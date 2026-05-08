@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 99%;
+  --foreground: 222 22% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 22% 9%;
+  --primary: 222 18% 10%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 20% 96%;
+  --secondary-foreground: 222 18% 12%;
+  --muted: 210 18% 96%;
+  --muted-foreground: 218 10% 42%;
+  --accent: 166 48% 92%;
+  --accent-foreground: 174 62% 15%;
+  --border: 214 18% 89%;
+  --input: 214 18% 89%;
+  --ring: 174 54% 36%;
+  --radius: 8px;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  min-height: 100vh;
+  color: hsl(var(--foreground));
+  background:
+    radial-gradient(circle at 20% 0%, rgba(20, 184, 166, 0.08), transparent 26rem),
+    linear-gradient(180deg, #fbfbfb 0%, #f6f7f8 100%);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+.recharts-cartesian-grid line {
+  stroke: hsl(var(--border));
+}
+
+.butterfly-chart-line {
+  stroke-dasharray: 760;
+  stroke-dashoffset: 760;
+  animation: butterfly-draw 2.4s ease-out forwards;
+}
+
+.butterfly-float {
+  animation: butterfly-float 5s ease-in-out infinite;
+}
+
+@keyframes butterfly-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes butterfly-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Hide Next.js development overlays so local previews match the product UI. */
+body > nextjs-portal,
+body > script[data-nextjs-dev-overlay],
+[data-nextjs-toast] {
+  display: none !important;
+}

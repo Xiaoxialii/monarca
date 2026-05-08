@@ -95,7 +95,7 @@ function Sidebar() {
           <Sparkles className="size-4" />
         </div>
         <div>
-          <p className="text-sm font-semibold">蝴蝶效应</p>
+          <p className="text-sm font-semibold">openAnalyst</p>
           <p className="text-xs text-muted-foreground">Analytics OS</p>
         </div>
       </div>

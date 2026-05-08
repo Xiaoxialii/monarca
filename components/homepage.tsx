@@ -46,7 +46,7 @@ const homepageCopy = {
   en: {
     lang: "中文",
     langLabel: "Switch to Chinese",
-    logo: "蝴蝶效应",
+    logo: "openAnalyst",
     nav: [
       { label: "Sources", href: "#sources" },
       { label: "Investigations", href: "#investigations" },
@@ -61,7 +61,7 @@ const homepageCopy = {
       eyebrow: "AI operating system for revenue teams",
       headline: "Your AI Growth Analyst",
       subheadline:
-        "蝴蝶效应 monitors growth metrics, explains what changed, and turns every anomaly into a clear next action.",
+        "openAnalyst monitors growth metrics, explains what changed, and turns every anomaly into a clear next action.",
       primaryCta: "Connect your data",
       secondaryCta: "Explore demo workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
@@ -89,7 +89,7 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "Revenue intelligence",
-      title: "What 蝴蝶效应 helps you do",
+      title: "What openAnalyst helps you do",
       intro:
         "A focused operating layer for teams that want signal, explanation, and action in one place.",
       cards: [
@@ -117,7 +117,7 @@ const homepageCopy = {
       points: [
         {
           title: "Metrics move constantly",
-          text: "蝴蝶效应 watches the operating model even when nobody is looking."
+          text: "openAnalyst watches the operating model even when nobody is looking."
         },
         {
           title: "Root cause takes too long",
@@ -133,7 +133,7 @@ const homepageCopy = {
       eyebrow: "Active investigation",
       title: "Revenue dropped 12.4%",
       timeline: [
-        ["08:42", "蝴蝶效应 detected a revenue anomaly across self-serve plans."],
+        ["08:42", "openAnalyst detected a revenue anomaly across self-serve plans."],
         ["08:43", "Compared cohorts, campaigns, billing events, and product activation."],
         ["08:45", "Drafted recommendations for growth, finance, and product owners."]
       ],
@@ -149,7 +149,7 @@ const homepageCopy = {
         },
         {
           title: "Recommended actions",
-          text: "蝴蝶效应 proposed three actions with owners, expected lift, and confidence scores."
+          text: "openAnalyst proposed three actions with owners, expected lift, and confidence scores."
         }
       ]
     },

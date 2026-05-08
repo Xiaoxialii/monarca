@@ -3,8 +3,8 @@ import "./globals.css";
 import { AuthShell } from "@/components/auth-shell";
 
 export const metadata: Metadata = {
-  title: "蝴蝶效应",
-  description: "A modern AI analytics SaaS dashboard."
+  title: "openAnalyst",
+  description: "openAnalyst is a modern AI analytics SaaS dashboard."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

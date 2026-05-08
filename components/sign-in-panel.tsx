@@ -116,13 +116,13 @@ function SignInBrand() {
         <div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
           <Sparkles className="size-5" />
         </div>
-        <span className="text-sm font-semibold">蝴蝶效应</span>
+        <span className="text-sm font-semibold">openAnalyst</span>
       </Link>
       <h1 className="text-4xl font-normal tracking-normal text-foreground sm:text-5xl">
         Sign in
       </h1>
       <p className="mt-5 text-base leading-7 text-foreground">
-        Use your 蝴蝶效应 account to continue to the AI analytics dashboard.
+        Use your openAnalyst account to continue to the AI analytics dashboard.
       </p>
     </div>
   );

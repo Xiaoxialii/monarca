@@ -20,11 +20,9 @@ import {
   Zap
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useLocale, type Locale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
-
-type Locale = "en" | "zh";
 
 const integrations = [
   "Google Analytics",
@@ -157,6 +155,8 @@ const homepageCopy = {
       eyebrow: "Reports",
       title: "A weekly growth brief that writes itself.",
       intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses.",
+      signal: "Weekly signal",
+      status: "Auto-drafted",
       cards: [
         ["Growth brief", "What changed this week, why it happened, and where to focus next."],
         ["Impact ledger", "Track actions, owners, confidence, and ARR movement in one view."],
@@ -281,6 +281,8 @@ const homepageCopy = {
       eyebrow: "报告",
       title: "自动生成每周增长简报。",
       intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表。",
+      signal: "每周信号",
+      status: "自动生成",
       cards: [
         ["数据自动化", "无需手动更新数据，系统自动同步、清洗并整理关键指标。"],
         ["增长简报", "自动汇总本周发生了什么、为什么发生、下一步该关注哪里。"],
@@ -534,8 +536,8 @@ function ReportsSection({ copy }: { copy: HomeCopy["reports"] }) {
           <p className="mt-4 text-sm leading-7 text-slate-300">{copy.intro}</p>
           <div className="mt-8 rounded-3xl border border-white/10 bg-white/8 p-4">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <span className="text-sm font-medium text-slate-200">Weekly signal</span>
-              <span className="rounded-full bg-emerald-400/15 px-2.5 py-1 text-xs font-medium text-emerald-200">Auto-drafted</span>
+              <span className="text-sm font-medium text-slate-200">{copy.signal}</span>
+              <span className="rounded-full bg-emerald-400/15 px-2.5 py-1 text-xs font-medium text-emerald-200">{copy.status}</span>
             </div>
             <div className="mt-4 space-y-3">
               <div className="h-2 w-11/12 rounded-full bg-white/20" />
@@ -588,23 +590,11 @@ function Integrations({ copy }: { copy: HomeCopy["integrations"] }) {
 }
 
 export function Homepage() {
-  const [locale, setLocale] = useState<Locale>("en");
-
-  useEffect(() => {
-    const savedLocale = window.localStorage.getItem("butterfly-locale");
-    if (savedLocale === "en" || savedLocale === "zh") {
-      setLocale(savedLocale);
-    }
-  }, []);
-
+  const [locale, setLocale] = useLocale("en");
   const copy = homepageCopy[locale];
 
   function toggleLocale() {
-    setLocale((currentLocale) => {
-      const nextLocale = currentLocale === "en" ? "zh" : "en";
-      window.localStorage.setItem("butterfly-locale", nextLocale);
-      return nextLocale;
-    });
+    setLocale(locale === "en" ? "zh" : "en");
   }
 
   return (

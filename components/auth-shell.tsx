@@ -4,13 +4,27 @@ import { ClerkProvider, SignedIn, SignedOut, SignInButton, SignOutButton } from 
 import { LogIn, LogOut } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useLocale, type Locale } from "@/lib/locale";
 
-function DemoUser() {
+const authCopy = {
+  en: {
+    signIn: "Sign in",
+    signOut: "Sign out"
+  },
+  zh: {
+    signIn: "登录",
+    signOut: "退出登录"
+  }
+} as const;
+
+function DemoUser({ locale }: { locale: Locale }) {
+  const copy = authCopy[locale];
+
   return (
     <Button asChild variant="outline" size="sm">
       <Link href="/sign-in">
         <LogOut />
-        Sign out
+        {copy.signOut}
       </Link>
     </Button>
   );
@@ -28,9 +42,11 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
 
 export function AuthControls() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const [locale] = useLocale("en");
+  const copy = authCopy[locale];
 
   if (!clerkKey) {
-    return <DemoUser />;
+    return <DemoUser locale={locale} />;
   }
 
   return (
@@ -39,7 +55,7 @@ export function AuthControls() {
         <SignInButton mode="modal">
           <Button variant="outline" size="sm">
             <LogIn />
-            Sign in
+            {copy.signIn}
           </Button>
         </SignInButton>
       </SignedOut>
@@ -47,7 +63,7 @@ export function AuthControls() {
         <SignOutButton>
           <Button variant="outline" size="sm">
             <LogOut />
-            Sign out
+            {copy.signOut}
           </Button>
         </SignOutButton>
       </SignedIn>

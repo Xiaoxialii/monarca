@@ -22,7 +22,7 @@ function DemoUser({ locale }: { locale: Locale }) {
 
   return (
     <Button asChild variant="outline" size="sm">
-      <Link href="/sign-in">
+      <Link href="/">
         <LogOut />
         {copy.signOut}
       </Link>
@@ -60,7 +60,7 @@ export function AuthControls() {
         </SignInButton>
       </SignedOut>
       <SignedIn>
-        <SignOutButton>
+        <SignOutButton redirectUrl="/">
           <Button variant="outline" size="sm">
             <LogOut />
             {copy.signOut}

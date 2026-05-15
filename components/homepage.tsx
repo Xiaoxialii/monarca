@@ -13,7 +13,6 @@ import {
   Languages,
   LineChart,
   MoveRight,
-  Play,
   Search,
   Sparkles,
   Target,
@@ -40,6 +39,9 @@ const featureMeta = [
   { icon: Target, className: "bg-emerald-100/70" }
 ];
 
+const teamRoleIcons = [Database, GitBranch, BarChart3, Search, Target];
+const pricingIcons = [Database, BrainCircuit, Database];
+
 const homepageCopy = {
   en: {
     lang: "中文",
@@ -49,7 +51,8 @@ const homepageCopy = {
       { label: "Sources", href: "#sources" },
       { label: "Investigations", href: "#investigations" },
       { label: "Alerts", href: "#alerts" },
-      { label: "Reports", href: "#reports" }
+      { label: "Reports", href: "#reports" },
+      { label: "Pricing", href: "#pricing" }
     ],
     auth: {
       login: "Log in",
@@ -57,9 +60,17 @@ const homepageCopy = {
     },
     hero: {
       eyebrow: "AI operating system for revenue teams",
-      headline: "Your AI Growth Analyst",
+      headline: "Your AI Growth Team",
       subheadline:
-        "openAnalyst monitors growth metrics, explains what changed, and turns every anomaly into a clear next action.",
+        "openAnalyst works like a full-stack growth data team: it connects data, models metrics, investigates changes, and turns findings into decisions your team can act on",
+      teamLabel: "One AI team covering the full analytics workflow",
+      team: [
+        { role: "Data Engineer", text: "Connects sources and keeps pipelines clean" },
+        { role: "Analytics Engineer", text: "Builds semantic layers and metric logic" },
+        { role: "BI Engineer", text: "Creates reports, dashboards, and trusted views" },
+        { role: "Analyst", text: "Explains movement, cohorts, and root causes" },
+        { role: "Growth Analyst", text: "Turns insights into focused growth actions" }
+      ],
       primaryCta: "Connect your data",
       secondaryCta: "Explore demo workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
@@ -74,7 +85,7 @@ const homepageCopy = {
       rootCauses: "3 root causes found",
       confidence: "91% confidence",
       actionTitle: "Recommended action",
-      recommendation: "Pause two low-quality search segments and route 18 expansion-ready accounts to success.",
+      recommendation: "Pause two low-quality search segments and route 18 expansion-ready accounts to success",
       owner: "Owner",
       ownerValue: "Growth + CS",
       impact: "Expected lift",
@@ -88,42 +99,40 @@ const homepageCopy = {
     features: {
       eyebrow: "Revenue intelligence",
       title: "What openAnalyst helps you do",
-      intro:
-        "A focused operating layer for teams that want signal, explanation, and action in one place.",
       cards: [
         {
           title: "Detect anomalies",
-          text: "Monitor revenue, activation, funnel, and retention shifts as they happen."
+          text: "Monitor revenue, activation, funnel, and retention shifts as they happen"
         },
         {
           title: "Find root causes",
-          text: "Trace changes back to channels, cohorts, accounts, product events, and billing states."
+          text: "Trace changes back to channels, cohorts, accounts, product events, and billing states"
         },
         {
           title: "Get recommendations",
-          text: "Prioritize actions with owner context, expected impact, and confidence."
+          text: "Prioritize actions with owner context, expected impact, and confidence"
         },
         {
           title: "Track impact",
-          text: "Close the loop by measuring whether every action moved the right metric."
+          text: "Close the loop by measuring whether every action moved the right metric"
         }
       ]
     },
     system: {
       eyebrow: "Why teams need it",
-      title: "Growth teams have dashboards. They need judgment.",
+      title: "Growth teams have dashboards, They need judgment",
       points: [
         {
           title: "Metrics move constantly",
-          text: "openAnalyst watches the operating model even when nobody is looking."
+          text: "openAnalyst watches the operating model even when nobody is looking"
         },
         {
           title: "Root cause takes too long",
-          text: "It compares every connected source and narrows the investigation path."
+          text: "It compares every connected source and narrows the investigation path"
         },
         {
           title: "Insights need owners",
-          text: "Every finding becomes an action with a team, expected lift, and follow-up."
+          text: "Every finding becomes an action with a team, expected lift, and follow-up"
         }
       ]
     },
@@ -131,41 +140,89 @@ const homepageCopy = {
       eyebrow: "Active investigation",
       title: "Revenue dropped 12.4%",
       timeline: [
-        ["08:42", "openAnalyst detected a revenue anomaly across self-serve plans."],
-        ["08:43", "Compared cohorts, campaigns, billing events, and product activation."],
-        ["08:45", "Drafted recommendations for growth, finance, and product owners."]
+        ["08:42", "openAnalyst detected a revenue anomaly across self-serve plans"],
+        ["08:43", "Compared cohorts, campaigns, billing events, and product activation"],
+        ["08:45", "Drafted recommendations for growth, finance, and product owners"]
       ],
-      watchDemo: "Watch demo",
       steps: [
         {
           title: "AI analyzed 15+ metrics",
-          text: "Revenue, activation, traffic quality, billing errors, and expansion pipeline were reviewed."
+          text: "Revenue, activation, traffic quality, billing errors, and expansion pipeline were reviewed"
         },
         {
           title: "Identified root causes",
-          text: "The drop was traced to CAC inflation, checkout friction, and late-stage pipeline compression."
+          text: "The drop was traced to CAC inflation, checkout friction, and late-stage pipeline compression"
         },
         {
           title: "Recommended actions",
-          text: "openAnalyst proposed three actions with owners, expected lift, and confidence scores."
+          text: "openAnalyst proposed three actions with owners, expected lift, and confidence scores"
         }
       ]
     },
     reports: {
       eyebrow: "Reports",
-      title: "A weekly growth brief that writes itself.",
-      intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses.",
+      title: "A weekly growth brief that writes itself",
+      intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses",
       signal: "Weekly signal",
       status: "Auto-drafted",
       cards: [
-        ["Growth brief", "What changed this week, why it happened, and where to focus next."],
-        ["Impact ledger", "Track actions, owners, confidence, and ARR movement in one view."],
-        ["Board-ready notes", "Turn raw metrics into crisp explanations for leadership reviews."]
+        ["Growth brief", "What changed this week, why it happened, and where to focus next"],
+        ["Impact ledger", "Track actions, owners, confidence, and ARR movement in one view"],
+        ["Board-ready notes", "Turn raw metrics into crisp explanations for leadership reviews"]
+      ]
+    },
+    pricing: {
+      eyebrow: "Pricing",
+      title: "Start with automation, Scale into decision intelligence",
+      intro:
+        "Choose the mode that matches your team's current data maturity, from automated reports to private enterprise decision systems",
+      plans: [
+        {
+          name: "Database Setup",
+          subtitle: "Build the data foundation",
+          price: "¥2,000+",
+          cadence: "",
+          badge: "",
+          features: [
+            "Design the business database and source structure",
+            "Connect key data sources and define field standards",
+            "Clean, sync, and prepare data for metric modeling",
+            "Consulting price varies by business complexity"
+          ],
+          cta: "Start setup",
+          href: "/checkout/database-setup"
+        },
+        {
+          name: "Professional",
+          subtitle: "Report automation + data analysis + decision support",
+          price: "¥2,000",
+          cadence: "/ month",
+          badge: "Recommended",
+          features: [
+            "Auto-generate business analysis reports",
+            "Metric monitoring and anomaly alerts",
+            "Conversational data exploration with Why-layer reasoning",
+            "Causal analysis and core driver breakdown",
+            "Actionable decision recommendations"
+          ],
+          cta: "Start professional",
+          href: "/checkout/professional"
+        },
+        {
+          name: "Enterprise",
+          subtitle: "Private enterprise decision system",
+          price: "Custom",
+          cadence: "",
+          badge: "",
+          features: ["Private deployment and data isolation", "Enterprise knowledge base plus business logic modeling", "Custom decision engine integrated into business workflows"],
+          cta: "Contact us",
+          href: "/checkout/enterprise"
+        }
       ]
     },
     integrations: {
       eyebrow: "Supported integrations",
-      title: "Connect the systems your revenue team already trusts."
+      title: "Connect the systems your revenue team already trusts"
     }
   },
   zh: {
@@ -176,7 +233,8 @@ const homepageCopy = {
       { label: "数据源", href: "#sources" },
       { label: "智能调查", href: "#investigations" },
       { label: "异常提醒", href: "#alerts" },
-      { label: "报告", href: "#reports" }
+      { label: "报告", href: "#reports" },
+      { label: "价格", href: "#pricing" }
     ],
     auth: {
       login: "登录",
@@ -184,9 +242,17 @@ const homepageCopy = {
     },
     hero: {
       eyebrow: "为团队打造的 AI 自动化数据系统",
-      headline: "你的 AI 增长分析师",
+      headline: "你的 AI 增长团队",
       subheadline:
-        "蝴蝶效应持续监控增长指标，解释发生了什么，并把每个异常转化为清晰的下一步行动。",
+        "蝴蝶效应是一支 24/7 在线的增长数据团队：连接数据、建立指标口径、分析异常，并把洞察转化为可执行的增长动作",
+      teamLabel: "一支 AI 团队，覆盖完整增长分析工作流",
+      team: [
+        { role: "数据工程师", text: "建立数据库，连接数据源，清洗和同步数据" },
+        { role: "分析工程师", text: "建立语义层，统一指标口径" },
+        { role: "商业智能工程师", text: "生成报告、看板和可信视图" },
+        { role: "数据分析师", text: "解释变化，定位关键根因" },
+        { role: "增长分析师", text: "把洞察转化为增长行动" }
+      ],
       primaryCta: "连接数据源",
       secondaryCta: "查看演示工作区",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
@@ -201,7 +267,7 @@ const homepageCopy = {
       rootCauses: "发现 3 个根因",
       confidence: "91% 置信度",
       actionTitle: "推荐行动",
-      recommendation: "暂停两个低质量搜索分组，并将 18 个具备扩张信号的账户交给客户成功团队。",
+      recommendation: "暂停两个低质量搜索分组，并将 18 个具备扩张信号的账户交给客户成功团队",
       owner: "负责人",
       ownerValue: "增长 + CS",
       impact: "预期提升",
@@ -215,41 +281,40 @@ const homepageCopy = {
     features: {
       eyebrow: "收入智能",
       title: "蝴蝶效应能帮你做什么",
-      intro: "给团队一个专注的智能操作层：把信号、解释和行动放在同一个工作流里。",
       cards: [
         {
           title: "检测异常",
-          text: "持续监控收入、激活、漏斗和留存变化。"
+          text: "持续监控收入、激活、漏斗和留存变化"
         },
         {
           title: "定位根因",
-          text: "把指标变化追溯到渠道、客群、账户、产品事件和计费状态。"
+          text: "把指标变化追溯到渠道、客群、账户、产品事件和计费状态"
         },
         {
           title: "获得建议",
-          text: "输出优先级、负责人、预期影响和置信度。"
+          text: "输出优先级、负责人、预期影响和置信度"
         },
         {
           title: "追踪影响",
-          text: "持续衡量每个行动是否真的推动了目标指标。"
+          text: "持续衡量每个行动是否真的推动了目标指标"
         }
       ]
     },
     system: {
       eyebrow: "为什么需要它",
-      title: "增长不缺数据，缺的是能转化为价值的洞察。",
+      title: "增长不缺数据，缺的是能转化为价值的洞察",
       points: [
         {
           title: "指标一直在变化",
-          text: "蝴蝶效应会持续监控增长模型，不依赖人工盯盘。"
+          text: "蝴蝶效应会持续监控增长模型，不依赖人工盯盘"
         },
         {
           title: "定位原因太慢",
-          text: "系统会跨数据源对比，并缩短调查路径。"
+          text: "系统会跨数据源对比，并缩短调查路径"
         },
         {
           title: "洞察落地为价值",
-          text: "每个发现都会转化为可执行行动，并持续追踪影响。"
+          text: "每个发现都会转化为可执行行动，并持续追踪影响"
         }
       ]
     },
@@ -257,41 +322,88 @@ const homepageCopy = {
       eyebrow: "进行中的智能调查",
       title: "收入下降 12.4%",
       timeline: [
-        ["08:42", "蝴蝶效应在自助订阅计划中检测到收入异常。"],
-        ["08:43", "对比了客群、投放、计费事件和产品激活数据。"],
-        ["08:45", "为增长、财务和产品团队生成了行动建议。"]
+        ["08:42", "蝴蝶效应在自助订阅计划中检测到收入异常"],
+        ["08:43", "对比了客群、投放、计费事件和产品激活数据"],
+        ["08:45", "为增长、财务和产品团队生成了行动建议"]
       ],
-      watchDemo: "观看演示",
       steps: [
         {
           title: "AI 分析了 15+ 项指标",
-          text: "系统检查了收入、激活率、流量质量、计费错误和扩张管道。"
+          text: "系统检查了收入、激活率、流量质量、计费错误和扩张管道"
         },
         {
           title: "识别关键根因",
-          text: "收入下滑主要来自 CAC 上升、结账摩擦和后期管道收缩。"
+          text: "收入下滑主要来自 CAC 上升、结账摩擦和后期管道收缩"
         },
         {
           title: "推荐可执行行动",
-          text: "蝴蝶效应输出了 3 个行动建议，并附带预期提升和置信度。"
+          text: "蝴蝶效应输出了 3 个行动建议，并附带预期提升和置信度"
         }
       ]
     },
     reports: {
       eyebrow: "报告",
-      title: "自动生成每周增长简报。",
-      intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表。",
+      title: "自动生成每周增长简报",
+      intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表",
       signal: "每周信号",
       status: "自动生成",
       cards: [
-        ["数据自动化", "无需手动更新数据，系统自动同步、清洗并整理关键指标。"],
-        ["增长简报", "自动汇总本周发生了什么、为什么发生、下一步该关注哪里。"],
-        ["管理层摘要", "把可信数据转化为适合复盘和汇报的清晰解释。"]
+        ["数据自动化", "无需手动更新数据，系统自动同步、清洗并整理关键指标"],
+        ["增长简报", "自动汇总本周发生了什么、为什么发生、下一步该关注哪里"],
+        ["管理层摘要", "把可信数据转化为适合复盘和汇报的清晰解释"]
+      ]
+    },
+    pricing: {
+      eyebrow: "价格",
+      title: "产品形态与多元订阅模式",
+      intro: "从数据报告自动化开始，逐步升级到分析决策辅助和企业级私有化决策系统",
+      plans: [
+        {
+          name: "数据库搭建",
+          subtitle: "建立数据基础设施",
+          price: "¥2,000+",
+          cadence: "",
+          badge: "",
+          features: [
+            "搭建业务数据库与数据表结构",
+            "连接核心数据源并定义字段规范",
+            "清洗、同步并准备后续指标建模",
+            "咨询根据商业复杂程度定价"
+          ],
+          cta: "开始搭建",
+          href: "/checkout/database-setup"
+        },
+        {
+          name: "专业版",
+          subtitle: "报告自动化 + 数据分析 + 决策辅助",
+          price: "¥2,000",
+          cadence: "/ 月",
+          badge: "推荐",
+          features: [
+            "自动生成业务分析报告",
+            "指标监控 & 异常提醒",
+            "对话式数据探索（Why 层）",
+            "因果分析 & 核心驱动拆解",
+            "可执行决策建议"
+          ],
+          cta: "选择专业版",
+          href: "/checkout/professional"
+        },
+        {
+          name: "企业版",
+          subtitle: "企业级决策系统（私有化）",
+          price: "按需报价",
+          cadence: "",
+          badge: "",
+          features: ["私有化部署 / 数据安全隔离", "企业知识库 + 业务逻辑建模", "定制化决策引擎（接入业务流）"],
+          cta: "联系咨询",
+          href: "/checkout/enterprise"
+        }
       ]
     },
     integrations: {
       eyebrow: "支持的数据集成",
-      title: "连接增长团队已经在使用的系统。"
+      title: "连接增长团队已经在使用的系统"
     }
   }
 } as const;
@@ -315,6 +427,39 @@ function TrustItem({ children }: { children: React.ReactNode }) {
       <Check className="size-4 text-emerald-700" />
       {children}
     </span>
+  );
+}
+
+function TeamRoster({ copy }: { copy: HomeCopy["hero"] }) {
+  return (
+    <div className="mt-6 max-w-2xl rounded-[28px] border border-emerald-100/80 bg-white/72 p-3 shadow-[0_16px_50px_rgba(6,78,59,0.07)] backdrop-blur">
+      <p className="px-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+        {copy.teamLabel}
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {copy.team.map((member, index) => {
+          const Icon = teamRoleIcons[index];
+
+          return (
+            <div
+              key={member.role}
+              className={cn(
+                "flex items-start gap-2.5 rounded-2xl border border-slate-200/75 bg-slate-50/80 p-3",
+                index === copy.team.length - 1 && "sm:col-span-2"
+              )}
+            >
+              <div className="grid size-8 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+                <Icon className="size-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-950">{member.role}</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">{member.text}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -409,9 +554,9 @@ function OperatingLayer({ copy }: { copy: HomeCopy["system"] }) {
   return (
     <section className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
       <div className="rounded-[32px] border border-slate-200/80 bg-white/76 p-6 shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:p-8">
-        <div className="mb-6 max-w-2xl">
+        <div className="mb-6">
           <p className="text-sm font-medium text-emerald-700">{copy.eyebrow}</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
+          <h2 className="mt-2 whitespace-nowrap text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
             {copy.title}
           </h2>
         </div>
@@ -437,14 +582,13 @@ function OperatingLayer({ copy }: { copy: HomeCopy["system"] }) {
 function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
   return (
     <section id="alerts" className="mx-auto max-w-7xl px-5 py-16 sm:px-8">
-      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-8">
         <div>
           <p className="text-sm font-medium text-emerald-700">{copy.eyebrow}</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
             {copy.title}
           </h2>
         </div>
-        <p className="max-w-md text-sm leading-6 text-slate-500">{copy.intro}</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {copy.cards.map((card, index) => {
@@ -491,13 +635,6 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                 </div>
               ))}
             </div>
-
-            <Button asChild className="mt-8 rounded-full bg-slate-950 px-5">
-              <Link href="/dashboard">
-                <Play className="fill-current" />
-                {copy.watchDemo}
-              </Link>
-            </Button>
           </div>
 
           <div className="bg-gradient-to-br from-slate-50 via-white to-emerald-100/65 p-6 sm:p-8">
@@ -561,6 +698,79 @@ function ReportsSection({ copy }: { copy: HomeCopy["reports"] }) {
             );
           })}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
+  return (
+    <section id="pricing" className="mx-auto max-w-7xl px-5 py-12 sm:px-8">
+      <div className="mb-8 max-w-3xl">
+        <p className="text-sm font-medium text-emerald-700">{copy.eyebrow}</p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
+          {copy.title}
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.intro}</p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {copy.plans.map((plan, index) => {
+          const Icon = pricingIcons[index];
+          const isFeatured = Boolean(plan.badge);
+
+          return (
+            <div
+              key={plan.name}
+              className={cn(
+                "relative flex min-h-[460px] flex-col rounded-[30px] border bg-white/84 p-6 shadow-[0_20px_80px_rgba(15,23,42,0.06)] backdrop-blur",
+                isFeatured && "border-emerald-300 bg-gradient-to-br from-white via-emerald-50/80 to-white shadow-[0_24px_90px_rgba(4,120,87,0.13)]"
+              )}
+            >
+              {plan.badge ? (
+                <span className="absolute right-5 top-5 rounded-full bg-emerald-700 px-3 py-1 text-xs font-semibold text-white">
+                  {plan.badge}
+                </span>
+              ) : null}
+
+              <div className="mb-6 grid size-11 place-items-center rounded-2xl bg-emerald-100 text-emerald-800">
+                <Icon className="size-5" />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-950">{plan.name}</h3>
+              <p className="mt-2 text-sm font-medium text-slate-500">{plan.subtitle}</p>
+
+              <div className="mt-6 flex items-end gap-1">
+                <span className="text-4xl font-semibold tracking-normal text-slate-950">{plan.price}</span>
+                {plan.cadence ? (
+                  <span className="pb-1 text-sm font-medium text-slate-500">{plan.cadence}</span>
+                ) : null}
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {plan.features.map((feature) => (
+                  <div key={feature} className="flex gap-3 text-sm leading-6 text-slate-600">
+                    <Check className="mt-1 size-4 shrink-0 text-emerald-700" />
+                    <span>{feature}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                asChild
+                className={cn(
+                  "mt-auto h-11 rounded-full",
+                  isFeatured ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white text-slate-950 hover:bg-slate-50"
+                )}
+                variant={isFeatured ? "default" : "outline"}
+              >
+                <Link href={plan.href}>
+                  {plan.cta}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -645,6 +855,7 @@ export function Homepage() {
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
             {copy.hero.subheadline}
           </p>
+          <TeamRoster copy={copy.hero} />
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
               <Link href="/sign-up">
@@ -676,6 +887,7 @@ export function Homepage() {
       <FeatureCards copy={copy.features} />
       <InvestigationPreview copy={copy.investigation} />
       <ReportsSection copy={copy.reports} />
+      <PricingSection copy={copy.pricing} />
       <Integrations copy={copy.integrations} />
     </main>
   );

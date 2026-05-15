@@ -16,17 +16,17 @@ const signUpCopy = {
     firstName: "First name",
     lastName: "Last name",
     username: "Username",
-    usernameHelp: "You can use letters, numbers, and periods.",
+    usernameHelp: "You can use letters, numbers, and periods",
     password: "Password",
     confirm: "Confirm",
     showPassword: "Show password",
-    passwordHelp: "Use 8 or more characters with a mix of letters, numbers, and symbols.",
+    passwordHelp: "Use 8 or more characters with a mix of letters, numbers, and symbols",
     signInInstead: "Sign in instead",
     next: "Next",
     brand: "openAnalyst",
     title: "Create your account",
     description:
-      "Start using openAnalyst to connect data, forecast growth, and ask questions across your business."
+      "Start using openAnalyst to connect data, forecast growth, and ask questions across your business"
   },
   zh: {
     language: "中文（简体）",
@@ -36,16 +36,16 @@ const signUpCopy = {
     firstName: "名",
     lastName: "姓",
     username: "用户名",
-    usernameHelp: "你可以使用字母、数字和句点。",
+    usernameHelp: "你可以使用字母、数字和句点",
     password: "密码",
     confirm: "确认密码",
     showPassword: "显示密码",
-    passwordHelp: "请使用 8 个或更多字符，并混合字母、数字和符号。",
+    passwordHelp: "请使用 8 个或更多字符，并混合字母、数字和符号",
     signInInstead: "改为登录",
     next: "下一步",
     brand: "蝴蝶效应",
     title: "创建你的账号",
-    description: "开始使用蝴蝶效应连接数据、预测增长，并向业务数据提问。"
+    description: "开始使用蝴蝶效应连接数据、预测增长，并向业务数据提问"
   }
 } as const;
 

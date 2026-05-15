@@ -16,12 +16,12 @@ const signInCopy = {
     emailLabel: "Email or phone",
     emailPlaceholder: "Email or phone",
     forgotEmail: "Forgot email?",
-    note: "Not your computer? Use a private browsing window to sign in. This demo continues directly to the dashboard.",
+    note: "Not your computer? Use a private browsing window to sign in, This demo continues directly to the dashboard",
     createAccount: "Create account",
     next: "Next",
     brand: "openAnalyst",
     title: "Sign in",
-    description: "Use your openAnalyst account to continue to the AI analytics dashboard."
+    description: "Use your openAnalyst account to continue to the AI analytics dashboard"
   },
   zh: {
     language: "中文（简体）",
@@ -31,12 +31,12 @@ const signInCopy = {
     emailLabel: "邮箱或手机号",
     emailPlaceholder: "邮箱或手机号",
     forgotEmail: "忘记邮箱？",
-    note: "这不是你的电脑？请使用无痕窗口登录。当前演示会直接进入数据看板。",
+    note: "这不是你的电脑？请使用无痕窗口登录当前演示会直接进入数据看板",
     createAccount: "创建账号",
     next: "下一步",
     brand: "蝴蝶效应",
     title: "登录",
-    description: "使用你的蝴蝶效应账号继续访问 AI 数据分析工作区。"
+    description: "使用你的蝴蝶效应账号继续访问 AI 数据分析工作区"
   }
 } as const;
 

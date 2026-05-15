@@ -28,13 +28,16 @@ export function setStoredLocale(locale: Locale) {
 
 export function useLocale(defaultLocale: Locale = "en") {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     setLocaleState(readStoredLocale(defaultLocale));
+    setIsReady(true);
 
     function handleStorage(event: StorageEvent) {
       if (event.key === LOCALE_STORAGE_KEY && isLocale(event.newValue)) {
         setLocaleState(event.newValue);
+        setIsReady(true);
       }
     }
 
@@ -42,6 +45,7 @@ export function useLocale(defaultLocale: Locale = "en") {
       const nextLocale = (event as CustomEvent<Locale>).detail;
       if (isLocale(nextLocale)) {
         setLocaleState(nextLocale);
+        setIsReady(true);
       }
     }
 
@@ -56,8 +60,9 @@ export function useLocale(defaultLocale: Locale = "en") {
 
   function setLocale(nextLocale: Locale) {
     setLocaleState(nextLocale);
+    setIsReady(true);
     setStoredLocale(nextLocale);
   }
 
-  return [locale, setLocale] as const;
+  return [locale, setLocale, isReady] as const;
 }

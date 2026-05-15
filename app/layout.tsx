@@ -4,7 +4,7 @@ import { AuthShell } from "@/components/auth-shell";
 
 export const metadata: Metadata = {
   title: "openAnalyst",
-  description: "openAnalyst is a modern AI analytics SaaS dashboard."
+  description: "openAnalyst is a modern AI analytics SaaS dashboard"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

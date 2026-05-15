@@ -65,7 +65,7 @@ body {
   }
 }
 
-/* Hide Next.js development overlays so local previews match the product UI. */
+/* Hide Next.js development overlays so local previews match the product UI */
 body > nextjs-portal,
 body > script[data-nextjs-dev-overlay],
 [data-nextjs-toast] {

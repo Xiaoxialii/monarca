@@ -40,7 +40,7 @@ const featureMeta = [
 ];
 
 const teamRoleIcons = [Database, GitBranch, BarChart3, Search, Target];
-const pricingIcons = [Database, BrainCircuit, Database];
+const pricingIcons = [Sparkles, BrainCircuit, Database];
 
 const homepageCopy = {
   en: {
@@ -167,36 +167,35 @@ const homepageCopy = {
     },
     reports: {
       eyebrow: "Reports",
-      title: "A weekly growth brief that writes itself",
+      title: "A daily growth brief that writes itself",
       intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses",
-      signal: "Weekly signal",
+      signal: "Daily signal",
       status: "Auto-drafted",
       cards: [
-        ["Growth brief", "What changed this week, why it happened, and where to focus next"],
+        ["Growth brief", "What changed today, why it happened, and where to focus next"],
         ["Impact ledger", "Track actions, owners, confidence, and ARR movement in one view"],
         ["Board-ready notes", "Turn raw metrics into crisp explanations for leadership reviews"]
       ]
     },
     pricing: {
       eyebrow: "Pricing",
-      title: "Start with automation, Scale into decision intelligence",
+      title: "SaaS plans for growth intelligence",
       intro:
-        "Choose the mode that matches your team's current data maturity, from automated reports to private enterprise decision systems",
+        "Choose the subscription that matches how your team wants to automate reports, analyze decisions, and operate growth",
       plans: [
         {
-          name: "Database Setup",
-          subtitle: "Build the data foundation",
-          price: "¥2,000+",
+          name: "One-time Experience",
+          subtitle: "Try one AI growth analysis session",
+          price: "¥200",
           cadence: "",
           badge: "",
           features: [
-            "Design the business database and source structure",
-            "Connect key data sources and define field standards",
-            "Clean, sync, and prepare data for metric modeling",
-            "Consulting price varies by business complexity"
+            "One guided growth analysis experience",
+            "Review sample metrics and report workflow",
+            "Understand data source and schema setup needs"
           ],
-          cta: "Start setup",
-          href: "/checkout/database-setup"
+          cta: "Start trial",
+          href: "/checkout/trial"
         },
         {
           name: "Professional",
@@ -224,7 +223,22 @@ const homepageCopy = {
           cta: "Contact us",
           href: "/checkout/enterprise"
         }
-      ]
+      ],
+      addOn: {
+        eyebrow: "Add-on service",
+        name: "Database Setup",
+        subtitle: "Build the data foundation before SaaS automation",
+        price: "¥2,000+",
+        description: "For teams that need help designing databases, connecting sources, cleaning data, and preparing metric modeling",
+        features: [
+          "Business database and table structure",
+          "Core source connection and field standards",
+          "Cleaning, sync, and metric modeling readiness",
+          "Consulting price varies by business complexity"
+        ],
+        cta: "Add database setup",
+        href: "/checkout/database-setup"
+      }
     },
     integrations: {
       eyebrow: "Supported integrations",
@@ -355,35 +369,34 @@ const homepageCopy = {
     },
     reports: {
       eyebrow: "报告",
-      title: "自动生成每周增长简报",
+      title: "自动生成每天增长简报",
       intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表",
-      signal: "每周信号",
+      signal: "每日信号",
       status: "自动生成",
       cards: [
         ["数据自动化", "无需手动更新数据，系统自动同步、清洗并整理关键指标"],
-        ["增长简报", "自动汇总本周发生了什么、为什么发生、下一步该关注哪里"],
+        ["增长简报", "自动汇总每天发生了什么、为什么发生、下一步该关注哪里"],
         ["管理层摘要", "把可信数据转化为适合复盘和汇报的清晰解释"]
       ]
     },
     pricing: {
       eyebrow: "价格",
-      title: "产品形态与多元订阅模式",
-      intro: "从数据报告自动化开始，逐步升级到分析决策辅助和企业级私有化决策系统",
+      title: "增长智能系统订阅方案",
+      intro: "选择适合团队当前阶段的 SaaS 方案，用于报告自动化、数据分析和经营决策辅助",
       plans: [
         {
-          name: "数据库搭建",
-          subtitle: "建立数据基础设施",
-          price: "¥2,000+",
+          name: "单次体验",
+          subtitle: "体验一次 AI 增长分析流程",
+          price: "¥200",
           cadence: "",
           badge: "",
           features: [
-            "搭建业务数据库与数据表结构",
-            "连接核心数据源并定义字段规范",
-            "清洗、同步并准备后续指标建模",
-            "咨询根据商业复杂程度定价"
+            "一次引导式增长分析体验",
+            "查看示例指标和报告生成流程",
+            "明确数据源和 Schema 搭建需求"
           ],
-          cta: "开始搭建",
-          href: "/checkout/database-setup"
+          cta: "开始体验",
+          href: "/checkout/trial"
         },
         {
           name: "专业版",
@@ -411,7 +424,22 @@ const homepageCopy = {
           cta: "联系咨询",
           href: "/checkout/enterprise"
         }
-      ]
+      ],
+      addOn: {
+        eyebrow: "附加服务",
+        name: "数据库搭建",
+        subtitle: "在 SaaS 自动化前建立数据基础设施",
+        price: "¥2,000+",
+        description: "适合需要先搭建数据库、连接数据源、清洗数据并准备指标建模的团队",
+        features: [
+          "业务数据库与数据表结构",
+          "核心数据源连接与字段规范",
+          "数据清洗、同步和指标建模准备",
+          "咨询根据商业复杂程度定价"
+        ],
+        cta: "添加数据库搭建",
+        href: "/checkout/database-setup"
+      }
     },
     integrations: {
       eyebrow: "支持的数据集成",
@@ -813,6 +841,47 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-4 rounded-[26px] border border-emerald-100 bg-gradient-to-br from-white via-emerald-50/70 to-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.05)] backdrop-blur">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_220px] lg:items-center">
+          <div className="flex items-start gap-4">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-800">
+              <Database className="size-5" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                {copy.addOn.eyebrow}
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-slate-950">{copy.addOn.name}</h3>
+              <p className="mt-1 text-sm font-medium text-slate-500">{copy.addOn.subtitle}</p>
+              <div className="mt-4 flex items-end gap-1">
+                <span className="text-3xl font-semibold tracking-normal text-slate-950">
+                  {copy.addOn.price}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm leading-6 text-slate-500">{copy.addOn.description}</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {copy.addOn.features.map((feature) => (
+                <div key={feature} className="flex gap-2 text-sm leading-6 text-slate-600">
+                  <Check className="mt-1 size-4 shrink-0 text-emerald-700" />
+                  <span>{feature}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Button asChild variant="outline" className="h-11 rounded-full bg-white">
+            <Link href={copy.addOn.href}>
+              {copy.addOn.cta}
+              <ArrowRight />
+            </Link>
+          </Button>
+        </div>
       </div>
     </section>
   );

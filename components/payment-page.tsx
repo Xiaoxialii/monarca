@@ -12,6 +12,7 @@ import {
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,18 +20,26 @@ import { Input } from "@/components/ui/input";
 import { useLocale, type Locale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
-export type PaymentPlan = "database-setup" | "professional" | "enterprise";
+export type PaymentPlan = "trial" | "database-setup" | "professional" | "enterprise";
 
 const planIcons = {
+  trial: Sparkles,
   "database-setup": Database,
   professional: BrainCircuit,
   enterprise: ShieldCheck
 } as const;
 
+const mainPlanIds = ["trial", "professional", "enterprise"] as const satisfies readonly PaymentPlan[];
+const addonPlanIds = ["database-setup"] as const satisfies readonly PaymentPlan[];
+
 const paymentCopy = {
   en: {
     brand: "openAnalyst",
     back: "Back to pricing",
+    selectorBadge: "Step 1",
+    selectorTitle: "Choose a plan first",
+    selectorSubtitle: "Select the plan you want to start, then confirm details below",
+    addonLabel: "Add-on service",
     secure: "Secure checkout",
     formTitle: "Checkout details",
     contactTitle: "Consultation details",
@@ -49,6 +58,23 @@ const paymentCopy = {
     protected: "Payment details are protected by encrypted checkout",
     secondary: "Return home",
     plans: {
+      trial: {
+        badge: "One-time",
+        name: "One-time Experience",
+        subtitle: "Try one AI growth analysis session",
+        price: "¥200",
+        cadence: "",
+        description:
+          "For teams that want to experience the AI growth analysis workflow before subscribing",
+        due: "¥200",
+        primary: "Start experience",
+        next: "After checkout, your workspace opens with a guided demo flow",
+        features: [
+          "One guided growth analysis experience",
+          "Sample metrics and report workflow",
+          "Data source and schema setup recommendation"
+        ]
+      },
       "database-setup": {
         badge: "Consulting",
         name: "Database Setup",
@@ -106,6 +132,10 @@ const paymentCopy = {
   zh: {
     brand: "蝴蝶效应",
     back: "返回价格",
+    selectorBadge: "第 1 步",
+    selectorTitle: "先选择套餐",
+    selectorSubtitle: "选择要开始的方案，下方结算信息会自动更新",
+    addonLabel: "附加服务",
     secure: "安全结算",
     formTitle: "付费信息",
     contactTitle: "咨询信息",
@@ -124,6 +154,22 @@ const paymentCopy = {
     protected: "支付信息通过加密结算保护",
     secondary: "返回首页",
     plans: {
+      trial: {
+        badge: "单次体验",
+        name: "单次体验",
+        subtitle: "体验一次 AI 增长分析流程",
+        price: "¥200",
+        cadence: "",
+        description: "适合在订阅前，先体验一次 AI 增长分析工作流的团队",
+        due: "¥200",
+        primary: "开始体验",
+        next: "结算后进入工作区，并开启引导式演示流程",
+        features: [
+          "一次引导式增长分析体验",
+          "示例指标和报告生成流程",
+          "数据源与 Schema 搭建建议"
+        ]
+      },
       "database-setup": {
         badge: "咨询定价",
         name: "数据库搭建",
@@ -186,11 +232,12 @@ function PlanBadge({ children }: { children: React.ReactNode }) {
 }
 
 export function PaymentPage({ plan }: { plan: PaymentPlan }) {
+  const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
   const [locale] = useLocale("en");
   const copy = paymentCopy[locale as Locale];
-  const selected = copy.plans[plan];
-  const Icon = planIcons[plan];
-  const isProfessional = plan === "professional";
+  const selected = copy.plans[selectedPlan];
+  const Icon = planIcons[selectedPlan];
+  const isProfessional = selectedPlan === "professional";
 
   return (
     <main
@@ -214,7 +261,111 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
         </nav>
       </header>
 
-      <section className="mx-auto grid max-w-6xl gap-5 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:py-14">
+      <section className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
+        <Card className="mb-5 overflow-hidden rounded-[28px] border-slate-200/80 bg-white/88 shadow-[0_18px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+          <CardContent className="p-5 sm:p-6">
+            <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <Badge variant="secondary" className="mb-3 rounded-full">
+                  {copy.selectorBadge}
+                </Badge>
+                <h1 className="text-2xl font-semibold tracking-normal text-slate-950">
+                  {copy.selectorTitle}
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-slate-500">{copy.selectorSubtitle}</p>
+              </div>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-3">
+              {mainPlanIds.map((planId) => {
+                const planCopy = copy.plans[planId];
+                const PlanIcon = planIcons[planId];
+                const isSelected = selectedPlan === planId;
+
+                return (
+                  <button
+                    key={planId}
+                    type="button"
+                    onClick={() => setSelectedPlan(planId)}
+                    className={cn(
+                      "rounded-2xl border bg-white p-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40",
+                      isSelected &&
+                        "border-emerald-400 bg-emerald-50/70 shadow-[0_14px_50px_rgba(4,120,87,0.12)]"
+                    )}
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="grid size-10 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+                        <PlanIcon className="size-5" />
+                      </div>
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-semibold",
+                          isSelected
+                            ? "bg-emerald-700 text-white"
+                            : "bg-slate-100 text-slate-600"
+                        )}
+                      >
+                        {planCopy.badge}
+                      </span>
+                    </div>
+                    <p className="text-base font-semibold text-slate-950">{planCopy.name}</p>
+                    <p className="mt-1 min-h-10 text-sm leading-5 text-slate-500">
+                      {planCopy.subtitle}
+                    </p>
+                    <div className="mt-4 flex items-end gap-1">
+                      <span className="text-2xl font-semibold text-slate-950">
+                        {planCopy.price}
+                      </span>
+                      {planCopy.cadence ? (
+                        <span className="pb-0.5 text-xs font-medium text-slate-500">
+                          {planCopy.cadence}
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3">
+              {addonPlanIds.map((planId) => {
+                const planCopy = copy.plans[planId];
+                const PlanIcon = planIcons[planId];
+                const isSelected = selectedPlan === planId;
+
+                return (
+                  <button
+                    key={planId}
+                    type="button"
+                    onClick={() => setSelectedPlan(planId)}
+                    className={cn(
+                      "flex w-full flex-col gap-3 rounded-2xl border bg-slate-50/70 p-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40 sm:flex-row sm:items-center sm:justify-between",
+                      isSelected &&
+                        "border-emerald-400 bg-emerald-50/70 shadow-[0_14px_50px_rgba(4,120,87,0.1)]"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="grid size-10 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+                        <PlanIcon className="size-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-emerald-700">{copy.addonLabel}</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-950">
+                          {planCopy.name}
+                        </p>
+                        <p className="text-sm text-slate-500">{planCopy.subtitle}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-semibold text-slate-950">{planCopy.price}</span>
+                      <ArrowRight className="size-4 text-slate-500" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <Card className="overflow-hidden rounded-[32px] border-emerald-200 bg-gradient-to-br from-white via-emerald-50/80 to-white shadow-[0_24px_90px_rgba(4,120,87,0.12)]">
           <CardContent className="p-6 sm:p-8">
             <div className="mb-8 flex items-start justify-between gap-4">
@@ -329,6 +480,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             </Button>
           </CardContent>
         </Card>
+        </div>
       </section>
     </main>
   );

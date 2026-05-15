@@ -1,5 +1,5 @@
-import { Dashboard } from "@/components/dashboard";
+import { redirect } from "next/navigation";
 
 export default function MetricsPage() {
-  return <Dashboard view="metrics" />;
+  redirect("/dashboard/import-data");
 }

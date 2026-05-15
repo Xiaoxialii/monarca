@@ -10,9 +10,11 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  CreditCard,
   Database,
   Download,
   FileText,
+  HelpCircle,
   LineChart,
   PanelLeft,
   Plus,
@@ -22,9 +24,9 @@ import {
   Share2,
   Sparkles,
   Table2,
-  Zap
+  Trash2
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -47,24 +49,32 @@ import { cn } from "@/lib/utils";
 const dashboardCopy = {
   en: {
     navItems: [
-      { label: "Overview", href: "/dashboard", target: "#overview", icon: BarChart3 },
-      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "Metrics", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
-      { label: "Reports & Analysis", href: "/dashboard/reports", target: "#reports", icon: FileText },
+      { label: "Analysis Report", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
+    ],
+    dataNavItems: [
+      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database }
     ],
     sidebar: {
       brand: "openAnalyst",
       subtitle: "Data automation OS",
       statusTitle: "Workspace status",
       statusText: "Connect data to start cleaning, mapping, and generating AI insights",
+      subscribe: "Subscribe",
       collapseLabel: "Collapse sidebar",
       expandLabel: "Expand sidebar"
+    },
+    account: {
+      name: "Amy",
+      email: "amy@example.com",
+      plan: "Pro",
+      billing: "Upgrade plan"
     },
     header: {
       openNav: "Open navigation",
       searchPlaceholder: "Search metrics, sources, fields...",
       newSource: "Import data",
+      help: "Help",
       notifications: "Notifications"
     },
     hero: {
@@ -75,7 +85,27 @@ const dashboardCopy = {
         "Import the systems your team already uses, openAnalyst will sync, clean, and map your business semantics before showing any metrics",
       primary: "Import data source",
       secondary: "View metrics architecture",
-      note: "No business data is displayed until a source is connected"
+      note: "No business data is displayed until a source is connected",
+      guideTitle: "新手引导",
+      guideDescription: "Complete these steps to turn raw systems into your first AI growth report",
+      guideSteps: [
+        {
+          title: "Connect data source",
+          text: "Import revenue, product, CRM, ads, or warehouse data"
+        },
+        {
+          title: "Generate Schema",
+          text: "Let AI inspect tables, fields, relationships, and quality"
+        },
+        {
+          title: "Confirm metric definitions",
+          text: "Review ARR, CAC, retention, activation, and formulas"
+        },
+        {
+          title: "Generate first report",
+          text: "Create the first daily growth brief with causes and actions"
+        }
+      ]
     },
     metrics: {
       description: "Metric cards are ready, but values stay hidden until data is imported",
@@ -94,8 +124,8 @@ const dashboardCopy = {
       ]
     },
     metricCatalog: {
-      title: "Metrics Architecture",
-      description: "Define how your business is measured before AI analysis begins",
+      title: "Metric Semantic Layer",
+      description: "AI learns how your business measures revenue, acquisition, activation, and retention",
       actions: ["Connect data source", "View schema"],
       hierarchy: [
         {
@@ -122,11 +152,46 @@ const dashboardCopy = {
         "Map fields to business terms",
         "Generate metrics for AI reasoning"
       ],
-      exampleTitle: "Metric Table Example",
-      exampleDescription:
-        "Example structure only, Real metric definitions are generated after data import",
+      exampleTitle: "Business metrics",
+      exampleDescription: "After data import, AI generates business metrics from connected schemas",
+      previewTitle: "Connect data to generate business metrics",
+      previewDescription:
+        "AI will create metric definitions, formulas, source mappings, and editors after trusted data is imported",
+      previewStatus: "Waiting for data",
+      previewGenerated: "Generated after import",
+      importedTableTitle: "Metric object table",
       exampleBadge: "Example",
-      exampleHeaders: ["Business Layer", "Metric Category", "Metric Name", "Definition", "Formula", "Data Source Mapping", "AI Status"],
+      addMetric: "Add metric",
+      deleteMetric: "Delete metric",
+      actionHeader: "Actions",
+      fieldPicker: "Insert schema field",
+      semanticTitle: "Semantic Metric Workspace",
+      semanticDescription: "AI turns schemas into business concepts, KPI relationships, and reasoning-ready metrics",
+      domainTitle: "Business domains",
+      allDomains: "All metrics",
+      formulaLabel: "Formula",
+      mappedFieldsLabel: "Mapped fields",
+      confidenceLabel: "AI confidence",
+      semanticTagsLabel: "Semantic meaning",
+      editMetric: "Edit",
+      closeEdit: "Done",
+      aiPanelTitle: "AI semantic reasoning",
+      aiPanelDescription: "The system is learning how your schema represents revenue, acquisition, activation, and retention",
+      detectedTitle: "Detected concept",
+      recommendedTitle: "Suggested related KPIs",
+      lineageTitle: "Semantic lineage",
+      relationshipTitle: "Metric relationships",
+      exampleHeaders: ["Business Layer", "Metric Category", "Metric Name", "Definition", "Formula", "Data Source Mapping", "Editor"],
+      newMetric: {
+        layer: "Driver",
+        category: "Custom",
+        metric: "New Metric",
+        definition: "Describe the business meaning",
+        formula: "",
+        mapping: "Current schema fields",
+        status: "AI",
+        tags: ["Custom", "Editable"]
+      },
       exampleRows: [
         {
           layer: "Primary",
@@ -135,7 +200,7 @@ const dashboardCopy = {
           definition: "Annualized recurring revenue from active paid accounts",
           formula: "MRR x 12",
           mapping: "Stripe subscriptions -> active recurring revenue",
-          status: "AI Ready",
+          status: "AI",
           tags: ["Semantic", "Revenue"]
         },
         {
@@ -145,7 +210,7 @@ const dashboardCopy = {
           definition: "Additional ARR generated from existing customers",
           formula: "Upgrade ARR - Downgrade ARR",
           mapping: "CRM opportunities + billing deltas",
-          status: "Needs Validation",
+          status: "user_1027",
           tags: ["Lineage", "Suggested"]
         },
         {
@@ -155,7 +220,7 @@ const dashboardCopy = {
           definition: "Average cost to acquire one new paying customer",
           formula: "Marketing Spend / New Customers",
           mapping: "Ad platforms + CRM new customer records",
-          status: "Missing Mapping",
+          status: "user_1027",
           tags: ["Cost", "Mapping"]
         },
         {
@@ -165,7 +230,7 @@ const dashboardCopy = {
           definition: "Share of new accounts reaching the activation event",
           formula: "Activated Users / Signups",
           mapping: "product_event = onboarding_completed",
-          status: "AI Ready",
+          status: "AI",
           tags: ["Event", "AI mapped"]
         },
         {
@@ -175,7 +240,7 @@ const dashboardCopy = {
           definition: "Share of customers or revenue retained over a period",
           formula: "Retained Customers / Starting Customers",
           mapping: "Billing status + account cohort table",
-          status: "Needs Validation",
+          status: "user_1027",
           tags: ["Cohort", "Definition"]
         }
       ],
@@ -204,6 +269,9 @@ const dashboardCopy = {
     settingsPage: {
       title: "Settings",
       description: "Manage workspace preferences, notifications, data controls, and billing",
+      tabSources: "Data sources",
+      tabMetrics: "Metrics",
+      tabOther: "Other",
       workspaceTitle: "Workspace",
       workspaceDescription: "Basic identity for this analytics workspace",
       workspaceName: "Workspace name",
@@ -219,7 +287,7 @@ const dashboardCopy = {
       notificationsTitle: "Notifications",
       notifications: [
         ["Anomaly alerts", "On"],
-        ["Weekly growth brief", "On"],
+        ["Daily growth brief", "On"],
         ["Data sync failures", "On"]
       ],
       securityTitle: "Data & security",
@@ -234,30 +302,35 @@ const dashboardCopy = {
       billingAction: "Manage plan"
     },
     onboarding: {
-      title: "Data import flow",
-      description: "A guided setup path for building a clean, automated analytics workspace",
+      title: "First data import flow",
+      description: "",
       badge: "Automated sync",
       steps: [
         {
-          title: "Connect sources",
-          text: "Add revenue, product, CRM, ads, and warehouse systems"
+          title: "Connect business data",
+          text: "Bring in the systems your team already uses"
         },
         {
-          title: "Map business semantics",
-          text: "Define how fields map to customers, revenue, accounts, and events"
+          title: "Understand your business",
+          text: "Map fields into customers, revenue, accounts, and events"
         },
         {
-          title: "Clean data quality",
-          text: "Detect missing fields, duplicate records, and inconsistent definitions"
+          title: "Find key metrics",
+          text: "Generate business metrics for AI reasoning"
         },
         {
-          title: "Turn on automation",
-          text: "Sync and refresh metrics automatically after setup"
+          title: "Start automated analysis",
+          text: "Monitor changes and generate reports continuously"
         }
       ]
     },
     importData: {
-      description: "Start with the systems your team already uses"
+      description: "Start with the systems your team already uses",
+      connectedTitle: "Connected data",
+      connectedDescription: "Connected sources, sync status, and last refresh will appear here",
+      connectedCount: "0 connected",
+      connectedEmptyTitle: "No data sources connected",
+      connectedEmptyText: "Choose a source below and validate access to start importing trusted data"
     },
     connectors: {
       title: "Connect data source",
@@ -300,18 +373,29 @@ const dashboardCopy = {
       sqlPlaceholder: "Optional SQL query",
       previewTitle: "Connection preview",
       previewRows: ["Tables and views are listed after validation", "AI maps fields and checks quality after import"],
+      connectAction: "Connect",
+      changeSourceAction: "Change source",
+      schemaTitle: "Current schema",
+      schemaBadge: "Example",
+      schemaDescription: "No data source is connected yet, this example shows how the current schema will appear after validation",
+      schemaTables: [
+        { name: "accounts", fields: ["account_id", "segment", "created_at", "country"] },
+        { name: "subscriptions", fields: ["subscription_id", "account_id", "mrr", "status"] },
+        { name: "events", fields: ["event_name", "user_id", "device", "occurred_at"] },
+        { name: "campaigns", fields: ["campaign_id", "channel", "spend", "new_customers"] }
+      ],
       testAction: "Test connection",
       importAction: "Connect and import"
     },
     chat: {
       title: "AI assistant",
       description: "",
-      status: "Setup assistant",
+      status: "",
       collapseLabel: "Collapse AI chat",
       expandLabel: "Expand AI chat",
-      assistantMessage: "Connect revenue and product data first, I can help map fields and clean definitions",
-      userQuestion: "What should I connect first?",
-      assistantReply: "Start with Stripe or your revenue source, then add product analytics and CRM",
+      assistantMessage: "Ask attribution questions across revenue, retention, channels, and user cohorts",
+      userQuestion: "Which user segment drove the revenue drop?",
+      assistantReply: "Break it down by country, device, channel, and cohort; start with US iOS new paid users",
       inputPlaceholder: "Ask about data, metrics, or setup...",
       sendLabel: "Send message"
     },
@@ -320,12 +404,12 @@ const dashboardCopy = {
       description: "Automated reports will be generated after your data sources are connected",
       pending: "Waiting for data",
       cards: [
-        ["Weekly growth brief", "Summaries will appear after data is imported"],
+        ["Daily growth brief", "Summaries will appear after data is imported"],
         ["Data automation log", "Refresh, cleaning, and mapping status will be tracked here"],
         ["Executive summary", "Board-ready notes will be generated from trusted metrics"]
       ],
       pageBadge: "AI analyst live",
-      pageTitle: "Executive Analysis Report",
+      pageTitle: "Analysis Report",
       pageSubtitle:
         "A real-time business analyst workspace that monitors revenue, explains changes, and turns insights into operations",
       periodLabel: "Reporting period",
@@ -334,6 +418,10 @@ const dashboardCopy = {
       generatedValue: "After data import",
       exportAction: "Export",
       shareAction: "Share",
+      databaseCtaTitle: "Connect business data",
+      databaseCtaEmpty: "After importing a database, AI will automatically generate an analysis report",
+      databaseCtaConnected: "Manage connected database",
+      databaseCtaDisconnected: "Connect database",
       liveStatuses: [
         "Syncing Stripe data",
         "Processing 4.2M events",
@@ -354,6 +442,63 @@ const dashboardCopy = {
       previewLabel: "Template preview",
       metricsTitle: "Metric snapshot",
       metricsDescription: "",
+      emptyReportTitle: "Today's business briefing",
+      emptyReportDescription:
+        "AI briefing preview, real numbers and evidence appear after connecting business data",
+      emptyBriefingBadge: "AI briefing preview",
+      emptyBriefingMetric: "Revenue down 8%",
+      emptyBriefingTimeComparisons: [
+        ["vs yesterday", "-8%"],
+        ["vs last week", "-5.2%"],
+        ["Last 7 days", "-3.1%"],
+        ["This month", "+4.8%"]
+      ],
+      emptyBriefingSections: [
+        ["Main reasons", "US ad costs increased", "iOS onboarding conversion declined"],
+        ["Impact", "ARR growth may be $12k lower over the next 7 days"],
+        ["Recommendations", "Pause one Facebook ad set", "Optimize onboarding step 2"]
+      ],
+      emptyBriefingActions: ["Expand evidence chain", "View trend", "View cohort"],
+      demoTitle: "AI can automatically analyze",
+      demoSwitchLabel: "Analysis scope",
+      demoSignalLabel: "Signals AI would inspect",
+      demoExamples: [
+        {
+          title: "Business metric shifts",
+          metric: "Metrics",
+          summary:
+            "Detect unexpected movement in core operating, financial, and performance metrics",
+          signals: ["Core KPIs", "Baseline", "Variance"]
+        },
+        {
+          title: "Customer and user changes",
+          metric: "Audience",
+          summary:
+            "Explain changes across segments, cohorts, usage patterns, and repeat behavior",
+          signals: ["Segments", "Cohorts", "Behavior"]
+        },
+        {
+          title: "Cost efficiency",
+          metric: "Efficiency",
+          summary:
+            "Track how spend, resources, and operational effort convert into business outcomes",
+          signals: ["Cost", "Output", "ROI"]
+        },
+        {
+          title: "Channel and region performance",
+          metric: "Markets",
+          summary:
+            "Compare regions, channels, stores, teams, or business units against expected baselines",
+          signals: ["Region", "Channel", "Business unit"]
+        },
+        {
+          title: "Process conversion",
+          metric: "Flow",
+          summary:
+            "Find where people, orders, leads, or tasks drop off across key business workflows",
+          signals: ["Funnel steps", "Completion", "Drop-off"]
+        }
+      ],
       metricCards: [
         { label: "Revenue", value: "$184K", delta: "-12.4%", detail: "Lower than prior week" },
         { label: "Activation", value: "42.8%", delta: "-6.1%", detail: "iOS signup flow declined" },
@@ -468,7 +613,7 @@ const dashboardCopy = {
       tableTitle: "Report sections",
       tableHeaders: ["Section", "Question answered", "Data required", "Status"],
       tableRows: [
-        ["Executive summary", "What changed this week", "Primary metrics", "Waiting"],
+        ["Executive summary", "What changed today", "Primary metrics", "Waiting"],
         ["Root-cause analysis", "Why did it change", "Driver metrics", "Waiting"],
         ["Data automation", "Can the data be trusted", "Sync and quality checks", "Waiting"],
         ["Action plan", "What should the team do next", "Validated insights", "Waiting"]
@@ -477,7 +622,7 @@ const dashboardCopy = {
       actions: [
         "Connect revenue, product, and CRM sources",
         "Map core fields to business semantics",
-        "Generate the first automated weekly report"
+        "Generate the first automated daily report"
       ],
       commandTitle: "Action command center",
       commandDescription: "Turn analysis into operational work across teams",
@@ -524,24 +669,32 @@ const dashboardCopy = {
   },
   zh: {
     navItems: [
-      { label: "概览", href: "/dashboard", target: "#overview", icon: BarChart3 },
-      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "指标", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
-      { label: "报告与分析", href: "/dashboard/reports", target: "#reports", icon: FileText },
+      { label: "分析报告", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
+    ],
+    dataNavItems: [
+      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database }
     ],
     sidebar: {
       brand: "蝴蝶效应",
       subtitle: "数据自动化系统",
       statusTitle: "工作区状态",
       statusText: "连接数据后，系统会自动清洗、映射业务语义，并生成 AI 洞察",
+      subscribe: "订阅",
       collapseLabel: "收起侧边栏",
       expandLabel: "展开侧边栏"
+    },
+    account: {
+      name: "Amy",
+      email: "amy@example.com",
+      plan: "Pro",
+      billing: "升级套餐"
     },
     header: {
       openNav: "打开导航",
       searchPlaceholder: "搜索指标、数据源、字段...",
       newSource: "导入数据",
+      help: "帮助",
       notifications: "通知"
     },
     hero: {
@@ -552,7 +705,27 @@ const dashboardCopy = {
         "导入团队已经在使用的系统蝴蝶效应会先自动同步、清洗并映射业务语义，再开始展示指标和洞察",
       primary: "导入数据源",
       secondary: "查看指标架构",
-      note: "连接数据源前，不展示任何业务数据"
+      note: "连接数据源前，不展示任何业务数据",
+      guideTitle: "Onboarding guide",
+      guideDescription: "完成这 4 步，把原始系统转化为第一份 AI 增长报告",
+      guideSteps: [
+        {
+          title: "连接数据源",
+          text: "导入收入、产品、CRM、广告或数仓数据"
+        },
+        {
+          title: "生成 Schema",
+          text: "让 AI 识别表、字段、关系和数据质量"
+        },
+        {
+          title: "确认指标定义",
+          text: "确认 ARR、CAC、留存、激活和公式口径"
+        },
+        {
+          title: "生成第一份报告",
+          text: "生成包含原因和行动建议的每日增长简报"
+        }
+      ]
     },
     metrics: {
       description: "指标卡片已准备好，但在导入数据前不显示任何数值",
@@ -570,8 +743,8 @@ const dashboardCopy = {
       ]
     },
     metricCatalog: {
-      title: "指标架构",
-      description: "在 AI 分析开始前，定义业务如何被衡量",
+      title: "指标语义层",
+      description: "让 AI 学习你的业务如何衡量收入、获客、激活和留存",
       actions: ["连接数据源", "查看 Schema"],
       hierarchy: [
         {
@@ -594,10 +767,45 @@ const dashboardCopy = {
       emptyDescription:
         "连接数据源或导入 Schema 后，系统才会生成指标定义当前页面只介绍 AI 分析所需的语义结构",
       emptySteps: ["连接业务数据", "映射字段到业务语义", "生成可供 AI 推理的指标"],
-      exampleTitle: "指标表示例",
-      exampleDescription: "仅用于展示结构真实指标会在导入数据后生成",
+      exampleTitle: "业务指标",
+      exampleDescription: "导入数据后，AI 会基于已连接的 Schema 自动生成业务指标",
+      previewTitle: "连接数据后 AI 将自动生成业务指标",
+      previewDescription: "导入可信数据后，会生成指标定义、公式、数据源映射和编辑者",
+      previewStatus: "等待导入",
+      previewGenerated: "导入后生成",
+      importedTableTitle: "指标对象表",
       exampleBadge: "示例",
-      exampleHeaders: ["业务层", "指标分类", "指标名称", "定义", "公式", "数据源映射", "AI 状态"],
+      addMetric: "新增指标",
+      deleteMetric: "删除指标",
+      actionHeader: "操作",
+      fieldPicker: "插入 Schema 字段",
+      semanticTitle: "语义指标工作区",
+      semanticDescription: "AI 将 Schema 转化为业务概念、指标关系和可推理的指标层",
+      domainTitle: "业务域",
+      allDomains: "全部指标",
+      formulaLabel: "公式",
+      mappedFieldsLabel: "映射字段",
+      confidenceLabel: "AI 置信度",
+      semanticTagsLabel: "语义含义",
+      editMetric: "编辑",
+      closeEdit: "完成",
+      aiPanelTitle: "AI 语义推理",
+      aiPanelDescription: "系统正在学习你的 Schema 如何表达收入、获客、激活和留存",
+      detectedTitle: "识别到的业务概念",
+      recommendedTitle: "建议关联指标",
+      lineageTitle: "语义血缘",
+      relationshipTitle: "指标关系",
+      exampleHeaders: ["业务层", "指标分类", "指标名称", "定义", "公式", "数据源映射", "编辑者"],
+      newMetric: {
+        layer: "驱动",
+        category: "自定义",
+        metric: "新指标",
+        definition: "描述业务含义",
+        formula: "",
+        mapping: "当前 Schema 字段",
+        status: "AI",
+        tags: ["自定义", "可编辑"]
+      },
       exampleRows: [
         {
           layer: "核心",
@@ -606,7 +814,7 @@ const dashboardCopy = {
           definition: "当前有效付费账户的年化经常性收入",
           formula: "MRR x 12",
           mapping: "Stripe subscriptions -> active recurring revenue",
-          status: "AI Ready",
+          status: "AI",
           tags: ["语义层", "收入"]
         },
         {
@@ -616,7 +824,7 @@ const dashboardCopy = {
           definition: "来自存量客户升级或增购产生的新增 ARR",
           formula: "升级 ARR - 降级 ARR",
           mapping: "CRM opportunities + billing deltas",
-          status: "需要验证",
+          status: "user_1027",
           tags: ["血缘", "AI 建议"]
         },
         {
@@ -626,7 +834,7 @@ const dashboardCopy = {
           definition: "获取一个新增付费客户的平均成本",
           formula: "营销费用 / 新增客户数",
           mapping: "广告平台 + CRM 新客户记录",
-          status: "缺少映射",
+          status: "user_1027",
           tags: ["成本", "待映射"]
         },
         {
@@ -636,7 +844,7 @@ const dashboardCopy = {
           definition: "新账户完成关键激活事件的比例",
           formula: "已激活用户 / 注册用户",
           mapping: "product_event = onboarding_completed",
-          status: "AI Ready",
+          status: "AI",
           tags: ["事件", "AI 映射"]
         },
         {
@@ -646,7 +854,7 @@ const dashboardCopy = {
           definition: "统计周期内保留下来的客户或收入比例",
           formula: "留存客户 / 期初客户",
           mapping: "Billing status + account cohort table",
-          status: "需要验证",
+          status: "user_1027",
           tags: ["Cohort", "定义"]
         }
       ],
@@ -674,6 +882,9 @@ const dashboardCopy = {
     settingsPage: {
       title: "设置",
       description: "管理工作区偏好、通知、数据控制和账单",
+      tabSources: "数据源",
+      tabMetrics: "指标",
+      tabOther: "其他",
       workspaceTitle: "工作区",
       workspaceDescription: "当前分析工作区的基础信息",
       workspaceName: "工作区名称",
@@ -689,7 +900,7 @@ const dashboardCopy = {
       notificationsTitle: "通知",
       notifications: [
         ["异常提醒", "开启"],
-        ["每周增长简报", "开启"],
+        ["每日增长简报", "开启"],
         ["数据同步失败", "开启"]
       ],
       securityTitle: "数据与安全",
@@ -704,30 +915,35 @@ const dashboardCopy = {
       billingAction: "管理方案"
     },
     onboarding: {
-      title: "数据导入流程",
-      description: "用清晰的步骤，建立一个干净、自动化的分析工作区",
+      title: "首次数据导入流程",
+      description: "",
       badge: "自动同步",
       steps: [
         {
-          title: "连接数据源",
-          text: "添加收入、产品、CRM、广告和数据仓库系统"
+          title: "连接业务数据",
+          text: "接入团队已经在使用的系统"
         },
         {
-          title: "映射业务语义",
-          text: "定义字段如何对应客户、收入、账户和事件"
+          title: "理解你的业务",
+          text: "把字段映射为客户、收入、账户和事件"
         },
         {
-          title: "清洗数据质量",
-          text: "检查缺失字段、重复记录和不一致的指标定义"
+          title: "发现关键指标",
+          text: "生成可供 AI 推理的业务指标"
         },
         {
-          title: "开启自动化",
-          text: "设置完成后，指标会自动同步和更新"
+          title: "开始自动分析",
+          text: "持续监控变化并自动生成报告"
         }
       ]
     },
     importData: {
-      description: "从团队已经在使用的系统开始"
+      description: "从团队已经在使用的系统开始",
+      connectedTitle: "当前已连接的数据",
+      connectedDescription: "连接后会在这里显示数据源、同步状态和最近更新时间",
+      connectedCount: "0 个已连接",
+      connectedEmptyTitle: "尚未连接数据源",
+      connectedEmptyText: "选择下方数据源并验证权限后，即可开始导入可信业务数据"
     },
     connectors: {
       title: "连接数据源",
@@ -770,18 +986,29 @@ const dashboardCopy = {
       sqlPlaceholder: "可选 SQL 查询",
       previewTitle: "连接预览",
       previewRows: ["验证后会列出表和视图", "导入后 AI 会自动映射字段并检查数据质量"],
+      connectAction: "连接",
+      changeSourceAction: "重新选择",
+      schemaTitle: "当前 Schema",
+      schemaBadge: "示例",
+      schemaDescription: "尚未连接数据源，以下示例展示验证后当前 Schema 的呈现方式",
+      schemaTables: [
+        { name: "accounts", fields: ["account_id", "segment", "created_at", "country"] },
+        { name: "subscriptions", fields: ["subscription_id", "account_id", "mrr", "status"] },
+        { name: "events", fields: ["event_name", "user_id", "device", "occurred_at"] },
+        { name: "campaigns", fields: ["campaign_id", "channel", "spend", "new_customers"] }
+      ],
       testAction: "测试连接",
       importAction: "连接并导入"
     },
     chat: {
       title: "AI 对话",
       description: "",
-      status: "导入前助手",
+      status: "",
       collapseLabel: "收起 AI 对话",
       expandLabel: "展开 AI 对话",
-      assistantMessage: "先连接收入和产品数据我会帮助映射字段、清洗定义，并准备洞察",
-      userQuestion: "先连接什么？",
-      assistantReply: "建议先接入收入系统，再补充产品分析和 CRM",
+      assistantMessage: "可以直接问我收入、留存、渠道或用户群体的归因问题",
+      userQuestion: "收入下降主要来自哪个用户群体？",
+      assistantReply: "可以按国家、设备、渠道和 cohort 拆解，优先查看美国 iOS 新付费用户",
       inputPlaceholder: "询问数据、指标或设置...",
       sendLabel: "发送消息"
     },
@@ -790,19 +1017,23 @@ const dashboardCopy = {
       description: "连接数据源后，系统会自动生成增长简报和数据自动化记录",
       pending: "等待数据",
       cards: [
-        ["每周增长简报", "导入数据后，这里会自动生成摘要"],
+        ["每天增长简报", "导入数据后，这里会自动生成摘要"],
         ["数据自动化记录", "自动同步、清洗和语义映射状态会在这里追踪"],
         ["管理层摘要", "可信指标准备好后，会自动生成汇报说明"]
       ],
       pageBadge: "AI 实时分析",
-      pageTitle: "经营分析报告",
+      pageTitle: "分析报告",
       pageSubtitle: "实时监控经营变化、解释业务原因，并把洞察转化为可创造价值的行动",
       periodLabel: "报告周期",
-      periodValue: "本周",
+      periodValue: "今日",
       generatedLabel: "生成状态",
       generatedValue: "导入数据后生成",
       exportAction: "导出",
       shareAction: "分享",
+      databaseCtaTitle: "连接业务数据",
+      databaseCtaEmpty: "导入数据库后，AI 将自动生成经营分析报告",
+      databaseCtaConnected: "管理已连接数据库",
+      databaseCtaDisconnected: "连接数据库",
       liveStatuses: [
         "正在同步 Stripe 数据",
         "正在处理 420 万事件",
@@ -822,6 +1053,57 @@ const dashboardCopy = {
       previewLabel: "模板预览",
       metricsTitle: "指标快照",
       metricsDescription: "",
+      emptyReportTitle: "今日经营简报",
+      emptyReportDescription: "AI 简报预览，连接业务数据后会展示真实数值和证据链",
+      emptyBriefingBadge: "AI briefing 预览",
+      emptyBriefingMetric: "收入下降 8%",
+      emptyBriefingTimeComparisons: [
+        ["相比昨日", "-8%"],
+        ["相比上周", "-5.2%"],
+        ["过去 7 天", "-3.1%"],
+        ["本月", "+4.8%"]
+      ],
+      emptyBriefingSections: [
+        ["主要原因", "美国广告成本上升", "iOS onboarding 转化下降"],
+        ["影响", "预计未来 7 天 ARR 少增长 $12k"],
+        ["建议", "暂停 Facebook 某广告组", "优化 onboarding 第二步"]
+      ],
+      emptyBriefingActions: ["展开证据链", "查看趋势", "查看 cohort"],
+      demoTitle: "AI 可自动分析",
+      demoSwitchLabel: "分析范围",
+      demoSignalLabel: "AI 会检查的信号",
+      demoExamples: [
+        {
+          title: "经营指标变化",
+          metric: "指标",
+          summary: "识别核心经营、财务和绩效指标中的异常波动",
+          signals: ["核心 KPI", "历史基线", "波动幅度"]
+        },
+        {
+          title: "客户与用户变化",
+          metric: "人群",
+          summary: "解释不同分群、cohort、使用行为和复购行为的变化",
+          signals: ["用户分群", "cohort", "行为路径"]
+        },
+        {
+          title: "成本效率",
+          metric: "效率",
+          summary: "追踪投入、资源和运营动作如何转化为业务结果",
+          signals: ["成本", "产出", "ROI"]
+        },
+        {
+          title: "渠道与区域表现",
+          metric: "市场",
+          summary: "对比区域、渠道、门店、团队或业务单元的基线变化",
+          signals: ["区域", "渠道", "业务单元"]
+        },
+        {
+          title: "流程转化",
+          metric: "流程",
+          summary: "定位用户、订单、线索或任务在关键业务流程中的流失位置",
+          signals: ["流程步骤", "完成率", "流失点"]
+        }
+      ],
       metricCards: [
         { label: "收入", value: "¥184K", delta: "-12.4%", detail: "低于上周水平" },
         { label: "激活率", value: "42.8%", delta: "-6.1%", detail: "iOS 注册链路下降" },
@@ -920,7 +1202,7 @@ const dashboardCopy = {
         {
           step: "01",
           title: "数据表现",
-          text: "本周收入下降 12.4%，激活率下降 6.1%，CAC 上升 18%，W2 留存同步下滑"
+          text: "今日收入下降 12.4%，激活率下降 6.1%，CAC 上升 18%，W2 留存同步下滑"
         },
         {
           step: "02",
@@ -936,7 +1218,7 @@ const dashboardCopy = {
       tableTitle: "报表结构",
       tableHeaders: ["模块", "回答的问题", "所需数据", "状态"],
       tableRows: [
-        ["管理层摘要", "本周发生了什么变化", "一级指标", "等待中"],
+        ["管理层摘要", "今天发生了什么变化", "一级指标", "等待中"],
         ["根因分析", "为什么会发生变化", "二级驱动指标", "等待中"],
         ["数据自动化", "数据是否可信", "同步和质量检查", "等待中"],
         ["行动计划", "团队下一步做什么", "已验证洞察", "等待中"]
@@ -945,7 +1227,7 @@ const dashboardCopy = {
       actions: [
         "连接收入、产品和 CRM 数据源",
         "把核心字段映射到业务语义",
-        "生成第一份自动化周报"
+        "生成第一份自动化日报"
       ],
       commandTitle: "行动指挥中心",
       commandDescription: "把分析结论转化为跨团队可执行工作流",
@@ -994,9 +1276,49 @@ const dashboardCopy = {
 
 type DashboardCopy = (typeof dashboardCopy)[Locale];
 type DashboardView = "overview" | "import-data" | "metrics" | "schema" | "reports" | "settings";
+type EditableMetricRow = {
+  id: string;
+  layer: string;
+  category: string;
+  metric: string;
+  definition: string;
+  formula: string;
+  mapping: string;
+  status: string;
+  tags: string[];
+};
 
 function navLabel(copy: DashboardCopy, href: string) {
-  return copy.navItems.find((item) => item.target === href)?.label ?? "";
+  if (href === "#metrics") {
+    return copy.metricCatalog.exampleTitle;
+  }
+
+  return (
+    [...copy.navItems, ...copy.dataNavItems].find((item) => item.target === href)?.label ??
+    (href === "#ai-chat" ? copy.chat.title : "")
+  );
+}
+
+function SidebarSubscribeLink({
+  copy,
+  isCollapsed
+}: {
+  copy: DashboardCopy;
+  isCollapsed: boolean;
+}) {
+  return (
+    <a
+      href="/checkout/professional"
+      title={isCollapsed ? copy.sidebar.subscribe : undefined}
+      className={cn(
+        "flex h-9 w-full items-center rounded-md text-sm font-medium text-emerald-800 transition hover:bg-emerald-50",
+        isCollapsed ? "justify-center px-0" : "gap-2 px-2"
+      )}
+    >
+      <CreditCard className="size-4" />
+      <span className={cn(isCollapsed && "sr-only")}>{copy.sidebar.subscribe}</span>
+    </a>
+  );
 }
 
 function Sidebar({
@@ -1010,10 +1332,30 @@ function Sidebar({
   isCollapsed: boolean;
   onToggle: () => void;
 }) {
+  const renderNavItem = (item: DashboardCopy["navItems"][number]) => {
+    const isActive = item.target === activeTarget;
+
+    return (
+      <a
+        key={item.label}
+        href={item.href}
+        title={isCollapsed ? item.label : undefined}
+        className={cn(
+          "flex h-9 w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
+          isCollapsed ? "justify-center px-0" : "gap-2 px-2",
+          isActive && "bg-secondary text-foreground"
+        )}
+      >
+        <item.icon className="size-4" />
+        <span className={cn(isCollapsed && "sr-only")}>{item.label}</span>
+      </a>
+    );
+  };
+
   return (
     <aside
       className={cn(
-        "hidden shrink-0 border-r bg-white/72 px-3 py-4 backdrop-blur transition-[width] duration-200 lg:block",
+        "hidden min-h-screen shrink-0 flex-col border-r bg-white/72 px-3 py-4 backdrop-blur transition-[width] duration-200 lg:flex",
         isCollapsed ? "w-20" : "w-64"
       )}
     >
@@ -1045,42 +1387,43 @@ function Sidebar({
         </Button>
       </div>
       <nav className="space-y-1">
-        {copy.navItems.map((item) => {
-          const isActive = item.target === activeTarget;
-
-          return (
-            <a
-              key={item.label}
-              href={item.href}
-              title={isCollapsed ? item.label : undefined}
-              className={cn(
-                "flex h-9 w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
-                isCollapsed ? "justify-center px-0" : "gap-2 px-2",
-                isActive && "bg-secondary text-foreground"
-              )}
-            >
-              <item.icon className="size-4" />
-              <span className={cn(isCollapsed && "sr-only")}>{item.label}</span>
-            </a>
-          );
-        })}
+        {copy.navItems.map(renderNavItem)}
       </nav>
-      {isCollapsed ? (
-        <div
-          className="mt-6 grid h-10 place-items-center rounded-lg border bg-background"
-          title={copy.sidebar.statusTitle}
-        >
-          <Zap className="size-4 text-teal-600" />
-        </div>
-      ) : (
-        <div className="mt-6 rounded-lg border bg-background p-3">
-          <div className="mb-3 flex items-center gap-2">
-            <Zap className="size-4 text-teal-600" />
-            <p className="text-sm font-medium">{copy.sidebar.statusTitle}</p>
+      <div className="mt-auto pt-4">
+        {isCollapsed ? (
+          <a
+            href="/checkout/professional"
+            title={`${copy.account.name} · ${copy.account.plan}`}
+            className="mx-auto grid size-10 place-items-center rounded-full bg-red-600 text-sm font-semibold text-white transition hover:bg-red-700"
+          >
+            A
+          </a>
+        ) : (
+          <div className="rounded-2xl border bg-white/84 p-3 shadow-sm">
+            <a
+              href="/checkout/professional"
+              className="flex items-center gap-3 rounded-xl p-1 transition hover:bg-secondary"
+            >
+              <div className="grid size-10 shrink-0 place-items-center rounded-full bg-red-600 text-sm font-semibold text-white">
+                A
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{copy.account.name}</p>
+                <p className="truncate text-xs text-muted-foreground">{copy.account.plan}</p>
+              </div>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </a>
+            <div className="my-3 h-px bg-border" />
+            <a
+              href="/checkout/professional"
+              className="flex items-center gap-3 rounded-xl px-1 py-2 text-sm font-medium transition hover:bg-secondary"
+            >
+              <Sparkles className="size-4" />
+              {copy.account.billing}
+            </a>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">{copy.sidebar.statusText}</p>
-        </div>
-      )}
+        )}
+      </div>
     </aside>
   );
 }
@@ -1100,9 +1443,9 @@ function Header({ copy }: { copy: DashboardCopy }) {
         </div>
         <div className="flex flex-1 items-center justify-end gap-2">
           <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
-            <a href="/dashboard/import-data">
-              <Plus />
-              {copy.header.newSource}
+            <a href="/support">
+              <HelpCircle />
+              {copy.header.help}
             </a>
           </Button>
           <Button variant="ghost" size="icon" aria-label={copy.header.notifications}>
@@ -1117,6 +1460,13 @@ function Header({ copy }: { copy: DashboardCopy }) {
 
 function SetupHero({ copy }: { copy: DashboardCopy }) {
   const overviewLabel = navLabel(copy, "#overview");
+  const reportsLabel = navLabel(copy, "#reports");
+  const guideRoutes = [
+    { href: "/dashboard/import-data", icon: Database },
+    { href: "/dashboard/schema", icon: Table2 },
+    { href: "/dashboard/metrics", icon: LineChart },
+    { href: "/dashboard/reports", icon: FileText }
+  ];
 
   return (
     <section id="overview" className="scroll-mt-20">
@@ -1153,6 +1503,69 @@ function SetupHero({ copy }: { copy: DashboardCopy }) {
             <CheckCircle2 className="size-4 text-emerald-700" />
             {copy.hero.note}
           </p>
+          <div className="mt-6 rounded-xl border bg-white/80 p-4 shadow-sm">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-base font-semibold tracking-tight">{copy.hero.guideTitle}</h3>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {copy.hero.guideDescription}
+                </p>
+              </div>
+              <Badge variant="secondary" className="w-fit shrink-0">0/4</Badge>
+            </div>
+            <div className="grid gap-2 md:grid-cols-4">
+              {copy.hero.guideSteps.map((step, index) => {
+                const GuideIcon = guideRoutes[index]?.icon ?? CheckCircle2;
+
+                return (
+                  <a
+                    key={step.title}
+                    href={guideRoutes[index]?.href ?? "/dashboard"}
+                    className="group rounded-lg border bg-background p-3 transition hover:border-emerald-200 hover:bg-emerald-50/50"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="grid size-7 place-items-center rounded-md bg-emerald-50 text-xs font-semibold text-emerald-800">
+                          {index + 1}
+                        </span>
+                        <GuideIcon className="size-4 text-emerald-800" />
+                      </div>
+                      <ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-emerald-800" />
+                    </div>
+                    <p className="text-sm font-semibold">{step.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{step.text}</p>
+                  </a>
+                );
+              })}
+            </div>
+            <div className="mt-4 rounded-xl border border-dashed border-emerald-100 bg-emerald-50/40 p-4">
+              <div className="mb-3">
+                <p className="text-sm font-semibold">{reportsLabel}</p>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+                  {copy.reports.description}
+                </p>
+              </div>
+              <div className="grid gap-2 lg:grid-cols-3">
+                {copy.reports.cards.map(([title, text]) => (
+                  <div
+                    key={title}
+                    className="rounded-lg border border-dashed bg-white/85 p-3 shadow-sm shadow-emerald-900/5"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="grid size-8 shrink-0 place-items-center rounded-md bg-secondary">
+                        <FileText className="size-4" />
+                      </div>
+                      <Badge variant="secondary" className="shrink-0">
+                        {copy.reports.pending}
+                      </Badge>
+                    </div>
+                    <p className="text-sm font-semibold">{title}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </section>
@@ -1202,7 +1615,6 @@ function MetricGrid({ copy }: { copy: DashboardCopy }) {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">{navLabel(copy, "#metrics")}</h2>
-          <p className="text-sm text-muted-foreground">{copy.metrics.description}</p>
         </div>
       </div>
       <Card className="overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/45 to-white shadow-sm">
@@ -1243,19 +1655,204 @@ function MetricGrid({ copy }: { copy: DashboardCopy }) {
   );
 }
 
-function MetricCatalogPage({ copy }: { copy: DashboardCopy }) {
+function SemanticMetricObjects({ copy }: { copy: DashboardCopy }) {
+  const hasImportedData = false;
+  const createRows = (): EditableMetricRow[] =>
+    copy.metricCatalog.exampleRows.map((row, index) => ({
+      ...row,
+      tags: [...row.tags],
+      id: `${row.metric}-${index}`
+    }));
+
+  const [metricRows, setMetricRows] = useState(createRows);
+
+  useEffect(() => {
+    setMetricRows(createRows());
+  }, [copy]);
+
+  const addMetric = () => {
+    const newRow = {
+        ...copy.metricCatalog.newMetric,
+        tags: [...copy.metricCatalog.newMetric.tags],
+        id: `custom-${Date.now()}`
+    };
+
+    setMetricRows((rows) => [...rows, newRow]);
+  };
+
+  const deleteMetric = (id: string) => {
+    setMetricRows((rows) => rows.filter((row) => row.id !== id));
+  };
+
+  const formatFormula = (formula: string) => formula.replace(/\bx\b/g, "×").replace(/->/g, "→");
+
   const statusClassName = (status: string) => {
-    if (status.includes("Ready")) {
+    if (status === "AI") {
       return "border-emerald-200 bg-emerald-50 text-emerald-800";
     }
 
-    if (status.includes("Missing") || status.includes("缺少")) {
-      return "border-amber-200 bg-amber-50 text-amber-800";
+    if (status.startsWith("user_")) {
+      return "border-indigo-200 bg-indigo-50 text-indigo-800";
     }
 
     return "border-slate-200 bg-slate-50 text-slate-700";
   };
 
+  if (!hasImportedData) {
+    return (
+      <Card className="overflow-hidden bg-white shadow-sm">
+        <CardHeader className="border-b p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base">{copy.metricCatalog.exampleTitle}</CardTitle>
+              <CardDescription className="mt-1 text-sm leading-6">
+                {copy.metricCatalog.exampleDescription}
+              </CardDescription>
+            </div>
+            <Badge variant="secondary" className="w-fit">
+              {copy.metricCatalog.previewStatus}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="rounded-xl border border-dashed border-emerald-100 bg-gradient-to-br from-emerald-50/70 via-white to-white p-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
+                  <BrainCircuit className="size-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold tracking-tight">
+                    {copy.metricCatalog.previewTitle}
+                  </h3>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                    {copy.metricCatalog.previewDescription}
+                  </p>
+                </div>
+              </div>
+              <Badge variant="secondary" className="w-fit shrink-0">
+                {copy.metricCatalog.importedTableTitle}
+              </Badge>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {copy.metrics.cards.map((metric) => (
+                <div key={metric.label} className="rounded-lg border bg-white/85 p-3 shadow-sm">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="grid size-9 shrink-0 place-items-center rounded-md bg-emerald-50 text-emerald-800">
+                      <metric.icon className="size-4" />
+                    </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      {copy.metricCatalog.previewGenerated}
+                    </Badge>
+                  </div>
+                  <p className="text-sm font-semibold">{metric.label}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{metric.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden bg-white shadow-sm">
+      <CardHeader className="border-b p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-base">{copy.metricCatalog.importedTableTitle}</CardTitle>
+            <CardDescription className="mt-1 text-sm leading-6">
+              {copy.metricCatalog.exampleDescription}
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="w-fit">
+              {copy.metricCatalog.exampleBadge}
+            </Badge>
+            <Button type="button" variant="outline" size="sm" onClick={addMetric}>
+              <Plus />
+              {copy.metricCatalog.addMetric}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="max-h-[520px] overflow-auto">
+          <table className="w-full min-w-[1400px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 z-10 border-b bg-secondary/80 text-xs text-muted-foreground backdrop-blur">
+              <tr>
+                {copy.metricCatalog.exampleHeaders.map((header) => (
+                  <th key={header} className="px-4 py-3 font-medium">
+                    {header}
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-right font-medium">
+                  {copy.metricCatalog.actionHeader}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {metricRows.map((row) => (
+                <tr key={row.id} className="align-top transition hover:bg-secondary/25">
+                  <td className="px-4 py-3">
+                    <Badge variant="secondary">{row.layer}</Badge>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {row.category}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-emerald-800">{row.metric}</div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {row.tags.map((tag) => (
+                        <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="max-w-[280px] px-4 py-3 leading-6 text-muted-foreground">
+                    <span className="block rounded-md border border-transparent px-2 py-1">
+                      {row.definition}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <code className="inline-block min-w-[180px] rounded-md border bg-secondary/45 px-2 py-1 font-mono text-xs">
+                      {formatFormula(row.formula)}
+                    </code>
+                  </td>
+                  <td className="max-w-[260px] px-4 py-3 leading-6 text-muted-foreground">
+                    <span className="block rounded-md border border-transparent px-2 py-1">
+                      {row.mapping}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={cn("inline-flex rounded-full border px-2 py-1 text-xs font-medium", statusClassName(row.status))}>
+                      {row.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={copy.metricCatalog.deleteMetric}
+                      onClick={() => deleteMetric(row.id)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MetricCatalogPage({ copy }: { copy: DashboardCopy }) {
   return (
     <section id="metrics" className="scroll-mt-20">
       <Card className="mb-4 overflow-hidden bg-white shadow-sm">
@@ -1279,31 +1876,6 @@ function MetricCatalogPage({ copy }: { copy: DashboardCopy }) {
                       {action}
                     </a>
                   </Button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-xl border bg-secondary/25 p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <Sparkles className="size-4 text-emerald-700" />
-                <h2 className="text-sm font-semibold">{copy.metricCatalog.flowTitle}</h2>
-              </div>
-              <p className="text-xs leading-5 text-muted-foreground">
-                {copy.metricCatalog.flowDescription}
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {copy.metricCatalog.flow.map((step, index) => (
-                  <div key={step} className="flex items-center gap-2">
-                    <div className="flex items-center gap-2 rounded-lg border bg-background px-2.5 py-2 text-xs font-medium">
-                      <span className="grid size-5 place-items-center rounded-md bg-emerald-50 text-[11px] font-semibold text-emerald-800">
-                        {index + 1}
-                      </span>
-                      <span>{step}</span>
-                    </div>
-                    {index < copy.metricCatalog.flow.length - 1 ? (
-                      <ArrowRight className="size-3.5 text-muted-foreground" />
-                    ) : null}
-                  </div>
                 ))}
               </div>
             </div>
@@ -1373,76 +1945,7 @@ function MetricCatalogPage({ copy }: { copy: DashboardCopy }) {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden bg-white shadow-sm">
-          <CardHeader className="border-b p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle className="text-base">{copy.metricCatalog.exampleTitle}</CardTitle>
-                <CardDescription className="mt-1 text-sm leading-6">
-                  {copy.metricCatalog.exampleDescription}
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="w-fit">
-                {copy.metricCatalog.exampleBadge}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="max-h-[520px] overflow-auto">
-              <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-                <thead className="sticky top-0 z-10 border-b bg-secondary/80 text-xs text-muted-foreground backdrop-blur">
-                  <tr>
-                    {copy.metricCatalog.exampleHeaders.map((header) => (
-                      <th key={header} className="px-4 py-3 font-medium">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {copy.metricCatalog.exampleRows.map((row) => (
-                    <tr key={`${row.layer}-${row.category}-${row.metric}`} className="align-top transition hover:bg-secondary/25">
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary">{row.layer}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{row.category}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-emerald-800">{row.metric}</div>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {row.tags.map((tag) => (
-                            <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="max-w-[280px] px-4 py-3 leading-6 text-muted-foreground">
-                        <span className="block rounded-md border border-transparent px-2 py-1 transition hover:border-border hover:bg-background">
-                          {row.definition}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <code className="inline-block rounded-md border bg-secondary/45 px-2 py-1 text-xs transition hover:border-emerald-200 hover:bg-emerald-50">
-                          {row.formula}
-                        </code>
-                      </td>
-                      <td className="max-w-[260px] px-4 py-3 leading-6 text-muted-foreground">
-                        <span className="block rounded-md border border-transparent px-2 py-1 transition hover:border-border hover:bg-background">
-                          {row.mapping}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={cn("inline-flex rounded-full border px-2 py-1 text-xs font-medium", statusClassName(row.status))}>
-                          {row.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        <SemanticMetricObjects copy={copy} />
 
       </div>
     </section>
@@ -1526,6 +2029,13 @@ function SchemaPage({ copy }: { copy: DashboardCopy }) {
 }
 
 function SettingsPage({ copy }: { copy: DashboardCopy }) {
+  const [activeTab, setActiveTab] = useState<"sources" | "metrics" | "other">("sources");
+  const tabs = [
+    { id: "sources", label: copy.settingsPage.tabSources, icon: Database },
+    { id: "metrics", label: copy.settingsPage.tabMetrics, icon: LineChart },
+    { id: "other", label: copy.settingsPage.tabOther, icon: Settings }
+  ] as const;
+
   return (
     <section id="settings" className="scroll-mt-20">
       <div className="mb-4">
@@ -1540,7 +2050,50 @@ function SettingsPage({ copy }: { copy: DashboardCopy }) {
         </p>
       </div>
 
-      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mb-4 flex flex-wrap gap-2">
+        {tabs.map((tab) => {
+          const TabIcon = tab.icon;
+          const isActive = activeTab === tab.id;
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+                isActive
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                  : "bg-white text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <TabIcon className="size-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "sources" ? (
+        <div className="grid gap-4">
+          <ConnectorPanel copy={copy} />
+        </div>
+      ) : null}
+
+      {activeTab === "metrics" ? (
+        <SemanticMetricObjects copy={copy} />
+      ) : null}
+
+      {activeTab === "other" ? (
+        <SettingsOtherPanel copy={copy} />
+      ) : null}
+    </section>
+  );
+}
+
+function SettingsOtherPanel({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-4">
           <Card className="overflow-hidden bg-white shadow-sm">
             <CardHeader className="border-b p-4">
@@ -1623,7 +2176,6 @@ function SettingsPage({ copy }: { copy: DashboardCopy }) {
           </Card>
         </div>
       </div>
-    </section>
   );
 }
 
@@ -1667,9 +2219,50 @@ function ImportDataSection({ copy }: { copy: DashboardCopy }) {
       </div>
       <div className="grid gap-4">
         <OnboardingFlow copy={copy} />
+        <ConnectedDataOverview copy={copy} />
         <ConnectorPanel copy={copy} />
       </div>
     </section>
+  );
+}
+
+function ConnectedDataOverview({ copy }: { copy: DashboardCopy }) {
+  return (
+    <Card className="overflow-hidden bg-white shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
+              <Database className="size-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold tracking-tight">
+                {copy.importData.connectedTitle}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {copy.importData.connectedDescription}
+              </p>
+            </div>
+          </div>
+          <Badge variant="secondary" className="w-fit shrink-0">
+            {copy.importData.connectedCount}
+          </Badge>
+        </div>
+        <div className="mt-4 rounded-lg border border-dashed bg-secondary/25 p-4">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
+              <Database className="size-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold">{copy.importData.connectedEmptyTitle}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {copy.importData.connectedEmptyText}
+              </p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1680,7 +2273,11 @@ function OnboardingFlow({ copy }: { copy: DashboardCopy }) {
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="text-base font-semibold tracking-tight">{copy.onboarding.title}</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{copy.onboarding.description}</p>
+            {copy.onboarding.description ? (
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {copy.onboarding.description}
+              </p>
+            ) : null}
           </div>
           <Badge variant="secondary">{copy.onboarding.badge}</Badge>
         </div>
@@ -1750,7 +2347,9 @@ function ChatPanel({
               </div>
               <div>
                 <CardTitle className="text-sm">{copy.chat.title}</CardTitle>
-                <p className="text-xs text-muted-foreground">{copy.chat.status}</p>
+                {copy.chat.status ? (
+                  <p className="text-xs text-muted-foreground">{copy.chat.status}</p>
+                ) : null}
               </div>
             </div>
             <Button variant="ghost" size="icon" aria-label={copy.chat.collapseLabel} onClick={onToggle}>
@@ -1799,6 +2398,7 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<string>(copy.connectors.modes[0]);
   const [selectedAuth, setSelectedAuth] = useState<string>(copy.connectors.authOptions[0]);
+  const [wizardStarted, setWizardStarted] = useState(false);
   const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
   const isFileSource = selectedSource.kind === "file";
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
@@ -1817,28 +2417,43 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
         </div>
       </CardHeader>
       <CardContent className="p-4">
-        <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className={cn("grid gap-4", wizardStarted && "2xl:grid-cols-[minmax(0,1fr)_340px]")}>
           <div className="rounded-lg border bg-background">
             <div className="border-b bg-secondary/20 p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                {copy.connectors.sourcePicker}
-              </p>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {copy.connectors.sourcePicker}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-full"
+                  onClick={() => setWizardStarted(true)}
+                >
+                  {copy.connectors.connectAction}
+                  <ArrowRight />
+                </Button>
+              </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {copy.connectors.sources.map((source, index) => (
                   <button
                     key={source.name}
                     type="button"
-                    onClick={() => setSelectedSourceIndex(index)}
+                    onClick={() => {
+                      setSelectedSourceIndex(index);
+                      setWizardStarted(false);
+                    }}
                     className={cn(
-                      "rounded-md border bg-background px-3 py-2 text-left transition hover:bg-secondary",
-                      index === selectedSourceIndex && "border-primary bg-primary text-primary-foreground"
+                      "rounded-md border bg-background px-3 py-2 text-left transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2",
+                      index === selectedSourceIndex &&
+                        "border-emerald-700 bg-slate-950 text-white hover:bg-slate-950"
                     )}
                   >
                     <span className="block text-sm font-semibold">{source.name}</span>
                     <span
                       className={cn(
                         "mt-1 block text-xs",
-                        index === selectedSourceIndex ? "text-primary-foreground/75" : "text-muted-foreground"
+                        index === selectedSourceIndex ? "text-white/75" : "text-muted-foreground"
                       )}
                     >
                       {source.type}
@@ -1847,6 +2462,9 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
                 ))}
               </div>
             </div>
+
+            {wizardStarted ? (
+              <>
             <div className="border-b p-3">
               <div className="flex items-center gap-3">
                 <div className="grid size-10 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
@@ -1856,6 +2474,15 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
                   <p className="text-sm font-semibold">{selectedSource.name}</p>
                   <p className="text-xs text-muted-foreground">{selectedSource.type}</p>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => setWizardStarted(false)}
+                >
+                  {copy.connectors.changeSourceAction}
+                </Button>
               </div>
             </div>
             <div className="space-y-4 p-4">
@@ -1986,8 +2613,11 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
                 </label>
               </div>
             </div>
+              </>
+            ) : null}
           </div>
 
+          {wizardStarted ? (
           <div className="rounded-lg border bg-white p-3 shadow-sm">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
@@ -2017,7 +2647,9 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
               </Button>
             </div>
           </div>
+          ) : null}
         </div>
+
       </CardContent>
     </Card>
   );
@@ -2580,9 +3212,11 @@ function ReportTrendCard({ copy }: { copy: DashboardCopy }) {
 }
 
 function ReportsPage({ copy }: { copy: DashboardCopy }) {
+  const hasConnectedDatabase = false;
+
   return (
     <section id="reports" className="space-y-4 scroll-mt-20">
-      <div className="flex flex-col gap-4 rounded-xl border bg-white/80 p-4 shadow-sm xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex flex-col gap-4 px-1 pb-2 pt-1 xl:flex-row xl:items-center xl:justify-between">
         <div className="max-w-3xl">
           <Badge className="mb-3 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
             {copy.reports.pageBadge}
@@ -2606,14 +3240,172 @@ function ReportsPage({ copy }: { copy: DashboardCopy }) {
         </div>
       </div>
 
-      <ReportHeroInsight copy={copy} />
-      <ReportMetricsVisualization copy={copy} />
-      <ReportInsightCard copy={copy} />
-      <ReportReasoningTrustSection copy={copy} />
-      <ReportTrendCard copy={copy} />
-      <ReportActionCommandCenter copy={copy} />
-      <ReportMemorySemanticSection copy={copy} />
+      <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
+      {hasConnectedDatabase ? (
+        <>
+          <ReportHeroInsight copy={copy} />
+          <ReportMetricsVisualization copy={copy} />
+          <ReportInsightCard copy={copy} />
+          <ReportReasoningTrustSection copy={copy} />
+          <ReportTrendCard copy={copy} />
+          <ReportActionCommandCenter copy={copy} />
+          <ReportMemorySemanticSection copy={copy} />
+        </>
+      ) : (
+        <ReportEmptyPreview copy={copy} />
+      )}
     </section>
+  );
+}
+
+function ReportDatabaseCta({
+  copy,
+  hasConnectedDatabase
+}: {
+  copy: DashboardCopy;
+  hasConnectedDatabase: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden border-emerald-100 bg-gradient-to-r from-white via-emerald-50/45 to-white shadow-sm">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
+            <Database className="size-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">{copy.reports.databaseCtaTitle}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{copy.reports.databaseCtaEmpty}</p>
+          </div>
+        </div>
+        <Button asChild className="w-full sm:w-auto" size="sm">
+          <a href="/dashboard/import-data">
+            {hasConnectedDatabase
+              ? copy.reports.databaseCtaConnected
+              : copy.reports.databaseCtaDisconnected}
+            <ArrowRight />
+          </a>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
+  return (
+    <Card className="overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
+      <CardContent className="p-5">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.16fr)_minmax(320px,0.84fr)] xl:items-stretch">
+          <div className="h-full rounded-2xl border bg-white/88 p-7 shadow-sm sm:p-8">
+            <Badge className="mb-8 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+              {copy.reports.emptyBriefingBadge}
+            </Badge>
+            <p className="text-base font-medium text-muted-foreground">{copy.reports.emptyReportTitle}</p>
+            <h2 className="mt-4 text-5xl font-semibold tracking-tight text-slate-950 sm:text-6xl">
+              {copy.reports.emptyBriefingMetric}
+            </h2>
+            <div className="mt-6 flex flex-wrap gap-2.5">
+              {copy.reports.emptyBriefingTimeComparisons.map(([label, value], index) => {
+                const isPositive = value.startsWith("+");
+
+                return (
+                  <div
+                    key={label}
+                    className={cn(
+                      "flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium",
+                      index === 0
+                        ? "border-rose-200 bg-rose-50 text-rose-800"
+                        : "border-slate-200 bg-white text-muted-foreground"
+                    )}
+                  >
+                    <span>{label}</span>
+                    <span className={isPositive ? "text-emerald-700" : "text-rose-700"}>{value}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-6 max-w-2xl text-sm leading-6 text-muted-foreground">
+              {copy.reports.emptyReportDescription}
+            </p>
+
+            <div className="mt-8 grid gap-3 md:grid-cols-3">
+              {copy.reports.emptyBriefingSections.map(([title, ...items]) => (
+                <div key={title} className="h-full rounded-xl border bg-secondary/15 p-4">
+                  <p className="text-sm font-semibold">{title}</p>
+                  <div className="mt-3 space-y-2">
+                    {items.map((item) => (
+                      <div key={item} className="flex gap-2 text-sm leading-5 text-muted-foreground">
+                        <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {copy.reports.emptyBriefingActions.map((action, index) => (
+                <Button key={action} variant={index === 0 ? "default" : "outline"} size="sm">
+                  {action}
+                  <ArrowRight />
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-full rounded-2xl border bg-white/70 p-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-center gap-2">
+                <BrainCircuit className="size-4 text-emerald-700" />
+                <p className="text-sm font-semibold">{copy.reports.demoTitle}</p>
+              </div>
+              <Badge variant="secondary" className="w-fit">
+                {copy.reports.demoSwitchLabel}
+              </Badge>
+            </div>
+
+            <div className="grid gap-2.5">
+              {copy.reports.demoExamples.map((example, index) => (
+                <div
+                  key={example.title}
+                  className={cn(
+                    "rounded-xl border bg-white/82 p-3 transition hover:border-emerald-200 hover:bg-emerald-50/45",
+                    index === 0 && "border-emerald-200 bg-emerald-50/70"
+                  )}
+                >
+                  <div className="flex gap-3">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-xs font-semibold text-emerald-800">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-semibold">{example.title}</h3>
+                        <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {example.metric}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {example.summary}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {example.signals.map((signal) => (
+                          <span
+                            key={signal}
+                            className="rounded-full border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                          >
+                            {signal}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2623,13 +3415,11 @@ export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const copy = dashboardCopy[locale];
   const activeTarget =
-    view === "import-data"
-      ? "#import-data"
-      : view === "metrics" || view === "schema"
-        ? "#metrics"
-        : view === "reports"
-          ? "#reports"
-          : view === "settings"
+    view === "import-data" || view === "metrics" || view === "schema"
+      ? "#data"
+      : view === "reports"
+        ? "#reports"
+        : view === "settings"
           ? "#settings"
           : "#overview";
 
@@ -2678,9 +3468,6 @@ export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
               <div className="min-w-0 xl:col-start-1">
                 <SetupHero copy={copy} />
               </div>
-              <div className="min-w-0 xl:col-start-1">
-                <MetricGrid copy={copy} />
-              </div>
             </>
           )}
           <ChatPanel
@@ -2689,11 +3476,6 @@ export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
             onToggle={() => setIsChatCollapsed((current) => !current)}
             className="min-w-0 xl:sticky xl:top-[76px] xl:col-start-2 xl:row-span-4 xl:row-start-1"
           />
-          {view === "overview" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <ReportsPanel copy={copy} />
-            </div>
-          ) : null}
         </main>
       </div>
     </div>

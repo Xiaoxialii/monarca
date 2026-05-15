@@ -52,7 +52,7 @@ export function AuthControls() {
   return (
     <>
       <SignedOut>
-        <SignInButton mode="modal">
+        <SignInButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
           <Button variant="outline" size="sm">
             <LogIn />
             {copy.signIn}

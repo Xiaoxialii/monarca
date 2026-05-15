@@ -83,7 +83,8 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
       <SignIn
         routing="path"
         path="/sign-in"
-        fallbackRedirectUrl="/"
+        fallbackRedirectUrl="/dashboard"
+        forceRedirectUrl="/dashboard"
         appearance={{
           elements: {
             rootBox: "w-full",
@@ -136,7 +137,7 @@ function DemoSignIn({ copy }: { copy: SignInCopy }) {
             <Link href="/sign-up">{copy.createAccount}</Link>
           </Button>
           <Button asChild className="rounded-full px-6">
-            <Link href="/">
+            <Link href="/dashboard">
               {copy.next}
               <ArrowRight />
             </Link>

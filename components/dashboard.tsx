@@ -11,6 +11,7 @@ import {
   ChevronRight,
   CheckCircle2,
   Database,
+  Download,
   FileText,
   LineChart,
   PanelLeft,
@@ -18,11 +19,23 @@ import {
   Search,
   Send,
   Settings,
+  Share2,
   Sparkles,
   Table2,
   Zap
 } from "lucide-react";
 import { useState } from "react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import { AuthControls } from "@/components/auth-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +50,7 @@ const dashboardCopy = {
       { label: "Overview", href: "/dashboard", target: "#overview", icon: BarChart3 },
       { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
       { label: "Metrics", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
-      { label: "Reports & Analysis", href: "/dashboard#reports", target: "#reports", icon: FileText },
+      { label: "Reports & Analysis", href: "/dashboard/reports", target: "#reports", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     sidebar: {
@@ -303,13 +316,209 @@ const dashboardCopy = {
       sendLabel: "Send message"
     },
     reports: {
-      title: "Reports",
+      title: "Reports & Analysis",
       description: "Automated reports will be generated after your data sources are connected",
       pending: "Waiting for data",
       cards: [
         ["Weekly growth brief", "Summaries will appear after data is imported"],
         ["Data automation log", "Refresh, cleaning, and mapping status will be tracked here"],
         ["Executive summary", "Board-ready notes will be generated from trusted metrics"]
+      ],
+      pageBadge: "AI analyst live",
+      pageTitle: "Executive Analysis Report",
+      pageSubtitle:
+        "A real-time business analyst workspace that monitors revenue, explains changes, and turns insights into operations",
+      periodLabel: "Reporting period",
+      periodValue: "This week",
+      generatedLabel: "Generated",
+      generatedValue: "After data import",
+      exportAction: "Export",
+      shareAction: "Share",
+      liveStatuses: [
+        "Syncing Stripe data",
+        "Processing 4.2M events",
+        "Correlating retention anomalies",
+        "Executive summary updated 2 min ago"
+      ],
+      heroLabel: "Critical business change",
+      heroMetric: "Revenue",
+      heroValue: "↓18%",
+      heroBaseline: "vs 4-week average",
+      heroSeverity: "Largest decline in 2 months",
+      heroImpact: "-$42K ARR at risk",
+      heroSummary:
+        "AI identified a material revenue anomaly driven by conversion, acquisition efficiency, and early retention weakness",
+      businessImpactLabel: "Business impact",
+      ownerLabel: "Owner",
+      impactLabel: "Impact",
+      previewLabel: "Template preview",
+      metricsTitle: "Metric snapshot",
+      metricsDescription: "",
+      metricCards: [
+        { label: "Revenue", value: "$184K", delta: "-12.4%", detail: "Lower than prior week" },
+        { label: "Activation", value: "42.8%", delta: "-6.1%", detail: "iOS signup flow declined" },
+        { label: "CAC", value: "$318", delta: "+18%", detail: "Paid search efficiency weakened" },
+        { label: "Retention W2", value: "61.5%", delta: "-9%", detail: "Early cohort health softened" }
+      ],
+      metricTrendTitle: "Metric trend",
+      timelineTitle: "Custom timeline",
+      timelineStartLabel: "Start year",
+      timelineEndLabel: "End year",
+      timelineSelectedLabel: "Selected range",
+      driverChartTitle: "Multi-dimensional driver analysis",
+      dimensionCards: [
+        {
+          title: "Country",
+          items: [
+            ["United States", "34%"],
+            ["Japan", "21%"],
+            ["United Kingdom", "14%"]
+          ]
+        },
+        {
+          title: "User profile",
+          items: [
+            ["SMB self-serve", "29%"],
+            ["New paid users", "24%"],
+            ["Mobile-first users", "18%"]
+          ]
+        },
+        {
+          title: "Channel",
+          items: [
+            ["Paid search", "31%"],
+            ["Affiliate", "12%"],
+            ["Organic", "8%"]
+          ]
+        }
+      ],
+      healthCards: [
+        {
+          label: "Revenue signal",
+          value: "Waiting for data",
+          detail: "Connect billing or warehouse tables to populate"
+        },
+        {
+          label: "Metric coverage",
+          value: "0 ready",
+          detail: "Semantic definitions generate after schema mapping"
+        },
+        {
+          label: "Data freshness",
+          value: "Not connected",
+          detail: "Sync cadence starts after source validation"
+        }
+      ],
+      chartTitle: "Growth signal trend",
+      chartDescription: "Preview layout, real values appear after source connection",
+      insightTitle: "Growth Analysis Report",
+      reasoningTitle: "Causal reasoning map",
+      reasoningDescription: "How the AI connects metric movement to likely business causes",
+      evidenceTitle: "Key evidence",
+      evidenceMetric: "Revenue dropped 18%",
+      evidenceDrivers: ["iOS conversion declined", "CAC increased", "Retention week 2 dropped"],
+      confidenceLabel: "Confidence",
+      confidenceValue: "82%",
+      whyLabel: "Reasoning basis",
+      reasoningNodes: [
+        {
+          title: "Revenue down",
+          delta: "-18%",
+          detail: "Primary anomaly against 4-week baseline",
+          children: ["iOS conversion down", "CAC up", "Retention W2 down"]
+        },
+        {
+          title: "iOS conversion down",
+          delta: "-14%",
+          detail: "Onboarding completion and checkout completion both weakened",
+          children: ["Onboarding completion down", "Payment completion down"]
+        },
+        {
+          title: "CAC up",
+          delta: "+18%",
+          detail: "Paid search efficiency deteriorated after campaign mix shifted",
+          children: ["Paid efficiency down", "Low-intent traffic up"]
+        }
+      ],
+      trustTitle: "Confidence system",
+      trustDescription: "Why this conclusion is considered enterprise-safe",
+      trustItems: [
+        { label: "Data completeness", value: "91%", detail: "Billing, product, and campaign events are covered" },
+        { label: "Attribution reliability", value: "Medium", detail: "Paid search paths show partial attribution gaps" },
+        { label: "Historical consistency", value: "High", detail: "Pattern matches prior conversion-led drops" },
+        { label: "Data freshness", value: "4 min", detail: "Latest warehouse sync completed successfully" }
+      ],
+      insights: [
+        {
+          step: "01",
+          title: "Data performance",
+          text: "Revenue declined 12.4%, activation dropped 6.1%, CAC increased 18%, and W2 retention weakened"
+        },
+        {
+          step: "02",
+          title: "Cause analysis",
+          text: "The change is mainly driven by iOS conversion decline, paid search CAC inflation, and Retention W2 softness"
+        },
+        {
+          step: "03",
+          title: "Recommended actions",
+          text: "Review the iOS signup and checkout flow, tighten inefficient spend, and run a W2 risk cohort recovery play"
+        }
+      ],
+      tableTitle: "Report sections",
+      tableHeaders: ["Section", "Question answered", "Data required", "Status"],
+      tableRows: [
+        ["Executive summary", "What changed this week", "Primary metrics", "Waiting"],
+        ["Root-cause analysis", "Why did it change", "Driver metrics", "Waiting"],
+        ["Data automation", "Can the data be trusted", "Sync and quality checks", "Waiting"],
+        ["Action plan", "What should the team do next", "Validated insights", "Waiting"]
+      ],
+      actionTitle: "Action queue",
+      actions: [
+        "Connect revenue, product, and CRM sources",
+        "Map core fields to business semantics",
+        "Generate the first automated weekly report"
+      ],
+      commandTitle: "Action command center",
+      commandDescription: "Turn analysis into operational work across teams",
+      workflows: [
+        {
+          label: "Create Jira ticket",
+          title: "Investigate iOS payment drop",
+          owner: "Product",
+          priority: "High",
+          impact: "+6.4% conversion recovery",
+          cta: "Create ticket"
+        },
+        {
+          label: "Launch CRM workflow",
+          title: "Re-engage high-risk W2 users",
+          owner: "Lifecycle",
+          priority: "Medium",
+          impact: "+4.8% retention lift",
+          cta: "Launch workflow"
+        },
+        {
+          label: "Adjust budget",
+          title: "Reduce low-ROI paid search spend",
+          owner: "Growth",
+          priority: "High",
+          impact: "-12% CAC exposure",
+          cta: "Review budget"
+        }
+      ],
+      memoryTitle: "AI business memory",
+      memoryItems: [
+        "Similar iOS checkout anomaly detected 3 weeks ago",
+        "Retention decline has persisted for 4 consecutive weeks",
+        "CAC spike correlates with the latest non-brand search campaign launch"
+      ],
+      semanticTitle: "Business semantics used",
+      semanticDescription: "The AI reasons through mapped business meaning, not raw dashboard fields",
+      semanticMappings: [
+        ["paid_amount", "Revenue"],
+        ["signup_completed", "Activation"],
+        ["subscription_renewed", "Retention"]
       ]
     }
   },
@@ -318,7 +527,7 @@ const dashboardCopy = {
       { label: "概览", href: "/dashboard", target: "#overview", icon: BarChart3 },
       { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
       { label: "指标", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
-      { label: "报告与分析", href: "/dashboard#reports", target: "#reports", icon: FileText },
+      { label: "报告与分析", href: "/dashboard/reports", target: "#reports", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     sidebar: {
@@ -577,20 +786,214 @@ const dashboardCopy = {
       sendLabel: "发送消息"
     },
     reports: {
-      title: "报告",
+      title: "报告与分析",
       description: "连接数据源后，系统会自动生成增长简报和数据自动化记录",
       pending: "等待数据",
       cards: [
         ["每周增长简报", "导入数据后，这里会自动生成摘要"],
         ["数据自动化记录", "自动同步、清洗和语义映射状态会在这里追踪"],
         ["管理层摘要", "可信指标准备好后，会自动生成汇报说明"]
+      ],
+      pageBadge: "AI 实时分析",
+      pageTitle: "经营分析报告",
+      pageSubtitle: "实时监控经营变化、解释业务原因，并把洞察转化为可创造价值的行动",
+      periodLabel: "报告周期",
+      periodValue: "本周",
+      generatedLabel: "生成状态",
+      generatedValue: "导入数据后生成",
+      exportAction: "导出",
+      shareAction: "分享",
+      liveStatuses: [
+        "正在同步 Stripe 数据",
+        "正在处理 420 万事件",
+        "正在关联留存异常",
+        "管理层摘要已于 2 分钟前更新"
+      ],
+      heroLabel: "关键业务变化",
+      heroMetric: "收入",
+      heroValue: "↓18%",
+      heroBaseline: "相比 4 周平均值",
+      heroSeverity: "近 2 个月最大跌幅",
+      heroImpact: "¥42K ARR 存在风险",
+      heroSummary: "AI 识别到一次重要收入异常，主要由转化、获客效率和早期留存共同驱动",
+      businessImpactLabel: "业务影响",
+      ownerLabel: "负责人",
+      impactLabel: "预期影响",
+      previewLabel: "模板预览",
+      metricsTitle: "指标快照",
+      metricsDescription: "",
+      metricCards: [
+        { label: "收入", value: "¥184K", delta: "-12.4%", detail: "低于上周水平" },
+        { label: "激活率", value: "42.8%", delta: "-6.1%", detail: "iOS 注册链路下降" },
+        { label: "CAC", value: "¥318", delta: "+18%", detail: "付费搜索效率走弱" },
+        { label: "W2 留存", value: "61.5%", delta: "-9%", detail: "早期 cohort 健康度下降" }
+      ],
+      metricTrendTitle: "指标趋势",
+      timelineTitle: "自定义时间线",
+      timelineStartLabel: "起始年份",
+      timelineEndLabel: "结束年份",
+      timelineSelectedLabel: "已选区间",
+      driverChartTitle: "多维度驱动分析",
+      dimensionCards: [
+        {
+          title: "国家",
+          items: [
+            ["美国", "34%"],
+            ["日本", "21%"],
+            ["英国", "14%"]
+          ]
+        },
+        {
+          title: "用户画像",
+          items: [
+            ["中小企业自助用户", "29%"],
+            ["新付费用户", "24%"],
+            ["移动端优先用户", "18%"]
+          ]
+        },
+        {
+          title: "渠道",
+          items: [
+            ["付费搜索", "31%"],
+            ["联盟渠道", "12%"],
+            ["自然流量", "8%"]
+          ]
+        }
+      ],
+      healthCards: [
+        {
+          label: "收入信号",
+          value: "等待数据",
+          detail: "连接收入系统或数仓表后自动填充"
+        },
+        {
+          label: "指标覆盖",
+          value: "0 个就绪",
+          detail: "完成 Schema 映射后生成语义指标"
+        },
+        {
+          label: "数据新鲜度",
+          value: "未连接",
+          detail: "验证数据源后开始自动同步"
+        }
+      ],
+      chartTitle: "增长信号趋势",
+      chartDescription: "当前为预览结构，真实数值会在连接数据后展示",
+      insightTitle: "数据分析增长报告",
+      reasoningTitle: "因果推理图",
+      reasoningDescription: "AI 如何把指标变化连接到可能的业务原因",
+      evidenceTitle: "关键证据",
+      evidenceMetric: "收入下降 18%",
+      evidenceDrivers: ["iOS 转化下降", "CAC 上升", "Retention week2 下滑"],
+      confidenceLabel: "置信度",
+      confidenceValue: "82%",
+      whyLabel: "原因判断依据",
+      reasoningNodes: [
+        {
+          title: "收入下降",
+          delta: "-18%",
+          detail: "相对 4 周基线的核心异常",
+          children: ["iOS 转化下降", "CAC 上升", "W2 留存下降"]
+        },
+        {
+          title: "iOS 转化下降",
+          delta: "-14%",
+          detail: "注册完成和支付完成同时走弱",
+          children: ["Onboarding 完成率下降", "支付完成率下降"]
+        },
+        {
+          title: "CAC 上升",
+          delta: "+18%",
+          detail: "投放结构变化后，付费搜索效率下降",
+          children: ["付费效率下降", "低意向流量增加"]
+        }
+      ],
+      trustTitle: "置信机制",
+      trustDescription: "为什么这个结论可以被企业审计和追溯",
+      trustItems: [
+        { label: "数据完整度", value: "91%", detail: "计费、产品和投放事件覆盖充分" },
+        { label: "归因可靠性", value: "中等", detail: "付费搜索路径存在部分归因缺口" },
+        { label: "历史一致性", value: "高", detail: "与过去转化驱动型收入下滑相似" },
+        { label: "数据新鲜度", value: "4 分钟", detail: "最新数仓同步已完成" }
+      ],
+      insights: [
+        {
+          step: "01",
+          title: "数据表现",
+          text: "本周收入下降 12.4%，激活率下降 6.1%，CAC 上升 18%，W2 留存同步下滑"
+        },
+        {
+          step: "02",
+          title: "原因分析",
+          text: "主要由 iOS 转化下降、付费搜索 CAC 上升和 Retention week2 下滑共同驱动"
+        },
+        {
+          step: "03",
+          title: "行动建议",
+          text: "优先排查 iOS 注册与支付链路，收紧低效投放，并对 W2 风险用户做召回"
+        }
+      ],
+      tableTitle: "报表结构",
+      tableHeaders: ["模块", "回答的问题", "所需数据", "状态"],
+      tableRows: [
+        ["管理层摘要", "本周发生了什么变化", "一级指标", "等待中"],
+        ["根因分析", "为什么会发生变化", "二级驱动指标", "等待中"],
+        ["数据自动化", "数据是否可信", "同步和质量检查", "等待中"],
+        ["行动计划", "团队下一步做什么", "已验证洞察", "等待中"]
+      ],
+      actionTitle: "行动队列",
+      actions: [
+        "连接收入、产品和 CRM 数据源",
+        "把核心字段映射到业务语义",
+        "生成第一份自动化周报"
+      ],
+      commandTitle: "行动指挥中心",
+      commandDescription: "把分析结论转化为跨团队可执行工作流",
+      workflows: [
+        {
+          label: "创建 Jira 任务",
+          title: "排查 iOS 支付转化下降",
+          owner: "产品团队",
+          priority: "高",
+          impact: "+6.4% 转化恢复",
+          cta: "创建任务"
+        },
+        {
+          label: "启动 CRM 流程",
+          title: "召回 W2 高风险用户",
+          owner: "生命周期团队",
+          priority: "中",
+          impact: "+4.8% 留存提升",
+          cta: "启动流程"
+        },
+        {
+          label: "调整预算",
+          title: "降低低 ROI 搜索投放",
+          owner: "增长团队",
+          priority: "高",
+          impact: "-12% CAC 风险",
+          cta: "查看预算"
+        }
+      ],
+      memoryTitle: "AI 业务记忆",
+      memoryItems: [
+        "3 周前检测到类似 iOS 支付异常",
+        "留存下滑已经连续 4 周出现",
+        "CAC 上升与最近一次非品牌搜索投放启动相关"
+      ],
+      semanticTitle: "使用的业务语义",
+      semanticDescription: "AI 通过业务含义推理，而不是直接读原始字段",
+      semanticMappings: [
+        ["paid_amount", "收入"],
+        ["signup_completed", "激活"],
+        ["subscription_renewed", "留存"]
       ]
     }
   }
 } as const;
 
 type DashboardCopy = (typeof dashboardCopy)[Locale];
-type DashboardView = "overview" | "import-data" | "metrics" | "schema" | "settings";
+type DashboardView = "overview" | "import-data" | "metrics" | "schema" | "reports" | "settings";
 
 function navLabel(copy: DashboardCopy, href: string) {
   return copy.navItems.find((item) => item.target === href)?.label ?? "";
@@ -1647,6 +2050,573 @@ function ReportsPanel({ copy }: { copy: DashboardCopy }) {
   );
 }
 
+const reportTrendData = [
+  { period: "D1", revenue: 38, activation: 44 },
+  { period: "D2", revenue: 42, activation: 46 },
+  { period: "D3", revenue: 39, activation: 43 },
+  { period: "D4", revenue: 48, activation: 51 },
+  { period: "D5", revenue: 45, activation: 54 },
+  { period: "D6", revenue: 52, activation: 56 },
+  { period: "D7", revenue: 57, activation: 61 }
+];
+
+const reportMetricTrendData = [
+  { period: "2019", revenue: 96, activation: 31, retention: 54 },
+  { period: "2020", revenue: 114, activation: 35, retention: 56 },
+  { period: "2021", revenue: 138, activation: 39, retention: 59 },
+  { period: "2022", revenue: 162, activation: 43, retention: 63 },
+  { period: "2023", revenue: 188, activation: 47, retention: 67 },
+  { period: "2024", revenue: 211, activation: 45, retention: 65 },
+  { period: "2025", revenue: 204, activation: 42, retention: 62 },
+  { period: "2026", revenue: 184, activation: 41, retention: 61 }
+];
+
+const reportDriverData = [
+  { driver: "iOS", impact: 38 },
+  { driver: "CAC", impact: 31 },
+  { driver: "W2", impact: 24 },
+  { driver: "Billing", impact: 12 },
+  { driver: "US", impact: 34 },
+  { driver: "Japan", impact: 21 },
+  { driver: "SMB", impact: 29 },
+  { driver: "New users", impact: 24 },
+  { driver: "Paid search", impact: 31 }
+];
+
+function ReportLiveStatusBar({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="rounded-xl border bg-slate-950 p-3 text-white shadow-sm">
+      <div className="grid gap-2 lg:grid-cols-4">
+        {copy.reports.liveStatuses.map((status, index) => (
+          <div key={status} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                index === 0 ? "animate-pulse bg-emerald-300" : "bg-white/35"
+              )}
+              aria-hidden="true"
+            />
+            <span className="truncate text-xs text-slate-200">{status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReportHeroInsight({ copy }: { copy: DashboardCopy }) {
+  return (
+    <Card className="overflow-hidden border-emerald-700/20 bg-gradient-to-br from-white via-emerald-50/70 to-white shadow-sm">
+      <CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div>
+          <Badge className="border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+            {copy.reports.heroLabel}
+          </Badge>
+          <div className="mt-5 flex flex-wrap items-end gap-4">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">{copy.reports.heroMetric}</p>
+              <h1 className="mt-2 text-6xl font-semibold tracking-tight text-slate-950">
+                {copy.reports.heroValue}
+              </h1>
+            </div>
+            <div className="pb-2">
+              <p className="text-lg font-semibold text-slate-700">{copy.reports.heroBaseline}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{copy.reports.heroSeverity}</p>
+            </div>
+          </div>
+          <p className="mt-5 max-w-2xl text-sm leading-6 text-muted-foreground">
+            {copy.reports.heroSummary}
+          </p>
+        </div>
+
+        <div className="grid rounded-xl border bg-white/80 p-4">
+          <div className="rounded-lg border bg-rose-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-rose-700">
+              {copy.reports.businessImpactLabel}
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-rose-700">{copy.reports.heroImpact}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReportReasoningTrustSection({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{copy.reports.reasoningTitle}</CardTitle>
+          <CardDescription>{copy.reports.reasoningDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {copy.reports.reasoningNodes.map((node, index) => (
+            <details
+              key={node.title}
+              open={index < 2}
+              className="group rounded-xl border bg-background p-4 open:bg-emerald-50/35"
+            >
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-emerald-50 text-sm font-semibold text-emerald-800">
+                    {index + 1}
+                  </span>
+                  <div>
+                    <p className="font-semibold">{node.title}</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{node.detail}</p>
+                  </div>
+                </div>
+                <Badge variant="secondary">{node.delta}</Badge>
+              </summary>
+              <div className="ml-11 mt-4 grid gap-2 sm:grid-cols-3">
+                {node.children.map((child) => (
+                  <div key={child} className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2">
+                    <ArrowRight className="size-3 text-emerald-700" />
+                    <span className="text-sm text-muted-foreground">{child}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{copy.reports.trustTitle}</CardTitle>
+          <CardDescription>{copy.reports.trustDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {copy.reports.trustItems.map((item) => (
+            <div key={item.label} className="rounded-xl border bg-background p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium">{item.label}</p>
+                <span className="text-sm font-semibold text-emerald-800">{item.value}</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ReportActionCommandCenter({ copy }: { copy: DashboardCopy }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{copy.reports.commandTitle}</CardTitle>
+        <CardDescription>{copy.reports.commandDescription}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-3">
+        {copy.reports.workflows.map((workflow) => (
+          <div key={workflow.title} className="rounded-xl border bg-background p-4">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <Badge variant="secondary">{workflow.label}</Badge>
+              <Badge className="bg-emerald-700 text-white hover:bg-emerald-700">
+                {workflow.priority}
+              </Badge>
+            </div>
+            <h3 className="text-base font-semibold">{workflow.title}</h3>
+            <div className="mt-4 grid gap-2 text-sm text-muted-foreground">
+              <div className="flex justify-between gap-3">
+                <span>{copy.reports.ownerLabel}</span>
+                <span className="font-medium text-foreground">{workflow.owner}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span>{copy.reports.impactLabel}</span>
+                <span className="font-medium text-foreground">{workflow.impact}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReportMemorySemanticSection({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{copy.reports.memoryTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {copy.reports.memoryItems.map((item) => (
+            <div key={item} className="flex gap-3 rounded-xl border bg-background p-3">
+              <BrainCircuit className="mt-0.5 size-4 shrink-0 text-emerald-700" />
+              <p className="text-sm leading-6 text-muted-foreground">{item}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{copy.reports.semanticTitle}</CardTitle>
+          <CardDescription>{copy.reports.semanticDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {copy.reports.semanticMappings.map(([field, meaning]) => (
+            <div key={field} className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3">
+              <code className="rounded-md bg-white px-2 py-1 text-xs text-muted-foreground">{field}</code>
+              <ArrowRight className="size-4 text-emerald-700" />
+              <span className="text-sm font-semibold">{meaning}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ReportMetricsVisualization({ copy }: { copy: DashboardCopy }) {
+  const [rangeStart, setRangeStart] = useState(0);
+  const [rangeEnd, setRangeEnd] = useState(reportMetricTrendData.length - 1);
+  const visibleMetricTrendData = reportMetricTrendData.slice(rangeStart, rangeEnd + 1);
+  const selectedStart = reportMetricTrendData[rangeStart]?.period;
+  const selectedEnd = reportMetricTrendData[rangeEnd]?.period;
+  const maxRangeIndex = reportMetricTrendData.length - 1;
+  const startPercent = (rangeStart / maxRangeIndex) * 100;
+  const endPercent = (rangeEnd / maxRangeIndex) * 100;
+
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">{copy.reports.metricsTitle}</h2>
+          {copy.reports.metricsDescription ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {copy.reports.metricsDescription}
+            </p>
+          ) : null}
+        </div>
+        <Badge variant="secondary">{copy.reports.previewLabel}</Badge>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {copy.reports.metricCards.map((metric) => {
+          const isNegative = metric.delta.startsWith("-");
+          const isPositiveCost = metric.label === "CAC" || metric.label.includes("CAC");
+
+          return (
+            <div key={metric.label} className="rounded-lg border bg-secondary/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">{metric.label}</p>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-xs font-semibold",
+                    isNegative || isPositiveCost
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-emerald-50 text-emerald-700"
+                  )}
+                >
+                  {metric.delta}
+                </span>
+              </div>
+              <p className="mt-3 text-2xl font-semibold tracking-tight">{metric.value}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{metric.detail}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 grid gap-4">
+        <div className="rounded-lg border bg-background p-4">
+          <h3 className="text-sm font-semibold">{copy.reports.metricTrendTitle}</h3>
+          <div className="mt-3 h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={visibleMetricTrendData} margin={{ left: 0, right: 18, top: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="metricRevenue" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#047857" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#047857" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="metricRetention" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#64748b" stopOpacity={0.16} />
+                    <stop offset="95%" stopColor="#64748b" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
+                <XAxis
+                  dataKey="period"
+                  axisLine={false}
+                  tickLine={false}
+                  interval={0}
+                  tick={{ fill: "#64748b", fontSize: 12 }}
+                />
+                <YAxis hide domain={[25, 230]} />
+                <Tooltip
+                  cursor={{ stroke: "#94a3b8", strokeWidth: 1 }}
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: "1px solid #e2e8f0",
+                    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)"
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="#047857"
+                  strokeWidth={2.5}
+                  fill="url(#metricRevenue)"
+                  name={copy.reports.metricCards[0].label}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="retention"
+                  stroke="#64748b"
+                  strokeWidth={2}
+                  fill="url(#metricRetention)"
+                  name={copy.reports.metricCards[3].label}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 px-1 pb-1">
+            <div className="relative h-9">
+              <div className="absolute left-0 right-0 top-4 h-1.5 rounded-full bg-slate-200" />
+              <div
+                className="absolute top-4 h-1.5 rounded-full bg-emerald-700"
+                style={{ left: `${startPercent}%`, right: `${100 - endPercent}%` }}
+              />
+              <input
+                aria-label={copy.reports.timelineStartLabel}
+                type="range"
+                min={0}
+                max={maxRangeIndex}
+                value={rangeStart}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setRangeStart(Math.min(next, rangeEnd));
+                }}
+                className="pointer-events-none absolute inset-x-0 top-1 z-20 h-8 w-full cursor-ew-resize appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-emerald-700 [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-700"
+              />
+              <input
+                aria-label={copy.reports.timelineEndLabel}
+                type="range"
+                min={0}
+                max={maxRangeIndex}
+                value={rangeEnd}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setRangeEnd(Math.max(next, rangeStart));
+                }}
+                className="pointer-events-none absolute inset-x-0 top-1 z-30 h-8 w-full cursor-ew-resize appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-emerald-700 [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-700"
+              />
+            </div>
+            <div className="mt-1 flex justify-between gap-2 text-[11px] text-muted-foreground">
+              {reportMetricTrendData.map((item) => (
+                <span key={item.period}>{item.period}</span>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {copy.reports.timelineSelectedLabel}: {selectedStart} - {selectedEnd}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-background p-4">
+          <h3 className="text-sm font-semibold">{copy.reports.driverChartTitle}</h3>
+          <div className="mt-3 h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={reportDriverData} margin={{ left: 0, right: 8, top: 10, bottom: 0 }}>
+                <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
+                <XAxis
+                  dataKey="driver"
+                  axisLine={false}
+                  tickLine={false}
+                  interval={0}
+                  tick={{ fill: "#64748b", fontSize: 11 }}
+                />
+                <YAxis hide domain={[0, 45]} />
+                <Tooltip
+                  cursor={{ fill: "rgba(4,120,87,0.06)" }}
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: "1px solid #e2e8f0",
+                    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)"
+                  }}
+                />
+                <Bar dataKey="impact" fill="#047857" radius={[8, 8, 2, 2]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {copy.reports.dimensionCards.map((dimension) => (
+              <div key={dimension.title} className="rounded-lg border bg-white p-3">
+                <p className="text-sm font-semibold">{dimension.title}</p>
+                <div className="mt-3 space-y-2">
+                  {dimension.items.map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="truncate text-muted-foreground">{label}</span>
+                      <span className="font-semibold text-emerald-800">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportInsightCard({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <h2 className="text-base font-semibold">{copy.reports.insightTitle}</h2>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {copy.reports.insights.map((item) => (
+          <div key={item.step} className="rounded-lg border bg-secondary/20 p-3">
+            <div className="flex items-center gap-3">
+              <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-sm font-semibold text-emerald-800">
+                {item.step}
+              </span>
+              <p className="font-medium">{item.title}</p>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">{item.text}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
+              {copy.reports.evidenceTitle}
+            </p>
+            <h3 className="mt-2 text-sm font-semibold text-foreground">
+              {copy.reports.whyLabel}
+            </h3>
+          </div>
+          <Badge className="w-fit bg-emerald-700 text-white hover:bg-emerald-700">
+            {copy.reports.confidenceLabel} {copy.reports.confidenceValue}
+          </Badge>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div className="rounded-md border bg-white p-3 text-sm font-semibold">
+            {copy.reports.evidenceMetric}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+            {copy.reports.evidenceDrivers.map((driver) => (
+              <div key={driver} className="flex items-center gap-2 rounded-md border bg-white px-3 py-2">
+                <span className="size-1.5 rounded-full bg-emerald-700" aria-hidden="true" />
+                <span className="text-sm text-muted-foreground">{driver}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportTrendCard({ copy }: { copy: DashboardCopy }) {
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">{copy.reports.chartTitle}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {copy.reports.chartDescription}
+          </p>
+        </div>
+        <Badge variant="secondary">{copy.reports.previewLabel}</Badge>
+      </div>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={reportTrendData} margin={{ left: 0, right: 8, top: 10, bottom: 0 }}>
+            <defs>
+              <linearGradient id="reportRevenue" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="5%" stopColor="#047857" stopOpacity={0.22} />
+                <stop offset="95%" stopColor="#047857" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="reportActivation" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
+            <XAxis
+              dataKey="period"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: "#64748b", fontSize: 12 }}
+            />
+            <YAxis hide domain={[30, 68]} />
+            <Tooltip
+              cursor={{ stroke: "#94a3b8", strokeWidth: 1 }}
+              contentStyle={{
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)"
+              }}
+            />
+            <Area
+              type="monotone"
+              dataKey="revenue"
+              stroke="#047857"
+              strokeWidth={2.5}
+              fill="url(#reportRevenue)"
+              name={copy.reports.healthCards[0].label}
+            />
+            <Area
+              type="monotone"
+              dataKey="activation"
+              stroke="#4f46e5"
+              strokeWidth={2.5}
+              fill="url(#reportActivation)"
+              name={copy.reports.insights[0].title}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function ReportsPage({ copy }: { copy: DashboardCopy }) {
+  return (
+    <section id="reports" className="space-y-4 scroll-mt-20">
+      <div className="flex flex-col gap-4 rounded-xl border bg-white/80 p-4 shadow-sm xl:flex-row xl:items-start xl:justify-between">
+        <div className="max-w-3xl">
+          <Badge className="mb-3 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+            {copy.reports.pageBadge}
+          </Badge>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            {copy.reports.pageTitle}
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {copy.reports.pageSubtitle}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm">
+            <Download />
+            {copy.reports.exportAction}
+          </Button>
+          <Button variant="outline" size="sm">
+            <Share2 />
+            {copy.reports.shareAction}
+          </Button>
+        </div>
+      </div>
+
+      <ReportHeroInsight copy={copy} />
+      <ReportMetricsVisualization copy={copy} />
+      <ReportInsightCard copy={copy} />
+      <ReportReasoningTrustSection copy={copy} />
+      <ReportTrendCard copy={copy} />
+      <ReportActionCommandCenter copy={copy} />
+      <ReportMemorySemanticSection copy={copy} />
+    </section>
+  );
+}
+
 export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
   const [locale, , isLocaleReady] = useLocale("en");
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
@@ -1657,7 +2627,9 @@ export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
       ? "#import-data"
       : view === "metrics" || view === "schema"
         ? "#metrics"
-        : view === "settings"
+        : view === "reports"
+          ? "#reports"
+          : view === "settings"
           ? "#settings"
           : "#overview";
 
@@ -1696,6 +2668,10 @@ export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
           ) : view === "settings" ? (
             <div className="min-w-0 xl:col-start-1">
               <SettingsPage copy={copy} />
+            </div>
+          ) : view === "reports" ? (
+            <div className="min-w-0 xl:col-start-1">
+              <ReportsPage copy={copy} />
             </div>
           ) : (
             <>

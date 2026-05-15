@@ -139,6 +139,12 @@ const homepageCopy = {
     investigation: {
       eyebrow: "Active investigation",
       title: "Revenue dropped 12.4%",
+      evidenceTitle: "Evidence chain",
+      evidenceMetric: "Revenue dropped 18%",
+      evidenceDrivers: ["iOS conversion declined", "CAC increased", "Retention week 2 dropped"],
+      confidenceLabel: "Confidence",
+      confidenceValue: "82%",
+      whyLabel: "Why AI believes this",
       timeline: [
         ["08:42", "openAnalyst detected a revenue anomaly across self-serve plans"],
         ["08:43", "Compared cohorts, campaigns, billing events, and product activation"],
@@ -321,6 +327,12 @@ const homepageCopy = {
     investigation: {
       eyebrow: "进行中的智能调查",
       title: "收入下降 12.4%",
+      evidenceTitle: "证据链",
+      evidenceMetric: "收入下降 18%",
+      evidenceDrivers: ["iOS 转化下降", "CAC 上升", "Retention week2 下滑"],
+      confidenceLabel: "置信度",
+      confidenceValue: "82%",
+      whyLabel: "AI 为什么这么判断",
       timeline: [
         ["08:42", "蝴蝶效应在自助订阅计划中检测到收入异常"],
         ["08:43", "对比了客群、投放、计费事件和产品激活数据"],
@@ -653,6 +665,36 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                   )}
                 </div>
               ))}
+            </div>
+            <div className="mt-5 rounded-3xl border border-emerald-200/80 bg-white/90 p-5 shadow-[0_18px_60px_rgba(4,120,87,0.1)]">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                    {copy.evidenceTitle}
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-slate-950">
+                    {copy.whyLabel}
+                  </h3>
+                </div>
+                <div className="w-fit rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-800">
+                  {copy.confidenceLabel}: {copy.confidenceValue}
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-[0.7fr_auto_1fr] lg:items-center">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-950">{copy.evidenceMetric}</p>
+                </div>
+                <ArrowRight className="hidden size-5 text-slate-400 lg:block" />
+                <div className="grid gap-2">
+                  {copy.evidenceDrivers.map((driver) => (
+                    <div key={driver} className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                      <span className="size-1.5 rounded-full bg-emerald-700" aria-hidden="true" />
+                      <span className="text-sm font-medium text-slate-700">{driver}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>

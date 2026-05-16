@@ -3417,10 +3417,7 @@ function ReportDatabaseCta({
 }
 
 function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
-  const [isMonitoringExpanded, setIsMonitoringExpanded] = useState(false);
-  const visibleMonitoringItems = isMonitoringExpanded
-    ? copy.reports.demoExamples
-    : copy.reports.demoExamples.slice(0, 3);
+  const visibleMonitoringItems = copy.reports.demoExamples;
 
   return (
     <Card className="h-full overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
@@ -3492,15 +3489,6 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
                 <BrainCircuit className="size-4 text-emerald-700" />
                 <p className="text-sm font-semibold">{copy.reports.demoTitle}</p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-fit px-2 text-xs"
-                onClick={() => setIsMonitoringExpanded((current) => !current)}
-              >
-                {isMonitoringExpanded ? copy.reports.demoCollapseLabel : copy.reports.demoSwitchLabel}
-              </Button>
             </div>
 
             <div className="grid gap-2.5">
@@ -3523,12 +3511,8 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
                           {example.metric}
                         </span>
                       </div>
-                      {isMonitoringExpanded ? (
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {example.summary}
-                        </p>
-                      ) : null}
-                      <div className={cn("flex flex-wrap gap-1.5", isMonitoringExpanded ? "mt-2" : "mt-1.5")}>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{example.summary}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {example.signals.map((signal) => (
                           <span
                             key={signal}

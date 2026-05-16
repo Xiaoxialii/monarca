@@ -833,7 +833,7 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
                 )}
                 variant={isFeatured ? "default" : "outline"}
               >
-                <Link href={plan.href}>
+                <Link href={`${plan.href}?from=home`}>
                   {plan.cta}
                   <ArrowRight />
                 </Link>
@@ -876,7 +876,7 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
           </div>
 
           <Button asChild variant="outline" className="h-11 rounded-full bg-white">
-            <Link href={copy.addOn.href}>
+            <Link href={`${copy.addOn.href}?from=home`}>
               {copy.addOn.cta}
               <ArrowRight />
             </Link>

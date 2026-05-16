@@ -12,7 +12,7 @@ import {
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,7 +35,6 @@ const addonPlanIds = ["database-setup"] as const satisfies readonly PaymentPlan[
 const paymentCopy = {
   en: {
     brand: "openAnalyst",
-    back: "Back to pricing",
     selectorBadge: "Step 1",
     selectorTitle: "Choose a plan first",
     selectorSubtitle: "Select the plan you want to start, then confirm details below",
@@ -131,7 +130,6 @@ const paymentCopy = {
   },
   zh: {
     brand: "蝴蝶效应",
-    back: "返回价格",
     selectorBadge: "第 1 步",
     selectorTitle: "先选择套餐",
     selectorSubtitle: "选择要开始的方案，下方结算信息会自动更新",
@@ -233,8 +231,23 @@ function PlanBadge({ children }: { children: React.ReactNode }) {
 
 export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
+  const [fromHome, setFromHome] = useState(false);
   const [locale] = useLocale("en");
   const copy = paymentCopy[locale as Locale];
+  useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get("from");
+    setFromHome(from === "home");
+  }, []);
+
+  const backHref = fromHome ? "/" : "/dashboard";
+  const backLabel =
+    locale === "zh"
+      ? fromHome
+        ? "返回首页"
+        : "返回 Dashboard"
+      : fromHome
+        ? "Back home"
+        : "Back to dashboard";
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
   const isProfessional = selectedPlan === "professional";
@@ -253,9 +266,9 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             <span className="text-sm font-semibold">{copy.brand}</span>
           </Link>
           <Button asChild variant="ghost" className="rounded-full text-slate-600">
-            <Link href="/#pricing">
+            <Link href={backHref}>
               <ArrowLeft />
-              {copy.back}
+              {backLabel}
             </Link>
           </Button>
         </nav>

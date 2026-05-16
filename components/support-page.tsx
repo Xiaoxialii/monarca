@@ -124,7 +124,7 @@ const supportCopy: Record<
 };
 
 export function SupportPage() {
-  const [locale] = useLocale("en");
+  const [locale, , isLocaleReady] = useLocale("en");
   const [isSubmitted, setIsSubmitted] = useState(false);
   const copy = supportCopy[locale];
 
@@ -132,6 +132,10 @@ export function SupportPage() {
     event.preventDefault();
     setIsSubmitted(true);
   };
+
+  if (!isLocaleReady) {
+    return <main className="min-h-screen bg-background" />;
+  }
 
   return (
     <main
@@ -157,131 +161,133 @@ export function SupportPage() {
           </Button>
         </header>
 
-        <section className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="py-4">
-            <Badge className="mb-4 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
-              {copy.badge}
-            </Badge>
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
-              {copy.title}
-            </h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-              {copy.subtitle}
-            </p>
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-emerald-100 bg-white/72 p-7 shadow-sm sm:p-8">
+              <Badge className="mb-4 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+                {copy.badge}
+              </Badge>
+              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
+                {copy.title}
+              </h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
+                {copy.subtitle}
+              </p>
+            </div>
+
+            <Card className="overflow-hidden border-slate-200/80 bg-white/90 shadow-sm">
+              <CardHeader className="border-b bg-white px-5 py-4">
+                <CardTitle>{copy.formTitle}</CardTitle>
+                <p className="text-sm text-muted-foreground">{copy.formSubtitle}</p>
+              </CardHeader>
+              <CardContent className="p-5">
+                {isSubmitted ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6">
+                    <div className="mb-4 grid size-11 place-items-center rounded-full bg-white text-emerald-800">
+                      <CheckCircle2 className="size-5" />
+                    </div>
+                    <h2 className="text-xl font-semibold">{copy.submittedTitle}</h2>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{copy.submittedText}</p>
+                    <Button className="mt-5 rounded-full" onClick={() => setIsSubmitted(false)}>
+                      {copy.submitAnother}
+                    </Button>
+                  </div>
+                ) : (
+                  <form className="grid gap-4" onSubmit={handleSubmit}>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.type}
+                        <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          {copy.types.map((type) => (
+                            <option key={type}>{type}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.priority}
+                        <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          {copy.priorities.map((priority) => (
+                            <option key={priority}>{priority}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.name}
+                        <Input placeholder="Amy" />
+                      </label>
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.email}
+                        <Input type="email" placeholder="amy@example.com" />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.workspace}
+                        <Input placeholder={copy.brand} />
+                      </label>
+                      <label className="grid gap-2 text-sm font-medium">
+                        {copy.subject}
+                        <Input />
+                      </label>
+                    </div>
+
+                    <label className="grid gap-2 text-sm font-medium">
+                      {copy.description}
+                      <textarea
+                        className="min-h-36 rounded-md border bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder={copy.descriptionPlaceholder}
+                      />
+                    </label>
+
+                    <Button className="mt-2 w-fit rounded-full px-5">
+                      <Send className="size-4" />
+                      {copy.submit}
+                    </Button>
+                  </form>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
-          <div className="grid gap-3">
-            {[
-              { icon: Clock3, title: copy.responseTitle, text: copy.responseText },
-              { icon: ShieldCheck, title: copy.secureTitle, text: copy.secureText },
-              { icon: MessageSquareText, title: copy.contextTitle, text: copy.contextText }
-            ].map((item) => (
-              <Card key={item.title} className="border-slate-200/80 bg-white/84 shadow-sm">
-                <CardContent className="flex gap-3 p-4">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
-                    <item.icon className="size-4" />
-                  </span>
-                  <div>
+          <aside className="space-y-5">
+            <div className="grid gap-3">
+              {[
+                { icon: Clock3, title: copy.responseTitle, text: copy.responseText },
+                { icon: ShieldCheck, title: copy.secureTitle, text: copy.secureText },
+                { icon: MessageSquareText, title: copy.contextTitle, text: copy.contextText }
+              ].map((item) => (
+                <Card key={item.title} className="border-slate-200/80 bg-white/84 shadow-sm">
+                  <CardContent className="flex gap-3 p-4">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
+                      <item.icon className="size-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold">{item.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            <Card className="border-slate-200/80 bg-white/84 shadow-sm">
+              <CardHeader className="px-5 py-4">
+                <CardTitle className="text-base">{copy.quickTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 px-5 pb-5">
+                {copy.quickItems.map((item) => (
+                  <div key={item.title} className="rounded-xl border bg-background p-4">
                     <p className="text-sm font-semibold">{item.title}</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <Card className="overflow-hidden border-slate-200/80 bg-white/90 shadow-sm">
-            <CardHeader className="border-b bg-white">
-              <CardTitle>{copy.formTitle}</CardTitle>
-              <p className="text-sm text-muted-foreground">{copy.formSubtitle}</p>
-            </CardHeader>
-            <CardContent className="p-5">
-              {isSubmitted ? (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6">
-                  <div className="mb-4 grid size-11 place-items-center rounded-full bg-white text-emerald-800">
-                    <CheckCircle2 className="size-5" />
-                  </div>
-                  <h2 className="text-xl font-semibold">{copy.submittedTitle}</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{copy.submittedText}</p>
-                  <Button className="mt-5 rounded-full" onClick={() => setIsSubmitted(false)}>
-                    {copy.submitAnother}
-                  </Button>
-                </div>
-              ) : (
-                <form className="grid gap-4" onSubmit={handleSubmit}>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.type}
-                      <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {copy.types.map((type) => (
-                          <option key={type}>{type}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.priority}
-                      <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {copy.priorities.map((priority) => (
-                          <option key={priority}>{priority}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.name}
-                      <Input placeholder="Amy" />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.email}
-                      <Input type="email" placeholder="amy@example.com" />
-                    </label>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.workspace}
-                      <Input placeholder={copy.brand} />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium">
-                      {copy.subject}
-                      <Input />
-                    </label>
-                  </div>
-
-                  <label className="grid gap-2 text-sm font-medium">
-                    {copy.description}
-                    <textarea
-                      className="min-h-36 rounded-md border bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder={copy.descriptionPlaceholder}
-                    />
-                  </label>
-
-                  <Button className="mt-2 w-fit rounded-full px-5">
-                    <Send className="size-4" />
-                    {copy.submit}
-                  </Button>
-                </form>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="h-fit border-slate-200/80 bg-white/84 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">{copy.quickTitle}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {copy.quickItems.map((item) => (
-                <div key={item.title} className="rounded-xl border bg-background p-4">
-                  <p className="text-sm font-semibold">{item.title}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          </aside>
         </section>
       </div>
     </main>

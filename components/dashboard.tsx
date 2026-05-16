@@ -33,6 +33,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -50,6 +51,7 @@ const dashboardCopy = {
   en: {
     navItems: [
       { label: "Analysis Report", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
@@ -336,6 +338,17 @@ const dashboardCopy = {
       title: "Connect data source",
       description: "Choose a source, validate access, then import trusted business data",
       status: "Ready",
+      connectedTitle: "Connected databases",
+      connectedDescription: "Manage sources that have already been connected to this workspace",
+      connectedStatus: "Connected",
+      connectedCountLabel: "connected",
+      editAction: "Edit",
+      doneAction: "Done",
+      deleteAction: "Remove",
+      lastSyncLabel: "Last sync",
+      syncModeLabel: "Mode",
+      noConnectedTitle: "No connected databases yet",
+      noConnectedText: "Connected databases will appear here after import",
       source: "Selected source",
       sourcePicker: "Data source",
       sources: [
@@ -388,11 +401,11 @@ const dashboardCopy = {
       importAction: "Connect and import"
     },
     chat: {
-      title: "AI assistant",
+      title: "AI Follow-up Analysis",
       description: "",
       status: "",
-      collapseLabel: "Collapse AI chat",
-      expandLabel: "Expand AI chat",
+      collapseLabel: "Collapse AI Follow-up Analysis",
+      expandLabel: "Expand AI Follow-up Analysis",
       assistantMessage: "Ask attribution questions across revenue, retention, channels, and user cohorts",
       userQuestion: "Which user segment drove the revenue drop?",
       assistantReply: "Break it down by country, device, channel, and cohort; start with US iOS new paid users",
@@ -459,8 +472,9 @@ const dashboardCopy = {
         ["Recommendations", "Pause one Facebook ad set", "Optimize onboarding step 2"]
       ],
       emptyBriefingActions: ["Expand evidence chain", "View trend", "View cohort"],
-      demoTitle: "AI can automatically analyze",
-      demoSwitchLabel: "Analysis scope",
+      demoTitle: "AI is monitoring",
+      demoSwitchLabel: "More...",
+      demoCollapseLabel: "Show less",
       demoSignalLabel: "Signals AI would inspect",
       demoExamples: [
         {
@@ -670,6 +684,7 @@ const dashboardCopy = {
   zh: {
     navItems: [
       { label: "分析报告", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
@@ -949,6 +964,17 @@ const dashboardCopy = {
       title: "连接数据源",
       description: "选择数据源，验证访问权限后导入可信业务数据",
       status: "可连接",
+      connectedTitle: "已连接数据库",
+      connectedDescription: "管理当前工作区已经连接的数据源",
+      connectedStatus: "已连接",
+      connectedCountLabel: "个已连接",
+      editAction: "编辑",
+      doneAction: "完成",
+      deleteAction: "删除连接",
+      lastSyncLabel: "最近同步",
+      syncModeLabel: "模式",
+      noConnectedTitle: "当前尚未连接数据库",
+      noConnectedText: "连接并导入后，数据库会显示在这里",
       source: "当前数据源",
       sourcePicker: "数据源",
       sources: [
@@ -1001,11 +1027,11 @@ const dashboardCopy = {
       importAction: "连接并导入"
     },
     chat: {
-      title: "AI 对话",
+      title: "AI继续分析",
       description: "",
       status: "",
-      collapseLabel: "收起 AI 对话",
-      expandLabel: "展开 AI 对话",
+      collapseLabel: "收起 AI继续分析",
+      expandLabel: "展开 AI继续分析",
       assistantMessage: "可以直接问我收入、留存、渠道或用户群体的归因问题",
       userQuestion: "收入下降主要来自哪个用户群体？",
       assistantReply: "可以按国家、设备、渠道和 cohort 拆解，优先查看美国 iOS 新付费用户",
@@ -1069,8 +1095,9 @@ const dashboardCopy = {
         ["建议", "暂停 Facebook 某广告组", "优化 onboarding 第二步"]
       ],
       emptyBriefingActions: ["展开证据链", "查看趋势", "查看 cohort"],
-      demoTitle: "AI 可自动分析",
-      demoSwitchLabel: "分析范围",
+      demoTitle: "AI 正在监控",
+      demoSwitchLabel: "更多...",
+      demoCollapseLabel: "收起",
       demoSignalLabel: "AI 会检查的信号",
       demoExamples: [
         {
@@ -1275,7 +1302,14 @@ const dashboardCopy = {
 } as const;
 
 type DashboardCopy = (typeof dashboardCopy)[Locale];
-type DashboardView = "overview" | "import-data" | "metrics" | "schema" | "reports" | "settings";
+type DashboardView =
+  | "overview"
+  | "import-data"
+  | "metrics"
+  | "schema"
+  | "reports"
+  | "report"
+  | "settings";
 type EditableMetricRow = {
   id: string;
   layer: string;
@@ -1332,6 +1366,13 @@ function Sidebar({
   isCollapsed: boolean;
   onToggle: () => void;
 }) {
+  const accountInitials = copy.account.name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "A";
+
   const renderNavItem = (item: DashboardCopy["navItems"][number]) => {
     const isActive = item.target === activeTarget;
 
@@ -1355,7 +1396,7 @@ function Sidebar({
   return (
     <aside
       className={cn(
-        "hidden min-h-screen shrink-0 flex-col border-r bg-white/72 px-3 py-4 backdrop-blur transition-[width] duration-200 lg:flex",
+        "hidden h-screen shrink-0 flex-col border-r bg-white/72 px-3 pb-4 pt-4 backdrop-blur transition-[width] duration-200 lg:flex",
         isCollapsed ? "w-20" : "w-64"
       )}
     >
@@ -1386,40 +1427,35 @@ function Sidebar({
           {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </Button>
       </div>
-      <nav className="space-y-1">
+      <nav className="flex-1 space-y-1 overflow-y-auto">
         {copy.navItems.map(renderNavItem)}
       </nav>
-      <div className="mt-auto pt-4">
+      <div className="mt-auto pt-3">
         {isCollapsed ? (
           <a
             href="/checkout/professional"
             title={`${copy.account.name} · ${copy.account.plan}`}
             className="mx-auto grid size-10 place-items-center rounded-full bg-red-600 text-sm font-semibold text-white transition hover:bg-red-700"
           >
-            A
+            {accountInitials}
           </a>
         ) : (
-          <div className="rounded-2xl border bg-white/84 p-3 shadow-sm">
+          <div className="px-2">
             <a
               href="/checkout/professional"
-              className="flex items-center gap-3 rounded-xl p-1 transition hover:bg-secondary"
+              className="flex items-end justify-between gap-3 rounded-lg px-1.5 py-1.5 transition hover:bg-secondary/75"
             >
-              <div className="grid size-10 shrink-0 place-items-center rounded-full bg-red-600 text-sm font-semibold text-white">
-                A
+              <div className="flex min-w-0 items-end gap-2.5">
+                <div className="grid size-10 shrink-0 place-items-center rounded-full bg-red-600 text-sm font-semibold text-white">
+                  {accountInitials}
+                </div>
+                <div className="min-w-0 pb-0.5">
+                  <p className="truncate text-sm font-semibold">{copy.account.name}</p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{copy.account.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{copy.account.plan}</p>
-              </div>
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </a>
-            <div className="my-3 h-px bg-border" />
-            <a
-              href="/checkout/professional"
-              className="flex items-center gap-3 rounded-xl px-1 py-2 text-sm font-medium transition hover:bg-secondary"
-            >
-              <Sparkles className="size-4" />
-              {copy.account.billing}
+              <span className="inline-flex h-7 shrink-0 items-center rounded-md border bg-secondary/35 px-2 text-xs font-medium text-muted-foreground">
+                升级
+              </span>
             </a>
           </div>
         )}
@@ -1656,7 +1692,7 @@ function MetricGrid({ copy }: { copy: DashboardCopy }) {
 }
 
 function SemanticMetricObjects({ copy }: { copy: DashboardCopy }) {
-  const hasImportedData = false;
+  const hasImportedData = true;
   const createRows = (): EditableMetricRow[] =>
     copy.metricCatalog.exampleRows.map((row, index) => ({
       ...row,
@@ -1669,16 +1705,6 @@ function SemanticMetricObjects({ copy }: { copy: DashboardCopy }) {
   useEffect(() => {
     setMetricRows(createRows());
   }, [copy]);
-
-  const addMetric = () => {
-    const newRow = {
-        ...copy.metricCatalog.newMetric,
-        tags: [...copy.metricCatalog.newMetric.tags],
-        id: `custom-${Date.now()}`
-    };
-
-    setMetricRows((rows) => [...rows, newRow]);
-  };
 
   const deleteMetric = (id: string) => {
     setMetricRows((rows) => rows.filter((row) => row.id !== id));
@@ -1770,10 +1796,6 @@ function SemanticMetricObjects({ copy }: { copy: DashboardCopy }) {
             <Badge variant="secondary" className="w-fit">
               {copy.metricCatalog.exampleBadge}
             </Badge>
-            <Button type="button" variant="outline" size="sm" onClick={addMetric}>
-              <Plus />
-              {copy.metricCatalog.addMetric}
-            </Button>
           </div>
         </div>
       </CardHeader>
@@ -2028,7 +2050,15 @@ function SchemaPage({ copy }: { copy: DashboardCopy }) {
   );
 }
 
-function SettingsPage({ copy }: { copy: DashboardCopy }) {
+function SettingsPage({
+  copy,
+  connectedSourceNames,
+  onRemoveConnectedSource
+}: {
+  copy: DashboardCopy;
+  connectedSourceNames: string[];
+  onRemoveConnectedSource: (sourceName: string) => void;
+}) {
   const [activeTab, setActiveTab] = useState<"sources" | "metrics" | "other">("sources");
   const tabs = [
     { id: "sources", label: copy.settingsPage.tabSources, icon: Database },
@@ -2076,7 +2106,11 @@ function SettingsPage({ copy }: { copy: DashboardCopy }) {
 
       {activeTab === "sources" ? (
         <div className="grid gap-4">
-          <ConnectorPanel copy={copy} />
+          <SettingsConnectedSourcesPanel
+            copy={copy}
+            connectedSourceNames={connectedSourceNames}
+            onRemoveConnectedSource={onRemoveConnectedSource}
+          />
         </div>
       ) : null}
 
@@ -2088,6 +2122,77 @@ function SettingsPage({ copy }: { copy: DashboardCopy }) {
         <SettingsOtherPanel copy={copy} />
       ) : null}
     </section>
+  );
+}
+
+function SettingsConnectedSourcesPanel({
+  copy,
+  connectedSourceNames,
+  onRemoveConnectedSource
+}: {
+  copy: DashboardCopy;
+  connectedSourceNames: string[];
+  onRemoveConnectedSource: (sourceName: string) => void;
+}) {
+  const connectedSources = copy.connectors.sources.filter((source) =>
+    connectedSourceNames.includes(source.name)
+  );
+  const connectedCountLabel = `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
+
+  return (
+    <Card className="overflow-hidden bg-white shadow-sm">
+      <CardHeader className="border-b p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-base">{copy.connectors.connectedTitle}</CardTitle>
+            <CardDescription className="mt-1 text-sm leading-6">
+              {copy.connectors.connectedDescription}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">{connectedCountLabel}</Badge>
+            <Button asChild variant="outline" size="sm">
+              <a href="/dashboard/import-data">
+                <Database className="size-4" />
+                {copy.connectors.connectAction}
+              </a>
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">
+        {connectedSources.length > 0 ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {connectedSources.map((source) => (
+              <div key={source.name} className="flex items-center gap-3 rounded-lg border bg-secondary/15 p-3">
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
+                  {source.kind === "file" ? <FileText className="size-4" /> : <Database className="size-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{source.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{source.type}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="size-8 shrink-0 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                  aria-label={`${copy.connectors.deleteAction} ${source.name}`}
+                  onClick={() => onRemoveConnectedSource(source.name)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed bg-secondary/20 p-4">
+            <p className="text-sm font-semibold">{copy.connectors.noConnectedTitle}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{copy.connectors.noConnectedText}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2210,7 +2315,13 @@ function SettingsListCard({
   );
 }
 
-function ImportDataSection({ copy }: { copy: DashboardCopy }) {
+function ImportDataSection({
+  copy,
+  onAddConnectedSource
+}: {
+  copy: DashboardCopy;
+  onAddConnectedSource: (sourceName: string) => void;
+}) {
   return (
     <section id="import-data" className="scroll-mt-20">
       <div className="mb-3">
@@ -2220,7 +2331,10 @@ function ImportDataSection({ copy }: { copy: DashboardCopy }) {
       <div className="grid gap-4">
         <OnboardingFlow copy={copy} />
         <ConnectedDataOverview copy={copy} />
-        <ConnectorPanel copy={copy} />
+        <ConnectorPanel
+          copy={copy}
+          onAddConnectedSource={onAddConnectedSource}
+        />
       </div>
     </section>
   );
@@ -2394,7 +2508,13 @@ function ChatPanel({
   );
 }
 
-function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
+function ConnectorPanel({
+  copy,
+  onAddConnectedSource
+}: {
+  copy: DashboardCopy;
+  onAddConnectedSource: (sourceName: string) => void;
+}) {
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<string>(copy.connectors.modes[0]);
   const [selectedAuth, setSelectedAuth] = useState<string>(copy.connectors.authOptions[0]);
@@ -2402,6 +2522,10 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
   const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
   const isFileSource = selectedSource.kind === "file";
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
+  const addSelectedSource = (sourceName: string) => {
+    onAddConnectedSource(sourceName);
+    setWizardStarted(false);
+  };
 
   return (
     <Card className="h-full overflow-hidden">
@@ -2637,11 +2761,11 @@ function ConnectorPanel({ copy }: { copy: DashboardCopy }) {
               ))}
             </div>
             <div className="mt-3 grid gap-2">
-              <Button variant="outline" size="sm">
-                <CheckCircle2 />
-                {copy.connectors.testAction}
-              </Button>
-              <Button size="sm">
+                <Button variant="outline" size="sm">
+                  <CheckCircle2 />
+                  {copy.connectors.testAction}
+                </Button>
+              <Button size="sm" onClick={() => addSelectedSource(selectedSource.name)}>
                 {copy.connectors.importAction}
                 <ArrowRight />
               </Button>
@@ -3215,16 +3339,16 @@ function ReportsPage({ copy }: { copy: DashboardCopy }) {
   const hasConnectedDatabase = false;
 
   return (
-    <section id="reports" className="space-y-4 scroll-mt-20">
-      <div className="flex flex-col gap-4 px-1 pb-2 pt-1 xl:flex-row xl:items-center xl:justify-between">
+    <section id="reports" className="flex min-h-full flex-col gap-3 scroll-mt-20">
+      <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-center xl:justify-between">
         <div className="max-w-3xl">
-          <Badge className="mb-3 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+          <Badge className="mb-2 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
             {copy.reports.pageBadge}
           </Badge>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {copy.reports.pageTitle}
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {copy.reports.pageSubtitle}
           </p>
         </div>
@@ -3252,7 +3376,9 @@ function ReportsPage({ copy }: { copy: DashboardCopy }) {
           <ReportMemorySemanticSection copy={copy} />
         </>
       ) : (
-        <ReportEmptyPreview copy={copy} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ReportEmptyPreview copy={copy} />
+        </div>
       )}
     </section>
   );
@@ -3267,9 +3393,9 @@ function ReportDatabaseCta({
 }) {
   return (
     <Card className="overflow-hidden border-emerald-100 bg-gradient-to-r from-white via-emerald-50/45 to-white shadow-sm">
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
             <Database className="size-5" />
           </div>
           <div>
@@ -3291,19 +3417,24 @@ function ReportDatabaseCta({
 }
 
 function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
+  const [isMonitoringExpanded, setIsMonitoringExpanded] = useState(false);
+  const visibleMonitoringItems = isMonitoringExpanded
+    ? copy.reports.demoExamples
+    : copy.reports.demoExamples.slice(0, 3);
+
   return (
-    <Card className="overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
-      <CardContent className="p-5">
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.16fr)_minmax(320px,0.84fr)] xl:items-stretch">
-          <div className="h-full rounded-2xl border bg-white/88 p-7 shadow-sm sm:p-8">
-            <Badge className="mb-8 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+    <Card className="h-full overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
+      <CardContent className="h-full p-4">
+        <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(310px,0.82fr)] xl:items-stretch">
+          <div className="flex h-full flex-col rounded-2xl border bg-white/88 p-5 shadow-sm sm:p-6">
+            <Badge className="mb-5 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
               {copy.reports.emptyBriefingBadge}
             </Badge>
-            <p className="text-base font-medium text-muted-foreground">{copy.reports.emptyReportTitle}</p>
-            <h2 className="mt-4 text-5xl font-semibold tracking-tight text-slate-950 sm:text-6xl">
+            <p className="text-sm font-medium text-muted-foreground">{copy.reports.emptyReportTitle}</p>
+            <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
               {copy.reports.emptyBriefingMetric}
             </h2>
-            <div className="mt-6 flex flex-wrap gap-2.5">
+            <div className="mt-4 flex flex-wrap gap-2">
               {copy.reports.emptyBriefingTimeComparisons.map(([label, value], index) => {
                 const isPositive = value.startsWith("+");
 
@@ -3311,7 +3442,7 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
                   <div
                     key={label}
                     className={cn(
-                      "flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium",
+                      "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
                       index === 0
                         ? "border-rose-200 bg-rose-50 text-rose-800"
                         : "border-slate-200 bg-white text-muted-foreground"
@@ -3323,57 +3454,65 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
                 );
               })}
             </div>
-            <p className="mt-6 max-w-2xl text-sm leading-6 text-muted-foreground">
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
               {copy.reports.emptyReportDescription}
             </p>
 
-            <div className="mt-8 grid gap-3 md:grid-cols-3">
-              {copy.reports.emptyBriefingSections.map(([title, ...items]) => (
-                <div key={title} className="h-full rounded-xl border bg-secondary/15 p-4">
-                  <p className="text-sm font-semibold">{title}</p>
-                  <div className="mt-3 space-y-2">
-                    {items.map((item) => (
-                      <div key={item} className="flex gap-2 text-sm leading-5 text-muted-foreground">
-                        <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
-                        <span>{item}</span>
-                      </div>
-                    ))}
+            <div className="mt-5 flex flex-1 flex-col">
+              <div className="grid gap-2.5 md:grid-cols-3">
+                {copy.reports.emptyBriefingSections.map(([title, ...items]) => (
+                  <div key={title} className="h-full rounded-xl border bg-secondary/15 p-3">
+                    <p className="text-sm font-semibold">{title}</p>
+                    <div className="mt-2 space-y-1.5">
+                      {items.map((item) => (
+                        <div key={item} className="flex gap-2 text-xs leading-5 text-muted-foreground">
+                          <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {copy.reports.emptyBriefingActions.map((action, index) => (
-                <Button key={action} variant={index === 0 ? "default" : "outline"} size="sm">
-                  {action}
-                  <ArrowRight />
-                </Button>
-              ))}
+              <div className="mt-4 flex flex-wrap gap-2 md:mt-auto md:pt-4">
+                {copy.reports.emptyBriefingActions.map((action, index) => (
+                  <Button key={action} variant={index === 0 ? "default" : "outline"} size="sm">
+                    {action}
+                    <ArrowRight />
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="h-full rounded-2xl border bg-white/70 p-4">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="h-full rounded-2xl border bg-white/70 p-3">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-center gap-2">
                 <BrainCircuit className="size-4 text-emerald-700" />
                 <p className="text-sm font-semibold">{copy.reports.demoTitle}</p>
               </div>
-              <Badge variant="secondary" className="w-fit">
-                {copy.reports.demoSwitchLabel}
-              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-fit px-2 text-xs"
+                onClick={() => setIsMonitoringExpanded((current) => !current)}
+              >
+                {isMonitoringExpanded ? copy.reports.demoCollapseLabel : copy.reports.demoSwitchLabel}
+              </Button>
             </div>
 
             <div className="grid gap-2.5">
-              {copy.reports.demoExamples.map((example, index) => (
+              {visibleMonitoringItems.map((example, index) => (
                 <div
                   key={example.title}
                   className={cn(
-                    "rounded-xl border bg-white/82 p-3 transition hover:border-emerald-200 hover:bg-emerald-50/45",
+                    "rounded-xl border bg-white/82 p-2.5 transition hover:border-emerald-200 hover:bg-emerald-50/45",
                     index === 0 && "border-emerald-200 bg-emerald-50/70"
                   )}
                 >
-                  <div className="flex gap-3">
+                  <div className="flex gap-2.5">
                     <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-xs font-semibold text-emerald-800">
                       {String(index + 1).padStart(2, "0")}
                     </span>
@@ -3384,10 +3523,12 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
                           {example.metric}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {example.summary}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                      {isMonitoringExpanded ? (
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {example.summary}
+                        </p>
+                      ) : null}
+                      <div className={cn("flex flex-wrap gap-1.5", isMonitoringExpanded ? "mt-2" : "mt-1.5")}>
                         {example.signals.map((signal) => (
                           <span
                             key={signal}
@@ -3409,74 +3550,391 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
   );
 }
 
+function ReportPage({ locale }: { locale: Locale }) {
+  const isZh = locale === "zh";
+  const [selectedRange, setSelectedRange] = useState("30D");
+
+  const timeRanges = ["7D", "30D", "90D", "12M"] as const;
+  const trendDataBase = [
+    { period: "05-01", revenue: 126, arr: 412, cac: 43, retention: 89, activation: 48, conversion: 12.8 },
+    { period: "05-04", revenue: 124, arr: 410, cac: 44, retention: 88, activation: 47, conversion: 12.4 },
+    { period: "05-08", revenue: 120, arr: 406, cac: 46, retention: 87, activation: 46, conversion: 12.1 },
+    { period: "05-12", revenue: 114, arr: 398, cac: 49, retention: 84, activation: 45, conversion: 11.6 },
+    { period: "05-16", revenue: 118, arr: 401, cac: 47, retention: 85, activation: 46, conversion: 11.9 },
+    { period: "05-20", revenue: 121, arr: 405, cac: 45, retention: 86, activation: 46, conversion: 12.2 },
+    { period: "05-24", revenue: 119, arr: 404, cac: 46, retention: 85, activation: 45, conversion: 12.0 },
+    { period: "05-28", revenue: 122, arr: 407, cac: 45, retention: 86, activation: 46, conversion: 12.3 },
+    { period: "06-01", revenue: 125, arr: 411, cac: 44, retention: 87, activation: 47, conversion: 12.5 },
+    { period: "06-04", revenue: 123, arr: 409, cac: 45, retention: 86, activation: 46, conversion: 12.2 },
+    { period: "06-08", revenue: 117, arr: 402, cac: 48, retention: 84, activation: 45, conversion: 11.8 },
+    { period: "06-12", revenue: 115, arr: 400, cac: 49, retention: 83, activation: 44, conversion: 11.5 }
+  ];
+
+  const rangeSizeMap: Record<(typeof timeRanges)[number], number> = {
+    "7D": 7,
+    "30D": 9,
+    "90D": 12,
+    "12M": 12
+  };
+
+  const trendData = trendDataBase.slice(-rangeSizeMap[selectedRange as keyof typeof rangeSizeMap]);
+  const sparkData = trendDataBase.slice(-7);
+
+  const metricCards = [
+    {
+      label: isZh ? "收入" : "Revenue",
+      value: "¥1.26M",
+      delta: "-3.2%",
+      positive: false,
+      key: "revenue" as const
+    },
+    { label: "ARR", value: "¥4.11M", delta: "+1.4%", positive: true, key: "arr" as const },
+    { label: "CAC", value: "¥452", delta: "+6.8%", positive: false, key: "cac" as const },
+    { label: "Retention", value: "84.2%", delta: "-1.9%", positive: false, key: "retention" as const },
+    { label: "Activation", value: "45.3%", delta: "+0.8%", positive: true, key: "activation" as const },
+    { label: "Conversion", value: "11.7%", delta: "-0.6%", positive: false, key: "conversion" as const }
+  ];
+
+  const annotations = [
+    {
+      date: isZh ? "5 月 12 日" : "May 12",
+      text: isZh ? "收入下降，AI 检测到 Facebook CAC 上升" : "Revenue dip, AI detected higher Facebook CAC"
+    },
+    {
+      date: isZh ? "6 月 8 日" : "Jun 8",
+      text: isZh ? "美国 iOS 新用户转化下降" : "US iOS new-user conversion declined"
+    }
+  ];
+
+  const aiInsights = [
+    isZh ? "过去 7 天收入下降主要来自 iOS 新用户群体" : "Past 7 days revenue decline concentrated in new iOS users",
+    isZh ? "建议优先查看 onboarding 第二步流失" : "Suggested next step: inspect onboarding step-2 drop-off",
+    isZh ? "渠道成本波动与本周投放策略调整同步出现" : "Channel cost volatility aligned with this week’s campaign changes"
+  ];
+
+  return (
+    <section id="report" className="flex flex-col gap-4 scroll-mt-20 xl:h-full">
+      <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{isZh ? "报表" : "Reports"}</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {isZh
+              ? "查看经营指标、历史趋势与 AI 数据标注"
+              : "Review business metrics, historical trends, and AI data annotations"}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 rounded-full border bg-white/80 p-1">
+          {timeRanges.map((range) => (
+            <button
+              key={range}
+              type="button"
+              onClick={() => setSelectedRange(range)}
+              className={cn(
+                "rounded-full px-3 py-1.5 text-xs font-medium transition",
+                selectedRange === range
+                  ? "bg-slate-900 text-white"
+                  : "text-muted-foreground hover:bg-secondary"
+              )}
+            >
+              {range}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        {metricCards.map((metric) => (
+          <Card key={metric.label} className="border-slate-200/70 bg-white/90 shadow-sm">
+            <CardContent className="space-y-2 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">{metric.label}</p>
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    metric.positive ? "text-emerald-700" : "text-rose-700"
+                  )}
+                >
+                  {metric.delta}
+                </span>
+              </div>
+              <p className="text-lg font-semibold leading-none">{metric.value}</p>
+              <div className="h-8">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={sparkData}>
+                    <Area
+                      type="monotone"
+                      dataKey={metric.key}
+                      stroke={metric.positive ? "#047857" : "#334155"}
+                      strokeWidth={2}
+                      fill={metric.positive ? "rgba(5,150,105,0.14)" : "rgba(71,85,105,0.12)"}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1.35fr)_320px]">
+        <div className="grid gap-4 xl:min-h-0">
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">{isZh ? "收入趋势" : "Revenue trend"}</CardTitle>
+              <CardDescription>
+                {isZh
+                  ? "AI 在图表上自动标注异常、可能原因和指标关联"
+                  : "AI annotations highlight anomalies, likely causes, and metric relationships"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trendData}>
+                    <defs>
+                      <linearGradient id="reportRevenueMain" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#059669" stopOpacity={0.24} />
+                        <stop offset="95%" stopColor="#059669" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                    <YAxis hide />
+                    <Tooltip />
+                    <Area
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="#047857"
+                      strokeWidth={2.5}
+                      fill="url(#reportRevenueMain)"
+                    />
+                    <Line type="monotone" dataKey="cac" stroke="#0f172a" strokeWidth={1.8} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {annotations.map((item) => (
+                  <div key={item.date} className="rounded-xl border bg-emerald-50/45 p-3">
+                    <p className="text-xs font-semibold text-emerald-800">{item.date}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">{isZh ? "用户与留存" : "Users and retention"}</CardTitle>
+                <CardDescription>DAU / WAU / MAU · Cohort · Activation</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg border bg-secondary/30 p-2">
+                    <p className="text-[11px] text-muted-foreground">DAU</p>
+                    <p className="text-sm font-semibold">12.4k</p>
+                  </div>
+                  <div className="rounded-lg border bg-secondary/30 p-2">
+                    <p className="text-[11px] text-muted-foreground">WAU</p>
+                    <p className="text-sm font-semibold">51.8k</p>
+                  </div>
+                  <div className="rounded-lg border bg-secondary/30 p-2">
+                    <p className="text-[11px] text-muted-foreground">MAU</p>
+                    <p className="text-sm font-semibold">198k</p>
+                  </div>
+                </div>
+                <div className="h-36">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={trendData}>
+                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="retention" stroke="#0f766e" strokeWidth={2} fill="rgba(20,184,166,0.12)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">{isZh ? "获客与转化" : "Acquisition and conversion"}</CardTitle>
+                <CardDescription>CAC · Conversion · Funnel · Channel</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="h-36">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={trendData.slice(-6)}>
+                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Bar dataKey="cac" fill="#047857" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="rounded-xl border bg-secondary/20 p-3">
+                  <p className="text-xs font-semibold">{isZh ? "AI 数据标注" : "AI data annotation"}</p>
+                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <li>{isZh ? "美国 iOS 用户转化下降" : "US iOS user conversion decline"}</li>
+                    <li>{isZh ? "广告成本异常上涨" : "Advertising cost anomaly spike"}</li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">{isZh ? "数据验证" : "Data validation"}</CardTitle>
+              <CardDescription>
+                {isZh
+                  ? "查看原始指标、时间粒度、数据来源和语义映射"
+                  : "Inspect raw metrics, time granularity, sources, and semantic mapping"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2 text-sm">
+              {[
+                [isZh ? "原始指标" : "Raw metric", "revenue, arr, cac, retention"],
+                [isZh ? "时间粒度" : "Time granularity", isZh ? "日 / 周 / 月" : "day / week / month"],
+                [isZh ? "数据来源" : "Data source", "Stripe, GA, CRM"],
+                [isZh ? "语义层映射" : "Semantic mapping", "paid_amount → revenue"]
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between rounded-lg border bg-white px-3 py-2">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="font-medium">{value}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="h-fit border-slate-200/70 bg-white/92 shadow-sm xl:sticky xl:top-[76px]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{isZh ? "AI Insights" : "AI Insights"}</CardTitle>
+            <CardDescription>{isZh ? "最近发现、异常提醒与后续建议" : "Recent findings, alerts, and next analysis steps"}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2.5">
+            {aiInsights.map((insight, index) => (
+              <div
+                key={insight}
+                className={cn(
+                  "rounded-xl border p-3 text-sm leading-6",
+                  index === 0 ? "border-emerald-200 bg-emerald-50/60" : "bg-white"
+                )}
+              >
+                {insight}
+              </div>
+            ))}
+            <Button variant="outline" className="mt-1 w-full justify-between">
+              {isZh ? "建议继续分析" : "Suggested follow-up analysis"}
+              <ArrowRight />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  );
+}
+
 export function Dashboard({ view = "overview" }: { view?: DashboardView }) {
   const [locale, , isLocaleReady] = useLocale("en");
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [connectedSourceNames, setConnectedSourceNames] = useState<string[]>([]);
   const copy = dashboardCopy[locale];
+  const isReportsView = view === "reports";
   const activeTarget =
     view === "import-data" || view === "metrics" || view === "schema"
       ? "#data"
-      : view === "reports"
+      : view === "report"
+        ? "#report"
+      : isReportsView
         ? "#reports"
         : view === "settings"
           ? "#settings"
           : "#overview";
 
+  const addConnectedSource = (sourceName: string) => {
+    setConnectedSourceNames((current) =>
+      current.includes(sourceName) ? current : [...current, sourceName]
+    );
+  };
+
+  const removeConnectedSource = (sourceName: string) => {
+    setConnectedSourceNames((current) => current.filter((name) => name !== sourceName));
+  };
+
   if (!isLocaleReady) {
-    return <div className="min-h-screen bg-background" />;
+    return <div className="h-screen bg-background" />;
   }
 
   return (
-    <div className="flex min-h-screen" lang={locale === "zh" ? "zh-CN" : "en"}>
+    <div className="flex h-screen overflow-hidden" lang={locale === "zh" ? "zh-CN" : "en"}>
       <Sidebar
         copy={copy}
         activeTarget={activeTarget}
         isCollapsed={isSidebarCollapsed}
         onToggle={() => setIsSidebarCollapsed((current) => !current)}
       />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex h-full flex-1 flex-col overflow-hidden">
         <Header copy={copy} />
-        <main
-          className={cn(
-            "mx-auto grid max-w-[1500px] gap-4 px-4 py-5 lg:px-6 xl:items-start",
-            isChatCollapsed ? "xl:grid-cols-[minmax(0,1fr)_76px]" : "xl:grid-cols-[minmax(0,1fr)_430px]"
-          )}
-        >
-          {view === "import-data" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <ImportDataSection copy={copy} />
-            </div>
-          ) : view === "metrics" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <MetricCatalogPage copy={copy} />
-            </div>
-          ) : view === "schema" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <SchemaPage copy={copy} />
-            </div>
-          ) : view === "settings" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <SettingsPage copy={copy} />
-            </div>
-          ) : view === "reports" ? (
-            <div className="min-w-0 xl:col-start-1">
-              <ReportsPage copy={copy} />
-            </div>
-          ) : (
-            <>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <main
+            className={cn(
+              "mx-auto grid min-h-full max-w-[1500px] gap-4 px-4 lg:px-6 xl:items-start",
+              isReportsView ? "py-3" : "py-5",
+              isChatCollapsed ? "xl:grid-cols-[minmax(0,1fr)_76px]" : "xl:grid-cols-[minmax(0,1fr)_430px]"
+            )}
+          >
+            {view === "import-data" ? (
               <div className="min-w-0 xl:col-start-1">
-                <SetupHero copy={copy} />
+                <ImportDataSection
+                  copy={copy}
+                  onAddConnectedSource={addConnectedSource}
+                />
               </div>
-            </>
-          )}
-          <ChatPanel
-            copy={copy}
-            isCollapsed={isChatCollapsed}
-            onToggle={() => setIsChatCollapsed((current) => !current)}
-            className="min-w-0 xl:sticky xl:top-[76px] xl:col-start-2 xl:row-span-4 xl:row-start-1"
-          />
-        </main>
+            ) : view === "metrics" ? (
+              <div className="min-w-0 xl:col-start-1">
+                <MetricCatalogPage copy={copy} />
+              </div>
+            ) : view === "schema" ? (
+              <div className="min-w-0 xl:col-start-1">
+                <SchemaPage copy={copy} />
+              </div>
+            ) : view === "settings" ? (
+              <div className="min-w-0 xl:col-start-1">
+                <SettingsPage
+                  copy={copy}
+                  connectedSourceNames={connectedSourceNames}
+                  onRemoveConnectedSource={removeConnectedSource}
+                />
+              </div>
+            ) : view === "reports" ? (
+              <div className="flex min-h-0 min-w-0 flex-col xl:col-start-1">
+                <ReportsPage copy={copy} />
+              </div>
+            ) : view === "report" ? (
+              <div className="min-w-0 xl:col-start-1">
+                <ReportPage locale={locale} />
+              </div>
+            ) : (
+              <>
+                <div className="min-w-0 xl:col-start-1">
+                  <SetupHero copy={copy} />
+                </div>
+              </>
+            )}
+            <ChatPanel
+              copy={copy}
+              isCollapsed={isChatCollapsed}
+              onToggle={() => setIsChatCollapsed((current) => !current)}
+              className="min-w-0 xl:sticky xl:top-[76px] xl:col-start-2 xl:row-span-4 xl:row-start-1"
+            />
+          </main>
+        </div>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import {
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,17 +56,17 @@ const paymentCopy = {
     dueToday: "Due today",
     nextStep: "Next step",
     protected: "Payment details are protected by encrypted checkout",
-    secondary: "Return home",
+    secondary: "Back",
     plans: {
       trial: {
         badge: "One-time",
         name: "One-time Experience",
         subtitle: "Try one AI growth analysis session",
-        price: "¥200",
+        price: "$49",
         cadence: "",
         description:
           "For teams that want to experience the AI growth analysis workflow before subscribing",
-        due: "¥200",
+        due: "$49",
         primary: "Start experience",
         next: "After checkout, your workspace opens with a guided demo flow",
         features: [
@@ -78,7 +79,7 @@ const paymentCopy = {
         badge: "Consulting",
         name: "Database Setup",
         subtitle: "Build the data foundation",
-        price: "¥2,000+",
+        price: "$499+",
         cadence: "",
         description:
           "For teams that need a clean business database before analytics automation starts",
@@ -95,11 +96,11 @@ const paymentCopy = {
         badge: "Recommended",
         name: "Professional",
         subtitle: "Report automation + data analysis + decision support",
-        price: "¥2,000",
+        price: "$499",
         cadence: "/ month",
         description:
           "For teams ready to automate growth reporting and use AI to explain metric movement",
-        due: "¥2,000",
+        due: "$499",
         primary: "Confirm subscription",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
@@ -150,7 +151,7 @@ const paymentCopy = {
     dueToday: "今日应付",
     nextStep: "下一步",
     protected: "支付信息通过加密结算保护",
-    secondary: "返回首页",
+    secondary: "返回",
     plans: {
       trial: {
         badge: "单次体验",
@@ -233,24 +234,26 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
   const [fromHome, setFromHome] = useState(false);
   const [locale] = useLocale("en");
+  const router = useRouter();
   const copy = paymentCopy[locale as Locale];
   useEffect(() => {
     const from = new URLSearchParams(window.location.search).get("from");
     setFromHome(from === "home");
   }, []);
 
-  const backHref = fromHome ? "/" : "/dashboard";
   const backLabel =
-    locale === "zh"
-      ? fromHome
-        ? "返回首页"
-        : "返回 Dashboard"
-      : fromHome
-        ? "Back home"
-        : "Back to dashboard";
+    locale === "zh" ? "返回" : "Back";
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
   const isProfessional = selectedPlan === "professional";
+
+  const handleGoBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push(fromHome ? "/" : "/dashboard");
+  };
 
   return (
     <main
@@ -265,11 +268,9 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             </div>
             <span className="text-sm font-semibold">{copy.brand}</span>
           </Link>
-          <Button asChild variant="ghost" className="rounded-full text-slate-600">
-            <Link href={backHref}>
-              <ArrowLeft />
-              {backLabel}
-            </Link>
+          <Button variant="ghost" className="rounded-full text-slate-600" onClick={handleGoBack}>
+            <ArrowLeft />
+            {backLabel}
           </Button>
         </nav>
       </header>
@@ -488,8 +489,8 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
               {selected.primary}
               <ArrowRight />
             </Button>
-            <Button asChild variant="outline" className="mt-3 h-11 w-full rounded-full">
-              <Link href="/">{copy.secondary}</Link>
+            <Button variant="outline" className="mt-3 h-11 w-full rounded-full" onClick={handleGoBack}>
+              {copy.secondary}
             </Button>
           </CardContent>
         </Card>

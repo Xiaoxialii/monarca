@@ -1,0 +1,318 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  VIEWER
+}
+
+enum DataSourceType {
+  SQL_SERVER
+  MYSQL
+  POSTGRESQL
+  SNOWFLAKE
+  BIGQUERY
+  EXCEL
+  CSV
+  GOOGLE_ANALYTICS
+  STRIPE
+}
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  FAILED
+  DISCONNECTED
+}
+
+enum MetricLayer {
+  PRIMARY
+  DRIVER
+  DIAGNOSTIC
+}
+
+enum MetricMaintainerRole {
+  AI
+  USER
+}
+
+enum MetricStatus {
+  AI_READY
+  NEEDS_MAPPING
+  NEEDS_VALIDATION
+}
+
+enum MetricExpressionType {
+  AGGREGATE
+  RATE
+  CALCULATION
+}
+
+enum RecommendationStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TicketType {
+  DATA_CONNECTION
+  REPORT_GENERATION
+  BILLING
+  ACCOUNT_ACCESS
+  OTHER
+}
+
+enum TicketPriority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SubscriptionPlan {
+  TRIAL
+  PROFESSIONAL
+  ENTERPRISE
+  DATABASE_SETUP
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  PENDING
+}
+
+enum WorkspaceMemberStatus {
+  ACTIVE
+  INVITED
+  REMOVED
+}
+
+model User {
+  id               String            @id @default(cuid())
+  clerkUserId      String            @unique
+  email            String            @unique
+  name             String
+  avatarUrl        String?           @map("avatar_url")
+  locale           String            @default("en")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  memberships      WorkspaceMember[]
+  ownedWorkspaces  Workspace[]       @relation("WorkspaceOwner")
+  maintainedMetrics MetricDefinition[] @relation("MetricMaintainer")
+  assignedTickets  SupportTicket[]    @relation("TicketAssignee")
+  submittedTickets SupportTicket[]   @relation("TicketSubmitter")
+}
+
+model Workspace {
+  id                String               @id @default(cuid())
+  slug              String               @unique
+  name              String
+  ownerId           String
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  owner             User                 @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members           WorkspaceMember[]
+  dataSources       DataSourceConnection[]
+  schemaSnapshots   SchemaSnapshot[]
+  metrics           MetricDefinition[]
+  briefings         DailyBriefing[]
+  supportTickets    SupportTicket[]
+  subscriptions     WorkspaceSubscription[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String?
+  invitedEmail String?
+  role        WorkspaceRole @default(VIEWER)
+  status      WorkspaceMemberStatus @default(ACTIVE)
+  invitedBy   String?
+  clerkInvitationId String? @map("clerk_invitation_id")
+  joinedAt    DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, invitedEmail])
+}
+
+model DataSourceConnection {
+  id              String           @id @default(cuid())
+  workspaceId     String
+  type            DataSourceType
+  name            String
+  provider        String
+  isActive        Boolean          @default(true)
+  status          ConnectionStatus @default(PENDING)
+  connectionMode  String?
+  authMethod      String?
+  config          Json?
+  schemas         Json?
+  lastErrorMessage String?
+  connectedAt     DateTime?
+  lastSyncAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  schemaSnapshots SchemaSnapshot[]
+
+  @@index([workspaceId, status])
+}
+
+model SchemaSnapshot {
+  id            String                @id @default(cuid())
+  workspaceId   String
+  dataSourceId  String?
+  version       Int
+  status        ConnectionStatus      @default(PENDING)
+  schemaJson    Json
+  qualityReport Json?
+  createdAt     DateTime              @default(now())
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource    DataSourceConnection? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, version])
+}
+
+model MetricDefinition {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  layer         MetricLayer
+  category      String
+  name          String
+  definition    String
+  formula       String
+  expressionType MetricExpressionType @default(CALCULATION)
+  unit          String?
+  window        String?
+  sourceMetricIds Json?
+  mappingJson   Json?
+  lineageJson   Json?
+  isActive      Boolean      @default(true)
+  maintainerRole MetricMaintainerRole
+  maintainerUserId String?
+  status        MetricStatus @default(NEEDS_MAPPING)
+  tagsJson      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  maintainedByUser User?        @relation("MetricMaintainer", fields: [maintainerUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, layer])
+  @@unique([workspaceId, name])
+}
+
+model DailyBriefing {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  briefingDate  DateTime
+  title         String
+  summary       String
+  confidence    Int?
+  payloadJson   Json?
+  createdAt     DateTime  @default(now())
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  insights      Insight[]
+
+  @@unique([workspaceId, briefingDate])
+  @@index([workspaceId, briefingDate])
+}
+
+model Insight {
+  id                 String                 @id @default(cuid())
+  briefingId         String
+  title              String
+  description        String
+  anomalyType        String?
+  anomalyTypeNormalized String?
+  impactScore        Float?
+  confidence         Int?
+  dataQualityScore   Int?
+  sampleSize         Int?
+  relatedMetricIds   Json?
+  explanationJson    Json?
+  evidenceJson       Json?
+  createdAt          DateTime               @default(now())
+  briefing           DailyBriefing          @relation(fields: [briefingId], references: [id], onDelete: Cascade)
+  recommendations    ActionRecommendation[]
+}
+
+model ActionRecommendation {
+  id               String   @id @default(cuid())
+  insightId        String
+  title            String
+  ownerTeam        String?
+  targetOwner      String?
+  executionPriority String?
+  impactScore      Float?
+  estimatedOutcome String?
+  workflowAction   String?
+  status           RecommendationStatus @default(PLANNED)
+  dueDate          DateTime?
+  actualOutcome    String?
+  createdAt        DateTime @default(now())
+  insight          Insight  @relation(fields: [insightId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceSubscription {
+  id          String             @id @default(cuid())
+  workspaceId String
+  plan        SubscriptionPlan
+  status      SubscriptionStatus @default(PENDING)
+  amount      Int
+  currency    String             @default("CNY")
+  interval    String?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  startPeriod DateTime?
+  endPeriod   DateTime?
+  trialEndsAt DateTime?
+  cancelAt    DateTime?
+  planVersion String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+}
+
+model SupportTicket {
+  id             String         @id @default(cuid())
+  workspaceId    String?
+  submitterId    String?
+  assigneeId     String?
+  type           TicketType
+  priority       TicketPriority @default(NORMAL)
+  status         TicketStatus   @default(OPEN)
+  subject        String
+  description    String
+  contextJson    Json?
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  workspace      Workspace?     @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  submitter      User?          @relation("TicketSubmitter", fields: [submitterId], references: [id], onDelete: SetNull)
+  assignee       User?          @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status])
+  @@index([submitterId, createdAt])
+  @@index([assigneeId, status])
+}

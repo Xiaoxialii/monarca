@@ -2,14 +2,39 @@
 
 import { useEffect, useState } from "react";
 
-export type Locale = "en" | "zh";
+export type Locale = "en" | "zh" | "es-419" | "es-MX";
+
+export type CopyLocale = "en" | "zh";
+
+export const LOCALE_OPTIONS: Array<{ value: Locale; label: string; shortLabel: string }> = [
+  { value: "en", label: "English", shortLabel: "EN" },
+  { value: "zh", label: "中文", shortLabel: "中文" },
+  { value: "es-419", label: "Español LATAM", shortLabel: "LATAM" },
+  { value: "es-MX", label: "Español México", shortLabel: "MX" }
+];
 
 export const LOCALE_STORAGE_KEY = "butterfly-locale";
 
 const LOCALE_CHANGE_EVENT = "butterfly-locale-change";
 
 function isLocale(value: string | null): value is Locale {
-  return value === "en" || value === "zh";
+  return value === "en" || value === "zh" || value === "es-419" || value === "es-MX";
+}
+
+export function getCopyLocale(locale: Locale): CopyLocale {
+  return locale === "zh" ? "zh" : "en";
+}
+
+export function getHtmlLang(locale: Locale) {
+  if (locale === "zh") {
+    return "zh-CN";
+  }
+
+  return locale;
+}
+
+export function getLocaleShortLabel(locale: Locale) {
+  return LOCALE_OPTIONS.find((option) => option.value === locale)?.shortLabel ?? "EN";
 }
 
 function readStoredLocale(defaultLocale: Locale) {

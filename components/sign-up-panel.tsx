@@ -1,11 +1,13 @@
 "use client";
 
 import { SignUp } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Eye, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronDown, Eye } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useLocale, type Locale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
 
 const signUpCopy = {
   en: {
@@ -23,10 +25,10 @@ const signUpCopy = {
     passwordHelp: "Use 8 or more characters with a mix of letters, numbers, and symbols",
     signInInstead: "Sign in instead",
     next: "Next",
-    brand: "openAnalyst",
+    brand: "Monarca AI",
     title: "Create your account",
     description:
-      "Start using openAnalyst to connect data, forecast growth, and ask questions across your business"
+      "Start using Monarca AI to connect data, forecast growth, and ask questions across your business"
   },
   zh: {
     language: "中文（简体）",
@@ -49,15 +51,15 @@ const signUpCopy = {
   }
 } as const;
 
-type SignUpCopy = (typeof signUpCopy)[Locale];
+type SignUpCopy = (typeof signUpCopy)[CopyLocale];
 
 export function SignUpPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const [locale] = useLocale("en");
-  const copy = signUpCopy[locale];
+  const copy = signUpCopy[getCopyLocale(locale)];
 
   return (
-    <main lang={locale === "zh" ? "zh-CN" : "en"} className="flex min-h-screen flex-col bg-[#f8fafd] px-4 py-6 sm:px-6">
+    <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col bg-[#f8fafd] px-4 py-6 sm:px-6">
       <div className="flex flex-1 items-center justify-center">
         <section className="w-full max-w-[1040px] rounded-[28px] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_20px_70px_rgba(16,24,40,0.08)] sm:p-10 lg:p-12">
           {clerkKey ? <ClerkSignUp copy={copy} /> : <DemoSignUp copy={copy} />}
@@ -87,30 +89,38 @@ export function SignUpPanel() {
 
 function ClerkSignUp({ copy }: { copy: SignUpCopy }) {
   return (
-    <div className="grid min-h-[460px] gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-20">
+    <div className="grid min-h-[560px] gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
       <AccountBrand copy={copy} />
-      <SignUp
-        routing="path"
-        path="/sign-up"
-        fallbackRedirectUrl="/dashboard"
-        appearance={{
-          elements: {
-            rootBox: "w-full",
-            cardBox: "w-full shadow-none border-0",
-            card: "w-full shadow-none p-0",
-            header: "hidden",
-            socialButtonsBlockButton: "rounded-full border-border",
-            formFieldInput: "h-14 rounded-md border-border text-base",
-            formButtonPrimary: "rounded-full bg-primary px-6 hover:bg-primary/90 text-primary-foreground",
-            footer: "hidden"
-          }
-        }}
-      />
+      <div className="flex min-h-[460px] items-start justify-center pt-12 lg:pt-16">
+        <SignUp
+          routing="path"
+          path="/sign-up"
+          fallbackRedirectUrl="/dashboard"
+          forceRedirectUrl="/dashboard"
+          appearance={{
+            elements: {
+              rootBox: "w-full max-w-[520px]",
+              cardBox: "w-full shadow-none border-0",
+              card: "w-full shadow-none p-0",
+              header: "hidden",
+              socialButtonsBlockButton:
+                "h-14 rounded-full border border-slate-400 bg-white text-base font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(15,23,42,0.12),0_1px_2px_rgba(15,23,42,0.12)] hover:bg-slate-50",
+              socialButtonsBlockButtonText: "text-base font-medium",
+              socialButtonsProviderIcon: "size-6",
+              formFieldInput: "h-14 rounded-md border-border text-base",
+              formButtonPrimary: "rounded-full bg-primary px-6 hover:bg-primary/90 text-primary-foreground",
+              footer: "hidden"
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }
 
 function DemoSignUp({ copy }: { copy: SignUpCopy }) {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <div className="grid min-h-[460px] gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
       <AccountBrand copy={copy} />
@@ -161,7 +171,7 @@ function DemoSignUp({ copy }: { copy: SignUpCopy }) {
               </label>
               <Input
                 id="password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder={copy.password}
                 className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
               />
@@ -172,7 +182,7 @@ function DemoSignUp({ copy }: { copy: SignUpCopy }) {
               </label>
               <Input
                 id="confirm-password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder={copy.confirm}
                 className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
               />
@@ -180,7 +190,13 @@ function DemoSignUp({ copy }: { copy: SignUpCopy }) {
           </div>
 
           <div className="flex items-start gap-3 px-1">
-            <button className="mt-0.5 grid size-5 shrink-0 place-items-center rounded border border-slate-300 text-slate-500 hover:bg-slate-50" aria-label={copy.showPassword}>
+            <button
+              type="button"
+              aria-label={copy.showPassword}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((current) => !current)}
+              className="mt-0.5 grid size-5 shrink-0 place-items-center rounded border border-slate-300 text-slate-500 transition hover:bg-slate-50 aria-pressed:border-emerald-700 aria-pressed:bg-emerald-50 aria-pressed:text-emerald-800"
+            >
               <Eye className="size-3.5" />
             </button>
             <p className="max-w-lg text-sm leading-6 text-slate-500">
@@ -208,11 +224,8 @@ function DemoSignUp({ copy }: { copy: SignUpCopy }) {
 function AccountBrand({ copy }: { copy: SignUpCopy }) {
   return (
     <div>
-      <Link href="/" className="mb-8 flex w-fit items-center gap-2">
-        <div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-          <Sparkles className="size-5" />
-        </div>
-        <span className="text-sm font-semibold">{copy.brand}</span>
+      <Link href="/" className="mb-8 flex w-fit items-center" aria-label={copy.brand}>
+        <BrandLogo label={copy.brand} className="h-12" />
       </Link>
       <h1 className="max-w-sm text-4xl font-normal tracking-normal text-foreground sm:text-5xl">
         {copy.title}

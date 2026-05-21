@@ -1,72 +1,69 @@
 "use client";
 
-import { ClerkProvider, SignedIn, SignedOut, SignInButton, SignOutButton } from "@clerk/nextjs";
-import { LogIn, LogOut } from "lucide-react";
-import Link from "next/link";
+import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
+import { useEffect } from "react";
+import { LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useLocale, type Locale } from "@/lib/locale";
+import { getCopyLocale, useLocale } from "@/lib/locale";
 
 const authCopy = {
   en: {
     signIn: "Sign in",
-    signOut: "Sign out"
+    signUp: "Sign up"
   },
   zh: {
     signIn: "登录",
-    signOut: "退出登录"
+    signUp: "注册"
   }
 } as const;
 
-function DemoUser({ locale }: { locale: Locale }) {
-  const copy = authCopy[locale];
+function SyncSignedInUser() {
+  const { isLoaded, isSignedIn, user } = useUser();
 
-  return (
-    <Button asChild variant="outline" size="sm">
-      <Link href="/">
-        <LogOut />
-        {copy.signOut}
-      </Link>
-    </Button>
-  );
-}
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !user?.id) {
+      return;
+    }
 
-export function AuthShell({ children }: { children: React.ReactNode }) {
-  const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    void fetch("/api/user/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }).catch(() => {
+      // Keep sign-in usable even if the local database is temporarily unavailable.
+    });
+  }, [isLoaded, isSignedIn, user?.id]);
 
-  if (!clerkKey) {
-    return <>{children}</>;
-  }
-
-  return <ClerkProvider publishableKey={clerkKey}>{children}</ClerkProvider>;
+  return null;
 }
 
 export function AuthControls() {
-  const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const [locale] = useLocale("en");
-  const copy = authCopy[locale];
-
-  if (!clerkKey) {
-    return <DemoUser locale={locale} />;
-  }
+  const copy = authCopy[getCopyLocale(locale)];
 
   return (
     <>
-      <SignedOut>
-        <SignInButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
-          <Button variant="outline" size="sm">
-            <LogIn />
-            {copy.signIn}
-          </Button>
-        </SignInButton>
-      </SignedOut>
-      <SignedIn>
-        <SignOutButton redirectUrl="/">
-          <Button variant="outline" size="sm">
-            <LogOut />
-            {copy.signOut}
-          </Button>
-        </SignOutButton>
-      </SignedIn>
+      <Show when="signed-out">
+        <div className="flex items-center gap-2">
+          <SignInButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
+            <Button variant="outline" size="sm">
+              <LogIn />
+              {copy.signIn}
+            </Button>
+          </SignInButton>
+          <SignUpButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
+            <Button size="sm">
+              <UserPlus />
+              {copy.signUp}
+            </Button>
+          </SignUpButton>
+        </div>
+      </Show>
+      <Show when="signed-in">
+        <SyncSignedInUser />
+        <UserButton />
+      </Show>
     </>
   );
 }

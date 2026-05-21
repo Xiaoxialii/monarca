@@ -4,21 +4,21 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock3,
-  HelpCircle,
   MessageSquareText,
   Send,
   ShieldCheck
 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useLocale, type Locale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
 
 const supportCopy: Record<
-  Locale,
+  CopyLocale,
   {
     brand: string;
     back: string;
@@ -52,7 +52,7 @@ const supportCopy: Record<
   }
 > = {
   en: {
-    brand: "openAnalyst",
+    brand: "Monarca AI",
     back: "Back to workspace",
     badge: "Support",
     title: "Contact support",
@@ -126,7 +126,7 @@ const supportCopy: Record<
 export function SupportPage() {
   const [locale, , isLocaleReady] = useLocale("en");
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const copy = supportCopy[locale];
+  const copy = supportCopy[getCopyLocale(locale)];
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -140,16 +140,13 @@ export function SupportPage() {
   return (
     <main
       className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_34%),linear-gradient(180deg,#ffffff,#f8fafc)] px-4 py-5 text-slate-950 sm:px-6 lg:px-8"
-      lang={locale === "zh" ? "zh-CN" : "en"}
+      lang={getHtmlLang(locale)}
     >
       <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex items-center justify-between gap-4">
           <Link href="/dashboard/reports" className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-xl bg-slate-950 text-white">
-              <HelpCircle className="size-4" />
-            </span>
+            <BrandLogo label={copy.brand} className="h-11" />
             <span>
-              <span className="block text-sm font-semibold">{copy.brand}</span>
               <span className="block text-xs text-muted-foreground">{copy.badge}</span>
             </span>
           </Link>

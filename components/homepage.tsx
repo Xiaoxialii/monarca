@@ -1,5 +1,6 @@
 "use client";
 
+import { Show, useUser } from "@clerk/nextjs";
 import {
   Activity,
   ArrowRight,
@@ -19,8 +20,19 @@ import {
   Zap
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
-import { useLocale, type Locale } from "@/lib/locale";
+import {
+  getCopyLocale,
+  getHtmlLang,
+  getLocaleShortLabel,
+  LOCALE_OPTIONS,
+  useLocale,
+  type CopyLocale,
+  type Locale
+} from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
 const integrations = [
@@ -46,7 +58,7 @@ const homepageCopy = {
   en: {
     lang: "中文",
     langLabel: "Switch to Chinese",
-    logo: "openAnalyst",
+    logo: "Monarca AI",
     nav: [
       { label: "Sources", href: "#sources" },
       { label: "Investigations", href: "#investigations" },
@@ -60,45 +72,46 @@ const homepageCopy = {
     },
     hero: {
       eyebrow: "AI operating system for revenue teams",
-      headline: "Your AI Growth Team",
+      headline: "Your AI Data Analyst Team",
       subheadline:
-        "openAnalyst works like a full-stack growth data team: it connects data, models metrics, investigates changes, and turns findings into decisions your team can act on",
+        "Connect your database, spreadsheets, and business tools. Automatically generate revenue, sales, customer, and operations reports with insights and next-step recommendations.",
       teamLabel: "One AI team covering the full analytics workflow",
       team: [
         { role: "Data Engineer", text: "Connects sources and keeps pipelines clean" },
         { role: "Analytics Engineer", text: "Builds semantic layers and metric logic" },
         { role: "BI Engineer", text: "Creates reports, dashboards, and trusted views" },
-        { role: "Analyst", text: "Explains movement, cohorts, and root causes" },
-        { role: "Growth Analyst", text: "Turns insights into focused growth actions" }
+        { role: "Business Intelligence", text: "Explains movement, cohorts, and root causes" },
+        { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
-      primaryCta: "Connect your data",
-      secondaryCta: "Explore demo workspace",
+      primaryCta: "Generate Your First Report",
+      secondaryCta: "View Demo Workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
     visual: {
       status: "Investigating",
-      monitor: "Revenue monitor",
-      drop: "Revenue dropped 12.4%",
-      trend: "ARR trend",
+      monitor: "Business monitor",
+      drop: "Revenue dropped 12.4% this week",
+      trend: "Business trend",
       range: "Last 30 days",
       preview: "AI investigation preview",
       rootCauses: "3 root causes found",
       confidence: "91% confidence",
       actionTitle: "Recommended action",
-      recommendation: "Pause two low-quality search segments and route 18 expansion-ready accounts to success",
+      recommendation: "Review ad spend, replenish top-selling items, and follow up with customers at risk of churn",
       owner: "Owner",
       ownerValue: "Growth + CS",
-      impact: "Expected lift",
-      impactValue: "$42K ARR",
+      impact: "Next step",
+      impactValue: "Action plan",
       causes: [
-        ["Paid search CAC", "+18%", "rose across non-brand campaigns"],
-        ["Expansion pipeline", "-9%", "slowed in enterprise accounts"],
-        ["Checkout errors", "+31%", "spiked after billing release"]
+        ["Ad acquisition cost", "+18%", "marketing spend is less efficient this week"],
+        ["Top-selling item inventory", "Low", "stock is not enough to support demand"],
+        ["Repeat purchase rate", "-9%", "fewer customers are buying again"],
+        ["Refund rate", "+31%", "refunds increased and need follow-up"]
       ]
     },
     features: {
       eyebrow: "Revenue intelligence",
-      title: "What openAnalyst helps you do",
+      title: "What Monarca AI helps you do",
       cards: [
         {
           title: "Detect anomalies",
@@ -124,7 +137,7 @@ const homepageCopy = {
       points: [
         {
           title: "Metrics move constantly",
-          text: "openAnalyst watches the operating model even when nobody is looking"
+          text: "Monarca AI watches the operating model even when nobody is looking"
         },
         {
           title: "Root cause takes too long",
@@ -146,7 +159,7 @@ const homepageCopy = {
       confidenceValue: "82%",
       whyLabel: "Why AI believes this",
       timeline: [
-        ["08:42", "openAnalyst detected a revenue anomaly across self-serve plans"],
+        ["08:42", "Monarca AI detected a revenue anomaly across self-serve plans"],
         ["08:43", "Compared cohorts, campaigns, billing events, and product activation"],
         ["08:45", "Drafted recommendations for growth, finance, and product owners"]
       ],
@@ -161,7 +174,7 @@ const homepageCopy = {
         },
         {
           title: "Recommended actions",
-          text: "openAnalyst proposed three actions with owners, expected lift, and confidence scores"
+          text: "Monarca AI proposed three actions with owners, expected lift, and confidence scores"
         }
       ]
     },
@@ -261,41 +274,42 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "为团队打造的 AI 自动化数据系统",
-      headline: "你的 AI 增长团队",
+      eyebrow: "为增长团队和中小企业打造的 AI 数据系统",
+      headline: "你的 AI 商业分析团队",
       subheadline:
-        "蝴蝶效应是一支 24/7 在线的增长数据团队：连接数据、建立指标口径、分析异常，并把洞察转化为可执行的增长动作",
-      teamLabel: "一支 AI 团队，覆盖完整增长分析工作流",
+        "连接你的业务数据，自动生成经营报告，发现异常、定位原因，并给出可执行的增长建议",
+      teamLabel: "一套 AI 工作流，完成从数据连接到经营洞察的全过程",
       team: [
         { role: "数据工程师", text: "建立数据库，连接数据源，清洗和同步数据" },
         { role: "分析工程师", text: "建立语义层，统一指标口径" },
         { role: "商业智能工程师", text: "生成报告、看板和可信视图" },
-        { role: "数据分析师", text: "解释变化，定位关键根因" },
-        { role: "增长分析师", text: "把洞察转化为增长行动" }
+        { role: "经营洞察", text: "解释变化，定位关键根因" },
+        { role: "增长运营", text: "把洞察转化为增长行动" }
       ],
-      primaryCta: "连接数据源",
+      primaryCta: "生成第一份报告",
       secondaryCta: "查看演示工作区",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
     },
     visual: {
       status: "正在调查",
-      monitor: "收入监控",
-      drop: "收入下降 12.4%",
-      trend: "ARR 趋势",
+      monitor: "经营监控",
+      drop: "本周收入下降 12.4%",
+      trend: "经营趋势",
       range: "过去 30 天",
       preview: "AI 调查预览",
       rootCauses: "发现 3 个根因",
       confidence: "91% 置信度",
       actionTitle: "推荐行动",
-      recommendation: "暂停两个低质量搜索分组，并将 18 个具备扩张信号的账户交给客户成功团队",
+      recommendation: "检查广告投放效率，补充热销商品库存，并跟进复购下降的客户群体",
       owner: "负责人",
       ownerValue: "增长 + CS",
-      impact: "预期提升",
-      impactValue: "$42K ARR",
+      impact: "下一步",
+      impactValue: "行动建议",
       causes: [
-        ["付费搜索 CAC", "+18%", "非品牌广告系列成本上升"],
-        ["扩张管道", "-9%", "企业客户推进速度放缓"],
-        ["结账错误", "+31%", "计费版本发布后错误激增"]
+        ["广告获客成本", "+18%", "本周投放效率下降"],
+        ["热销商品库存", "不足", "库存无法覆盖当前需求"],
+        ["复购率", "-9%", "老客户再次购买减少"],
+        ["退款率", "+31%", "退款增加，需要排查原因"]
       ]
     },
     features: {
@@ -448,15 +462,12 @@ const homepageCopy = {
   }
 } as const;
 
-type HomeCopy = (typeof homepageCopy)[Locale];
+type HomeCopy = (typeof homepageCopy)[CopyLocale];
 
 function Logo({ label }: { label: string }) {
   return (
-    <Link href="/" className="flex items-center gap-2">
-      <div className="grid size-8 place-items-center rounded-xl bg-slate-950 text-white shadow-sm">
-        <Sparkles className="size-4" />
-      </div>
-      <span className="text-sm font-semibold tracking-normal text-slate-950">{label}</span>
+    <Link href="/" className="flex items-center" aria-label={label}>
+      <BrandLogo label={label} className="h-12" />
     </Link>
   );
 }
@@ -912,15 +923,19 @@ function Integrations({ copy }: { copy: HomeCopy["integrations"] }) {
 
 export function Homepage() {
   const [locale, setLocale] = useLocale("en");
-  const copy = homepageCopy[locale];
+  const copy = homepageCopy[getCopyLocale(locale)];
+  const router = useRouter();
+  const { isLoaded, isSignedIn } = useUser();
 
-  function toggleLocale() {
-    setLocale(locale === "en" ? "zh" : "en");
-  }
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      router.replace("/dashboard");
+    }
+  }, [isLoaded, isSignedIn, router]);
 
   return (
     <main
-      lang={locale === "zh" ? "zh-CN" : "en"}
+      lang={getHtmlLang(locale)}
       className="min-h-screen overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f1faf5_46%,#ffffff_100%)] text-slate-950"
     >
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
@@ -934,21 +949,38 @@ export function Homepage() {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              className="rounded-full px-3 text-slate-600"
-              aria-label={copy.langLabel}
-              onClick={toggleLocale}
-            >
-              <Languages />
-              {copy.lang}
-            </Button>
-            <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 sm:inline-flex">
-              <Link href="/sign-in">{copy.auth.login}</Link>
-            </Button>
-            <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
-              <Link href="/sign-up">{copy.auth.getStarted}</Link>
-            </Button>
+            <label className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+              <Languages className="size-4" />
+              <span className="sr-only">{copy.langLabel}</span>
+              <select
+                value={locale}
+                onChange={(event) => setLocale(event.target.value as Locale)}
+                className="cursor-pointer appearance-none bg-transparent text-sm font-medium outline-none"
+                aria-label={copy.langLabel}
+              >
+                {LOCALE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                {getLocaleShortLabel(locale)}
+              </span>
+            </label>
+            <Show when="signed-out">
+              <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 sm:inline-flex">
+                <Link href="/sign-in">{copy.auth.login}</Link>
+              </Button>
+              <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
+                <Link href="/sign-up">{copy.auth.getStarted}</Link>
+              </Button>
+            </Show>
+            <Show when="signed-in">
+              <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
+                <Link href="/dashboard">{copy.auth.getStarted}</Link>
+              </Button>
+            </Show>
           </div>
         </nav>
       </header>
@@ -968,12 +1000,22 @@ export function Homepage() {
           </p>
           <TeamRoster copy={copy.hero} />
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
-              <Link href="/sign-up">
-                {copy.hero.primaryCta}
-                <ArrowRight />
-              </Link>
-            </Button>
+            <Show when="signed-out">
+              <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
+                <Link href="/sign-up">
+                  {copy.hero.primaryCta}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            </Show>
+            <Show when="signed-in">
+              <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
+                <Link href="/dashboard">
+                  {copy.hero.primaryCta}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            </Show>
             <Button asChild variant="outline" className="h-11 rounded-full border-slate-200 bg-white/70 px-5">
               <Link href="/dashboard">
                 <Search />

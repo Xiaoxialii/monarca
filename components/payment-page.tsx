@@ -14,11 +14,12 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useLocale, type Locale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
 export type PaymentPlan = "trial" | "database-setup" | "professional" | "enterprise";
@@ -35,7 +36,7 @@ const addonPlanIds = ["database-setup"] as const satisfies readonly PaymentPlan[
 
 const paymentCopy = {
   en: {
-    brand: "openAnalyst",
+    brand: "Monarca AI",
     selectorBadge: "Step 1",
     selectorTitle: "Choose a plan first",
     selectorSubtitle: "Select the plan you want to start, then confirm details below",
@@ -235,14 +236,14 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [fromHome, setFromHome] = useState(false);
   const [locale] = useLocale("en");
   const router = useRouter();
-  const copy = paymentCopy[locale as Locale];
+  const copy = paymentCopy[getCopyLocale(locale)];
   useEffect(() => {
     const from = new URLSearchParams(window.location.search).get("from");
     setFromHome(from === "home");
   }, []);
 
   const backLabel =
-    locale === "zh" ? "返回" : "Back";
+    getCopyLocale(locale) === "zh" ? "返回" : "Back";
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
   const isProfessional = selectedPlan === "professional";
@@ -257,16 +258,13 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
 
   return (
     <main
-      lang={locale === "zh" ? "zh-CN" : "en"}
+      lang={getHtmlLang(locale)}
       className="min-h-screen bg-[linear-gradient(180deg,#ffffff_0%,#eef8f2_48%,#ffffff_100%)] text-slate-950"
     >
       <header className="border-b border-slate-200/70 bg-white/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="grid size-8 place-items-center rounded-xl bg-slate-950 text-white">
-              <Sparkles className="size-4" />
-            </div>
-            <span className="text-sm font-semibold">{copy.brand}</span>
+          <Link href="/" className="flex items-center" aria-label={copy.brand}>
+            <BrandLogo label={copy.brand} className="h-10" />
           </Link>
           <Button variant="ghost" className="rounded-full text-slate-600" onClick={handleGoBack}>
             <ArrowLeft />

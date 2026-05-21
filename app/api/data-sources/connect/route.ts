@@ -1,0 +1,162 @@
+import { NextResponse } from "next/server";
+import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import {
+  normalizeDatabaseType,
+  publicDatabaseConfig,
+  resolveDatabaseConfig
+} from "@/lib/database-connection-config";
+import { introspectDatabase, testDatabaseConnection } from "@/lib/database-introspection";
+import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+
+export const runtime = "nodejs";
+
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ ok: false, message }, { status });
+}
+
+function toDataSourceType(type: "mysql" | "postgresql") {
+  return type === "mysql" ? DataSourceType.MYSQL : DataSourceType.POSTGRESQL;
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const type = normalizeDatabaseType(payload?.type);
+
+    if (!type) {
+      return jsonError("Database type must be mysql or postgresql");
+    }
+
+    const config = resolveDatabaseConfig(type, payload);
+
+    if (!config.host || !config.database || !config.username) {
+      return jsonError(
+        "Database preset is incomplete. Configure host, database, and username on the server or provide them as overrides."
+      );
+    }
+
+    await testDatabaseConnection(config);
+    const tables = await introspectDatabase(config);
+    const sourceType = toDataSourceType(type);
+    const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
+    const publicConfig = publicDatabaseConfig(config);
+    const semanticLayer = buildSemanticLayer(tables);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const dataSource = await tx.dataSourceConnection.create({
+        data: {
+          workspaceId: session.workspace.id,
+          type: sourceType,
+          name: `${provider} - ${config.database}`,
+          provider,
+          status: ConnectionStatus.CONNECTED,
+          connectionMode: typeof payload?.mode === "string" ? payload.mode : "Import",
+          authMethod: "Database",
+          config: {
+            ...publicConfig,
+            username: config.username,
+            password: config.password
+          },
+          schemas: {
+            scannedAt: new Date().toISOString(),
+            tables,
+            semanticLayer
+          },
+          connectedAt: new Date(),
+          lastSyncAt: new Date()
+        }
+      });
+
+      const latestSnapshot = await tx.schemaSnapshot.findFirst({
+        where: {
+          workspaceId: session.workspace.id
+        },
+        orderBy: {
+          version: "desc"
+        },
+        select: {
+          version: true
+        }
+      });
+
+      const schemaSnapshot = await tx.schemaSnapshot.create({
+        data: {
+          workspaceId: session.workspace.id,
+          dataSourceId: dataSource.id,
+          version: (latestSnapshot?.version ?? 0) + 1,
+          status: ConnectionStatus.CONNECTED,
+          schemaJson: {
+            sourceId: dataSource.id,
+            scannedAt: new Date().toISOString(),
+            tables,
+            semanticLayer
+          },
+          qualityReport: {
+            tableCount: tables.length,
+            columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
+            semanticFieldCount: semanticLayer.fields.length,
+            businessEntityCount: semanticLayer.entities.length,
+            generatedMetricCount: semanticLayer.metrics.length
+          }
+        }
+      });
+
+      const generatedMetricCount = await generateSemanticMetrics(tx, {
+        workspaceId: session.workspace.id,
+        userId: session.user.id,
+        semanticLayer
+      });
+
+      return { dataSource, schemaSnapshot, generatedMetricCount };
+    });
+
+    return NextResponse.json({
+      ok: true,
+      dataSource: {
+        id: result.dataSource.id,
+        name: result.dataSource.name,
+        provider: result.dataSource.provider,
+        type: result.dataSource.type,
+        status: result.dataSource.status,
+        connectionMode: result.dataSource.connectionMode,
+        authMethod: result.dataSource.authMethod,
+        config: publicConfig,
+        schema: {
+          tableCount: tables.length,
+          columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
+          scannedAt: new Date().toISOString(),
+          tables,
+          semanticLayer
+        },
+        connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
+        lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null
+      },
+      schema: {
+        id: result.schemaSnapshot.id,
+        version: result.schemaSnapshot.version,
+        tableCount: tables.length,
+        columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
+        semanticFieldCount: semanticLayer.fields.length,
+        businessEntityCount: semanticLayer.entities.length,
+        generatedMetricCount: result.generatedMetricCount
+      }
+    });
+  } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+
+    if (authResponse) {
+      return authResponse;
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        message: error instanceof Error ? error.message : "Connection import failed"
+      },
+      { status: 400 }
+    );
+  }
+}

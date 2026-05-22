@@ -36,7 +36,8 @@ function publicConfig(configValue: unknown) {
     ssl: typeof config.ssl === "boolean" ? config.ssl : null,
     fileName: typeof config.fileName === "string" ? config.fileName : null,
     fileSize: toNumber(config.fileSize),
-    extension: typeof config.extension === "string" ? config.extension : null
+    extension: typeof config.extension === "string" ? config.extension : null,
+    hasStoredFile: typeof config.storedFilePath === "string" && Boolean(config.storedFilePath)
   };
 }
 

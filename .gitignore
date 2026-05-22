@@ -11,6 +11,9 @@ out/
 build/
 dist/
 
+# private uploaded data
+.data/
+
 # env
 .env
 .env*.local

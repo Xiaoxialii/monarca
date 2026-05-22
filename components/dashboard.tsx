@@ -30,7 +30,8 @@ import {
   Share2,
   Table2,
   Trash2,
-  Copy
+  Copy,
+  X
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -376,6 +377,7 @@ const dashboardCopy = {
       title: "First data import flow",
       description: "",
       badge: "Automated sync",
+      dismissLabel: "Hide onboarding guide",
       steps: [
         {
           title: "Connect business data",
@@ -1057,6 +1059,7 @@ const dashboardCopy = {
       title: "首次数据导入流程",
       description: "",
       badge: "自动同步",
+      dismissLabel: "不再显示",
       steps: [
         {
           title: "连接业务数据",
@@ -4201,10 +4204,7 @@ function ImportDataSection({
       </div>
       <div className="grid gap-4">
         {!connectionPage ? (
-          <>
-            <OnboardingFlow copy={copy} />
-            <ConnectedDataOverview copy={copy} connectedSources={connectedSources} />
-          </>
+          <ConnectedDataOverview copy={copy} connectedSources={connectedSources} />
         ) : null}
         <ConnectorPanel
           copy={copy}
@@ -4284,11 +4284,17 @@ function ConnectedDataOverview({
   );
 }
 
-function OnboardingFlow({ copy }: { copy: DashboardCopy }) {
+function OnboardingFlow({
+  copy,
+  onDismiss
+}: {
+  copy: DashboardCopy;
+  onDismiss?: () => void;
+}) {
   return (
     <Card className="overflow-hidden border-emerald-100 bg-gradient-to-r from-white via-emerald-50/35 to-white shadow-sm">
       <CardContent className="p-4">
-        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h3 className="text-base font-semibold tracking-tight">{copy.onboarding.title}</h3>
             {copy.onboarding.description ? (
@@ -4297,7 +4303,21 @@ function OnboardingFlow({ copy }: { copy: DashboardCopy }) {
               </p>
             ) : null}
           </div>
-          <Badge variant="secondary">{copy.onboarding.badge}</Badge>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge variant="secondary">{copy.onboarding.badge}</Badge>
+            {onDismiss ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-full text-muted-foreground hover:bg-white/80 hover:text-foreground"
+                aria-label={copy.onboarding.dismissLabel}
+                onClick={onDismiss}
+              >
+                <X className="size-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
         <div className="grid gap-2 md:grid-cols-4">
           {copy.onboarding.steps.map((step, index) => (
@@ -5089,6 +5109,18 @@ function ReportsPage({
   copy: DashboardCopy;
   hasConnectedDatabase: boolean;
 }) {
+  const onboardingStorageKey = "monarca-hide-report-onboarding-flow-v2";
+  const [showOnboardingFlow, setShowOnboardingFlow] = useState(true);
+
+  useEffect(() => {
+    setShowOnboardingFlow(window.localStorage.getItem(onboardingStorageKey) !== "true");
+  }, []);
+
+  const dismissOnboardingFlow = () => {
+    window.localStorage.setItem(onboardingStorageKey, "true");
+    setShowOnboardingFlow(false);
+  };
+
   return (
     <section id="reports" className="flex min-h-full flex-col gap-3 scroll-mt-20">
       <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-center xl:justify-between">
@@ -5115,8 +5147,12 @@ function ReportsPage({
         </div>
       </div>
 
+      {showOnboardingFlow ? (
+        <OnboardingFlow copy={copy} onDismiss={dismissOnboardingFlow} />
+      ) : null}
+
       <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         <ReportEmptyPreview copy={copy} />
       </div>
     </section>
@@ -5162,12 +5198,12 @@ function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
     <Card className="h-full overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
       <CardContent className="h-full p-4">
         <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(310px,0.82fr)] xl:items-stretch">
-          <div className="flex h-full flex-col rounded-2xl border bg-white/88 p-5 shadow-sm sm:p-6">
+          <div className="flex h-full min-w-0 flex-col rounded-2xl border bg-white/88 p-5 shadow-sm [container-type:inline-size] sm:p-6">
             <Badge className="mb-5 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
               {copy.reports.emptyBriefingBadge}
             </Badge>
             <p className="text-sm font-medium text-muted-foreground">{copy.reports.emptyReportTitle}</p>
-            <h2 className="mt-3 max-w-full whitespace-nowrap text-[clamp(1.75rem,3.15vw,2.85rem)] font-semibold leading-[1.08] tracking-normal text-slate-950">
+            <h2 className="mt-3 max-w-full whitespace-nowrap text-[clamp(2rem,5.2cqw,3.35rem)] font-semibold leading-[1.08] tracking-normal text-slate-950">
               {copy.reports.emptyBriefingMetric}
             </h2>
             <div className="mt-4 flex flex-wrap gap-2">

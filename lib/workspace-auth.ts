@@ -48,7 +48,7 @@ export async function requireWorkspaceRole(allowedRoles: WorkspaceRole[]): Promi
 
 export function workspaceAuthErrorResponse(error: unknown) {
   if (error instanceof WorkspaceAuthError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: error.message, message: error.message }, { status: error.status });
   }
 
   return null;

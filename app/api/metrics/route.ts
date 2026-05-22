@@ -28,6 +28,18 @@ function mappingLabel(mappingJson: unknown) {
   return labels.length > 0 ? labels.join(" + ") : "Waiting for source mapping";
 }
 
+function sourceTableLabels(mappingJson: unknown) {
+  const mapping = asRecord(mappingJson);
+  const sourceFields = Array.isArray(mapping?.sourceFields) ? mapping.sourceFields : [];
+
+  return sourceFields.flatMap((field) => {
+    const fieldRecord = asRecord(field);
+    const table = typeof fieldRecord?.table === "string" ? fieldRecord.table : "";
+
+    return table ? [table] : [];
+  });
+}
+
 function toTables(schemaJson: unknown) {
   const schema = asRecord(schemaJson);
   const tables = Array.isArray(schema?.tables) ? schema.tables : [];
@@ -63,9 +75,32 @@ function toTables(schemaJson: unknown) {
   });
 }
 
+function tableLabel(table: ReturnType<typeof toTables>[number]) {
+  return table.schema ? `${table.schema}.${table.name}` : table.name;
+}
+
+function metricBelongsToTables(metric: { mappingJson: unknown }, activeTableLabels: Set<string>) {
+  if (activeTableLabels.size === 0) {
+    return true;
+  }
+
+  const labels = sourceTableLabels(metric.mappingJson);
+  return labels.length > 0 && labels.some((label) => activeTableLabels.has(label));
+}
+
 export async function GET() {
   try {
     const session = await requireWorkspace();
+    const latestSnapshot = await prisma.schemaSnapshot.findFirst({
+      where: {
+        workspaceId: session.workspace.id
+      },
+      orderBy: {
+        version: "desc"
+      }
+    });
+    const latestTables = latestSnapshot ? toTables(latestSnapshot.schemaJson) : [];
+    const activeTableLabels = new Set(latestTables.map(tableLabel));
     let metrics = await prisma.metricDefinition.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -84,23 +119,14 @@ export async function GET() {
         { createdAt: "asc" }
       ]
     });
+    let visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
 
     if (
-      metrics.length === 0 &&
+      visibleMetrics.length === 0 &&
       (session.membership.role === WorkspaceRole.OWNER || session.membership.role === WorkspaceRole.ADMIN)
     ) {
-      const latestSnapshot = await prisma.schemaSnapshot.findFirst({
-        where: {
-          workspaceId: session.workspace.id
-        },
-        orderBy: {
-          version: "desc"
-        }
-      });
-
       if (latestSnapshot) {
-        const tables = toTables(latestSnapshot.schemaJson);
-        const semanticLayer = buildSemanticLayer(tables);
+        const semanticLayer = buildSemanticLayer(latestTables);
         const generatedMetricCount = await generateSemanticMetrics(prisma, {
           workspaceId: session.workspace.id,
           userId: session.user.id,
@@ -143,12 +169,13 @@ export async function GET() {
             { createdAt: "asc" }
           ]
         });
+        visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
       }
     }
 
     return NextResponse.json({
       ok: true,
-      metrics: metrics.map((metric) => ({
+      metrics: visibleMetrics.map((metric) => ({
         id: metric.id,
         layer: metric.layer,
         category: metric.category,

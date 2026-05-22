@@ -484,6 +484,22 @@ export async function generateSemanticMetrics(
     semanticLayer: SemanticLayerResult;
   }
 ) {
+  const currentMetricNames = semanticLayer.metrics.map((metric) => metric.name);
+
+  await tx.metricDefinition.updateMany({
+    where: {
+      workspaceId,
+      maintainerRole: MetricMaintainerRole.AI,
+      isActive: true,
+      name: {
+        notIn: currentMetricNames.length > 0 ? currentMetricNames : ["__none__"]
+      }
+    },
+    data: {
+      isActive: false
+    }
+  });
+
   for (const metric of semanticLayer.metrics) {
     await tx.metricDefinition.upsert({
       where: {
@@ -514,6 +530,7 @@ export async function generateSemanticMetrics(
         tagsJson: metric.tags
       },
       update: {
+        isActive: true,
         layer: metric.layer,
         category: metric.category,
         definition: metric.definition,

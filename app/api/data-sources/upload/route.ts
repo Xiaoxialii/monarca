@@ -26,8 +26,12 @@ function tableNameFromFile(fileName: string) {
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
 
+  if (message.includes("DATABASE_URL must be a PostgreSQL connection string")) {
+    return "数据库连接地址不是 PostgreSQL。请把 DATABASE_URL 改为 Neon/PostgreSQL 连接串后重试。";
+  }
+
   if (message.includes("pool timeout") || message.includes("failed to retrieve a connection")) {
-    return "数据库暂时无法连接，请先启动本地 MySQL 后再上传文件";
+    return "数据库暂时无法连接，请检查 PostgreSQL / Neon 连接地址后再上传文件";
   }
 
   if (

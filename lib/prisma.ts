@@ -12,6 +12,10 @@ function createPrismaClient() {
     throw new Error("DATABASE_URL is not configured.");
   }
 
+  if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
+    throw new Error("DATABASE_URL must be a PostgreSQL connection string.");
+  }
+
   const adapter = new PrismaPg({ connectionString: databaseUrl });
 
   return new PrismaClient({

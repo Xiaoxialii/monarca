@@ -6,6 +6,7 @@ import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { storeUploadInR2 } from "@/lib/r2-storage";
 
 export const runtime = "nodejs";
 
@@ -272,6 +273,33 @@ export async function POST(request: Request) {
 
       return { dataSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };
     });
+    const storedFile = await storeUploadInR2({
+      workspaceId: session.workspace.id,
+      dataSourceId: result.dataSource.id,
+      file
+    });
+
+    if (storedFile) {
+      await prisma.dataSourceConnection.update({
+        where: {
+          id: result.dataSource.id
+        },
+        data: {
+          config: {
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type || null,
+            extension,
+            storage: {
+              provider: "cloudflare-r2",
+              bucket: storedFile.bucket,
+              key: storedFile.key,
+              url: storedFile.url
+            }
+          }
+        }
+      });
+    }
 
     await consumeCredit({
       userId: session.user.id,
@@ -299,7 +327,15 @@ export async function POST(request: Request) {
         config: {
           fileName: file.name,
           fileSize: file.size,
-          extension
+          extension,
+          storage: storedFile
+            ? {
+                provider: "cloudflare-r2",
+                bucket: storedFile.bucket,
+                key: storedFile.key,
+                url: storedFile.url
+              }
+            : null
         },
         schema: {
           tableCount: tables.length,

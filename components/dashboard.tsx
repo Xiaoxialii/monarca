@@ -6500,7 +6500,7 @@ function reportMetricBadges(result: ReportMetricEvidenceResult, maxCount = 2) {
 
 function reportMetricShortDescription(result: ReportMetricEvidenceResult) {
   const name = normalizeReportMetricText(`${result.displayName ?? ""} ${result.metricName}`);
-  const module = inferReportMetricBusinessModule(result);
+  const businessModule = inferReportMetricBusinessModule(result);
 
   if (name.includes("negative_sentiment_rate")) return "整体负向反馈占比，用于判断用户体验风险";
   if (name.includes("positive_sentiment_rate")) return "整体正向反馈占比，用于判断用户满意度";
@@ -6508,9 +6508,9 @@ function reportMetricShortDescription(result: ReportMetricEvidenceResult) {
   if (name.includes("total_installs")) return "安装规模指标，注意原始口径限制";
   if (name.includes("average_rating")) return "公开评分的平均水平";
   if (name.includes("estimated")) return "方向性估算指标，不代表真实收入";
-  if (module === "金融 / 时间序列") return "金融时序指标，用于观察价格、收益或交易规模";
-  if (module === "排名与对象") return "对象级结果，适合放入排名和排查线索";
-  return `${module}下的业务指标`;
+  if (businessModule === "金融 / 时间序列") return "金融时序指标，用于观察价格、收益或交易规模";
+  if (businessModule === "排名与对象") return "对象级结果，适合放入排名和排查线索";
+  return `${businessModule}下的业务指标`;
 }
 
 type ReportChartType =
@@ -7289,10 +7289,10 @@ function ReportMetricEvidencePanel({
       reportCoreKpiPriority(left) - reportCoreKpiPriority(right)
     );
   const groupedResults = visibleResults.reduce((groups, result) => {
-    const module = inferReportMetricBusinessModule(result);
-    const values = groups.get(module) ?? [];
+    const businessModule = inferReportMetricBusinessModule(result);
+    const values = groups.get(businessModule) ?? [];
     values.push(result);
-    groups.set(module, values);
+    groups.set(businessModule, values);
     return groups;
   }, new Map<string, ReportMetricEvidenceResult[]>());
   const latestComputedAt = computedResults

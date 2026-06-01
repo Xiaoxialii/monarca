@@ -5055,10 +5055,16 @@ function ConnectorPanel({
     }
   };
   const friendlyConnectionMessage = (message: string) => {
+    if (message.includes("PostgreSQL") || message.includes("DATABASE_URL")) {
+      return isZh
+        ? "数据库连接地址不是 PostgreSQL。请把 DATABASE_URL 改为 Neon/PostgreSQL 连接串后重试。"
+        : "The application database URL is not PostgreSQL. Set DATABASE_URL to your Neon/PostgreSQL connection string and try again.";
+    }
+
     if (message.includes("pool timeout") || message.includes("failed to retrieve a connection")) {
       return isZh
-        ? "数据库暂时无法连接，请先启动本地 MySQL 后再继续"
-        : "The database is unavailable. Start local MySQL before continuing.";
+        ? "数据库暂时无法连接，请检查 PostgreSQL / Neon 连接地址后再继续"
+        : "The database is unavailable. Check the PostgreSQL / Neon connection string before continuing.";
     }
 
     return message;

@@ -84,7 +84,7 @@ const homepageCopy = {
         { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
       primaryCta: "Generate Your First Report",
-      secondaryCta: "View Demo Workspace",
+      secondaryCta: "View Sample Workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
     visual: {
@@ -199,7 +199,7 @@ const homepageCopy = {
         {
           name: "One-time Experience",
           subtitle: "Try one AI growth analysis session",
-          price: "¥200",
+          price: "$20",
           cadence: "",
           badge: "",
           features: [
@@ -213,7 +213,7 @@ const homepageCopy = {
         {
           name: "Professional",
           subtitle: "Report automation + data analysis + decision support",
-          price: "¥2,000",
+          price: "$199",
           cadence: "/ month",
           badge: "Recommended",
           features: [
@@ -241,7 +241,7 @@ const homepageCopy = {
         eyebrow: "Add-on service",
         name: "Database Setup",
         subtitle: "Build the data foundation before SaaS automation",
-        price: "¥2,000+",
+        price: "$200+",
         description: "For teams that need help designing databases, connecting sources, cleaning data, and preparing metric modeling",
         features: [
           "Business database and table structure",
@@ -401,7 +401,7 @@ const homepageCopy = {
         {
           name: "单次体验",
           subtitle: "体验一次 AI 增长分析流程",
-          price: "¥200",
+          price: "¥99",
           cadence: "",
           badge: "",
           features: [
@@ -415,7 +415,7 @@ const homepageCopy = {
         {
           name: "专业版",
           subtitle: "报告自动化 + 数据分析 + 决策辅助",
-          price: "¥2,000",
+          price: "¥1,999",
           cadence: "/ 月",
           badge: "推荐",
           features: [
@@ -926,6 +926,7 @@ export function Homepage() {
   const copy = homepageCopy[getCopyLocale(locale)];
   const router = useRouter();
   const { isLoaded, isSignedIn } = useUser();
+  const isAuthenticated = isLoaded && isSignedIn;
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
@@ -968,19 +969,20 @@ export function Homepage() {
                 {getLocaleShortLabel(locale)}
               </span>
             </label>
-            <Show when="signed-out">
-              <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 sm:inline-flex">
-                <Link href="/sign-in">{copy.auth.login}</Link>
-              </Button>
-              <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
-                <Link href="/sign-up">{copy.auth.getStarted}</Link>
-              </Button>
-            </Show>
-            <Show when="signed-in">
+            {isAuthenticated ? (
               <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
                 <Link href="/dashboard">{copy.auth.getStarted}</Link>
               </Button>
-            </Show>
+            ) : (
+              <>
+                <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 sm:inline-flex">
+                  <Link href="/sign-in">{copy.auth.login}</Link>
+                </Button>
+                <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
+                  <Link href="/sign-up">{copy.auth.getStarted}</Link>
+                </Button>
+              </>
+            )}
           </div>
         </nav>
       </header>

@@ -20,6 +20,7 @@ dist/
 
 # misc
 .DS_Store
+test-results/
 tsconfig.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*

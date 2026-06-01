@@ -3,8 +3,11 @@ import { NextResponse } from "next/server";
 import mariadb from "mariadb";
 import { Client as PostgresClient } from "pg";
 import { prisma } from "@/lib/prisma";
-import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { assertSafeDatabaseHost } from "@/lib/database-host-safety";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 export const runtime = "nodejs";
 
@@ -129,6 +132,8 @@ function resolveDatabaseConfig(type: DatabaseType, payload: Record<string, unkno
 }
 
 async function introspectMysql(config: ReturnType<typeof resolveDatabaseConfig>) {
+  await assertSafeDatabaseHost(config.host);
+
   const connection = await mariadb.createConnection({
     host: config.host,
     port: config.port,
@@ -173,6 +178,8 @@ async function introspectMysql(config: ReturnType<typeof resolveDatabaseConfig>)
 }
 
 async function introspectPostgres(config: ReturnType<typeof resolveDatabaseConfig>) {
+  await assertSafeDatabaseHost(config.host);
+
   const client = new PostgresClient({
     host: config.host,
     port: config.port,
@@ -317,10 +324,9 @@ export async function POST(request: Request) {
       }
     });
 
-    await generateSemanticMetrics(prisma, {
+    await generateWorkspaceMetricsFromConnectedSources(prisma, {
       workspaceId: session.workspace.id,
-      userId: session.user.id,
-      semanticLayer
+      userId: session.user.id
     });
 
     return NextResponse.json({
@@ -334,12 +340,6 @@ export async function POST(request: Request) {
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;
 
-    return NextResponse.json(
-      {
-        ok: false,
-        message: error instanceof Error ? error.message : "Schema scan failed"
-      },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, "Schema scan failed");
   }
 }

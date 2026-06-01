@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+import { validationFromLineage } from "@/lib/metric-validation";
 import { requireWorkspace, requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { WorkspaceRole } from "@prisma/client";
+import { apiErrorResponse } from "@/lib/api-errors";
+import { metricBelongsToTables } from "@/lib/metric-visibility";
+import {
+  generateWorkspaceMetricsFromConnectedSources,
+  getConnectedWorkspaceSchemaContext
+} from "@/lib/workspace-metric-generation";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -20,7 +26,11 @@ function mappingLabel(mappingJson: unknown) {
   const labels = sourceFields.flatMap((field) => {
     const fieldRecord = asRecord(field);
     const table = typeof fieldRecord?.table === "string" ? fieldRecord.table : "";
-    const name = typeof fieldRecord?.field === "string" ? fieldRecord.field : "";
+    const name = typeof fieldRecord?.displayField === "string"
+      ? fieldRecord.displayField
+      : typeof fieldRecord?.field === "string"
+        ? fieldRecord.field
+        : "";
 
     return table && name ? [`${table}.${name}`] : [];
   });
@@ -28,78 +38,14 @@ function mappingLabel(mappingJson: unknown) {
   return labels.length > 0 ? labels.join(" + ") : "Waiting for source mapping";
 }
 
-function sourceTableLabels(mappingJson: unknown) {
-  const mapping = asRecord(mappingJson);
-  const sourceFields = Array.isArray(mapping?.sourceFields) ? mapping.sourceFields : [];
-
-  return sourceFields.flatMap((field) => {
-    const fieldRecord = asRecord(field);
-    const table = typeof fieldRecord?.table === "string" ? fieldRecord.table : "";
-
-    return table ? [table] : [];
-  });
-}
-
-function toTables(schemaJson: unknown) {
-  const schema = asRecord(schemaJson);
-  const tables = Array.isArray(schema?.tables) ? schema.tables : [];
-
-  return tables.flatMap((table) => {
-    const tableRecord = asRecord(table);
-    const name = typeof tableRecord?.name === "string" ? tableRecord.name : "";
-
-    if (!name) {
-      return [];
-    }
-
-    const columns = Array.isArray(tableRecord?.columns) ? tableRecord.columns : [];
-
-    return [{
-      name,
-      schema: typeof tableRecord?.schema === "string" ? tableRecord.schema : undefined,
-      columns: columns.flatMap((column) => {
-        const columnRecord = asRecord(column);
-        const columnName = typeof columnRecord?.name === "string" ? columnRecord.name : "";
-
-        if (!columnName) {
-          return [];
-        }
-
-        return [{
-          name: columnName,
-          type: typeof columnRecord?.type === "string" ? columnRecord.type : "unknown",
-          nullable: typeof columnRecord?.nullable === "boolean" ? columnRecord.nullable : true
-        }];
-      })
-    }];
-  });
-}
-
-function tableLabel(table: ReturnType<typeof toTables>[number]) {
+function tableLabel(table: { name: string; schema?: string | null }) {
   return table.schema ? `${table.schema}.${table.name}` : table.name;
-}
-
-function metricBelongsToTables(metric: { mappingJson: unknown }, activeTableLabels: Set<string>) {
-  if (activeTableLabels.size === 0) {
-    return true;
-  }
-
-  const labels = sourceTableLabels(metric.mappingJson);
-  return labels.length > 0 && labels.some((label) => activeTableLabels.has(label));
 }
 
 export async function GET() {
   try {
     const session = await requireWorkspace();
-    const latestSnapshot = await prisma.schemaSnapshot.findFirst({
-      where: {
-        workspaceId: session.workspace.id
-      },
-      orderBy: {
-        version: "desc"
-      }
-    });
-    const latestTables = latestSnapshot ? toTables(latestSnapshot.schemaJson) : [];
+    const { primarySnapshot, tables: latestTables } = await getConnectedWorkspaceSchemaContext(prisma, session.workspace.id);
     const activeTableLabels = new Set(latestTables.map(tableLabel));
     let metrics = await prisma.metricDefinition.findMany({
       where: {
@@ -125,31 +71,12 @@ export async function GET() {
       visibleMetrics.length === 0 &&
       (session.membership.role === WorkspaceRole.OWNER || session.membership.role === WorkspaceRole.ADMIN)
     ) {
-      if (latestSnapshot) {
-        const semanticLayer = buildSemanticLayer(latestTables);
-        const generatedMetricCount = await generateSemanticMetrics(prisma, {
+      if (primarySnapshot) {
+        const result = await generateWorkspaceMetricsFromConnectedSources(prisma, {
           workspaceId: session.workspace.id,
-          userId: session.user.id,
-          semanticLayer
+          userId: session.user.id
         });
-
-        await prisma.schemaSnapshot.update({
-          where: {
-            id: latestSnapshot.id
-          },
-          data: {
-            schemaJson: {
-              ...(asRecord(latestSnapshot.schemaJson) ?? {}),
-              semanticLayer
-            },
-            qualityReport: {
-              ...(asRecord(latestSnapshot.qualityReport) ?? {}),
-              semanticFieldCount: semanticLayer.fields.length,
-              businessEntityCount: semanticLayer.entities.length,
-              generatedMetricCount
-            }
-          }
-        });
+        const refreshedTableLabels = new Set(result.tables.map(tableLabel));
 
         metrics = await prisma.metricDefinition.findMany({
           where: {
@@ -169,7 +96,7 @@ export async function GET() {
             { createdAt: "asc" }
           ]
         });
-        visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
+        visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, refreshedTableLabels));
       }
     }
 
@@ -187,7 +114,8 @@ export async function GET() {
           ? "AI"
           : metric.maintainedByUser?.name || metric.maintainedByUser?.email || metric.maintainerRole,
         metricStatus: metric.status,
-        tags: asStringArray(metric.tagsJson)
+        tags: asStringArray(metric.tagsJson),
+        validation: validationFromLineage(metric.lineageJson)
       }))
     });
   } catch (error) {
@@ -197,57 +125,28 @@ export async function GET() {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to load metrics" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to load metrics");
   }
 }
 
 export async function POST() {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-    const latestSnapshot = await prisma.schemaSnapshot.findFirst({
-      where: {
-        workspaceId: session.workspace.id
-      },
-      orderBy: {
-        version: "desc"
-      }
+    const result = await generateWorkspaceMetricsFromConnectedSources(prisma, {
+      workspaceId: session.workspace.id,
+      userId: session.user.id
     });
 
-    if (!latestSnapshot) {
+    if (!result.primarySnapshot || !result.semanticLayer) {
       return NextResponse.json({ ok: false, message: "No schema snapshot found" }, { status: 404 });
     }
 
-    const tables = toTables(latestSnapshot.schemaJson);
-    const semanticLayer = buildSemanticLayer(tables);
-    const generatedMetricCount = await generateSemanticMetrics(prisma, {
-      workspaceId: session.workspace.id,
-      userId: session.user.id,
-      semanticLayer
-    });
-
-    await prisma.schemaSnapshot.update({
-      where: {
-        id: latestSnapshot.id
-      },
-      data: {
-        schemaJson: {
-          ...(asRecord(latestSnapshot.schemaJson) ?? {}),
-          semanticLayer
-        },
-        qualityReport: {
-          ...(asRecord(latestSnapshot.qualityReport) ?? {}),
-          semanticFieldCount: semanticLayer.fields.length,
-          businessEntityCount: semanticLayer.entities.length,
-          generatedMetricCount
-        }
-      }
-    });
-
     return NextResponse.json({
       ok: true,
-      generatedMetricCount,
-      semanticFieldCount: semanticLayer.fields.length,
-      businessEntityCount: semanticLayer.entities.length
+      generatedMetricCount: result.generatedMetricCount,
+      validationResults: result.validationResults,
+      semanticFieldCount: result.semanticLayer.fields.length,
+      businessEntityCount: result.semanticLayer.entities.length
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
@@ -256,6 +155,6 @@ export async function POST() {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to generate metrics" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to generate metrics");
   }
 }

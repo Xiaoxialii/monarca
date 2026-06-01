@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -141,6 +142,6 @@ export async function GET() {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to load data sources" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to load data sources");
   }
 }

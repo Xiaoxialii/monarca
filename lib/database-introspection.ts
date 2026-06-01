@@ -1,6 +1,7 @@
 import mariadb from "mariadb";
 import { Client as PostgresClient } from "pg";
 import type { SupportedDatabaseType } from "@/lib/database-connection-config";
+import { assertSafeDatabaseHost } from "@/lib/database-host-safety";
 
 export type DatabaseConnectionInput = {
   type: SupportedDatabaseType;
@@ -23,6 +24,8 @@ export type IntrospectedTable = {
 };
 
 export async function testDatabaseConnection(input: DatabaseConnectionInput) {
+  await assertSafeDatabaseHost(input.host);
+
   if (input.type === "mysql") {
     const connection = await mariadb.createConnection({
       host: input.host,
@@ -63,6 +66,8 @@ export async function testDatabaseConnection(input: DatabaseConnectionInput) {
 }
 
 export async function introspectDatabase(input: DatabaseConnectionInput): Promise<IntrospectedTable[]> {
+  await assertSafeDatabaseHost(input.host);
+
   if (input.type === "mysql") {
     const connection = await mariadb.createConnection({
       host: input.host,

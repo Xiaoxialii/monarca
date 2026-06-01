@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
+import { UsageActionType } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { checkUserEntitlement, consumeCredit, EntitlementError } from "@/lib/entitlements";
 
 export const dynamic = "force-dynamic";
+
+const MAX_CHAT_INPUT_CHARS = 12_000;
+const MAX_OUTPUT_TOKENS = 700;
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -70,6 +75,10 @@ function extractOutputText(payload: unknown) {
     .trim();
 }
 
+function estimateTokens(text: string) {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspace();
@@ -89,6 +98,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Send at least one user message" }, { status: 400 });
     }
 
+    const inputText = messages.map((message) => message.content).join("\n");
+
+    if (inputText.length > MAX_CHAT_INPUT_CHARS) {
+      return NextResponse.json(
+        { ok: false, message: "Message is too long. Please shorten it and try again." },
+        { status: 413 }
+      );
+    }
+
+    const estimatedMaxTokens = estimateTokens(inputText) + MAX_OUTPUT_TOKENS;
+    const entitlement = await checkUserEntitlement(session.user.id, UsageActionType.AI_FOLLOW_UP);
+
+    if (Number.isFinite(entitlement.remaining) && entitlement.remaining < estimatedMaxTokens) {
+      throw new EntitlementError("CREDIT_USED_UP", "AI 使用额度不足，请升级套餐或购买新额度。");
+    }
+
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -106,7 +131,7 @@ export async function POST(request: Request) {
           role: message.role,
           content: message.content
         })),
-        max_output_tokens: 700,
+        max_output_tokens: MAX_OUTPUT_TOKENS,
         user: session.user.clerkUserId
       })
     });
@@ -126,16 +151,42 @@ export async function POST(request: Request) {
     }
 
     const reply = extractOutputText(data);
+    const consumed = await consumeCredit({
+      userId: session.user.id,
+      actionType: UsageActionType.AI_FOLLOW_UP,
+      amount: estimateTokens(`${inputText}\n${reply}`),
+      metadata: {
+        workspaceId: session.workspace.id,
+        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini"
+      }
+    });
 
     return NextResponse.json({
       ok: true,
-      reply: reply || "I could not generate a reply. Please try again."
+      reply: reply || "I could not generate a reply. Please try again.",
+      entitlement: {
+        creditId: consumed.creditId,
+        remainingAiTokens: consumed.remaining
+      }
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
 
     if (authResponse) {
       return authResponse;
+    }
+
+    if (error instanceof EntitlementError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: error.code,
+          message: error.message,
+          upgradeUrl: "/checkout/professional",
+          oneTimeUrl: "/checkout/trial"
+        },
+        { status: error.status }
+      );
     }
 
     return NextResponse.json({ ok: false, message: "Failed to call ChatGPT" }, { status: 500 });

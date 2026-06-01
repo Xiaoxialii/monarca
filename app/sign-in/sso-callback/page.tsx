@@ -1,5 +1,5 @@
-import { SignInPanel } from "@/components/sign-in-panel";
+import { AuthenticateWithRedirectCallback } from "@clerk/nextjs";
 
 export default function SignInSsoCallbackPage() {
-  return <SignInPanel />;
+  return <AuthenticateWithRedirectCallback />;
 }

@@ -96,6 +96,49 @@ enum SubscriptionStatus {
   PENDING
 }
 
+enum PlanType {
+  ONE_TIME
+  MONTHLY
+}
+
+enum UserSubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PAYMENT_FAILED
+}
+
+enum UserCreditSourceType {
+  ONE_TIME_PURCHASE
+  MONTHLY_SUBSCRIPTION
+}
+
+enum UserCreditStatus {
+  ACTIVE
+  USED_UP
+  EXPIRED
+}
+
+enum PaymentOrderType {
+  ONE_TIME
+  MONTHLY
+}
+
+enum PaymentOrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum UsageActionType {
+  GENERATE_REPORT
+  AI_FOLLOW_UP
+  DATABASE_CONNECTION
+  EXPORT_REPORT
+  HUMAN_SERVICE
+}
+
 enum WorkspaceMemberStatus {
   ACTIVE
   INVITED
@@ -116,6 +159,10 @@ model User {
   maintainedMetrics MetricDefinition[] @relation("MetricMaintainer")
   assignedTickets  SupportTicket[]    @relation("TicketAssignee")
   submittedTickets SupportTicket[]   @relation("TicketSubmitter")
+  userSubscriptions UserSubscription[]
+  userCredits       UserCredit[]
+  paymentOrders     PaymentOrder[]
+  usageLogs         UsageLog[]
 }
 
 model Workspace {
@@ -292,6 +339,111 @@ model WorkspaceSubscription {
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, status])
+}
+
+model Plan {
+  id                      String        @id @default(cuid())
+  code                    String        @unique
+  name                    String
+  type                    PlanType
+  price                   Decimal       @db.Decimal(10, 2)
+  currency                String        @default("USD")
+  description             String
+  reportQuota             Int           @default(0)
+  aiTokenQuota            Int           @default(0)
+  databaseConnectionQuota Int           @default(0)
+  includesHumanService    Boolean       @default(false)
+  validDays               Int?
+  isActive                Boolean       @default(true)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  subscriptions           UserSubscription[]
+  credits                 UserCredit[]
+  orders                  PaymentOrder[]
+
+  @@index([type, isActive])
+}
+
+model UserSubscription {
+  id                     String                 @id @default(cuid())
+  userId                 String
+  planId                 String
+  status                 UserSubscriptionStatus @default(ACTIVE)
+  currentPeriodStart     DateTime
+  currentPeriodEnd       DateTime
+  cancelAtPeriodEnd      Boolean                @default(false)
+  paymentProvider        String?
+  providerSubscriptionId String?                 @unique
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   Plan                   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  credits                UserCredit[]
+
+  @@index([userId, status])
+  @@index([planId, status])
+}
+
+model UserCredit {
+  id                String               @id @default(cuid())
+  userId            String
+  planId            String
+  subscriptionId    String?
+  paymentOrderId    String?              @unique
+  sourceType        UserCreditSourceType
+  reportCreditsTotal Int                 @default(0)
+  reportCreditsUsed  Int                 @default(0)
+  aiTokenTotal      Int                  @default(0)
+  aiTokenUsed       Int                  @default(0)
+  validFrom         DateTime             @default(now())
+  validUntil        DateTime?
+  status            UserCreditStatus     @default(ACTIVE)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscription      UserSubscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  paymentOrder      PaymentOrder?        @relation(fields: [paymentOrderId], references: [id], onDelete: SetNull)
+  usageLogs         UsageLog[]
+
+  @@index([userId, status, validUntil])
+  @@index([planId, sourceType])
+}
+
+model PaymentOrder {
+  id                String             @id @default(cuid())
+  userId            String
+  planId            String
+  orderType         PaymentOrderType
+  amount            Decimal            @db.Decimal(10, 2)
+  currency          String             @default("USD")
+  status            PaymentOrderStatus @default(PENDING)
+  paymentProvider   String?
+  providerPaymentId String?            @unique
+  providerSessionId String?            @unique
+  createdAt         DateTime           @default(now())
+  paidAt            DateTime?
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  credit            UserCredit?
+
+  @@index([userId, status])
+  @@index([planId, orderType])
+}
+
+model UsageLog {
+  id          String          @id @default(cuid())
+  userId      String
+  actionType  UsageActionType
+  creditId    String?
+  usageAmount Int             @default(1)
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credit      UserCredit?     @relation(fields: [creditId], references: [id], onDelete: SetNull)
+
+  @@index([userId, actionType, createdAt])
+  @@index([creditId, createdAt])
 }
 
 model SupportTicket {

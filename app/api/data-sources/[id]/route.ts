@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 export async function DELETE(
   _request: Request,
@@ -43,6 +44,6 @@ export async function DELETE(
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to remove data source" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to remove data source");
   }
 }

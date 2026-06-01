@@ -6,7 +6,7 @@ function createWorkspaceSlug(clerkUserId: string) {
   return `workspace-${clerkUserId.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase()}`;
 }
 
-export async function syncCurrentClerkUser() {
+export async function syncCurrentClerkUser(options: { fallbackEmail?: string } = {}) {
   const { userId } = await auth();
 
   if (!userId) {
@@ -18,100 +18,74 @@ export async function syncCurrentClerkUser() {
 
   const email = clerkUser.emailAddresses.find(
     (item) => item.id === clerkUser.primaryEmailAddressId
-  )?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress;
+  )?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress ?? options.fallbackEmail?.trim().toLowerCase();
 
   if (!email) {
-    throw new Error("Signed-in Clerk user does not have an email address.");
+    throw new Error("SIGNED_IN_USER_EMAIL_REQUIRED");
   }
 
   const name = clerkUser.fullName ?? clerkUser.username ?? email.split("@")[0] ?? "New user";
   const avatarUrl = clerkUser.imageUrl || null;
 
-  return prisma.$transaction(async (tx) => {
-    const user = await tx.user.upsert({
-      where: { clerkUserId: clerkUser.id },
-      update: {
-        email,
-        name,
-        avatarUrl
-      },
-      create: {
-        clerkUserId: clerkUser.id,
-        email,
-        name,
-        avatarUrl
-      },
-      include: {
-        memberships: {
-          include: {
-            workspace: true
-          },
-          orderBy: [
-            { status: "asc" },
-            { joinedAt: "asc" },
-            { createdAt: "asc" }
-          ]
-        }
+  const user = await prisma.user.upsert({
+    where: { clerkUserId: clerkUser.id },
+    update: {
+      email,
+      name,
+      avatarUrl
+    },
+    create: {
+      clerkUserId: clerkUser.id,
+      email,
+      name,
+      avatarUrl
+    },
+    include: {
+      memberships: {
+        include: {
+          workspace: true
+        },
+        orderBy: [
+          { status: "asc" },
+          { joinedAt: "asc" },
+          { createdAt: "asc" }
+        ]
       }
-    });
-
-    const existingMembership = user.memberships.find(
-      (membership) => membership.status === WorkspaceMemberStatus.ACTIVE
-    ) ?? user.memberships[0];
-
-    if (existingMembership) {
-      return {
-        user,
-        workspace: existingMembership.workspace,
-        membership: existingMembership
-      };
     }
+  });
 
-    const pendingInvite = await tx.workspaceMember.findFirst({
-      where: {
-        invitedEmail: email,
-        status: WorkspaceMemberStatus.INVITED,
-        userId: null
-      },
-      include: {
-        workspace: true
-      },
-      orderBy: {
-        createdAt: "asc"
-      }
-    });
+  const existingMembership = user.memberships.find(
+    (membership) => membership.status === WorkspaceMemberStatus.ACTIVE
+  ) ?? user.memberships[0];
 
-    if (pendingInvite) {
-      const membership = await tx.workspaceMember.update({
-        where: { id: pendingInvite.id },
-        data: {
-          userId: user.id,
-          invitedEmail: null,
-          status: WorkspaceMemberStatus.ACTIVE,
-          joinedAt: new Date()
-        }
-      });
+  if (existingMembership) {
+    return {
+      user,
+      workspace: existingMembership.workspace,
+      membership: existingMembership
+    };
+  }
 
-      return {
-        user,
-        workspace: pendingInvite.workspace,
-        membership
-      };
+  const pendingInvite = await prisma.workspaceMember.findFirst({
+    where: {
+      invitedEmail: email,
+      status: WorkspaceMemberStatus.INVITED,
+      userId: null
+    },
+    include: {
+      workspace: true
+    },
+    orderBy: {
+      createdAt: "asc"
     }
+  });
 
-    const workspace = await tx.workspace.create({
+  if (pendingInvite) {
+    const membership = await prisma.workspaceMember.update({
+      where: { id: pendingInvite.id },
       data: {
-        name: `${name}'s Workspace`,
-        slug: createWorkspaceSlug(clerkUser.id),
-        ownerId: user.id
-      }
-    });
-
-    const membership = await tx.workspaceMember.create({
-      data: {
-        workspaceId: workspace.id,
         userId: user.id,
-        role: WorkspaceRole.OWNER,
+        invitedEmail: null,
         status: WorkspaceMemberStatus.ACTIVE,
         joinedAt: new Date()
       }
@@ -119,8 +93,32 @@ export async function syncCurrentClerkUser() {
 
     return {
       user,
-      workspace,
+      workspace: pendingInvite.workspace,
       membership
     };
+  }
+
+  const workspace = await prisma.workspace.create({
+    data: {
+      name: `${name}'s Workspace`,
+      slug: createWorkspaceSlug(clerkUser.id),
+      ownerId: user.id
+    }
   });
+
+  const membership = await prisma.workspaceMember.create({
+    data: {
+      workspaceId: workspace.id,
+      userId: user.id,
+      role: WorkspaceRole.OWNER,
+      status: WorkspaceMemberStatus.ACTIVE,
+      joinedAt: new Date()
+    }
+  });
+
+  return {
+    user,
+    workspace,
+    membership
+  };
 }

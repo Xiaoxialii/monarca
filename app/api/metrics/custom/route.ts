@@ -7,7 +7,9 @@ import {
 } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { tablesFromSchemaJson, validateWorkspaceMetrics, validationFromLineage } from "@/lib/metric-validation";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -43,6 +45,33 @@ function mappingLabel(sourceFields: unknown[]) {
   });
 
   return labels.length > 0 ? labels.join(" + ") : "User selected fields";
+}
+
+async function validateSavedMetric(workspaceId: string, metricId: string) {
+  const latestSnapshot = await prisma.schemaSnapshot.findFirst({
+    where: {
+      workspaceId
+    },
+    orderBy: {
+      version: "desc"
+    }
+  });
+
+  if (!latestSnapshot) {
+    return null;
+  }
+
+  await validateWorkspaceMetrics(prisma, {
+    workspaceId,
+    tables: tablesFromSchemaJson(latestSnapshot.schemaJson),
+    metricIds: [metricId]
+  });
+
+  return prisma.metricDefinition.findUnique({
+    where: {
+      id: metricId
+    }
+  });
 }
 
 export async function POST(request: Request) {
@@ -115,19 +144,23 @@ export async function POST(request: Request) {
       }
     });
 
+    const validatedMetric = await validateSavedMetric(session.workspace.id, metric.id);
+    const responseMetric = validatedMetric ?? metric;
+
     return NextResponse.json({
       ok: true,
       metric: {
-        id: metric.id,
-        layer: metric.layer,
-        category: metric.category,
-        metric: metric.name,
-        definition: metric.definition,
-        formula: metric.formula,
+        id: responseMetric.id,
+        layer: responseMetric.layer,
+        category: responseMetric.category,
+        metric: responseMetric.name,
+        definition: responseMetric.definition,
+        formula: responseMetric.formula,
         mapping: mappingLabel(sourceFields),
         status: session.user.name || session.user.email,
-        metricStatus: metric.status,
-        tags: Array.isArray(metric.tagsJson) ? metric.tagsJson : []
+        metricStatus: responseMetric.status,
+        tags: Array.isArray(responseMetric.tagsJson) ? responseMetric.tagsJson : [],
+        validation: validationFromLineage(responseMetric.lineageJson)
       }
     });
   } catch (error) {
@@ -137,6 +170,6 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to create metric" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to create metric");
   }
 }

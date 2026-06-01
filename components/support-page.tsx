@@ -126,11 +126,59 @@ const supportCopy: Record<
 export function SupportPage() {
   const [locale, , isLocaleReady] = useLocale("en");
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const copy = supportCopy[getCopyLocale(locale)];
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setIsSubmitted(true);
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    const formData = new FormData(event.currentTarget);
+
+    try {
+      const response = await fetch("/api/help-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          source: "support",
+          type: String(formData.get("type") || ""),
+          priority: String(formData.get("priority") || ""),
+          name: String(formData.get("name") || ""),
+          email: String(formData.get("email") || ""),
+          workspaceName: String(formData.get("workspaceName") || ""),
+          subject: String(formData.get("subject") || ""),
+          description: String(formData.get("description") || ""),
+          locale
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(
+          typeof data?.message === "string"
+            ? data.message
+            : getCopyLocale(locale) === "zh"
+              ? "工单提交失败，请稍后重试。"
+              : "Failed to submit ticket. Please try again."
+        );
+      }
+
+      setIsSubmitted(true);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : getCopyLocale(locale) === "zh"
+            ? "工单提交失败，请稍后重试。"
+            : "Failed to submit ticket. Please try again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!isLocaleReady) {
@@ -194,7 +242,7 @@ export function SupportPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.type}
-                        <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <select name="type" className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                           {copy.types.map((type) => (
                             <option key={type}>{type}</option>
                           ))}
@@ -202,7 +250,7 @@ export function SupportPage() {
                       </label>
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.priority}
-                        <select className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <select name="priority" className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                           {copy.priorities.map((priority) => (
                             <option key={priority}>{priority}</option>
                           ))}
@@ -213,22 +261,22 @@ export function SupportPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.name}
-                        <Input placeholder="Amy" />
+                        <Input name="name" placeholder="Amy" />
                       </label>
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.email}
-                        <Input type="email" placeholder="amy@example.com" />
+                        <Input name="email" type="email" placeholder="amy@example.com" />
                       </label>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.workspace}
-                        <Input placeholder={copy.brand} />
+                        <Input name="workspaceName" placeholder={copy.brand} />
                       </label>
                       <label className="grid gap-2 text-sm font-medium">
                         {copy.subject}
-                        <Input />
+                        <Input name="subject" />
                       </label>
                     </div>
 
@@ -236,13 +284,20 @@ export function SupportPage() {
                       {copy.description}
                       <textarea
                         className="min-h-36 rounded-md border bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        name="description"
                         placeholder={copy.descriptionPlaceholder}
                       />
                     </label>
 
-                    <Button className="mt-2 w-fit rounded-full px-5">
+                    {submitError ? (
+                      <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        {submitError}
+                      </p>
+                    ) : null}
+
+                    <Button className="mt-2 w-fit rounded-full px-5" disabled={isSubmitting}>
                       <Send className="size-4" />
-                      {copy.submit}
+                      {isSubmitting ? (getCopyLocale(locale) === "zh" ? "提交中..." : "Submitting...") : copy.submit}
                     </Button>
                   </form>
                 )}

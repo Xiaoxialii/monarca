@@ -7,13 +7,14 @@ import {
   Check,
   CreditCard,
   Database,
+  Loader2,
   Lock,
   ShieldCheck,
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { getCopyLocale, getHtmlLang, useLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
 export type PaymentPlan = "trial" | "database-setup" | "professional" | "enterprise";
+type CheckoutCurrency = "cny" | "usd";
 
 const planIcons = {
   trial: Sparkles,
@@ -48,28 +50,64 @@ const paymentCopy = {
     paymentSubtitle: "Confirm your billing information to start the plan",
     name: "Name",
     email: "Work email",
+    emailOptional: "Work email (optional)",
     company: "Company",
     card: "Card number",
     expiry: "Expiry",
     cvc: "CVC",
     notes: "Business context",
     notesPlaceholder: "Data sources, team size, current reporting flow",
+    redirecting: "Redirecting to Stripe...",
+    checkoutError: "Unable to start Stripe checkout. Please try again.",
+    contactError: "Unable to submit the request. Please try again.",
+    checkoutSuccessTitle: "Payment completed",
+    checkoutSuccessBody: "Stripe has confirmed your checkout. You can now continue to your workspace.",
+    checkoutCancelledTitle: "Checkout cancelled",
+    checkoutCancelledBody: "No payment was completed. You can review the plan and start checkout again.",
+    goDashboard: "Go to dashboard",
     dueToday: "Due today",
     nextStep: "Next step",
     protected: "Payment details are protected by encrypted checkout",
     secondary: "Back",
+    currency: "Currency",
+    currencies: {
+      cny: "CNY",
+      usd: "USD"
+    },
+    stripePrices: {
+      trial: {
+        cny: {
+          price: "¥99",
+          due: "¥99"
+        },
+        usd: {
+          price: "$20",
+          due: "$20"
+        }
+      },
+      professional: {
+        cny: {
+          price: "¥1,999",
+          due: "¥1,999"
+        },
+        usd: {
+          price: "$199",
+          due: "$199"
+        }
+      }
+    },
     plans: {
       trial: {
         badge: "One-time",
         name: "One-time Experience",
         subtitle: "Try one AI growth analysis session",
-        price: "$49",
+        price: "$20",
         cadence: "",
         description:
           "For teams that want to experience the AI growth analysis workflow before subscribing",
-        due: "$49",
+        due: "$20",
         primary: "Start experience",
-        next: "After checkout, your workspace opens with a guided demo flow",
+        next: "After checkout, your workspace opens with a guided setup flow",
         features: [
           "One guided growth analysis experience",
           "Sample metrics and report workflow",
@@ -80,7 +118,7 @@ const paymentCopy = {
         badge: "Consulting",
         name: "Database Setup",
         subtitle: "Build the data foundation",
-        price: "$499+",
+        price: "$200+",
         cadence: "",
         description:
           "For teams that need a clean business database before analytics automation starts",
@@ -97,11 +135,11 @@ const paymentCopy = {
         badge: "Recommended",
         name: "Professional",
         subtitle: "Report automation + data analysis + decision support",
-        price: "$499",
+        price: "$199",
         cadence: "/ month",
         description:
           "For teams ready to automate growth reporting and use AI to explain metric movement",
-        due: "$499",
+        due: "$199",
         primary: "Confirm subscription",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
@@ -143,25 +181,61 @@ const paymentCopy = {
     paymentSubtitle: "填写信息后即可开始方案",
     name: "姓名",
     email: "工作邮箱",
+    emailOptional: "工作邮箱（选填）",
     company: "公司",
     card: "银行卡号",
     expiry: "有效期",
     cvc: "CVC",
     notes: "业务背景",
     notesPlaceholder: "数据源、团队规模、当前报表流程",
+    redirecting: "正在跳转到 Stripe...",
+    checkoutError: "暂时无法发起 Stripe 付款，请稍后重试。",
+    contactError: "暂时无法提交咨询，请稍后重试。",
+    checkoutSuccessTitle: "付款已完成",
+    checkoutSuccessBody: "Stripe 已确认本次结算。现在可以进入工作区继续使用。",
+    checkoutCancelledTitle: "付款已取消",
+    checkoutCancelledBody: "本次没有完成付款。你可以确认套餐后重新发起结算。",
+    goDashboard: "进入工作区",
     dueToday: "今日应付",
     nextStep: "下一步",
     protected: "支付信息通过加密结算保护",
     secondary: "返回",
+    currency: "币种",
+    currencies: {
+      cny: "人民币",
+      usd: "美元"
+    },
+    stripePrices: {
+      trial: {
+        cny: {
+          price: "¥99",
+          due: "¥99"
+        },
+        usd: {
+          price: "$20",
+          due: "$20"
+        }
+      },
+      professional: {
+        cny: {
+          price: "¥1,999",
+          due: "¥1,999"
+        },
+        usd: {
+          price: "$199",
+          due: "$199"
+        }
+      }
+    },
     plans: {
       trial: {
         badge: "单次体验",
         name: "单次体验",
         subtitle: "体验一次 AI 增长分析流程",
-        price: "¥200",
+        price: "¥99",
         cadence: "",
         description: "适合在订阅前，先体验一次 AI 增长分析工作流的团队",
-        due: "¥200",
+        due: "¥99",
         primary: "开始体验",
         next: "结算后进入工作区，并开启引导式演示流程",
         features: [
@@ -190,10 +264,10 @@ const paymentCopy = {
         badge: "推荐",
         name: "专业版",
         subtitle: "报告自动化 + 数据分析 + 决策辅助",
-        price: "¥2,000",
+        price: "¥1,999",
         cadence: "/ 月",
         description: "适合希望自动生成增长报告，并用 AI 解释指标变化的团队",
-        due: "¥2,000",
+        due: "¥1,999",
         primary: "确认订阅",
         next: "结算后进入工作区，然后连接数据源",
         features: [
@@ -234,19 +308,110 @@ function PlanBadge({ children }: { children: React.ReactNode }) {
 export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
   const [fromHome, setFromHome] = useState(false);
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [email, setEmail] = useState("");
+  const [notes, setNotes] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checkoutMessage, setCheckoutMessage] = useState("");
+  const [checkoutStatus, setCheckoutStatus] = useState<"success" | "cancelled" | null>(null);
   const [locale] = useLocale("en");
+  const [checkoutCurrency, setCheckoutCurrency] = useState<CheckoutCurrency>("cny");
   const router = useRouter();
   const copy = paymentCopy[getCopyLocale(locale)];
   useEffect(() => {
-    const from = new URLSearchParams(window.location.search).get("from");
+    const searchParams = new URLSearchParams(window.location.search);
+    const from = searchParams.get("from");
+    const checkout = searchParams.get("checkout");
+    const message = searchParams.get("message");
+
     setFromHome(from === "home");
+    setCheckoutStatus(checkout === "success" || checkout === "cancelled" ? checkout : null);
+    setCheckoutMessage(checkout === "error" && message ? message : "");
   }, []);
+  useEffect(() => {
+    setCheckoutCurrency(getCopyLocale(locale) === "zh" ? "cny" : "usd");
+  }, [locale]);
 
   const backLabel =
     getCopyLocale(locale) === "zh" ? "返回" : "Back";
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
-  const isProfessional = selectedPlan === "professional";
+  const hasCurrencyPrice = selectedPlan === "trial" || selectedPlan === "professional";
+  const usesStripe = selectedPlan !== "enterprise";
+  const selectedCurrencyPrice = hasCurrencyPrice
+    ? copy.stripePrices[selectedPlan][checkoutCurrency]
+    : null;
+  const selectedPrice = selectedCurrencyPrice?.price ?? selected.price;
+  const selectedDue = selectedCurrencyPrice?.due ?? selected.due;
+
+  const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCheckoutMessage("");
+
+    if (!usesStripe) {
+      setIsSubmitting(true);
+
+      try {
+        const response = await fetch("/api/help-requests", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            source: "checkout",
+            plan: selectedPlan,
+            name,
+            company,
+            email,
+            notes,
+            locale
+          })
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok || !data?.ok) {
+          throw new Error(typeof data?.message === "string" ? data.message : copy.contactError);
+        }
+
+        setCheckoutMessage(selected.next);
+      } catch (error) {
+        setCheckoutMessage(error instanceof Error ? error.message : copy.contactError);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          plan: selectedPlan,
+          currency: checkoutCurrency,
+          name,
+          company,
+          email,
+          notes
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.url) {
+        throw new Error(typeof data?.message === "string" ? data.message : copy.checkoutError);
+      }
+
+      window.location.href = data.url;
+    } catch (error) {
+      setCheckoutMessage(error instanceof Error ? error.message : copy.checkoutError);
+      setIsSubmitting(false);
+    }
+  };
 
   const handleGoBack = () => {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -259,7 +424,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   return (
     <main
       lang={getHtmlLang(locale)}
-      className="min-h-screen bg-[linear-gradient(180deg,#ffffff_0%,#eef8f2_48%,#ffffff_100%)] text-slate-950"
+      className="relative isolate z-30 min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,#ffffff_0%,#eef8f2_48%,#ffffff_100%)] text-slate-950"
     >
       <header className="border-b border-slate-200/70 bg-white/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
@@ -273,7 +438,53 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
         </nav>
       </header>
 
-      <section className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
+      <section className="relative z-10 mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
+        {checkoutStatus ? (
+          <Card
+            className={cn(
+              "mb-5 overflow-hidden rounded-[24px] border bg-white shadow-[0_14px_50px_rgba(15,23,42,0.06)]",
+              checkoutStatus === "success" ? "border-emerald-200" : "border-amber-200"
+            )}
+          >
+            <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div className="flex gap-4">
+                <div
+                  className={cn(
+                    "grid size-11 shrink-0 place-items-center rounded-full",
+                    checkoutStatus === "success"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  )}
+                >
+                  <Check className="size-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    {checkoutStatus === "success"
+                      ? copy.checkoutSuccessTitle
+                      : copy.checkoutCancelledTitle}
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {checkoutStatus === "success"
+                      ? copy.checkoutSuccessBody
+                      : copy.checkoutCancelledBody}
+                  </p>
+                </div>
+              </div>
+              {checkoutStatus === "success" ? (
+                <Button
+                  type="button"
+                  className="h-10 shrink-0 rounded-full bg-slate-950 text-white hover:bg-slate-800"
+                  onClick={() => router.push("/dashboard")}
+                >
+                  {copy.goDashboard}
+                  <ArrowRight />
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card className="mb-5 overflow-hidden rounded-[28px] border-slate-200/80 bg-white/88 shadow-[0_18px_70px_rgba(15,23,42,0.08)] backdrop-blur">
           <CardContent className="p-5 sm:p-6">
             <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -292,6 +503,10 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                 const planCopy = copy.plans[planId];
                 const PlanIcon = planIcons[planId];
                 const isSelected = selectedPlan === planId;
+                const planPrice =
+                  planId === "trial" || planId === "professional"
+                    ? copy.stripePrices[planId][checkoutCurrency].price
+                    : planCopy.price;
 
                 return (
                   <button
@@ -325,7 +540,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                     </p>
                     <div className="mt-4 flex items-end gap-1">
                       <span className="text-2xl font-semibold text-slate-950">
-                        {planCopy.price}
+                        {planPrice}
                       </span>
                       {planCopy.cadence ? (
                         <span className="pb-0.5 text-xs font-medium text-slate-500">
@@ -377,8 +592,8 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
           </CardContent>
         </Card>
 
-        <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-        <Card className="overflow-hidden rounded-[32px] border-emerald-200 bg-gradient-to-br from-white via-emerald-50/80 to-white shadow-[0_24px_90px_rgba(4,120,87,0.12)]">
+        <div className="relative z-10 grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
+        <Card className="relative z-10 overflow-hidden rounded-[32px] border-emerald-200 bg-gradient-to-br from-white via-emerald-50/80 to-white shadow-[0_24px_90px_rgba(4,120,87,0.12)]">
           <CardContent className="p-6 sm:p-8">
             <div className="mb-8 flex items-start justify-between gap-4">
               <div className="grid size-14 place-items-center rounded-2xl bg-emerald-100 text-emerald-800">
@@ -393,7 +608,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             <p className="mt-3 text-base font-medium text-slate-500">{selected.subtitle}</p>
             <div className="mt-8 flex items-end gap-1">
               <span className="text-5xl font-semibold tracking-normal text-slate-950">
-                {selected.price}
+                {selectedPrice}
               </span>
               {selected.cadence ? (
                 <span className="pb-1 text-sm font-medium text-slate-500">{selected.cadence}</span>
@@ -412,15 +627,21 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden rounded-[32px] border-slate-200/80 bg-white/88 shadow-[0_24px_90px_rgba(15,23,42,0.08)] backdrop-blur">
+        <Card className="relative z-20 overflow-hidden rounded-[32px] border-slate-200/80 bg-white/95 shadow-[0_24px_90px_rgba(15,23,42,0.08)] backdrop-blur">
+          <form
+            action={usesStripe ? "/api/stripe/checkout" : undefined}
+            method={usesStripe ? "GET" : undefined}
+            onSubmit={handleCheckout}
+          >
+          <input type="hidden" name="plan" value={selectedPlan} />
           <CardHeader className="border-b p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <CardTitle className="text-xl">
-                  {isProfessional ? copy.formTitle : copy.contactTitle}
+                  {usesStripe ? copy.formTitle : copy.contactTitle}
                 </CardTitle>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  {isProfessional ? copy.paymentSubtitle : copy.contactSubtitle}
+                  {usesStripe ? copy.paymentSubtitle : copy.contactSubtitle}
                 </p>
               </div>
             </div>
@@ -429,38 +650,74 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-slate-500">{copy.name}</span>
-                <Input />
+                <Input
+                  name="name"
+                  autoComplete="name"
+                  className="h-12 bg-white"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-slate-500">{copy.company}</span>
-                <Input />
+                <Input
+                  name="organization"
+                  autoComplete="organization"
+                  className="h-12 bg-white"
+                  value={company}
+                  onChange={(event) => setCompany(event.target.value)}
+                />
               </label>
               <label className="space-y-1.5 sm:col-span-2">
-                <span className="text-xs font-medium text-slate-500">{copy.email}</span>
-                <Input type="email" />
+                <span className="text-xs font-medium text-slate-500">
+                  {usesStripe ? copy.emailOptional : copy.email}
+                </span>
+                <Input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  className="h-12 bg-white"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
               </label>
             </div>
 
-            {isProfessional ? (
-              <div className="mt-5 rounded-2xl border bg-slate-50/70 p-4">
-                <div className="mb-3 flex items-center gap-2">
+            {usesStripe ? (
+              <div className="mt-5 space-y-4 rounded-2xl border bg-slate-50/70 p-4">
+                {hasCurrencyPrice ? (
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-slate-500">{copy.currency}</p>
+                    <div className="relative z-10 grid grid-cols-2 gap-2 rounded-full bg-slate-200/70 p-1">
+                      {(["cny", "usd"] as const).map((currency) => (
+                        <label
+                          key={currency}
+                          className={cn(
+                            "flex h-9 cursor-pointer items-center justify-center rounded-full text-sm font-semibold transition",
+                            checkoutCurrency === currency
+                              ? "bg-white text-slate-950 shadow-sm"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="currency"
+                            value={currency}
+                            checked={checkoutCurrency === currency}
+                            onChange={() => setCheckoutCurrency(currency)}
+                            className="sr-only"
+                          />
+                          {copy.currencies[currency]}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex items-center gap-2">
                   <CreditCard className="size-4 text-emerald-700" />
-                  <p className="text-sm font-semibold">{copy.formTitle}</p>
+                  <p className="text-sm font-semibold">{copy.secure}</p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1.5 sm:col-span-2">
-                    <span className="text-xs font-medium text-slate-500">{copy.card}</span>
-                    <Input placeholder="4242 4242 4242 4242" />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-500">{copy.expiry}</span>
-                    <Input placeholder="MM / YY" />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-500">{copy.cvc}</span>
-                    <Input placeholder="123" />
-                  </label>
-                </div>
+                <p className="text-sm leading-6 text-slate-600">{copy.protected}</p>
               </div>
             ) : (
               <label className="mt-5 block space-y-1.5">
@@ -468,6 +725,8 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                 <textarea
                   className="min-h-[128px] w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm outline-none transition focus:ring-2 focus:ring-ring"
                   placeholder={copy.notesPlaceholder}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
                 />
               </label>
             )}
@@ -475,22 +734,38 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             <div className="mt-5 rounded-2xl border bg-emerald-50/60 p-4">
               <div className="flex items-center justify-between gap-4 border-b border-emerald-100 pb-3">
                 <span className="text-sm font-medium text-slate-600">{copy.dueToday}</span>
-                <span className="text-lg font-semibold text-slate-950">{selected.due}</span>
+                <span className="text-lg font-semibold text-slate-950">{selectedDue}</span>
               </div>
               <div className="mt-3 flex gap-3 text-sm leading-6 text-slate-600">
                 <Lock className="mt-1 size-4 shrink-0 text-emerald-700" />
-                <span>{isProfessional ? copy.protected : selected.next}</span>
+                <span>{usesStripe ? copy.protected : selected.next}</span>
               </div>
             </div>
 
-            <Button className="mt-5 h-11 w-full rounded-full bg-slate-950 text-white hover:bg-slate-800">
-              {selected.primary}
-              <ArrowRight />
+            {checkoutMessage ? (
+              <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                {checkoutMessage}
+              </p>
+            ) : null}
+
+            <Button
+              type="submit"
+              className="relative z-10 mt-5 h-12 w-full cursor-pointer rounded-full bg-slate-950 text-white hover:bg-slate-800"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? copy.redirecting : selected.primary}
+              {isSubmitting ? <Loader2 className="animate-spin" /> : <ArrowRight />}
             </Button>
-            <Button variant="outline" className="mt-3 h-11 w-full rounded-full" onClick={handleGoBack}>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3 h-11 w-full rounded-full"
+              onClick={handleGoBack}
+            >
               {copy.secondary}
             </Button>
           </CardContent>
+          </form>
         </Card>
         </div>
       </section>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 type SelectedField = {
   key: string;
@@ -30,8 +31,17 @@ function asField(value: unknown): SelectedField | null {
   };
 }
 
+function safeIdentifier(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || "field";
+}
+
 function qualifiedField(field: SelectedField) {
-  return `${field.schema ? `${field.schema}.` : ""}${field.table}.${field.name}`;
+  return `${field.schema ? `${field.schema}.` : ""}${field.table}.${safeIdentifier(field.name)}`;
 }
 
 function isNumericField(field: SelectedField) {
@@ -75,7 +85,7 @@ function makeSuggestions(fields: SelectedField[]) {
       category: "Classification",
       layer: "DRIVER",
       definition: `Measure the share of records matching a target ${labelField.name} value`,
-      formula: `COUNT_IF(${qualifiedField(labelField)} = target) / COUNT(${qualifiedField(labelField)})`,
+      formula: `SAFE_DIVIDE(COUNT_IF(${qualifiedField(labelField)} = target), COUNT_NON_EMPTY(${qualifiedField(labelField)}))`,
       optimization: "适合把分类字段变成可监控比例，例如正向情绪占比、成功状态占比或重点类别占比",
       tags: ["AI Suggested", "Rate"],
       sourceFields: [labelField]
@@ -90,7 +100,7 @@ function makeSuggestions(fields: SelectedField[]) {
       category: "Volume",
       layer: "PRIMARY",
       definition: `Count records based on ${field.name}`,
-      formula: `COUNT(${qualifiedField(field)})`,
+      formula: `COUNT_NON_EMPTY(${qualifiedField(field)})`,
       optimization: "适合作为基础业务量指标，用于判断数据规模、活跃度或反馈量变化",
       tags: ["AI Suggested", "Volume"],
       sourceFields: [field]
@@ -140,6 +150,6 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to generate metric suggestions" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to generate metric suggestions");
   }
 }

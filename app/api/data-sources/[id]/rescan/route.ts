@@ -3,8 +3,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveDatabaseConfig, type SupportedDatabaseType } from "@/lib/database-connection-config";
 import { introspectDatabase } from "@/lib/database-introspection";
-import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { storedSecret } from "@/lib/secret-crypto";
 
 export const runtime = "nodejs";
 
@@ -67,7 +69,7 @@ export async function POST(
       port: savedConfig?.port,
       database: savedConfig?.database,
       username: savedConfig?.username,
-      password: savedConfig?.password,
+      password: storedSecret(savedConfig?.password, savedConfig?.passwordEncrypted),
       ssl: savedConfig?.ssl
     });
 
@@ -130,13 +132,12 @@ export async function POST(
         }
       });
 
-      const generatedMetricCount = await generateSemanticMetrics(tx, {
+      const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(tx, {
         workspaceId: session.workspace.id,
-        userId: session.user.id,
-        semanticLayer
+        userId: session.user.id
       });
 
-      return { updatedSource, schemaSnapshot, generatedMetricCount };
+      return { updatedSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };
     });
 
     return NextResponse.json({

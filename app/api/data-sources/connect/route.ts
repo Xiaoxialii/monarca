@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
+import { ConnectionStatus, DataSourceType, UsageActionType, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { checkUserEntitlement, consumeCredit, EntitlementError } from "@/lib/entitlements";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import {
   normalizeDatabaseType,
@@ -8,7 +9,11 @@ import {
   resolveDatabaseConfig
 } from "@/lib/database-connection-config";
 import { introspectDatabase, testDatabaseConnection } from "@/lib/database-introspection";
-import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
+import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { encryptSecret } from "@/lib/secret-crypto";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 export const runtime = "nodejs";
 
@@ -23,6 +28,7 @@ function toDataSourceType(type: "mysql" | "postgresql") {
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await checkUserEntitlement(session.user.id, UsageActionType.DATABASE_CONNECTION);
     const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const type = normalizeDatabaseType(payload?.type);
 
@@ -44,6 +50,7 @@ export async function POST(request: Request) {
     const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
     const publicConfig = publicDatabaseConfig(config);
     const semanticLayer = buildSemanticLayer(tables);
+    const analysisReport = generateUniversalDataAnalysisReport(tables);
 
     const result = await prisma.$transaction(async (tx) => {
       const dataSource = await tx.dataSourceConnection.create({
@@ -58,12 +65,14 @@ export async function POST(request: Request) {
           config: {
             ...publicConfig,
             username: config.username,
-            password: config.password
+            passwordEncrypted: encryptSecret(config.password),
+            passwordStored: Boolean(config.password)
           },
           schemas: {
             scannedAt: new Date().toISOString(),
             tables,
-            semanticLayer
+            semanticLayer,
+            analysisReport
           },
           connectedAt: new Date(),
           lastSyncAt: new Date()
@@ -92,25 +101,38 @@ export async function POST(request: Request) {
             sourceId: dataSource.id,
             scannedAt: new Date().toISOString(),
             tables,
-            semanticLayer
+            semanticLayer,
+            analysisReport
           },
           qualityReport: {
             tableCount: tables.length,
             columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
             semanticFieldCount: semanticLayer.fields.length,
             businessEntityCount: semanticLayer.entities.length,
-            generatedMetricCount: semanticLayer.metrics.length
+            generatedMetricCount: semanticLayer.metrics.length,
+            analysisReport
           }
         }
       });
 
-      const generatedMetricCount = await generateSemanticMetrics(tx, {
+      const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(tx, {
         workspaceId: session.workspace.id,
-        userId: session.user.id,
-        semanticLayer
+        userId: session.user.id
       });
 
-      return { dataSource, schemaSnapshot, generatedMetricCount };
+      return { dataSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };
+    });
+
+    await consumeCredit({
+      userId: session.user.id,
+      actionType: UsageActionType.DATABASE_CONNECTION,
+      amount: 1,
+      metadata: {
+        workspaceId: session.workspace.id,
+        dataSourceId: result.dataSource.id,
+        sourceType: result.dataSource.type,
+        provider: result.dataSource.provider
+      }
     });
 
     return NextResponse.json({
@@ -129,7 +151,8 @@ export async function POST(request: Request) {
           columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
           scannedAt: new Date().toISOString(),
           tables,
-          semanticLayer
+          semanticLayer,
+          analysisReport
         },
         connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null
@@ -141,7 +164,8 @@ export async function POST(request: Request) {
         columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
-        generatedMetricCount: result.generatedMetricCount
+        generatedMetricCount: result.generatedMetricCount,
+        analysisReport
       }
     });
   } catch (error) {
@@ -151,12 +175,19 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    return NextResponse.json(
-      {
-        ok: false,
-        message: error instanceof Error ? error.message : "Connection import failed"
-      },
-      { status: 400 }
-    );
+    if (error instanceof EntitlementError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: error.code,
+          message: error.message,
+          upgradeUrl: "/checkout/professional",
+          oneTimeUrl: "/checkout/trial"
+        },
+        { status: error.status }
+      );
+    }
+
+    return apiErrorResponse(error, "Connection import failed");
   }
 }

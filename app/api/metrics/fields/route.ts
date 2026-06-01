@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -66,6 +67,6 @@ export async function GET() {
       return authResponse;
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to load schema fields" }, { status: 400 });
+    return apiErrorResponse(error, "Failed to load schema fields");
   }
 }

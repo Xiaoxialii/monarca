@@ -7,6 +7,7 @@ import {
   resolveDatabaseConfig
 } from "@/lib/database-connection-config";
 import { testDatabaseConnection } from "@/lib/database-introspection";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 export const runtime = "nodejs";
 
@@ -48,12 +49,6 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    return NextResponse.json(
-      {
-        ok: false,
-        message: error instanceof Error ? error.message : "Connection failed"
-      },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, "Connection failed");
   }
 }

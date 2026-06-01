@@ -1,9 +1,10 @@
 "use client";
 
-import { SignUp } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Eye } from "lucide-react";
+import { useSignUp } from "@clerk/nextjs/legacy";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,39 +16,111 @@ const signUpCopy = {
     help: "Help",
     privacy: "Privacy",
     terms: "Terms",
-    firstName: "First name",
-    lastName: "Last name",
-    username: "Username",
-    usernameHelp: "You can use letters, numbers, and periods",
-    password: "Password",
-    confirm: "Confirm",
+    emailCodeMode: "Email",
+    passwordMode: "Username",
+    emailLabel: "Email",
+    usernameLabel: "Username",
+    passwordLabel: "Password",
+    confirmPasswordLabel: "Confirm password",
     showPassword: "Show password",
-    passwordHelp: "Use 8 or more characters with a mix of letters, numbers, and symbols",
-    signInInstead: "Sign in instead",
+    hidePassword: "Hide password",
+    emailPlaceholder: "you@example.com",
+    usernamePlaceholder: "Choose a username",
+    passwordPlaceholder: "At least 8 characters",
+    confirmPasswordPlaceholder: "Enter password again",
+    codeLabel: "Verification code",
+    codePlaceholder: "Enter code",
+    emailCodeIntro: "We will send a one-time verification code to your email. No password is required.",
+    passwordIntro: "Create an account with only a username and password. No email is required.",
+    continueWithGoogle: "Continue with Google",
+    divider: "or",
+    sendEmailCode: "Send email code",
+    sendingEmailCode: "Sending...",
+    createWithPassword: "Create with username",
+    creatingWithPassword: "Creating...",
+    createWithCode: "Create account",
+    creatingWithCode: "Creating...",
+    resendCode: "Resend code",
+    changeIdentifier: "Edit account details",
+    sentCode: "Code sent to",
+    missingEmail: "Enter your email.",
+    missingUsername: "Enter your username.",
+    invalidUsernameLength: "Username must be between 4 and 64 characters long.",
+    missingPassword: "Enter your password.",
+    shortPassword: "Password must be at least 8 characters.",
+    passwordMismatch: "Passwords do not match.",
+    missingCode: "Enter the verification code.",
+    codeUnavailable: "Email verification code sign-up is not enabled. Check the Clerk sign-up settings.",
+    passwordUnavailable: "Username and password sign-up is not enabled. Enable username sign-up in Clerk, then try again.",
+    incompleteSignUp: "The code was verified, but Clerk still requires: {fields}. Make these fields optional in Clerk, or add them to this sign-up form.",
+    passwordIncompleteSignUp: "Clerk still requires: {fields}. Make email optional in Clerk to support username-only sign-up, or switch this form back to email + password.",
+    pendingVerification: "The code was accepted, but Clerk still needs verification for: {fields}.",
+    passwordPendingVerification: "Clerk still needs verification for: {fields}. Check the username/password sign-up settings in Clerk.",
+    incompleteStatus: "The code was accepted, but sign-up is not complete yet. Clerk status: {status}.",
+    passwordIncompleteStatus: "Sign-up is not complete yet. Clerk status: {status}.",
+    googleUnavailable: "Google sign-up is not available right now.",
+    signInPrompt: "Already have an account?",
+    signInInstead: "Sign in",
     next: "Next",
     brand: "Monarca AI",
-    title: "Create your account",
+    title: "Start automatically analyzing your business data",
     description:
-      "Start using Monarca AI to connect data, forecast growth, and ask questions across your business"
+      "Connect databases, Excel, and business systems to automatically generate operating briefs, growth insights, and action recommendations."
   },
   zh: {
     language: "中文（简体）",
     help: "帮助",
     privacy: "隐私",
     terms: "条款",
-    firstName: "名",
-    lastName: "姓",
-    username: "用户名",
-    usernameHelp: "你可以使用字母、数字和句点",
-    password: "密码",
-    confirm: "确认密码",
+    emailCodeMode: "邮箱",
+    passwordMode: "用户名密码",
+    emailLabel: "邮箱",
+    usernameLabel: "用户名",
+    passwordLabel: "密码",
+    confirmPasswordLabel: "确认密码",
     showPassword: "显示密码",
-    passwordHelp: "请使用 8 个或更多字符，并混合字母、数字和符号",
-    signInInstead: "改为登录",
+    hidePassword: "隐藏密码",
+    emailPlaceholder: "you@example.com",
+    usernamePlaceholder: "请输入用户名",
+    passwordPlaceholder: "至少 8 位",
+    confirmPasswordPlaceholder: "请再次输入密码",
+    codeLabel: "验证码",
+    codePlaceholder: "请输入验证码",
+    emailCodeIntro: "我们会向你的邮箱发送一次性验证码，不需要设置密码。",
+    passwordIntro: "只使用用户名和密码创建账号，不需要输入邮箱。",
+    continueWithGoogle: "Continue with Google",
+    divider: "或",
+    sendEmailCode: "发送邮箱验证码",
+    sendingEmailCode: "发送中...",
+    createWithPassword: "使用用户名创建账号",
+    creatingWithPassword: "创建中...",
+    createWithCode: "创建账号",
+    creatingWithCode: "创建中...",
+    resendCode: "重新发送",
+    changeIdentifier: "修改注册信息",
+    sentCode: "验证码已发送至",
+    missingEmail: "请输入邮箱。",
+    missingUsername: "请输入用户名。",
+    invalidUsernameLength: "用户名长度需要在 4 到 64 个字符之间。",
+    missingPassword: "请输入密码。",
+    shortPassword: "密码至少需要 8 位。",
+    passwordMismatch: "两次输入的密码不一致。",
+    missingCode: "请输入验证码。",
+    codeUnavailable: "当前未启用邮箱验证码注册，请检查 Clerk 注册设置。",
+    passwordUnavailable: "当前 Clerk 后台没有开启用户名注册，请先在 Clerk 注册设置中启用 username。",
+    incompleteSignUp: "验证码已通过，但 Clerk 注册还缺必填项：{fields}。请在 Clerk Dashboard 把这些字段改为 optional，或把注册页补上对应字段。",
+    passwordIncompleteSignUp: "Clerk 注册还缺必填项：{fields}。如果要支持只用用户名和密码注册，请在 Clerk 后台把邮箱改为 optional；否则需要把注册页改回邮箱 + 密码。",
+    pendingVerification: "验证码已通过，但 Clerk 还要求继续验证：{fields}。",
+    passwordPendingVerification: "Clerk 还要求继续验证：{fields}。请检查 Clerk 后台的用户名密码注册设置。",
+    incompleteStatus: "验证码已通过，但注册还没有完成。Clerk 当前状态：{status}。",
+    passwordIncompleteStatus: "注册还没有完成。Clerk 当前状态：{status}。",
+    googleUnavailable: "当前无法使用 Google 注册。",
+    signInPrompt: "已有账号？",
+    signInInstead: "登录",
     next: "下一步",
     brand: "蝴蝶效应",
-    title: "创建你的账号",
-    description: "开始使用蝴蝶效应连接数据、预测增长，并向业务数据提问"
+    title: "开始自动分析你的业务数据",
+    description: "连接数据库、Excel 和业务系统，自动生成经营简报、增长洞察和行动建议。"
   }
 } as const;
 
@@ -55,22 +128,42 @@ type SignUpCopy = (typeof signUpCopy)[CopyLocale];
 
 export function SignUpPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  const [locale] = useLocale("en");
+  const [locale, setLocale] = useLocale("en");
   const copy = signUpCopy[getCopyLocale(locale)];
 
   return (
-    <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col bg-[#f8fafd] px-4 py-6 sm:px-6">
+    <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#f7f8fa] px-5 py-5 sm:px-8">
+      <header className="mx-auto flex w-full max-w-[1080px] justify-end px-1">
+        <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white/80 p-1 text-sm text-slate-500">
+          <button
+            type="button"
+            onClick={() => setLocale("zh")}
+            className={`rounded px-2.5 py-1 transition ${
+              locale === "zh" ? "bg-slate-100 text-slate-950" : "hover:text-slate-900"
+            }`}
+          >
+            中文
+          </button>
+          <span className="text-slate-300">/</span>
+          <button
+            type="button"
+            onClick={() => setLocale("en")}
+            className={`rounded px-2.5 py-1 transition ${
+              locale !== "zh" ? "bg-slate-100 text-slate-950" : "hover:text-slate-900"
+            }`}
+          >
+            EN
+          </button>
+        </div>
+      </header>
+
       <div className="flex flex-1 items-center justify-center">
-        <section className="w-full max-w-[1040px] rounded-[28px] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_20px_70px_rgba(16,24,40,0.08)] sm:p-10 lg:p-12">
-          {clerkKey ? <ClerkSignUp copy={copy} /> : <DemoSignUp copy={copy} />}
+        <section className="mx-auto w-full max-w-[1080px] overflow-hidden px-1 py-6 sm:px-4 lg:py-8">
+          {clerkKey ? <ClerkSignUp copy={copy} /> : <FallbackSignUp copy={copy} />}
         </section>
       </div>
 
-      <footer className="mx-auto mt-6 flex w-full max-w-[1040px] flex-col gap-4 px-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-        <button className="flex w-fit items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-white">
-          {copy.language}
-          <ChevronDown className="size-3" />
-        </button>
+      <footer className="mx-auto mt-4 flex w-full max-w-[1080px] justify-center px-2 text-xs text-muted-foreground sm:justify-end">
         <div className="flex gap-5">
           <Link href="/" className="hover:text-foreground">
             {copy.help}
@@ -89,118 +182,488 @@ export function SignUpPanel() {
 
 function ClerkSignUp({ copy }: { copy: SignUpCopy }) {
   return (
-    <div className="grid min-h-[560px] gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
+    <div className="grid min-h-[560px] grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(300px,380px)_minmax(420px,480px)] lg:items-center lg:justify-center lg:gap-14">
       <AccountBrand copy={copy} />
-      <div className="flex min-h-[460px] items-start justify-center pt-12 lg:pt-16">
-        <SignUp
-          routing="path"
-          path="/sign-up"
-          fallbackRedirectUrl="/dashboard"
-          forceRedirectUrl="/dashboard"
-          appearance={{
-            elements: {
-              rootBox: "w-full max-w-[520px]",
-              cardBox: "w-full shadow-none border-0",
-              card: "w-full shadow-none p-0",
-              header: "hidden",
-              socialButtonsBlockButton:
-                "h-14 rounded-full border border-slate-400 bg-white text-base font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(15,23,42,0.12),0_1px_2px_rgba(15,23,42,0.12)] hover:bg-slate-50",
-              socialButtonsBlockButtonText: "text-base font-medium",
-              socialButtonsProviderIcon: "size-6",
-              formFieldInput: "h-14 rounded-md border-border text-base",
-              formButtonPrimary: "rounded-full bg-primary px-6 hover:bg-primary/90 text-primary-foreground",
-              footer: "hidden"
-            }
-          }}
-        />
+      <div className="flex w-full min-w-0 items-center justify-center lg:justify-end">
+        <PasswordSignUp copy={copy} />
       </div>
     </div>
   );
 }
 
-function DemoSignUp({ copy }: { copy: SignUpCopy }) {
+function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
+  const router = useRouter();
+  const { isLoaded, signUp, setActive } = useSignUp();
+  const [mode, setMode] = useState<"email" | "password">("email");
+  const [emailAddress, setEmailAddress] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [code, setCode] = useState("");
+  const [sentTo, setSentTo] = useState("");
+  const [step, setStep] = useState<"identifier" | "code">("identifier");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setError("");
+  }, [copy]);
+
+  function getErrorMessage(errorValue: unknown) {
+    if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
+      const clerkError = errorValue as { errors?: Array<{ code?: string; longMessage?: string; message?: string }> };
+      const firstError = clerkError.errors?.[0];
+      const clerkMessage = firstError?.longMessage || firstError?.message || "";
+      const errorCode = firstError?.code || "";
+
+      if (
+        mode === "password" &&
+        (errorCode.includes("form_param") ||
+          clerkMessage.toLowerCase().includes("username is not a valid parameter"))
+      ) {
+        return copy.passwordUnavailable;
+      }
+
+      if (
+        mode === "password" &&
+        clerkMessage.toLowerCase().includes("username must be between 4 and 64 characters")
+      ) {
+        return copy.invalidUsernameLength;
+      }
+
+      return clerkMessage || (mode === "password" ? copy.passwordUnavailable : copy.codeUnavailable);
+    }
+
+    return errorValue instanceof Error
+      ? errorValue.message
+      : mode === "password"
+        ? copy.passwordUnavailable
+        : copy.codeUnavailable;
+  }
+
+  function getSignUpStateMessage(result: unknown) {
+    if (!result || typeof result !== "object") {
+      return copy.codeUnavailable;
+    }
+
+    const signUpState = result as {
+      status?: string | null;
+      missingFields?: string[] | null;
+      requiredFields?: string[] | null;
+      unverifiedFields?: string[] | null;
+    };
+    const missingFields = Array.from(new Set([
+      ...(signUpState.missingFields || []),
+      ...(signUpState.requiredFields || [])
+    ]));
+    const unverifiedFields = signUpState.unverifiedFields || [];
+
+    if (missingFields.length) {
+      return (mode === "password" ? copy.passwordIncompleteSignUp : copy.incompleteSignUp).replace(
+        "{fields}",
+        missingFields.join(", ")
+      );
+    }
+
+    if (unverifiedFields.length) {
+      return (mode === "password" ? copy.passwordPendingVerification : copy.pendingVerification).replace(
+        "{fields}",
+        unverifiedFields.join(", ")
+      );
+    }
+
+    if (signUpState.status) {
+      return (mode === "password" ? copy.passwordIncompleteStatus : copy.incompleteStatus).replace(
+        "{status}",
+        signUpState.status
+      );
+    }
+
+    return copy.codeUnavailable;
+  }
+
+  function selectMode(nextMode: "email" | "password") {
+    setMode(nextMode);
+    setError("");
+    setCode("");
+    setSentTo("");
+    setStep("identifier");
+  }
+
+  async function activateCompletedSignUp(createdSessionId: string | null) {
+    if (createdSessionId && setActive) {
+      await setActive({ session: createdSessionId });
+      router.push("/dashboard");
+    }
+  }
+
+  async function startGoogleSignUp() {
+    if (!isLoaded) return;
+
+    setError("");
+
+    try {
+      await signUp.authenticateWithRedirect({
+        strategy: "oauth_google",
+        redirectUrl: "/sign-up/sso-callback",
+        redirectUrlComplete: "/dashboard"
+      });
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError) || copy.googleUnavailable);
+    }
+  }
+
+  async function createAccount() {
+    if (!isLoaded) return;
+
+    const trimmedEmail = emailAddress.trim();
+
+    if (!trimmedEmail) {
+      setError(copy.missingEmail);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const nextSignUp = await signUp.create({
+        emailAddress: trimmedEmail
+      });
+
+      if (nextSignUp.status === "complete") {
+        await activateCompletedSignUp(nextSignUp.createdSessionId);
+        return;
+      }
+
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+
+      setSentTo(trimmedEmail);
+      setStep("code");
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function createPasswordAccount() {
+    if (!isLoaded) return;
+
+    const trimmedUsername = username.trim();
+
+    if (!trimmedUsername) {
+      setError(copy.missingUsername);
+      return;
+    }
+
+    if (trimmedUsername.length < 4 || trimmedUsername.length > 64) {
+      setError(copy.invalidUsernameLength);
+      return;
+    }
+
+    if (!password) {
+      setError(copy.missingPassword);
+      return;
+    }
+
+    if (password.length < 8) {
+      setError(copy.shortPassword);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError(copy.passwordMismatch);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const nextSignUp = await signUp.create({
+        username: trimmedUsername,
+        password
+      });
+
+      if (nextSignUp.status === "complete") {
+        await activateCompletedSignUp(nextSignUp.createdSessionId);
+        return;
+      }
+
+      setError(getSignUpStateMessage(nextSignUp));
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function verifyCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!isLoaded) return;
+
+    const trimmedCode = code.trim();
+
+    if (!trimmedCode) {
+      setError(copy.missingCode);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const result = await signUp.attemptEmailAddressVerification({ code: trimmedCode });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        router.push("/dashboard");
+        return;
+      }
+
+      setError(getSignUpStateMessage(result));
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function resetIdentifier() {
+    setCode("");
+    setError("");
+    setSentTo("");
+    setStep("identifier");
+  }
 
   return (
-    <div className="grid min-h-[460px] gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
-      <AccountBrand copy={copy} />
+    <div className="w-full max-w-full min-w-0 rounded-lg border border-slate-100 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_12px_28px_rgba(15,23,42,0.04)] sm:max-w-[480px] sm:p-7">
+      {step === "identifier" ? (
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (mode === "email") {
+              void createAccount();
+              return;
+            }
 
-      <div className="flex flex-col justify-between">
-        <div className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label className="sr-only" htmlFor="first-name">
-                {copy.firstName}
-              </label>
-              <Input
-                id="first-name"
-                placeholder={copy.firstName}
-                className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="sr-only" htmlFor="last-name">
-                {copy.lastName}
-              </label>
-              <Input
-                id="last-name"
-                placeholder={copy.lastName}
-                className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
-              />
-            </div>
+            void createPasswordAccount();
+          }}
+        >
+          <Button type="button" variant="outline" onClick={() => void startGoogleSignUp()} disabled={!isLoaded} className="h-12 w-full rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none hover:bg-slate-50">
+            <span className="text-xl font-semibold text-[#4285f4]">G</span>
+            {copy.continueWithGoogle}
+          </Button>
+
+          <div className="flex items-center gap-5 py-1 text-sm text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            <span>{copy.divider}</span>
+            <span className="h-px flex-1 bg-border" />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="sr-only" htmlFor="username">
-              {copy.username}
+          <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1 text-sm font-medium text-slate-500">
+            <button
+              type="button"
+              onClick={() => selectMode("email")}
+              className={`flex h-10 items-center justify-center rounded transition ${
+                mode === "email" ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-900"
+              }`}
+            >
+              {copy.emailCodeMode}
+            </button>
+            <button
+              type="button"
+              onClick={() => selectMode("password")}
+              className={`flex h-10 items-center justify-center rounded transition ${
+                mode === "password" ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-900"
+              }`}
+            >
+              {copy.passwordMode}
+            </button>
+          </div>
+
+          {mode === "email" ? (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="signup-email">
+                  {copy.emailLabel}
+                </label>
+                <Input
+                  id="signup-email"
+                  autoComplete="email"
+                  inputMode="email"
+                  type="email"
+                  value={emailAddress}
+                  onChange={(event) => setEmailAddress(event.target.value)}
+                  placeholder={copy.emailPlaceholder}
+                  className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
+                />
+              </div>
+
+              <p className="px-1 text-sm leading-6 text-slate-500">
+                {copy.emailCodeIntro}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="signup-username">
+                  {copy.usernameLabel}
+                </label>
+                <Input
+                  id="signup-username"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder={copy.usernamePlaceholder}
+                  className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="signup-password">
+                  {copy.passwordLabel}
+                </label>
+                <div className="relative">
+                  <Input
+                    id="signup-password"
+                    autoComplete="new-password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={copy.passwordPlaceholder}
+                    className="h-12 rounded-md border-slate-200 bg-white pr-12 text-sm shadow-none focus-visible:ring-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute right-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+                    aria-label={showPassword ? copy.hidePassword : copy.showPassword}
+                    title={showPassword ? copy.hidePassword : copy.showPassword}
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="signup-confirm-password">
+                  {copy.confirmPasswordLabel}
+                </label>
+                <div className="relative">
+                  <Input
+                    id="signup-confirm-password"
+                    autoComplete="new-password"
+                    type={showPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder={copy.confirmPasswordPlaceholder}
+                    className="h-12 rounded-md border-slate-200 bg-white pr-12 text-sm shadow-none focus-visible:ring-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute right-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+                    aria-label={showPassword ? copy.hidePassword : copy.showPassword}
+                    title={showPassword ? copy.hidePassword : copy.showPassword}
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <p className="px-1 text-sm leading-6 text-slate-500">
+                {copy.passwordIntro}
+              </p>
+            </>
+          )}
+
+          {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
+
+          <Button type="submit" disabled={isSubmitting} className="h-12 w-full rounded-md px-6 text-sm font-medium">
+            {isSubmitting
+              ? mode === "password"
+                ? copy.creatingWithPassword
+                : copy.sendingEmailCode
+              : mode === "password"
+                ? copy.createWithPassword
+                : copy.sendEmailCode}
+            <ArrowRight />
+          </Button>
+          <div className="text-center text-sm text-slate-400">
+            {copy.signInPrompt}
+            <Link href="/sign-in" className="ml-1 font-medium text-slate-700 hover:text-slate-950 hover:underline">
+              {copy.signInInstead}
+            </Link>
+          </div>
+        </form>
+      ) : (
+        <form className="space-y-5" onSubmit={verifyCode}>
+          <div className="space-y-2">
+            <p className="text-sm leading-6 text-muted-foreground">
+              {copy.sentCode} <span className="font-medium text-foreground">{sentTo}</span>
+            </p>
+            <label className="text-sm font-medium" htmlFor="signup-code">
+              {copy.codeLabel}
             </label>
             <Input
-              id="username"
-              placeholder={copy.username}
+              id="signup-code"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              placeholder={copy.codePlaceholder}
+              className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
+            />
+          </div>
+
+          {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
+
+          <div className="flex flex-col gap-3">
+            <Button type="submit" disabled={isSubmitting} className="h-12 w-full rounded-md px-6 text-sm font-medium">
+              {isSubmitting ? copy.creatingWithCode : copy.createWithCode}
+              <ArrowRight />
+            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
+              <Button type="button" variant="ghost" onClick={() => void createAccount()} className="rounded-full px-4 text-teal-700 hover:bg-teal-50 hover:text-teal-800">
+                {copy.resendCode}
+              </Button>
+              <Button type="button" variant="ghost" onClick={resetIdentifier} className="rounded-full px-4 text-slate-600 hover:bg-slate-50 hover:text-slate-900">
+                {copy.changeIdentifier}
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function FallbackSignUp({ copy }: { copy: SignUpCopy }) {
+  return (
+    <div className="grid min-h-[460px] gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16">
+      <AccountBrand copy={copy} />
+
+      <div className="flex min-w-0 flex-col justify-between">
+        <div className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="sr-only" htmlFor="fallback-email">
+              {copy.emailLabel}
+            </label>
+            <Input
+              id="fallback-email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder={copy.emailPlaceholder}
               className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
             />
             <p className="px-1 text-xs leading-5 text-slate-500">
-              {copy.usernameHelp}
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label className="sr-only" htmlFor="password">
-                {copy.password}
-              </label>
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                placeholder={copy.password}
-                className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="sr-only" htmlFor="confirm-password">
-                {copy.confirm}
-              </label>
-              <Input
-                id="confirm-password"
-                type={showPassword ? "text" : "password"}
-                placeholder={copy.confirm}
-                className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 px-1">
-            <button
-              type="button"
-              aria-label={copy.showPassword}
-              aria-pressed={showPassword}
-              onClick={() => setShowPassword((current) => !current)}
-              className="mt-0.5 grid size-5 shrink-0 place-items-center rounded border border-slate-300 text-slate-500 transition hover:bg-slate-50 aria-pressed:border-emerald-700 aria-pressed:bg-emerald-50 aria-pressed:text-emerald-800"
-            >
-              <Eye className="size-3.5" />
-            </button>
-            <p className="max-w-lg text-sm leading-6 text-slate-500">
-              {copy.passwordHelp}
+              {copy.emailCodeIntro}
             </p>
           </div>
         </div>
@@ -223,14 +686,14 @@ function DemoSignUp({ copy }: { copy: SignUpCopy }) {
 
 function AccountBrand({ copy }: { copy: SignUpCopy }) {
   return (
-    <div>
-      <Link href="/" className="mb-8 flex w-fit items-center" aria-label={copy.brand}>
-        <BrandLogo label={copy.brand} className="h-12" />
+    <div className="mx-auto flex h-full w-full max-w-[400px] min-w-0 flex-col items-center justify-center text-center">
+      <Link href="/" className="mb-7 flex w-fit items-center" aria-label={copy.brand}>
+        <BrandLogo label={copy.brand} className="h-10" />
       </Link>
-      <h1 className="max-w-sm text-4xl font-normal tracking-normal text-foreground sm:text-5xl">
+      <h1 className="max-w-full break-words text-3xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-4xl lg:text-[42px]">
         {copy.title}
       </h1>
-      <p className="mt-5 max-w-sm text-base leading-7 text-foreground">
+      <p className="mt-4 max-w-[360px] text-base leading-7 text-slate-600">
         {copy.description}
       </p>
     </div>

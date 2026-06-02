@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "build": "NEXT_DIST_DIR=.next-build next build",
-    "start": "NEXT_DIST_DIR=.next-build next start",
+    "build": "next build",
+    "start": "next start",
     "lint": "eslint .",
     "postinstall": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",

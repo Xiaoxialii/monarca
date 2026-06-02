@@ -270,13 +270,21 @@ export async function POST(request: Request) {
         }
       });
 
-      const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(tx, {
+      return { dataSource, schemaSnapshot };
+    });
+
+    let generatedMetricCount = 0;
+
+    try {
+      const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(prisma, {
         workspaceId: session.workspace.id,
         userId: session.user.id
       });
 
-      return { dataSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };
-    });
+      generatedMetricCount = metricGeneration.generatedMetricCount;
+    } catch (metricGenerationError) {
+      console.error("Failed to generate metrics after upload", metricGenerationError);
+    }
     const storedFile = await storeUploadInR2({
       workspaceId: session.workspace.id,
       dataSourceId: result.dataSource.id,
@@ -359,7 +367,7 @@ export async function POST(request: Request) {
         columnCount,
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
-        generatedMetricCount: result.generatedMetricCount,
+        generatedMetricCount,
         analysisReport
       }
     });

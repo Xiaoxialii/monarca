@@ -8179,19 +8179,6 @@ function evidenceObjectValues(row: Record<string, string | number | null>, limit
   return [...entries.slice(0, limit), smallSampleNote].filter((value): value is string => Boolean(value));
 }
 
-function evidenceObjectSummary(rows?: Array<Record<string, string | number | null>>) {
-  return businessObjectRows(rows)
-    .slice(0, 3)
-    .map((row, index) => {
-      const label = evidenceObjectLabel(row, index);
-      const sample = evidenceObjectValues(row, 1)[0];
-
-      return sample ? `${label}（${sample}）` : label;
-    })
-    .filter(Boolean)
-    .join("、");
-}
-
 function rowNumberByPattern(row: Record<string, string | number | null>, patterns: RegExp[]) {
   for (const [key, value] of Object.entries(row)) {
     if (!patterns.some((pattern) => pattern.test(key))) continue;
@@ -8452,6 +8439,49 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       .replace(/\b(joined tables?|join key|threshold|Top\/Bottom ranking support)\b/gi, "")
       .trim() || fallback;
   };
+  const localeDynamicText = (value: string | undefined | null, fallback = "") => {
+    if (!value) return fallback;
+    const normalized = String(value)
+      .replace(/（[^）]*[\u3400-\u9fff][^）]*）/g, "")
+      .replace(/\([^)]*[\u3400-\u9fff][^)]*\)/g, "")
+      .replace(/[，、]/g, ", ")
+      .replace(/。/g, ". ")
+      .replace(/：/g, ": ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!normalized) return fallback;
+    if (locale === "en" && containsCjkText(normalized)) return fallback;
+
+    return normalized;
+  };
+  const localeObjectSummary = (rows?: Array<Record<string, string | number | null>>) => {
+    const labels = businessObjectRows(rows)
+      .slice(0, 3)
+      .map((row, index) => {
+        const label = evidenceObjectLabel(row, index);
+
+        if (!isBusinessObjectLabel(label)) return "";
+        if (locale === "en" && containsCjkText(label)) return "";
+
+        const values = evidenceObjectValues(row, 2)
+          .map((value) => localeDynamicText(value))
+          .filter(Boolean);
+
+        return values.length ? `${label} (${values.join(", ")})` : label;
+      })
+      .filter(Boolean);
+
+    return labels.join(locale === "zh" ? "、" : ", ");
+  };
+  const joinSentenceParts = (parts: string[]) => {
+    const visibleParts = parts.map((part) => localeDynamicText(part)).filter(Boolean);
+    const joined = visibleParts.join(locale === "zh" ? "" : " ");
+
+    if (locale === "en" && containsCjkText(joined)) return "";
+
+    return joined;
+  };
   const backendBusinessRisks = isZh ? (report.generatedInsights?.businessRisks ?? report.businessRisks ?? []) : (report.businessRisks ?? []);
   const backendGrowthOpportunities = isZh ? (report.generatedInsights?.growthOpportunities ?? report.growthOpportunities ?? []) : (report.growthOpportunities ?? []);
   const backendDataLimitations = isZh ? (report.generatedInsights?.dataLimitations ?? report.dataLimitations ?? []) : (report.dataLimitations ?? []);
@@ -8459,46 +8489,61 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const rawObjects = item.affectedObjects ?? item.objects ?? [];
     const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
     const hasOnlyTinyObjects = rawObjects.length > 0 && !visibleObjects.length && hasTinyObjectSample(rawObjects);
-    const objectSummary = evidenceObjectSummary(visibleObjects);
+    const objectSummary = localeObjectSummary(visibleObjects);
 
     if (hasOnlyTinyObjects && /negative|sentiment|负向|负面|情绪/i.test([item.title, item.businessImpact, item.businessMeaning].join(" "))) {
       return [];
     }
+    const comparisonText = localeDynamicText(item.comparison);
+    const impactText = earlyBusinessText(item.businessImpact ?? item.businessMeaning, "");
+    const decisionText = earlyBusinessText(item.recommendedAction, "");
+    const body = joinSentenceParts([
+      objectSummary ? `${isZh ? "涉及对象：" : "Objects: "}${objectSummary}${isZh ? "。" : "."}` : "",
+      comparisonText ? `${comparisonText}${isZh ? "。" : "."}` : "",
+      impactText,
+      decisionText ? ` ${isZh ? "建议决策：" : "Decision: "}${decisionText}` : ""
+    ]);
+
+    if (!body.trim()) return [];
 
     return [{
       id: item.id,
       title: earlyBusinessText(item.title, isZh ? "业务风险" : "Business risk"),
       badge: item.severity === "high" ? (isZh ? "高风险" : "High") : item.severity === "low" ? (isZh ? "低风险" : "Low") : (isZh ? "关注" : "Watch"),
-      body: [
-        objectSummary ? `${isZh ? "涉及对象" : "Objects"}：${objectSummary}。` : "",
-        item.comparison ? `${item.comparison}。` : "",
-        earlyBusinessText(item.businessImpact ?? item.businessMeaning, ""),
-        item.recommendedAction ? ` ${isZh ? "建议决策" : "Decision"}：${earlyBusinessText(item.recommendedAction, "")}` : ""
-      ].filter(Boolean).join("")
+      body
     }];
   }).slice(0, 5);
   const growthOpportunityItems = backendGrowthOpportunities.flatMap((item) => {
     const rawObjects = item.targetObjects ?? item.objects ?? [];
     const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
-    const objectSummary = evidenceObjectSummary(visibleObjects);
+    const objectSummary = localeObjectSummary(visibleObjects);
     const title = earlyBusinessText(item.title, isZh ? "增长机会" : "Growth opportunity");
+    const comparisonText = localeDynamicText(item.comparison);
+    const meaningText = earlyBusinessText(item.businessMeaning, "");
+    const decisionText = earlyBusinessText(item.recommendedAction, "");
+    const body = joinSentenceParts([
+      objectSummary ? `${isZh ? "候选对象：" : "Candidates: "}${objectSummary}${isZh ? "。" : "."}` : "",
+      comparisonText ? `${comparisonText}${isZh ? "。" : "."}` : "",
+      meaningText ? `${meaningText}${isZh ? "。" : "."}` : "",
+      decisionText ? `${isZh ? "建议决策：" : "Decision: "}${decisionText}` : ""
+    ]);
+
+    if (!body.trim()) return [];
 
     return [{
       id: item.id,
       title,
       badge: item.priority === "high" ? (isZh ? "高机会" : "High") : item.priority === "low" ? (isZh ? "低优先级" : "Low") : (isZh ? "机会" : "Opportunity"),
-      body: [
-        objectSummary ? `${isZh ? "候选对象" : "Candidates"}：${objectSummary}。` : "",
-        item.comparison ? `${item.comparison}。` : "",
-        item.businessMeaning ? `${earlyBusinessText(item.businessMeaning, "")}。` : "",
-        item.recommendedAction ? `${isZh ? "建议决策" : "Decision"}：${earlyBusinessText(item.recommendedAction, "")}` : ""
-      ].join("")
+      body
     }];
   }).filter((item) => item.body.trim()).slice(0, 5);
   const limitationCards = backendDataLimitations.slice(0, 5).map((item) => ({
     id: item.id,
-    title: item.title ?? "数据口径与限制",
-    body: `${item.limitation ?? item.message}${item.impact ? `。影响：${item.impact}` : ""}${item.suggestedFix ? `。建议：${item.suggestedFix}` : ""}`
+    title: localeDynamicText(item.title, isZh ? "数据口径与限制" : "Definition and limitation"),
+    body: localeDynamicText(
+      `${item.limitation ?? item.message ?? ""}${item.impact ? `${isZh ? "。影响：" : ". Impact: "}${item.impact}` : ""}${item.suggestedFix ? `${isZh ? "。建议：" : ". Suggested fix: "}${item.suggestedFix}` : ""}`,
+      isZh ? "该限制已收入口径详情。" : "This limitation is available in the definition details."
+    )
   }));
   const insightActions = report.generatedInsights?.recommendedActions ?? [];
   const nextActionPlan = isZh ? report.generatedInsights?.nextActionPlan : undefined;
@@ -8570,35 +8615,44 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     action?: string;
     requiredDataIfAny?: string[];
   }) => {
-    if (item.actionType === "fix_data_quality_for_decision") return "生成去重后的规模指标";
+    if (item.actionType === "fix_data_quality_for_decision") return isZh ? "生成去重后的规模指标" : "Generate deduped scale metrics";
     if (item.actionType === "collect_missing_business_data" && /paid_amount|order_amount|transaction_amount|revenue|cost|ad_spend|acquisition_cost|真实收入|收入|成本|ROI|ROAS/i.test([
       item.title,
       item.recommendedAction,
       item.action,
       ...(item.requiredDataIfAny ?? [])
     ].join(" "))) {
-      return "补充真实收入和成本字段";
+      return isZh ? "补充真实收入和成本字段" : "Add actual revenue and cost fields";
     }
     if (item.actionType === "scale_opportunity_object" || item.actionType === "expand_high_performing_segment") {
-      return "筛选头部类别中的高质量增长候选";
+      return isZh ? "筛选头部类别中的高质量增长候选" : "Screen high-quality growth candidates";
     }
-    if (item.actionType === "reduce_negative_feedback") return "排查负向反馈候选 App";
+    if (item.actionType === "reduce_negative_feedback") return isZh ? "排查负向反馈候选 App" : "Review negative-feedback app candidates";
 
-    return item.title;
+    return localeDynamicText(item.title, isZh ? item.title : "Recommended action");
   };
   const conciseCaveats = (caveats?: string[]) => (caveats ?? []).map((caveat) => {
+    if (!isZh) {
+      if (/小样本|small sample/i.test(caveat)) return "Small-sample lead";
+      if (/估算|estimated/i.test(caveat)) return "Estimated";
+      if (/去重|重复|原始|dedup|raw/i.test(caveat)) return "Raw metric";
+
+      return localeDynamicText(caveat, "Caveat");
+    }
     if (/小样本/.test(caveat)) return "小样本线索";
     if (/估算/.test(caveat)) return "估算值";
     if (/去重|重复|原始/.test(caveat)) return "未去重";
 
     return caveat;
   });
-  const isDedupCaveat = (caveat: string) => /未去重|去重|重复|原始/.test(caveat);
+  const isDedupCaveat = (caveat: string) => /未去重|去重|重复|原始|dedup|duplicate|raw metric|raw definition/i.test(caveat);
   const businessActionCaveatText = (caveats?: string[]) => {
     const labels = conciseCaveats(caveats);
 
     if (labels.some(isDedupCaveat)) {
-      return "安装量为原始口径，正式判断前建议参考去重版本。";
+      return isZh
+        ? "安装量为原始口径，正式判断前建议参考去重版本。"
+        : "Install metrics use the raw definition; use deduped values before making final decisions.";
     }
 
     return "";
@@ -8619,14 +8673,14 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
   const dataRequestActions = missingDataRequests.map((item) => ({
     id: `missing-action-${item.id}`,
     title: item.missingFieldType === "revenue"
-      ? "补充真实收入和成本字段"
+      ? (isZh ? "补充真实收入和成本字段" : "Add actual revenue and cost fields")
       : item.missingFieldType === "cost"
-        ? "补真实成本字段"
+        ? (isZh ? "补真实成本字段" : "Add actual cost fields")
         : item.missingFieldType === "time"
-          ? "补时间字段"
+          ? (isZh ? "补时间字段" : "Add time fields")
           : item.missingFieldType === "entity_id"
-    ? "生成稳定实体口径"
-            : "补强决策数据",
+    ? (isZh ? "生成稳定实体口径" : "Add stable entity identifiers")
+            : (isZh ? "补强决策数据" : "Add decision data"),
     priority: item.priority,
     actionType: "collect_missing_business_data",
     basedOn: [item.whyNeeded],
@@ -8634,18 +8688,24 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     currentFinding: "",
     whyItMatters: item.whyNeeded,
     recommendedAction: item.missingFieldType === "revenue"
-      ? "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。"
-      : `补充 ${item.suggestedFields.join("、")}。`,
+      ? (isZh
+        ? "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。"
+        : "Add paid_amount, order_amount, transaction_amount, revenue, cost, ad_spend, and acquisition_cost to validate Estimated Paid App Install Value and calculate actual ROI / ROAS.")
+      : `${isZh ? "补充" : "Add"} ${item.suggestedFields.join(isZh ? "、" : ", ")}${isZh ? "。" : "."}`,
     action: item.missingFieldType === "revenue"
-      ? "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。"
-      : `补充 ${item.suggestedFields.join("、")}。`,
+      ? (isZh
+        ? "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。"
+        : "Add paid_amount, order_amount, transaction_amount, revenue, cost, ad_spend, and acquisition_cost to validate Estimated Paid App Install Value and calculate actual ROI / ROAS.")
+      : `${isZh ? "补充" : "Add"} ${item.suggestedFields.join(isZh ? "、" : ", ")}${isZh ? "。" : "."}`,
     expectedOutcome: item.whatItEnables,
     expectedImpact: item.whatItEnables,
     keyEvidence: item.whyNeeded,
     executionSteps: item.missingFieldType === "revenue"
-      ? ["补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost。", "将收入和成本字段接入 ROI / ROAS 指标计算。"]
-      : [`补充 ${item.suggestedFields.join("、")}。`, "将新增字段接入后续指标计算和报告生成。"],
-    deliverable: item.missingFieldType === "revenue" ? "Estimated Value vs Actual Revenue / ROI / ROAS 验证表" : "数据补充清单",
+      ? (isZh
+        ? ["补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost。", "将收入和成本字段接入 ROI / ROAS 指标计算。"]
+        : ["Add paid_amount, order_amount, transaction_amount, revenue, cost, ad_spend, and acquisition_cost.", "Use the revenue and cost fields in ROI / ROAS calculations."])
+      : [`${isZh ? "补充" : "Add"} ${item.suggestedFields.join(isZh ? "、" : ", ")}${isZh ? "。" : "."}`, isZh ? "将新增字段接入后续指标计算和报告生成。" : "Use the new fields in future metric calculation and report generation."],
+    deliverable: item.missingFieldType === "revenue" ? (isZh ? "Estimated Value vs Actual Revenue / ROI / ROAS 验证表" : "Estimated Value vs Actual Revenue / ROI / ROAS validation table") : (isZh ? "数据补充清单" : "Data collection checklist"),
     ownerHint: undefined,
     timeHorizon: "this_month" as const,
     estimatedRoiOrValue: undefined,
@@ -8681,22 +8741,28 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
 
     return (
       <details className="mt-2 text-xs leading-5 text-muted-foreground">
-        <summary className="cursor-pointer font-medium text-slate-600">查看口径</summary>
-        <p className="mt-1">相关字段：{detailFields.join("、")}</p>
+        <summary className="cursor-pointer font-medium text-slate-600">{isZh ? "查看口径" : "View definitions"}</summary>
+        <p className="mt-1">
+          {isZh ? "相关字段：" : "Related fields: "}{detailFields.join(isZh ? "、" : ", ")}
+        </p>
       </details>
     );
   };
   const displayActionText = (action: string, fields?: string[]) => {
     const detailFields = reportDetailFields(fields);
     const fieldPhrase = detailFields.length
-      ? `，重点按 ${detailFields.slice(0, 2).join(" 和 ")} 对比`
+      ? isZh
+        ? `，重点按 ${detailFields.slice(0, 2).join(" 和 ")} 对比`
+        : `, compare by ${detailFields.slice(0, 2).join(" and ")}`
       : "";
 
-    return action
+    const cleaned = action
       .replace(/，重点使用[^。]+维度/g, fieldPhrase)
       .replace(/基于真实存在的 [^。]+ 维度生成/g, detailFields.length ? `基于 ${detailFields.slice(0, 2).join(" 和 ")} 生成` : "基于可用业务维度生成")
       .replace(/\s+/g, " ")
       .trim();
+
+    return localeDynamicText(cleaned, isZh ? "" : "Use the identified objects to decide the next operating action.");
   };
   const executionStepsFor = (item: {
     actionType?: string;
@@ -8705,24 +8771,41 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     recommendedAction?: string;
     action?: string;
   }) => {
-    if (item.executionSteps?.length) return item.executionSteps.slice(0, 5);
+    if (item.executionSteps?.length) return item.executionSteps
+      .slice(0, 5)
+      .map((step) => localeDynamicText(step))
+      .filter(Boolean);
 
-    const objects = item.targetObjects?.length ? item.targetObjects.join("、") : "重点对象";
+    const objects = item.targetObjects?.length ? item.targetObjects.join(isZh ? "、" : ", ") : (isZh ? "重点对象" : "the priority objects");
     if (item.actionType === "reduce_negative_feedback") {
-      return [
-        `拉取 ${objects} 的负向评论原文。`,
-        "按功能缺陷、性能卡顿、广告体验、版本问题、价格/付费、兼容性分类。",
-        "统计每类问题的出现次数和代表性评论。",
-        "输出 Top 3 负面问题主题和对应修复建议。"
-      ];
+      return isZh
+        ? [
+          `拉取 ${objects} 的负向评论原文。`,
+          "按功能缺陷、性能卡顿、广告体验、版本问题、价格/付费、兼容性分类。",
+          "统计每类问题的出现次数和代表性评论。",
+          "输出 Top 3 负面问题主题和对应修复建议。"
+        ]
+        : [
+          `Review the negative comments for ${objects}.`,
+          "Classify issues by feature defects, performance, ads experience, version changes, pricing, and compatibility.",
+          "Count each issue theme and capture representative comments.",
+          "Produce the top 3 issue themes and recommended fixes."
+        ];
     }
     if (item.actionType === "scale_opportunity_object" || item.actionType === "expand_high_performing_segment") {
-      return [
-        `把 ${objects} 与其他类别做对比表。`,
-        "列出 installs、rating、review volume、negative sentiment rate。",
-        "筛选高评分、低负向反馈、安装量仍有提升空间的 App。",
-        "输出增长实验候选清单。"
-      ];
+      return isZh
+        ? [
+          `把 ${objects} 与其他类别做对比表。`,
+          "列出 installs、rating、review volume、negative sentiment rate。",
+          "筛选高评分、低负向反馈、安装量仍有提升空间的 App。",
+          "输出增长实验候选清单。"
+        ]
+        : [
+          `Compare ${objects} against the remaining categories.`,
+          "Include installs, rating, review volume, and negative sentiment rate.",
+          "Screen for apps with high ratings, low negative feedback, and room to grow installs.",
+          "Produce a growth-test candidate list."
+        ];
     }
 
     return [displayActionText(item.recommendedAction ?? item.action ?? "")].filter(Boolean);
@@ -8731,14 +8814,14 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     actionType?: string;
     deliverable?: string;
   }) => {
-    if (item.deliverable) return item.deliverable;
-    if (item.actionType === "reduce_negative_feedback") return "负向反馈问题清单";
-    if (item.actionType === "scale_opportunity_object") return "增长实验候选清单";
-    if (item.actionType === "expand_high_performing_segment") return "头部类别质量风险对比表";
-    if (item.actionType === "collect_missing_business_data") return "Estimated Value vs Actual Revenue / ROI / ROAS 验证表";
-    if (item.actionType === "fix_data_quality_for_decision") return "Raw vs Deduped 对比表";
+    if (item.deliverable) return localeDynamicText(item.deliverable, isZh ? item.deliverable : "Operating action output");
+    if (item.actionType === "reduce_negative_feedback") return isZh ? "负向反馈问题清单" : "Negative feedback issue list";
+    if (item.actionType === "scale_opportunity_object") return isZh ? "增长实验候选清单" : "Growth-test candidate list";
+    if (item.actionType === "expand_high_performing_segment") return isZh ? "头部类别质量风险对比表" : "Top category quality-risk comparison table";
+    if (item.actionType === "collect_missing_business_data") return isZh ? "Estimated Value vs Actual Revenue / ROI / ROAS 验证表" : "Estimated Value vs Actual Revenue / ROI / ROAS validation table";
+    if (item.actionType === "fix_data_quality_for_decision") return isZh ? "Raw vs Deduped 对比表" : "Raw vs Deduped comparison table";
 
-    return "经营行动清单";
+    return isZh ? "经营行动清单" : "Operating action checklist";
   };
   const dataActionCopy = (item: {
     actionType?: string;
@@ -8753,26 +8836,26 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
   }) => {
     if (item.actionType === "fix_data_quality_for_decision") {
       return {
-        whyNeeded: "Total Installs、Total Reviews 和 Top Share 当前可能受重复 App 影响。",
-        action: "生成 Deduped Total Installs、Deduped Total Reviews、Deduped Top Share，并与 Raw 指标并列展示。",
-        output: "Raw vs Deduped Total Installs / Reviews / Top Share 对比表",
-        decisionImpact: "提高市场规模、集中度和机会优先级判断的可信度。"
+        whyNeeded: isZh ? "Total Installs、Total Reviews 和 Top Share 当前可能受重复 App 影响。" : "Total Installs, Total Reviews, and Top Share may be affected by duplicate app records.",
+        action: isZh ? "生成 Deduped Total Installs、Deduped Total Reviews、Deduped Top Share，并与 Raw 指标并列展示。" : "Generate Deduped Total Installs, Deduped Total Reviews, and Deduped Top Share, then show them next to the raw metrics.",
+        output: isZh ? "Raw vs Deduped Total Installs / Reviews / Top Share 对比表" : "Raw vs Deduped Total Installs / Reviews / Top Share comparison table",
+        decisionImpact: isZh ? "提高市场规模、集中度和机会优先级判断的可信度。" : "Improve confidence in market scale, concentration, and opportunity prioritization."
       };
     }
     if (item.actionType === "collect_missing_business_data") {
       return {
-        whyNeeded: "当前 Estimated Paid App Install Value 只能作为估算变现信号，缺少真实收入和成本字段时无法判断 ROI / ROAS。",
-        action: "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。",
-        output: "Estimated Value vs Actual Revenue / ROI / ROAS 验证表",
-        decisionImpact: "判断估算价值是否能支撑真实变现、投放回报和资源投入决策。"
+        whyNeeded: isZh ? "当前 Estimated Paid App Install Value 只能作为估算变现信号，缺少真实收入和成本字段时无法判断 ROI / ROAS。" : "Estimated Paid App Install Value is only a directional monetization signal; actual revenue and cost fields are required to judge ROI / ROAS.",
+        action: isZh ? "补充 paid_amount、order_amount、transaction_amount、revenue、cost、ad_spend、acquisition_cost，用于验证 Estimated Paid App Install Value，并计算真实 ROI / ROAS。" : "Add paid_amount, order_amount, transaction_amount, revenue, cost, ad_spend, and acquisition_cost to validate Estimated Paid App Install Value and calculate actual ROI / ROAS.",
+        output: isZh ? "Estimated Value vs Actual Revenue / ROI / ROAS 验证表" : "Estimated Value vs Actual Revenue / ROI / ROAS validation table",
+        decisionImpact: isZh ? "判断估算价值是否能支撑真实变现、投放回报和资源投入决策。" : "Determine whether the estimated value can support monetization, campaign return, and resource allocation decisions."
       };
     }
 
     return {
-      whyNeeded: item.whyItMatters ?? item.evidence ?? "该数据会影响报告可信度和经营判断。",
+      whyNeeded: localeDynamicText(item.whyItMatters ?? item.evidence, isZh ? "该数据会影响报告可信度和经营判断。" : "This data affects report credibility and operating decisions."),
       action: displayActionText(item.recommendedAction ?? item.action ?? ""),
-      output: item.deliverable ?? "数据补强结果",
-      decisionImpact: item.expectedImpact ?? item.expectedOutcome ?? "提升后续报告和行动优先级判断的可信度。"
+      output: localeDynamicText(item.deliverable, isZh ? "数据补强结果" : "Data improvement output"),
+      decisionImpact: localeDynamicText(item.expectedImpact ?? item.expectedOutcome, isZh ? "提升后续报告和行动优先级判断的可信度。" : "Improve confidence in future reports and action prioritization.")
     };
   };
   const displayFindingSummary = (item: { summary?: string; finding?: string; businessMeaning?: string }) => {
@@ -9409,18 +9492,23 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                       <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{objects.join(isZh ? "、" : ", ")}</p>
                     ) : null}
                     {item.keyEvidence ?? item.evidence ? (
-                      <p className="mt-2 text-xs leading-5 text-slate-600">{text.evidencePrefix}{item.keyEvidence ?? item.evidence}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-600">
+                        {text.evidencePrefix}{localeDynamicText(item.keyEvidence ?? item.evidence, isZh ? "当前报告已形成可执行证据。" : "The report has produced actionable evidence.")}
+                      </p>
                     ) : null}
                     <div className="mt-3 rounded-xl bg-slate-50 p-3">
                       <p className="text-xs font-semibold text-slate-700">{text.currentInsight}</p>
                       <p className="mt-2 text-xs leading-5 text-slate-700">
-                        {item.currentFinding ?? "当前报告已形成对象、分组或指标级判断。"}
+                        {localeDynamicText(
+                          item.currentFinding,
+                          isZh ? "当前报告已形成对象、分组或指标级判断。" : "The report has identified object, group, or metric-level signals."
+                        )}
                       </p>
                       {item.businessMeaning ? (
                         <>
                           <p className="mt-3 text-xs font-semibold text-slate-700">{text.businessMeaning}</p>
                           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                            {item.businessMeaning}
+                            {localeDynamicText(item.businessMeaning, isZh ? "该发现会影响后续经营判断。" : "This finding affects the next operating decision.")}
                           </p>
                         </>
                       ) : null}
@@ -9444,7 +9532,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                       ) : null}
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-700">{text.deliverable}{deliverableForDisplay(item)}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{item.expectedImpact ?? item.expectedOutcome}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {text.expectedImpact}{localeDynamicText(item.expectedImpact ?? item.expectedOutcome, isZh ? "提升后续经营判断的准确性。" : "Improve the accuracy of the next operating decision.")}
+                    </p>
                     {caveatText ? (
                       <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{text.caveatPrefix}{caveatText}</p>
                     ) : null}
@@ -9469,7 +9559,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                     <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{item.referencedObjects.join(isZh ? "、" : ", ")}</p>
                   ) : null}
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.executionAction}{displayActionText(item.action, item.referencedFields)}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{item.reason}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{localeDynamicText(item.reason, isZh ? "提升后续经营判断的准确性。" : "Improve the accuracy of the next operating decision.")}</p>
                   {actionDetails(item.referencedFields)}
                 </div>
               ))}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
-const supportedLocales = new Set(["en", "zh", "es-419", "es-MX"]);
+const supportedLocales = new Set(["en", "zh"]);
 
 function normalizeLocale(value: unknown) {
   return typeof value === "string" && supportedLocales.has(value) ? value : null;

@@ -5685,6 +5685,9 @@ function ReportsPage({
   hasConnectedDatabase: boolean;
 }) {
   type ReportData = {
+    requestedLocale?: Locale;
+    reportLocale?: Locale | null;
+    usedLocaleFallback?: boolean;
     briefing?: {
       title: string;
       summary: string;
@@ -5704,6 +5707,8 @@ function ReportsPage({
   const [reportGenerationMessage, setReportGenerationMessage] = useState<string | null>(null);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [isLoadingReport, setIsLoadingReport] = useState(true);
+  const localizedFallbackRequestRef = useRef<string | null>(null);
+  const isReportsZh = copy.reports.pageTitle === "分析报告";
 
   useEffect(() => {
     setShowOnboardingFlow(window.localStorage.getItem(onboardingStorageKey) !== "true");
@@ -5735,10 +5740,13 @@ function ReportsPage({
     setShowOnboardingFlow(false);
   };
 
-  const generateReport = async () => {
+  const generateReport = useCallback(async (options?: { silent?: boolean }) => {
     setIsGeneratingReport(true);
-    setReportGenerationMessage(null);
-    const isReportsZh = copy.reports.pageTitle === "分析报告";
+    if (!options?.silent) {
+      setReportGenerationMessage(null);
+    } else {
+      setReportGenerationMessage(isReportsZh ? "正在生成当前语言版本报告..." : "Preparing the report in the selected language...");
+    }
 
     try {
       const response = await fetch("/api/dashboard/reports/generate", {
@@ -5773,16 +5781,42 @@ function ReportsPage({
     } finally {
       setIsGeneratingReport(false);
     }
-  };
+  }, [isReportsZh, loadReportData, locale]);
 
   const lastReportUpdatedAt =
     reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
-  const isReportsZh = copy.reports.pageTitle === "分析报告";
   const briefing = reportData?.briefing ?? null;
   const reportMetricResults = briefing?.payloadJson?.metricResults ?? [];
   const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
   const hasReportContent = Boolean(briefing) || hasReportMetrics;
+  const isLocaleFallbackReport = Boolean(reportData?.usedLocaleFallback && briefing);
   const shouldShowOnboarding = !isLoadingReport && showOnboardingFlow && !hasConnectedDatabase && !hasReportContent;
+
+  useEffect(() => {
+    if (!isLocaleFallbackReport || !briefing || isGeneratingReport) {
+      return;
+    }
+
+    const fallbackKey = [
+      locale,
+      reportData?.reportLocale ?? "unknown",
+      briefing.payloadJson?.generatedAt ?? briefing.createdAt ?? "latest"
+    ].join(":");
+
+    if (localizedFallbackRequestRef.current === fallbackKey) {
+      return;
+    }
+
+    localizedFallbackRequestRef.current = fallbackKey;
+    void generateReport({ silent: true });
+  }, [
+    briefing,
+    generateReport,
+    isGeneratingReport,
+    isLocaleFallbackReport,
+    locale,
+    reportData?.reportLocale
+  ]);
 
   return (
     <section id="reports" className="flex min-h-full flex-col gap-3 scroll-mt-20">
@@ -5806,7 +5840,7 @@ function ReportsPage({
             </span>
           </div>
           <div className="flex w-full flex-nowrap items-center gap-2 xl:w-auto">
-            <Button size="sm" onClick={generateReport} disabled={isGeneratingReport}>
+            <Button size="sm" onClick={() => void generateReport()} disabled={isGeneratingReport}>
               <RefreshCw className={cn(isGeneratingReport && "animate-spin")} />
               {isGeneratingReport ? copy.reports.generatingAction : copy.reports.generateAction}
             </Button>
@@ -5842,7 +5876,20 @@ function ReportsPage({
         <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        {hasReportMetrics && briefing ? (
+        {isLocaleFallbackReport ? (
+          <Card className="border bg-white shadow-sm">
+            <CardContent className="space-y-2 p-5 text-sm leading-6 text-muted-foreground">
+              <p className="font-medium text-slate-950">
+                {isReportsZh ? "正在切换为中文报告" : "Preparing the English report"}
+              </p>
+              <p>
+                {isReportsZh
+                  ? "系统找到了上一份其他语言报告，正在基于同一批数据生成中文版本。"
+                  : "The latest saved report was generated in another language. We are regenerating the report in English from the same data instead of showing mixed-language content."}
+              </p>
+            </CardContent>
+          </Card>
+        ) : hasReportMetrics && briefing ? (
           <ReportGeneratedPanel
             briefing={briefing}
             metricResults={reportMetricResults}

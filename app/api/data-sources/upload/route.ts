@@ -7,6 +7,7 @@ import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspac
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { storeUploadInR2 } from "@/lib/r2-storage";
+import { apiErrorResponse } from "@/lib/api-errors";
 
 export const runtime = "nodejs";
 
@@ -285,11 +286,19 @@ export async function POST(request: Request) {
     } catch (metricGenerationError) {
       console.error("Failed to generate metrics after upload", metricGenerationError);
     }
-    const storedFile = await storeUploadInR2({
-      workspaceId: session.workspace.id,
-      dataSourceId: result.dataSource.id,
-      file
-    });
+    let storedFile: Awaited<ReturnType<typeof storeUploadInR2>> = null;
+    let storageWarning: string | null = null;
+
+    try {
+      storedFile = await storeUploadInR2({
+        workspaceId: session.workspace.id,
+        dataSourceId: result.dataSource.id,
+        file
+      });
+    } catch (storageError) {
+      storageWarning = "Original file storage failed; schema import was saved.";
+      console.warn("Skipping original upload storage after schema import", storageError);
+    }
 
     if (storedFile) {
       await prisma.dataSourceConnection.update({
@@ -369,7 +378,8 @@ export async function POST(request: Request) {
         businessEntityCount: semanticLayer.entities.length,
         generatedMetricCount,
         analysisReport
-      }
+      },
+      storageWarning
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
@@ -391,12 +401,6 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(
-      {
-        ok: false,
-        message: uploadErrorMessage(error)
-      },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, uploadErrorMessage(error));
   }
 }

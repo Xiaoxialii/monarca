@@ -1,7 +1,10 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { syncClerkUserById } from "@/lib/clerk-user-sync";
 import {
+  createPaymentOrderForUser,
+  findPlanForCheckout,
   grantCreditForPaidOrder
 } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
@@ -37,6 +40,19 @@ function invoiceSubscriptionId(invoice: Stripe.Invoice) {
     stripeObjectId(rawInvoice.parent?.subscription_details?.subscription);
 }
 
+function checkoutProviderPaymentId(session: Stripe.Checkout.Session) {
+  if (typeof session.invoice === "string") return session.invoice;
+  if (session.invoice?.id) return session.invoice.id;
+  if (typeof session.payment_intent === "string") return session.payment_intent;
+  if (session.payment_intent?.id) return session.payment_intent.id;
+
+  return session.id;
+}
+
+function checkoutEmail(session: Stripe.Checkout.Session) {
+  return session.customer_details?.email ?? session.customer_email ?? undefined;
+}
+
 function subscriptionPeriod(subscription: Stripe.Subscription) {
   const rawSubscription = subscription as Stripe.Subscription & {
     current_period_start?: number | null;
@@ -50,12 +66,37 @@ function subscriptionPeriod(subscription: Stripe.Subscription) {
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-  const orderId = session.metadata?.paymentOrderId;
+  let orderId = session.metadata?.paymentOrderId;
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : undefined;
   let periodStart = unixToDate(session.created);
   let periodEnd = session.expires_at ? unixToDate(session.expires_at) : undefined;
 
-  if (!orderId) return;
+  if (!orderId) {
+    const existingOrder = await prisma.paymentOrder.findUnique({
+      where: { providerSessionId: session.id }
+    });
+
+    orderId = existingOrder?.id;
+  }
+
+  if (!orderId) {
+    const plan = session.metadata?.plan;
+    const clerkUserId = session.metadata?.clerkUserId;
+
+    if (!plan || !clerkUserId) return;
+
+    const userSession = await syncClerkUserById(clerkUserId, {
+      fallbackEmail: checkoutEmail(session)
+    });
+    const entitlementPlan = await findPlanForCheckout(plan);
+    const paymentOrder = await createPaymentOrderForUser({
+      userId: userSession.user.id,
+      plan: entitlementPlan,
+      providerSessionId: session.id
+    });
+
+    orderId = paymentOrder.id;
+  }
 
   if (subscriptionId) {
     const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
@@ -66,7 +107,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   await grantCreditForPaidOrder({
     orderId,
-    providerPaymentId: typeof session.payment_intent === "string" ? session.payment_intent : session.id,
+    providerPaymentId: checkoutProviderPaymentId(session),
     subscriptionId,
     periodStart,
     periodEnd
@@ -87,6 +128,38 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 
   const periodStart = unixToDate(invoice.period_start) ?? new Date();
   const periodEnd = unixToDate(invoice.period_end) ?? new Date(Date.now() + 30 * 86_400_000);
+  const existingCreditForPeriod = await prisma.userCredit.findFirst({
+    where: {
+      subscriptionId: subscription.id,
+      validFrom: {
+        lt: periodEnd
+      },
+      OR: [
+        {
+          validUntil: null
+        },
+        {
+          validUntil: {
+            gt: periodStart
+          }
+        }
+      ]
+    }
+  });
+
+  if (existingCreditForPeriod) {
+    await prisma.userSubscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: UserSubscriptionStatus.ACTIVE,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd
+      }
+    });
+
+    return;
+  }
+
   const existingOrder = await prisma.paymentOrder.findUnique({
     where: {
       providerPaymentId: invoice.id
@@ -163,6 +236,22 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   });
 }
 
+async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
+  const orderId = session.metadata?.paymentOrderId;
+
+  if (!orderId) return;
+
+  await prisma.paymentOrder.updateMany({
+    where: {
+      id: orderId,
+      status: PaymentOrderStatus.PENDING
+    },
+    data: {
+      status: PaymentOrderStatus.FAILED
+    }
+  });
+}
+
 async function handleSubscriptionEvent(subscription: Stripe.Subscription) {
   const { currentPeriodStart, currentPeriodEnd } = subscriptionPeriod(subscription);
   const status =
@@ -208,6 +297,9 @@ export async function POST(request: Request) {
   switch (event.type) {
     case "checkout.session.completed":
       await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "checkout.session.expired":
+      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
       break;
     case "invoice.payment_succeeded":
       await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);

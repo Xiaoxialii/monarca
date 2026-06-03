@@ -1,4 +1,3 @@
-import mariadb from "mariadb";
 import { Client as PostgresClient } from "pg";
 import type { SupportedDatabaseType } from "@/lib/database-connection-config";
 import { assertSafeDatabaseHost } from "@/lib/database-host-safety";
@@ -26,85 +25,26 @@ export type IntrospectedTable = {
 export async function testDatabaseConnection(input: DatabaseConnectionInput) {
   await assertSafeDatabaseHost(input.host);
 
-  if (input.type === "mysql") {
-    const connection = await mariadb.createConnection({
-      host: input.host,
-      port: input.port,
-      database: input.database,
-      user: input.username,
-      password: input.password,
-      connectTimeout: 5000,
-      allowPublicKeyRetrieval: true,
-      ssl: input.ssl ? { rejectUnauthorized: false } : undefined
-    });
+  const client = new PostgresClient({
+    host: input.host,
+    port: input.port,
+    database: input.database,
+    user: input.username,
+    password: input.password,
+    connectionTimeoutMillis: 5000,
+    ssl: input.ssl ? { rejectUnauthorized: false } : undefined
+  });
 
-    try {
-      await connection.query("SELECT 1 AS ok");
-    } finally {
-      await connection.end();
-    }
-  }
-
-  if (input.type === "postgresql") {
-    const client = new PostgresClient({
-      host: input.host,
-      port: input.port,
-      database: input.database,
-      user: input.username,
-      password: input.password,
-      connectionTimeoutMillis: 5000,
-      ssl: input.ssl ? { rejectUnauthorized: false } : undefined
-    });
-
-    try {
-      await client.connect();
-      await client.query("SELECT 1 AS ok");
-    } finally {
-      await client.end().catch(() => undefined);
-    }
+  try {
+    await client.connect();
+    await client.query("SELECT 1 AS ok");
+  } finally {
+    await client.end().catch(() => undefined);
   }
 }
 
 export async function introspectDatabase(input: DatabaseConnectionInput): Promise<IntrospectedTable[]> {
   await assertSafeDatabaseHost(input.host);
-
-  if (input.type === "mysql") {
-    const connection = await mariadb.createConnection({
-      host: input.host,
-      port: input.port,
-      database: input.database,
-      user: input.username,
-      password: input.password,
-      connectTimeout: 5000,
-      allowPublicKeyRetrieval: true,
-      ssl: input.ssl ? { rejectUnauthorized: false } : undefined
-    });
-
-    try {
-      const rows = (await connection.query(
-        `SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName, DATA_TYPE AS dataType, IS_NULLABLE AS isNullable
-         FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = ?
-         ORDER BY TABLE_NAME, ORDINAL_POSITION
-         LIMIT 500`,
-        [input.database]
-      )) as Array<{
-        tableName: string;
-        columnName: string;
-        dataType: string;
-        isNullable: string;
-      }>;
-
-      return groupColumns(rows.map((row) => ({
-        tableName: row.tableName,
-        columnName: row.columnName,
-        dataType: row.dataType,
-        nullable: row.isNullable === "YES"
-      })));
-    } finally {
-      await connection.end();
-    }
-  }
 
   const client = new PostgresClient({
     host: input.host,

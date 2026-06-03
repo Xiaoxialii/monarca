@@ -515,7 +515,7 @@ function metricDraftsFromIndustryGenerator(tables: IntrospectedTable[], semantic
   return { metricGeneration, metrics };
 }
 
-function createMetricDrafts(fields: SemanticField[]): MetricDraft[] {
+export function createMetricDrafts(fields: SemanticField[]): MetricDraft[] {
   const drafts: MetricDraft[] = [];
   const fieldsByTable = new Map<string, SemanticField[]>();
 

@@ -1,4 +1,4 @@
-export type SupportedDatabaseType = "mysql" | "postgresql";
+export type SupportedDatabaseType = "postgresql";
 
 export type ResolvedDatabaseConfig = {
   type: SupportedDatabaseType;
@@ -11,7 +11,6 @@ export type ResolvedDatabaseConfig = {
 };
 
 const DEFAULT_PORTS: Record<SupportedDatabaseType, number> = {
-  mysql: 3306,
   postgresql: 5432
 };
 
@@ -20,10 +19,6 @@ type ParsedDatabaseUrl = Partial<Omit<ResolvedDatabaseConfig, "type" | "ssl">> &
 };
 
 export function normalizeDatabaseType(value: unknown): SupportedDatabaseType | null {
-  if (value === "mysql") {
-    return "mysql";
-  }
-
   if (value === "postgresql") {
     return "postgresql";
   }
@@ -55,12 +50,7 @@ function parseDatabaseUrl(value: string): ParsedDatabaseUrl | null {
   try {
     const url = new URL(value);
     const protocol = url.protocol.replace(":", "");
-    const type =
-      protocol === "mysql" || protocol === "mariadb"
-        ? "mysql"
-        : protocol === "postgresql" || protocol === "postgres"
-          ? "postgresql"
-          : null;
+    const type = protocol === "postgresql" || protocol === "postgres" ? "postgresql" : null;
 
     if (!type) {
       return null;
@@ -91,11 +81,7 @@ function getDatabaseUrlPreset(type: SupportedDatabaseType) {
 
 function resolvePort(type: SupportedDatabaseType, payloadPort: unknown, presetPort?: number) {
   const payloadPortNumber = Number(payloadPort);
-  const envPort = Number(
-    type === "mysql"
-      ? firstEnv("MYSQL_PORT", "PRESET_MYSQL_PORT")
-      : firstEnv("POSTGRESQL_PORT", "POSTGRES_PORT", "PGPORT", "PRESET_POSTGRESQL_PORT")
-  );
+  const envPort = Number(firstEnv("POSTGRESQL_PORT", "POSTGRES_PORT", "PGPORT", "PRESET_POSTGRESQL_PORT"));
 
   if (Number.isInteger(payloadPortNumber) && payloadPortNumber > 0) {
     return payloadPortNumber;
@@ -121,30 +107,6 @@ export function resolveDatabaseConfig(
   const payloadUsername = typeof payload?.username === "string" ? payload.username.trim() : "";
   const payloadPassword = typeof payload?.password === "string" ? payload.password : "";
   const databaseUrlPreset = getDatabaseUrlPreset(type);
-
-  if (type === "mysql") {
-    return {
-      type,
-      host: payloadHost || firstEnv("MYSQL_HOST", "PRESET_MYSQL_HOST") || databaseUrlPreset?.host || "127.0.0.1",
-      port: resolvePort(type, payload?.port, databaseUrlPreset?.port),
-      database:
-        payloadDatabase ||
-        firstEnv("MYSQL_DATABASE", "MYSQL_DB", "PRESET_MYSQL_DATABASE") ||
-        databaseUrlPreset?.database ||
-        "",
-      username:
-        payloadUsername ||
-        firstEnv("MYSQL_USER", "MYSQL_USERNAME", "PRESET_MYSQL_USER") ||
-        databaseUrlPreset?.username ||
-        "",
-      password:
-        payloadPassword ||
-        firstEnv("MYSQL_PASSWORD", "PRESET_MYSQL_PASSWORD") ||
-        databaseUrlPreset?.password ||
-        "",
-      ssl: Boolean(payload?.ssl) || parseBooleanEnv(firstEnv("MYSQL_SSL", "PRESET_MYSQL_SSL"))
-    };
-  }
 
   return {
     type,

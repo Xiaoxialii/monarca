@@ -7,6 +7,8 @@ Push `main` to GitHub, then import the repository in Vercel.
 ## 2. Neon PostgreSQL
 
 Create a Neon project and database. Use the pooled connection string for `DATABASE_URL`.
+This project uses Prisma with PostgreSQL. `DATABASE_URL` must start with
+`postgresql://` or `postgres://`.
 
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
@@ -47,6 +49,24 @@ https://YOUR_DOMAIN/api/stripe/webhook
 ```
 
 Copy the generated `whsec_...` into `STRIPE_WEBHOOK_SECRET`.
+
+Subscribe the endpoint to these events:
+
+- `checkout.session.completed`
+- `checkout.session.expired`
+- `invoice.payment_succeeded`
+- `invoice.payment_failed`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+For local testing, forward events with the Stripe CLI:
+
+```bash
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+
+Then copy the printed `whsec_...` value into local `.env` as
+`STRIPE_WEBHOOK_SECRET` and restart the dev server.
 
 ## 5. Cloudflare R2
 

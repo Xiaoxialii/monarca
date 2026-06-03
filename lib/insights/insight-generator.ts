@@ -252,6 +252,45 @@ function readableRankingLabel(value?: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function rankingDimensionBusinessLabel(ranking?: RankingResult) {
+  const field = normalizeFieldKey(ranking?.entityField ?? ranking?.dimension);
+
+  if (!field) return "对象或分组";
+  if (field.includes("category")) return "类别";
+  if (field === "app" || field.includes("app")) return "App";
+  if (field.includes("product") || field === "sku") return "产品";
+  if (field.includes("channel")) return "渠道";
+  if (field.includes("region") || field.includes("country") || field.includes("city")) return "地区";
+  if (field.includes("type")) return "类型";
+  if (field.includes("segment")) return "分群";
+
+  return readableRankingLabel(ranking?.entityField ?? ranking?.dimension);
+}
+
+function rankingMetricBusinessLabel(ranking?: RankingResult) {
+  const metric = ranking?.metricField ?? ranking?.metric;
+  const normalized = normalizeFieldKey(metric);
+
+  if (normalized.includes("install")) return "安装量";
+  if (normalized.includes("review")) return "评论量";
+  if (normalized.includes("rating")) return "评分";
+  if (normalized.includes("negative")) return "负向反馈率";
+  if (normalized.includes("positive")) return "正向反馈率";
+  if (normalized.includes("sentiment")) return "情绪指标";
+  if (normalized.includes("revenue") || normalized.includes("sales") || normalized.includes("gmv")) return "收入/销售额";
+  if (normalized.includes("volume")) return "规模";
+
+  return readableRankingLabel(metric);
+}
+
+function categoryValueExplanation(ranking?: RankingResult) {
+  const field = normalizeFieldKey(ranking?.entityField ?? ranking?.dimension);
+
+  if (!field.includes("category")) return "";
+
+  return "这些名称是 Category 字段下的应用类别，不是单个 App；例如 COMMUNICATION 表示通讯类应用。";
+}
+
 function rankingShareLabel(ranking: RankingResult | undefined, count = 3) {
   const grain = readableRankingLabel(ranking?.entityField ?? ranking?.dimension ?? "Object");
   const metric = readableRankingLabel(ranking?.metricField ?? ranking?.metric ?? "Metric");
@@ -1164,8 +1203,8 @@ function categoricalComparisonInsight(metrics: SelectedReportMetric[], aggregati
 
   const owner = rankingOwner(aggregations, ranking);
   const dimension = ranking.entityField ?? ranking.dimension;
-  const dimensionLabel = readableRankingLabel(dimension);
-  const metricLabel = readableRankingLabel(ranking.metricField ?? ranking.metric);
+  const dimensionLabel = rankingDimensionBusinessLabel(ranking);
+  const metricLabel = rankingMetricBusinessLabel(ranking);
   const groupNames = rankingObjectNames(ranking, 3);
   const groupText = rankingObjectsText(ranking, 3);
   const top3Share = topShareForRanking(ranking, 3);
@@ -1173,32 +1212,31 @@ function categoricalComparisonInsight(metrics: SelectedReportMetric[], aggregati
   const top3ShareText = top3Share != null ? shareText(top3ShareLabel, top3Share) : "";
   const hasQualityEvidence = hasQualityOrSentimentByDimension(aggregations, dimension, owner?.businessType);
   const evidence = insightMetricEvidence(metrics, ranking);
-  const confidence = top3Share != null ? 0.84 : 0.76;
 
   return buildInsight({
     id: `category-comparison-${normalizeFieldKey(dimension)}-${normalizeFieldKey(ranking.metricField ?? ranking.metric)}`,
     findingType: "category_comparison",
     title: top3Share != null
-      ? `${dimensionLabel} 维度显示头部分组贡献 ${(top3Share * 100).toFixed(1)}%`
-      : `${dimensionLabel} 维度已经形成头部分组对比`,
+      ? `头部${dimensionLabel}贡献了 ${(top3Share * 100).toFixed(1)}% 的${metricLabel}`
+      : `${dimensionLabel}对比已经显示头部分组`,
     summary: [groupText, top3ShareText].filter(Boolean).join("；"),
     metrics: evidence,
     aggregations,
     businessType: owner?.businessType,
-    currentConclusion: `${groupNames} 是当前 ${metricLabel} 最高的 ${dimensionLabel} 分组${top3Share != null ? `，前三组合计占比 ${(top3Share * 100).toFixed(1)}%` : ""}。`,
+    currentConclusion: `${groupNames} 是当前${metricLabel}最高的${dimensionLabel}${top3Share != null ? `，前三组合计占比 ${(top3Share * 100).toFixed(1)}%` : ""}。${categoryValueExplanation(ranking)}`,
     supportingEvidence: rankingEvidenceText(ranking, 3),
     evidence: rankingEvidenceText(ranking, 3),
     deeperAnalysisResult: hasQualityEvidence
-      ? `系统已经在 ${dimensionLabel} 维度生成质量或反馈聚合，可直接对比头部分组的规模、评分、评论量和负向反馈表现。`
-      : `当前已有 ${metricLabel} 的 ${dimensionLabel} 分类对比，但缺少同一维度的评分或情绪聚合，因此暂不能判断头部分组是否伴随质量风险。`,
-    businessImplication: `头部 ${dimensionLabel} 决定整体 ${metricLabel} 表现；如果头部分组质量偏低，会对整体体验和增长质量产生更大影响。`,
+      ? `当前已经可以对比头部${dimensionLabel}的规模、评分、评论量和负向反馈表现。`
+      : `当前已有${dimensionLabel}的${metricLabel}排名，但缺少同一${dimensionLabel}粒度的评分或情绪聚合，因此暂不能判断头部${dimensionLabel}是否伴随质量风险。`,
+    businessImplication: `头部${dimensionLabel}决定整体${metricLabel}表现；如果头部${dimensionLabel}质量偏低，会对整体体验和增长质量产生更大影响。`,
     recommendedDecision: hasQualityEvidence
-      ? "优先将头部分组中高规模低质量的对象列为处理对象。"
-      : "当前先把头部分组作为质量验证候选，不把高规模直接解释为高质量增长。",
-    businessMeaning: `${dimensionLabel} 分类对比能把全局规模拆到具体分组，避免报告只复述总体指标。`,
+      ? `优先将头部${dimensionLabel}中高规模低质量的对象列为处理对象。`
+      : `当前先把头部${dimensionLabel}作为质量验证候选，不把高规模直接解释为高质量增长。`,
+    businessMeaning: `${dimensionLabel}对比能把全局规模拆到具体分组，避免报告只复述总体指标。`,
     nextAction: hasQualityEvidence
-      ? "优先将头部分组中高规模低质量的对象列为处理对象。"
-      : "当前先把头部分组作为质量验证候选，不把高规模直接解释为高质量增长。",
+      ? `优先将头部${dimensionLabel}中高规模低质量的对象列为处理对象。`
+      : `当前先把头部${dimensionLabel}作为质量验证候选，不把高规模直接解释为高质量增长。`,
     comparedGroups: rankingObjects(ranking, 10),
     evidenceObjects: rankingObjects(ranking, 10),
     caveat: ranking.totalValue == null ? "当前 ranking 缺少 totalValue，无法输出完整 Top Share 判断。" : undefined,
@@ -1238,6 +1276,9 @@ function joinedTableInsight(metrics: SelectedReportMetric[], aggregations: Aggre
   const scaleObjects = rankingObjectNames(scaleRanking, 3);
   const qualityObjects = rankingObjectNames(qualityRanking, 3);
   const qualityObjectsWithSamples = negativeRankingObjectsText(qualityRanking, 3) || qualityObjects;
+  const scaleDimensionLabel = rankingDimensionBusinessLabel(scaleRanking);
+  const scaleMetricLabel = rankingMetricBusinessLabel(scaleRanking);
+  const qualityDimensionLabel = rankingDimensionBusinessLabel(qualityRanking);
   const scaleNames = new Set(rankingObjectNames(scaleRanking, 10).split("、").map(normalizeFieldKey).filter(Boolean));
   const qualityNames = rankingObjectNames(qualityRanking, 10).split("、").map((name) => ({ raw: name, key: normalizeFieldKey(name) })).filter((item) => item.key);
   const overlap = qualityNames.filter((item) => scaleNames.has(item.key)).map((item) => item.raw).slice(0, 3);
@@ -1252,36 +1293,36 @@ function joinedTableInsight(metrics: SelectedReportMetric[], aggregations: Aggre
     findingType: "joined_table_insight",
     title: `${businessJoinLabel} 规模与用户反馈可以同视角判断`,
     summary: [
-      scaleObjects ? `规模头部对象：${scaleObjects}` : "",
-      qualityObjectsWithSamples ? `质量或负向反馈候选对象：${qualityObjectsWithSamples}` : ""
+      scaleObjects ? `按${scaleMetricLabel}排名的头部${scaleDimensionLabel}：${scaleObjects}` : "",
+      qualityObjectsWithSamples ? `质量或负向反馈候选${qualityDimensionLabel}：${qualityObjectsWithSamples}` : ""
     ].filter(Boolean).join("；"),
     metrics: evidence,
     aggregations,
     businessType: pair.left.businessType === "generic" ? pair.right.businessType : pair.left.businessType,
-    currentConclusion: `${businessJoinLabel} 维度可以同时观察规模、评分和用户反馈，当前报告应优先识别高规模但质量或反馈偏弱的对象。`,
+    currentConclusion: `${businessJoinLabel} 视角可以同时观察规模、评分和用户反馈，当前报告应优先识别高规模但质量或反馈偏弱的对象。`,
     supportingEvidence: [
-      scaleRanking ? `规模证据：${rankingObjectsText(scaleRanking, 3)}` : "",
-      qualityRanking ? `质量/反馈证据：${qualityObjectsWithSamples}` : ""
+      scaleRanking ? `${scaleMetricLabel}排名：${rankingObjectsText(scaleRanking, 3)}` : "",
+      qualityRanking ? `质量/反馈候选：${qualityObjectsWithSamples}` : ""
     ].filter(Boolean).join("；"),
     evidence: [
-      scaleRanking ? `规模证据：${rankingObjectsText(scaleRanking, 3)}` : "",
-      qualityRanking ? `质量/反馈证据：${qualityObjectsWithSamples}` : ""
+      scaleRanking ? `${scaleMetricLabel}排名：${rankingObjectsText(scaleRanking, 3)}` : "",
+      qualityRanking ? `质量/反馈候选：${qualityObjectsWithSamples}` : ""
     ].filter(Boolean).join("；"),
     deeperAnalysisResult: overlap.length
       ? `${overlap.join("、")} 同时出现在规模头部和质量/负向反馈候选中，应作为高影响风险对象。`
       : qualityRanking
         ? themeText
           ? `负向反馈主题已识别为：${themeText}。`
-          : `当前已识别 ${qualityObjectsWithSamples} 为质量或负向反馈候选对象；如果它们同时具备较高规模，应进入高影响排查清单。`
+          : `当前已识别 ${qualityObjectsWithSamples} 为质量或负向反馈候选${qualityDimensionLabel}；如果它们同时具备较高规模，应进入高影响排查清单。`
         : "当前已识别对象规模排名，但缺少同一对象粒度的质量、情绪或转化排名，因此暂不能判断高规模是否伴随低质量。",
     businessImplication: "把规模和用户反馈放在同一对象视角下，能避免只看安装量、收入或评论量而忽略体验风险。",
     recommendedDecision: overlap.length
       ? "优先处理同时具备高规模和低质量信号的对象。"
-      : "当前将跨表对象作为优先验证池；缺少质量排名时不输出强风险结论。",
+      : "当前先把这些对象加入体验排查清单；如果样本量和质量指标足够，再决定是否进入产品优化优先级。",
     businessMeaning: "这种对象级对比能发现高规模低质量、高质量低规模或评分与情绪不一致的问题。",
     nextAction: overlap.length
       ? "优先处理同时具备高规模和低质量信号的对象。"
-      : "当前将跨表对象作为优先验证池；缺少质量排名时不输出强风险结论。",
+      : "当前先把这些对象加入体验排查清单；如果样本量和质量指标足够，再决定是否进入产品优化优先级。",
     caveat: [
       pair.confidence < 0.75 ? "当前 join 基于名称或语义匹配，可能存在重复、拼写差异或一对多问题，结果仅作方向性参考。" : "",
       hasSmallSample ? "对象级负向率样本量较小，仅作为排查线索。" : ""
@@ -1352,6 +1393,8 @@ function scaleInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
   const rankingText = rankingObjectsText(scaleRanking, 3);
   const top3Share = topShareForRanking(scaleRanking, 3);
   const top3ShareText = top3Share != null ? shareText(rankingShareLabel(scaleRanking, 3), top3Share) : "";
+  const scaleDimensionLabel = rankingDimensionBusinessLabel(scaleRanking);
+  const scaleMetricLabel = rankingMetricBusinessLabel(scaleRanking);
   const ratioText = ratioSeverityText(ratio);
   const hasQualityEvidence = hasQualityOrSentimentByDimension(
     aggregations,
@@ -1373,7 +1416,7 @@ function scaleInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
   return buildInsight({
     id: "scale-distribution",
     title: scaleRanking
-      ? "头部规模来源已经识别，可直接判断集中度"
+      ? `头部${scaleDimensionLabel}规模来源已经识别`
       : ratioText || topShare
         ? "整体规模已有对比基准，可初步判断长尾和集中度"
         : "整体规模已可计算，但暂不能判断是否由头部对象拉高",
@@ -1381,14 +1424,14 @@ function scaleInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
       `${primary.displayName} 为 ${primary.displayValue}`,
       ratioText ?? "",
       topShare ? `${topShare.displayName} 为 ${topShare.displayValue}` : "",
-      scaleRanking && rankingText ? `${rankingText} 是当前规模贡献最高的对象或分组` : "",
+      scaleRanking && rankingText ? `${rankingText} 是当前${scaleMetricLabel}贡献最高的${scaleDimensionLabel}` : "",
       top3ShareText
     ].filter(Boolean).join("；"),
     metrics: evidence,
     aggregations,
     businessType: primary.businessType,
     currentConclusion: scaleRanking && rankingText
-      ? `${rankingNames} 是当前规模贡献最高的对象或分组，说明规模来源已经可以定位。`
+      ? `${rankingNames} 是当前${scaleMetricLabel}贡献最高的${scaleDimensionLabel}，说明规模来源已经可以定位。${categoryValueExplanation(scaleRanking)}`
       : `${primary.displayName} 为 ${primary.displayValue}，当前只能确认总体规模。`,
     supportingEvidence: supportingEvidenceText(
       evidence,
@@ -1398,15 +1441,15 @@ function scaleInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
     deeperAnalysisResult: [
       scaleRanking && rankingText
         ? hasQualityEvidence
-          ? `比较结果已包含 ${scaleRanking.dimension} 级质量或情绪聚合，当前可以直接对照头部规模和质量表现。`
-          : `当前已有安装量或规模排名（${rankingText}），但缺少对应的类别级评分和情绪聚合，因此暂不能判断头部类别是否伴随质量风险。`
+          ? `比较结果已包含${scaleDimensionLabel}级质量或情绪聚合，当前可以直接对照头部规模和质量表现。`
+          : `当前已有${scaleMetricLabel}排名（${rankingText}），但缺少对应的${scaleDimensionLabel}级评分和情绪聚合，因此暂不能判断头部${scaleDimensionLabel}是否伴随质量风险。`
         : "当前缺少对象级排名或分组排名，因此暂不能定位规模贡献来自哪些对象。",
       ratioText ?? "",
       deduplicationText
     ].filter(Boolean).join(" "),
     businessImplication: "头部对象或头部类别决定整体规模表现；如果头部规模伴随低质量，会对整体评分、留存和增长质量产生更大影响。",
     recommendedDecision: scaleRanking
-      ? "将头部规模对象标记为质量验证对象；在缺少质量聚合前，不把高安装或高规模直接解释为高质量增长。"
+      ? `将头部${scaleDimensionLabel}标记为质量验证对象；在缺少质量聚合前，不把高安装或高规模直接解释为高质量增长。`
       : "规模结论暂按总体观察处理，不进入对象级优先级判断。",
     caveat: primary.requiresDeduplication ? "规模指标存在 raw / 未去重口径限制。" : undefined,
     businessMeaning: ratioText
@@ -1414,12 +1457,12 @@ function scaleInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
       : scaleRanking
         ? top3Share != null
           ? `对象级排名已经提供规模来源，Top 3 合计贡献 ${(top3Share * 100).toFixed(1)}%，报告可以直接基于头部分组判断规模来源`
-          : "对象级排名已经提供规模来源，报告可以直接定位头部对象，而不是停留在总体指标"
+          : `排名已经提供规模来源，报告可以直接定位头部${scaleDimensionLabel}，而不是停留在总体指标`
         : topShare
           ? "规模指标与集中度指标结合后，可以判断平均表现是否被头部对象拉高"
         : "当前只能确认规模大小，不能判断规模来自广泛对象还是少数头部对象",
     nextAction: scaleRanking && rankingNames
-      ? "将头部规模对象标记为质量验证对象；在缺少质量聚合前，不把高安装或高规模直接解释为高质量增长。"
+      ? `将头部${scaleDimensionLabel}标记为质量验证对象；在缺少质量聚合前，不把高安装或高规模直接解释为高质量增长。`
       : ratio || topShare || anyRankingExists
         ? "当前可基于集中度、分布和排名证据判断规模口径。"
         : "规模结论暂按总体观察处理，不进入对象级优先级判断。",
@@ -1606,6 +1649,11 @@ function trendInsight(metrics: SelectedReportMetric[], aggregations: Aggregation
 }
 
 function genericInsight(metrics: SelectedReportMetric[], aggregations: AggregationResult[]) {
+  // Generic metric-only observations are intentionally not emitted as key findings.
+  // They read like system fallback text and do not carry enough business evidence.
+  // Missing evidence is handled in dataLimitations instead.
+  return null;
+
   const alreadyCovered = new Set([
     ...metrics.filter((metric) => /sentiment|review|rating|revenue|sales|paid|price|value/i.test(metricText(metric))).map((metric) => metric.metricId)
   ]);

@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import mariadb from "mariadb";
 import { Client as PostgresClient } from "pg";
 import {
   ConnectionStatus,
@@ -13,7 +12,7 @@ import type { SchemaColumn, SchemaTable } from "@/lib/metric-validation";
 import { validationFromLineage } from "@/lib/metric-validation";
 import { storedSecret } from "@/lib/secret-crypto";
 
-type SupportedResultDatabase = "mysql" | "postgresql";
+type SupportedResultDatabase = "postgresql";
 
 type ResultConfig = {
   type: SupportedResultDatabase;
@@ -183,7 +182,6 @@ function normalize(value: string) {
 }
 
 function sourceType(source: Pick<DataSourceConnection, "type">): SupportedResultDatabase | null {
-  if (source.type === DataSourceType.MYSQL) return "mysql";
   if (source.type === DataSourceType.POSTGRESQL) return "postgresql";
   return null;
 }
@@ -225,7 +223,7 @@ function quoteIdentifier(type: SupportedResultDatabase, value: string) {
       throw new Error(`Unsafe identifier: ${part}`);
     }
 
-    return type === "mysql" ? `\`${part}\`` : `"${part}"`;
+    return `"${part}"`;
   }).join(".");
 }
 
@@ -281,7 +279,7 @@ function singleFieldReference(tables: SchemaTable[], expression: string) {
 }
 
 function textCast(type: SupportedResultDatabase, expressionSql: string) {
-  return type === "mysql" ? `CAST(${expressionSql} AS CHAR)` : `CAST(${expressionSql} AS TEXT)`;
+  return `CAST(${expressionSql} AS TEXT)`;
 }
 
 function nonEmptyTextCountSql(type: SupportedResultDatabase, expressionSql: string) {
@@ -298,9 +296,7 @@ function cleanNumericSqlExpression(type: SupportedResultDatabase, tables: Schema
     return rawSql;
   }
 
-  const numericSql = type === "mysql"
-    ? `CAST(${rawSql} AS DECIMAL(20,6))`
-    : `CAST(${rawSql} AS NUMERIC)`;
+  const numericSql = `CAST(${rawSql} AS NUMERIC)`;
 
   return `CASE WHEN ${numericSql} BETWEEN 0 AND 5 THEN ${numericSql} ELSE NULL END`;
 }
@@ -637,25 +633,6 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
 }
 
 async function queryMetric(config: ResultConfig, sql: string) {
-  if (config.type === "mysql") {
-    const connection = await mariadb.createConnection({
-      host: config.host,
-      port: config.port,
-      database: config.database,
-      user: config.username,
-      password: config.password,
-      connectTimeout: 5000,
-      allowPublicKeyRetrieval: true,
-      ssl: config.ssl ? { rejectUnauthorized: false } : undefined
-    });
-
-    try {
-      return await connection.query(sql) as Array<Record<string, unknown>>;
-    } finally {
-      await connection.end();
-    }
-  }
-
   const client = new PostgresClient({
     host: config.host,
     port: config.port,

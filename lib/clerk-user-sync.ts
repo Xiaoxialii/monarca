@@ -13,8 +13,15 @@ export async function syncCurrentClerkUser(options: { fallbackEmail?: string } =
     return null;
   }
 
+  return syncClerkUserById(userId, options);
+}
+
+export async function syncClerkUserById(
+  clerkUserId: string,
+  options: { fallbackEmail?: string } = {}
+) {
   const client = await clerkClient();
-  const clerkUser = await client.users.getUser(userId);
+  const clerkUser = await client.users.getUser(clerkUserId);
 
   const email = clerkUser.emailAddresses.find(
     (item) => item.id === clerkUser.primaryEmailAddressId

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const type = normalizeDatabaseType(payload?.type);
 
     if (!type) {
-      return jsonError("Database type must be mysql or postgresql");
+      return jsonError("Database type must be postgresql");
     }
 
     const config = resolveDatabaseConfig(type, payload);

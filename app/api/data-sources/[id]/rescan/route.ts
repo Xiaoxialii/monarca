@@ -17,10 +17,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function dataSourceTypeToDatabaseType(type: DataSourceType): SupportedDatabaseType | null {
-  if (type === DataSourceType.MYSQL) {
-    return "mysql";
-  }
-
   if (type === DataSourceType.POSTGRESQL) {
     return "postgresql";
   }
@@ -60,7 +56,7 @@ export async function POST(
     const type = dataSourceTypeToDatabaseType(dataSource.type);
 
     if (!type) {
-      return NextResponse.json({ ok: false, message: "Only MySQL and PostgreSQL can be rescanned" }, { status: 400 });
+      return NextResponse.json({ ok: false, message: "Only PostgreSQL data sources can be rescanned" }, { status: 400 });
     }
 
     const savedConfig = asRecord(dataSource.config);

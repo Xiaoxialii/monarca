@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import {
   getCopyLocale,
   getHtmlLang,
-  getLocaleShortLabel,
   LOCALE_OPTIONS,
   useLocale,
   type CopyLocale,
@@ -959,15 +958,12 @@ export function Homepage() {
                 className="cursor-pointer appearance-none bg-transparent text-sm font-medium outline-none"
                 aria-label={copy.langLabel}
               >
-                {LOCALE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
-                {getLocaleShortLabel(locale)}
-              </span>
+              {LOCALE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             </label>
             {isAuthenticated ? (
               <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">

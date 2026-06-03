@@ -14,7 +14,6 @@ enum WorkspaceRole {
 
 enum DataSourceType {
   SQL_SERVER
-  MYSQL
   POSTGRESQL
   SNOWFLAKE
   BIGQUERY

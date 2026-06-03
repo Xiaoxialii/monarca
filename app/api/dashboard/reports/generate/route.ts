@@ -36,6 +36,10 @@ function startOfToday() {
   return date;
 }
 
+function normalizeReportLocale(value: unknown): ReportLocale | null {
+  return value === "zh" || value === "en" ? value : null;
+}
+
 function formatValue(value: unknown) {
   if (typeof value === "number") {
     if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
@@ -164,7 +168,9 @@ function uniqueTables(tables: ReturnType<typeof tablesFromSchemaJson>) {
   });
 }
 
-function buildBriefSummary(results: MetricResultValue[]) {
+type ReportLocale = "en" | "zh";
+
+function buildBriefSummary(results: MetricResultValue[], locale: ReportLocale = "zh") {
   const computed = results.filter((result) =>
     result.status === "computed" &&
     !result.isInternalMetric &&
@@ -183,18 +189,26 @@ function buildBriefSummary(results: MetricResultValue[]) {
   const failed = results.filter((result) => result.status === "failed");
 
   if (computed.length === 0) {
-    return "当前没有成功计算的指标。请确认数据库连接、指标校验状态和公式是否可执行。";
+    return locale === "zh"
+      ? "当前没有成功计算的指标。请确认数据库连接、指标校验状态和公式是否可执行。"
+      : "No metrics were computed successfully. Check the data connection, metric validation status, and executable formulas.";
   }
 
   const highlights = computed.slice(0, 4).map((result) =>
-    `${contextualMetricName(result.metricName, result.formula)} 为 ${formatValue(result.value)}`
+    locale === "zh"
+      ? `${contextualMetricName(result.metricName, result.formula)} 为 ${formatValue(result.value)}`
+      : `${contextualMetricName(result.metricName, result.formula)}: ${formatValue(result.value)}`
   );
 
-  return [
+  return locale === "zh" ? [
     `本次报告基于 ${computed.length} 个通过校验的指标生成`,
     ...highlights,
     failed.length > 0 ? `${failed.length} 个指标计算失败，已从报告结论中排除` : ""
-  ].filter(Boolean).join("；");
+  ].filter(Boolean).join("；") : [
+    `This report is based on ${computed.length} validated metrics`,
+    ...highlights,
+    failed.length > 0 ? `${failed.length} failed metrics were excluded from the report conclusions` : ""
+  ].filter(Boolean).join("; ");
 }
 
 function groupMetricResultsByType(results: MetricResultValue[]) {
@@ -215,9 +229,18 @@ function groupMetricResultsByType(results: MetricResultValue[]) {
   };
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const payload = await request.json().catch(() => null);
+    const requestedLocale = normalizeReportLocale(asRecord(payload).locale);
+    const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
+    if (requestedLocale && requestedLocale !== session.user.locale) {
+      await prisma.user.update({
+        where: { id: session.user.id },
+        data: { locale: requestedLocale }
+      });
+    }
     await checkUserEntitlement(session.user.id, UsageActionType.GENERATE_REPORT);
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
@@ -352,18 +375,21 @@ export async function POST() {
         mappingJson: metric.mappingJson,
         lineageJson: metric.lineageJson
       })),
-      aggregationResults
+      aggregationResults,
+      locale: reportLocale
     });
     const prompt = buildReportPrompt(structuredReport);
-    const mockReport = buildMockAiBrief(metricResults);
-    const fullSummary = structuredReport.coreSummary || mockReport.summary || buildBriefSummary(metricResults);
+    const mockReport = buildMockAiBrief(metricResults, reportLocale);
+    const fullSummary = structuredReport.coreSummary || mockReport.summary || buildBriefSummary(metricResults, reportLocale);
     const summary = compactText(fullSummary);
     const today = startOfToday();
+    const reportTitle = reportLocale === "zh" ? "AI 数据分析报告" : "AI Data Analysis Report";
     const payloadJson = {
       generatedFrom: "mock_ai_brief",
+      locale: reportLocale,
       generatedAt: new Date().toISOString(),
       dataSourceIds: dataSources.map((source) => source.id),
-      dataSourceName: dataSources.map((source) => source.name).join("、"),
+      dataSourceName: dataSources.map((source) => source.name).join(reportLocale === "zh" ? "、" : ", "),
       fullSummary,
       metricResults,
       metricResultGroups,
@@ -387,13 +413,13 @@ export async function POST() {
       create: {
         workspaceId: session.workspace.id,
         briefingDate: today,
-        title: "AI 数据分析报告",
+        title: reportTitle,
         summary,
         confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
         payloadJson
       },
       update: {
-        title: "AI 数据分析报告",
+        title: reportTitle,
         summary,
         confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
         payloadJson
@@ -443,7 +469,9 @@ export async function POST() {
         hasDisplayableMetricValue(result.value)
       ).slice(0, 5).map((result) => ({
         title: contextualMetricName(result.metricName, result.formula),
-        description: `${contextualMetricName(result.metricName, result.formula)} 当前计算值为 ${formatValue(result.value)}`,
+        description: reportLocale === "zh"
+          ? `${contextualMetricName(result.metricName, result.formula)} 当前计算值为 ${formatValue(result.value)}`
+          : `${contextualMetricName(result.metricName, result.formula)} is currently ${formatValue(result.value)}`,
         anomalyType: "metric_result",
         confidence: 88,
         evidenceJson: {
@@ -469,9 +497,17 @@ export async function POST() {
           evidenceJson: item.evidenceJson,
           recommendations: {
             create: [{
-              title: compactText(item.recommendation?.title ?? `基于「${item.title}」形成系统判断`, 180),
+              title: compactText(item.recommendation?.title ?? (
+                reportLocale === "zh"
+                  ? `基于「${item.title}」形成系统判断`
+                  : `System judgment based on "${item.title}"`
+              ), 180),
               executionPriority: item.recommendation?.priority === "high" ? "High" : item.recommendation?.priority === "low" ? "Low" : "Medium",
-              estimatedOutcome: compactText(item.recommendation?.expectedOutcome ?? "把结构化洞察转成可展示的经营判断和行动结论"),
+              estimatedOutcome: compactText(item.recommendation?.expectedOutcome ?? (
+                reportLocale === "zh"
+                  ? "把结构化洞察转成可展示的经营判断和行动结论"
+                  : "Turn structured insights into business-facing conclusions and action decisions"
+              )),
               workflowAction: item.recommendation?.action ?? "follow_up_analysis",
               status: RecommendationStatus.PLANNED
             }]

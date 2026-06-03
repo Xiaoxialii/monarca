@@ -16,6 +16,23 @@ function analysisReportFromSnapshot(snapshot: { schemaJson: unknown; qualityRepo
   return asRecord(snapshot.qualityReport).analysisReport ?? asRecord(snapshot.schemaJson).analysisReport ?? null;
 }
 
+function normalizeReportLocale(value: unknown) {
+  return value === "zh" ? "zh" : "en";
+}
+
+function briefingLocale(
+  briefing: Awaited<ReturnType<typeof prisma.dailyBriefing.findFirst>>
+) {
+  if (!briefing) {
+    return null;
+  }
+
+  const payloadJson = asRecord(briefing.payloadJson);
+  const locale = payloadJson.locale;
+
+  return locale === "zh" || locale === "en" ? locale : null;
+}
+
 function filterBriefingMetricResults(
   briefing: Awaited<ReturnType<typeof prisma.dailyBriefing.findFirst>>,
   visibleMetricIds: Set<string>,
@@ -65,13 +82,15 @@ function filterBriefingMetricResults(
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await syncCurrentClerkUser();
 
     if (!session) {
       return NextResponse.json({ hasData: false, briefing: null, insights: [], recommendations: [] }, { status: 401 });
     }
+
+    const requestedLocale = normalizeReportLocale(new URL(request.url).searchParams.get("locale") ?? session.user.locale);
 
     const briefing = await prisma.dailyBriefing.findFirst({
       where: {
@@ -95,6 +114,7 @@ export async function GET() {
         }
       }
     });
+    const localeMatchedBriefing = briefingLocale(briefing) === requestedLocale ? briefing : null;
 
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
@@ -125,13 +145,13 @@ export async function GET() {
     const businessMetrics = metrics.filter((metric) => isBusinessFacingMetricDefinition(metric));
     const visibleMetricIds = new Set(businessMetrics.map((metric) => metric.id));
     const visibleMetricsById = new Map(businessMetrics.map((metric) => [metric.id, metric]));
-    const visibleBriefing = filterBriefingMetricResults(briefing, visibleMetricIds, visibleMetricsById);
-    const insights = briefing?.insights ?? [];
+    const visibleBriefing = filterBriefingMetricResults(localeMatchedBriefing, visibleMetricIds, visibleMetricsById);
+    const insights = localeMatchedBriefing?.insights ?? [];
     const recommendations = insights.flatMap((insight) => insight.recommendations);
 
     return NextResponse.json({
       workspaceId: session.workspace.id,
-      hasData: Boolean(briefing || insights.length || recommendations.length),
+      hasData: Boolean(localeMatchedBriefing || insights.length || recommendations.length),
       briefing: visibleBriefing,
       insights,
       recommendations,

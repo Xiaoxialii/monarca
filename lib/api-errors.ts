@@ -23,9 +23,7 @@ export function isDatabaseUnavailableError(error: unknown) {
     code === "P1001" ||
     code === "P1002" ||
     code === "P1017" ||
-    message.includes("can't connect to mysql server on") ||
-    message.includes("can't connect to mysql server") ||
-    message.includes("can't connect to local mysql server") ||
+    message.includes("database_url must be a postgresql connection string") ||
     message.includes("cannot connect to database server") ||
     message.includes("server has closed the connection") ||
     message.includes("server has gone away") ||
@@ -45,7 +43,7 @@ export function databaseUnavailableResponse() {
     {
       ok: false,
       code: "DATABASE_UNAVAILABLE",
-      message: "数据库暂时无法连接，请先启动本地 MySQL 后重试"
+      message: "数据库暂时无法连接，请检查 PostgreSQL DATABASE_URL 后重试"
     },
     { status: 503 }
   );

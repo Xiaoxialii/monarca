@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { createPaymentOrderForUser, findPlanForCheckout } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import {
@@ -16,23 +17,41 @@ function stringValue(value: unknown) {
 }
 
 function appUrl(request: Request) {
+  const requestOrigin = new URL(request.url).origin;
   const configuredUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
     process.env.VERCEL_PROJECT_PRODUCTION_URL ||
     process.env.VERCEL_URL;
+  const normalizedConfiguredUrl = configuredUrl
+    ? configuredUrl.startsWith("http")
+      ? configuredUrl
+      : `https://${configuredUrl}`
+    : "";
 
-  if (configuredUrl) {
-    return configuredUrl.startsWith("http") ? configuredUrl : `https://${configuredUrl}`;
+  const requestHost = new URL(requestOrigin).hostname;
+  const isLocalRequest = requestHost === "localhost" || requestHost === "127.0.0.1";
+
+  if (!isLocalRequest) {
+    return requestOrigin;
   }
 
-  return new URL(request.url).origin;
+  return normalizedConfiguredUrl || requestOrigin;
 }
 
 type CheckoutPayload = Record<string, unknown>;
 
 function checkoutErrorMessage(error: unknown) {
   if (error instanceof Error) {
+    if (
+      error.message.includes("datasource.url") ||
+      error.message.includes("must start with the protocol `postgresql://`") ||
+      error.message.includes("DATABASE_URL must be a PostgreSQL connection string") ||
+      error.message.includes("Can't reach database server")
+    ) {
+      return "数据库连接未配置正确。当前项目需要 PostgreSQL，请把 DATABASE_URL 配置成 postgresql:// 或 postgres:// 后重试。";
+    }
+
     if (error.message.includes("STRIPE_SECRET_KEY")) {
       return "Stripe 密钥未配置：请在环境变量中设置 STRIPE_SECRET_KEY。";
     }
@@ -63,6 +82,50 @@ function checkoutErrorMessage(error: unknown) {
   }
 
   return "付款初始化失败，请检查登录状态和 Stripe 配置后重试。";
+}
+
+async function getCheckoutUser(fallbackEmail: string) {
+  const { userId } = await auth();
+
+  if (!userId) return null;
+
+  try {
+    const userSession = await syncCurrentClerkUser({ fallbackEmail });
+
+    if (userSession) {
+      return {
+        appUserId: userSession.user.id,
+        clerkUserId: userSession.user.clerkUserId,
+        email: userSession.user.email
+      };
+    }
+  } catch (error) {
+    console.warn("Skipping local user sync before Stripe checkout", error);
+  }
+
+  try {
+    const client = await clerkClient();
+    const clerkUser = await client.users.getUser(userId);
+    const email =
+      clerkUser.emailAddresses.find((item) => item.id === clerkUser.primaryEmailAddressId)
+        ?.emailAddress ??
+      clerkUser.emailAddresses[0]?.emailAddress ??
+      fallbackEmail;
+
+    return {
+      appUserId: null,
+      clerkUserId: userId,
+      email
+    };
+  } catch (error) {
+    console.warn("Unable to load Clerk user before Stripe checkout", error);
+
+    return {
+      appUserId: null,
+      clerkUserId: userId,
+      email: fallbackEmail
+    };
+  }
 }
 
 async function createCheckoutSession(request: Request, payload: CheckoutPayload) {
@@ -98,9 +161,9 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
   const notes = stringValue(payload.notes);
 
   try {
-    const userSession = await syncCurrentClerkUser({ fallbackEmail: email });
+    const checkoutUser = await getCheckoutUser(email);
 
-    if (!userSession) {
+    if (!checkoutUser) {
       return {
         ok: false as const,
         status: 401,
@@ -108,11 +171,39 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
       };
     }
 
-    const entitlementPlan = await findPlanForCheckout(plan);
-    const paymentOrder = await createPaymentOrderForUser({
-      userId: userSession.user.id,
-      plan: entitlementPlan
-    });
+    let entitlementPlan: Awaited<ReturnType<typeof findPlanForCheckout>> | null = null;
+    let paymentOrder: Awaited<ReturnType<typeof createPaymentOrderForUser>> | null = null;
+
+    try {
+      entitlementPlan = await findPlanForCheckout(plan);
+
+      if (checkoutUser.appUserId) {
+        paymentOrder = await createPaymentOrderForUser({
+          userId: checkoutUser.appUserId,
+          plan: entitlementPlan
+        });
+      }
+    } catch (error) {
+      console.warn("Continuing Stripe checkout without a local payment order", error);
+    }
+
+    const metadata: Record<string, string> = {
+      plan,
+      currency,
+      clerkUserId: checkoutUser.clerkUserId,
+      name,
+      company,
+      notes
+    };
+
+    if (checkoutUser.appUserId) metadata.appUserId = checkoutUser.appUserId;
+    if (paymentOrder) metadata.paymentOrderId = paymentOrder.id;
+
+    if (entitlementPlan) {
+      metadata.entitlementPlanId = entitlementPlan.id;
+      metadata.entitlementPlanCode = entitlementPlan.code;
+    }
+
     const stripe = getStripe();
     const stripeSession = await stripe.checkout.sessions.create({
       mode: planConfig.mode,
@@ -122,36 +213,15 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
           quantity: 1
         }
       ],
-      customer_email: email || userSession.user.email || undefined,
-      client_reference_id: userSession.user.clerkUserId,
+      customer_email: email || checkoutUser.email || undefined,
+      client_reference_id: checkoutUser.clerkUserId,
       success_url: `${baseUrl}/checkout/success?plan=${plan}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/checkout/${plan}?checkout=cancelled`,
-      metadata: {
-        plan,
-        currency,
-        paymentOrderId: paymentOrder.id,
-        entitlementPlanId: entitlementPlan.id,
-        entitlementPlanCode: entitlementPlan.code,
-        appUserId: userSession.user.id,
-        clerkUserId: userSession.user.clerkUserId,
-        name,
-        company,
-        notes
-      },
+      metadata,
       subscription_data:
         planConfig.mode === "subscription"
           ? {
-              metadata: {
-                plan,
-                currency,
-                paymentOrderId: paymentOrder.id,
-                entitlementPlanId: entitlementPlan.id,
-                entitlementPlanCode: entitlementPlan.code,
-                appUserId: userSession.user.id,
-                clerkUserId: userSession.user.clerkUserId,
-                name,
-                company
-              }
+              metadata
             }
           : undefined
     });
@@ -164,10 +234,12 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
       };
     }
 
-    await prisma.paymentOrder.update({
-      where: { id: paymentOrder.id },
-      data: { providerSessionId: stripeSession.id }
-    });
+    if (paymentOrder) {
+      await prisma.paymentOrder.update({
+        where: { id: paymentOrder.id },
+        data: { providerSessionId: stripeSession.id }
+      });
+    }
 
     return { ok: true as const, url: stripeSession.url };
   } catch (error) {

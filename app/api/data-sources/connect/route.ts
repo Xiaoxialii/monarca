@@ -21,10 +21,6 @@ function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, message }, { status });
 }
 
-function toDataSourceType(type: "mysql" | "postgresql") {
-  return type === "mysql" ? DataSourceType.MYSQL : DataSourceType.POSTGRESQL;
-}
-
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
@@ -33,7 +29,7 @@ export async function POST(request: Request) {
     const type = normalizeDatabaseType(payload?.type);
 
     if (!type) {
-      return jsonError("Database type must be mysql or postgresql");
+      return jsonError("Database type must be postgresql");
     }
 
     const config = resolveDatabaseConfig(type, payload);
@@ -46,8 +42,7 @@ export async function POST(request: Request) {
 
     await testDatabaseConnection(config);
     const tables = await introspectDatabase(config);
-    const sourceType = toDataSourceType(type);
-    const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
+    const provider = "PostgreSQL";
     const publicConfig = publicDatabaseConfig(config);
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(tables);
@@ -56,7 +51,7 @@ export async function POST(request: Request) {
       const dataSource = await tx.dataSourceConnection.create({
         data: {
           workspaceId: session.workspace.id,
-          type: sourceType,
+          type: DataSourceType.POSTGRESQL,
           name: `${provider} - ${config.database}`,
           provider,
           status: ConnectionStatus.CONNECTED,

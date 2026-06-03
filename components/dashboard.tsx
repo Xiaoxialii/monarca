@@ -60,7 +60,6 @@ import { Input } from "@/components/ui/input";
 import {
   getCopyLocale,
   getHtmlLang,
-  getLocaleShortLabel,
   LOCALE_OPTIONS,
   useLocale,
   type CopyLocale,
@@ -74,6 +73,8 @@ const dashboardCopy = {
   en: {
     navItems: [
       { label: "Analysis Report", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+      { label: "Metrics", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
       { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -439,7 +440,6 @@ const dashboardCopy = {
       sourcePicker: "Data source",
       sources: [
         { name: "SQL Server", type: "Database", kind: "database" },
-        { name: "MySQL", type: "Database", kind: "database" },
         { name: "PostgreSQL", type: "Database", kind: "database" },
         { name: "Excel / CSV", type: "File upload", kind: "file" },
         { name: "Snowflake", type: "Data warehouse", kind: "warehouse" },
@@ -487,14 +487,14 @@ const dashboardCopy = {
       importAction: "Connect and import"
     },
     chat: {
-      title: "AI Follow-up Analysis",
-      description: "",
+      title: "AI Analyst",
+      description: "Ask follow-up questions about this report",
       status: "",
       collapseLabel: "Collapse AI Follow-up Analysis",
       expandLabel: "Expand AI Follow-up Analysis",
-      assistantMessage: "Ask attribution questions across revenue, retention, channels, and user cohorts",
-      userQuestion: "Which user segment drove the revenue drop?",
-      assistantReply: "Break it down by country, device, channel, and cohort; start with the segment with the largest variance",
+      assistantMessage: "Generate a report to ask follow-up questions.",
+      userQuestion: "What should I prioritize next?",
+      assistantReply: "Once the report is ready, I will suggest questions based on the current metrics, findings, and risks.",
       inputPlaceholder: "Ask about data, metrics, or setup...",
       sendLabel: "Send message"
     },
@@ -510,7 +510,7 @@ const dashboardCopy = {
       pageBadge: "AI intelligence live",
       pageTitle: "Analysis Report",
       pageSubtitle:
-        "A real-time business intelligence workspace that monitors revenue, explains changes, and turns insights into operations",
+        "Real-time business intelligence from your connected data",
       periodLabel: "Reporting period",
       periodValue: "This week",
       generatedLabel: "Generated",
@@ -772,6 +772,8 @@ const dashboardCopy = {
   zh: {
     navItems: [
       { label: "分析报告", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+      { label: "指标", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
       { label: "报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -1123,7 +1125,6 @@ const dashboardCopy = {
       sourcePicker: "数据源",
       sources: [
         { name: "SQL Server", type: "数据库", kind: "database" },
-        { name: "MySQL", type: "数据库", kind: "database" },
         { name: "PostgreSQL", type: "数据库", kind: "database" },
         { name: "Excel / CSV", type: "文件上传", kind: "file" },
         { name: "Snowflake", type: "数据仓库", kind: "warehouse" },
@@ -1171,14 +1172,14 @@ const dashboardCopy = {
       importAction: "连接并导入"
     },
     chat: {
-      title: "AI继续分析",
-      description: "",
+      title: "AI 分析助手",
+      description: "继续追问当前报告",
       status: "",
-      collapseLabel: "收起 AI继续分析",
-      expandLabel: "展开 AI继续分析",
-      assistantMessage: "可以直接问我收入、留存、渠道或用户群体的归因问题",
-      userQuestion: "收入下降主要来自哪个用户群体？",
-      assistantReply: "可以按国家、设备、渠道和 cohort 拆解，优先查看美国 iOS 新付费用户",
+      collapseLabel: "收起 AI 分析助手",
+      expandLabel: "展开 AI 分析助手",
+      assistantMessage: "生成报告后，可以继续追问分析结果。",
+      userQuestion: "下一步应该优先处理什么？",
+      assistantReply: "报告生成后，我会基于当前指标、发现和风险给出追问建议。",
       inputPlaceholder: "询问数据、指标或设置...",
       sendLabel: "发送消息"
     },
@@ -1570,28 +1571,6 @@ function navLabel(copy: DashboardCopy, href: string) {
   );
 }
 
-function SidebarSubscribeLink({
-  copy,
-  isCollapsed
-}: {
-  copy: DashboardCopy;
-  isCollapsed: boolean;
-}) {
-  return (
-    <a
-      href="/checkout/professional"
-      title={isCollapsed ? copy.sidebar.subscribe : undefined}
-      className={cn(
-        "flex h-9 w-full items-center rounded-md text-sm font-medium text-emerald-800 transition hover:bg-emerald-50",
-        isCollapsed ? "justify-center px-0" : "gap-2 px-2"
-      )}
-    >
-      <CreditCard className="size-4" />
-      <span className={cn(isCollapsed && "sr-only")}>{copy.sidebar.subscribe}</span>
-    </a>
-  );
-}
-
 function Sidebar({
   copy,
   activeTarget,
@@ -1752,7 +1731,6 @@ function Header({
         </div>
         <div className="flex flex-1 items-center justify-end gap-2">
           <label className="hidden items-center gap-2 rounded-md border bg-white px-2 py-1 text-sm font-medium text-muted-foreground shadow-sm sm:flex">
-            <span>{getLocaleShortLabel(locale)}</span>
             <select
               value={locale}
               onChange={(event) => onLocaleChange(event.target.value as Locale)}
@@ -1888,89 +1866,6 @@ function SetupHero({ copy }: { copy: DashboardCopy }) {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
-function MetricPlaceholder({
-  metric,
-  pending,
-  generated
-}: {
-  metric: DashboardCopy["metrics"]["cards"][number];
-  pending: string;
-  generated: string;
-}) {
-  return (
-    <Card className="border-border/70 bg-white/85 shadow-sm">
-      <CardContent className="p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-emerald-50 text-emerald-800">
-              <metric.icon className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground">{metric.label}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{metric.text}</p>
-            </div>
-          </div>
-          <Badge variant="secondary" className="shrink-0">
-            {pending}
-          </Badge>
-        </div>
-        <div className="mt-3 rounded-md border border-dashed bg-secondary/40 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-emerald-600/60" aria-hidden="true" />
-            {generated}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MetricGrid({ copy }: { copy: DashboardCopy }) {
-  return (
-    <section id="metrics" className="scroll-mt-20">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{navLabel(copy, "#metrics")}</h2>
-        </div>
-      </div>
-      <Card className="overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/45 to-white shadow-sm">
-        <CardContent className="p-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {copy.metrics.cards.map((metric) => (
-              <MetricPlaceholder
-                key={metric.label}
-                metric={metric}
-                pending={copy.metrics.pending}
-                generated={copy.metrics.generated}
-              />
-            ))}
-          </div>
-          <div className="mt-3 rounded-lg border bg-white/80 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-emerald-700" />
-                <p className="text-sm font-semibold">{copy.metrics.readinessTitle}</p>
-              </div>
-              <Badge variant="secondary">{copy.metrics.readinessStatus}</Badge>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {copy.metrics.readinessDescription}
-            </p>
-            <div className="mt-3 grid gap-2">
-              {copy.metrics.readinessSteps.map((step) => (
-                <div key={step} className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="size-1.5 rounded-full bg-emerald-600/70" aria-hidden="true" />
-                  {step}
-                </div>
-              ))}
             </div>
           </div>
         </CardContent>
@@ -3468,25 +3363,6 @@ function SettingsWorkspacePanel({ copy }: { copy: DashboardCopy }) {
   );
 }
 
-function formatSourceDate(value: string | null | undefined, isZh: boolean) {
-  if (!value) {
-    return isZh ? "暂无" : "None";
-  }
-
-  const timestamp = new Date(value);
-
-  if (Number.isNaN(timestamp.getTime())) {
-    return isZh ? "暂无" : "None";
-  }
-
-  return new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(timestamp);
-}
-
 function formatRelativeSourceDate(value: string | null | undefined, isZh: boolean) {
   if (!value) {
     return isZh ? "暂无" : "None";
@@ -4059,7 +3935,7 @@ function SettingsTeamPanel({ copy }: { copy: DashboardCopy }) {
       setMembers((current) =>
         current.map((row) => (row.id === member.id ? ({ ...row, ...payload.removed } as TeamMemberRow) : row))
       );
-	    } catch (error) {
+	    } catch {
 	      setMembers((current) =>
 	        current.map((row) =>
 	          row.id === member.id ? ({ ...row, status: "removed" } as TeamMemberRow) : row
@@ -4809,36 +4685,156 @@ function OnboardingFlow({
   );
 }
 
+function buildReportChatMessages(
+  copy: DashboardCopy,
+  reportPayload: { briefing?: { payloadJson?: { metricResults?: ReportMetricEvidenceResult[] } | null } | null } | null,
+  isReportView: boolean
+) {
+  const isZh = copy.chat.sendLabel === "发送消息";
+
+  if (!isReportView) {
+    return [
+      { role: "assistant" as const, content: copy.chat.assistantMessage },
+      { role: "user" as const, content: copy.chat.userQuestion },
+      { role: "assistant" as const, content: copy.chat.assistantReply }
+    ];
+  }
+
+  const metricResults = reportPayload?.briefing?.payloadJson?.metricResults ?? [];
+  const computedText = metricResults
+    .filter((result) => result.status === "computed")
+    .map((result) => [
+      result.metricName,
+      result.displayName,
+      result.metricCategory,
+      result.businessType,
+      result.formula
+    ].filter(Boolean).join(" "))
+    .join(" ")
+    .toLowerCase();
+
+  if (!computedText) {
+    return [
+      {
+        role: "assistant" as const,
+        content: isZh ? "生成报告后，可以继续追问分析结果。" : "Generate a report to ask follow-up questions."
+      }
+    ];
+  }
+
+  const hasAppOrReviews = /app|install|rating|review|sentiment|category/.test(computedText);
+  const hasSalesOrRevenue = /revenue|sales|gmv|order|product|channel|roi|cost|margin/.test(computedText);
+  const hasFinanceTimeseries = /close|adj close|volume|drawdown|return|volatility|trading|price/.test(computedText);
+  const questions = hasAppOrReviews
+    ? (isZh
+      ? [
+          "哪些类别贡献了最多安装量？",
+          "哪些 App 的负向反馈最高？",
+          "哪些指标存在口径限制？",
+          "下一步最应该优先处理什么？"
+        ]
+      : [
+          "Which category drives the most installs?",
+          "Which apps have the highest negative feedback?",
+          "What should I prioritize next?",
+          "Which metrics have reliability caveats?"
+        ])
+    : hasSalesOrRevenue
+      ? (isZh
+        ? [
+            "哪些产品贡献了最多收入？",
+            "哪些渠道转化最低？",
+            "哪些品类退款率最高？",
+            "哪些对象值得优先放大？"
+          ]
+        : [
+            "Which product drove the revenue change?",
+            "Which channel has the highest ROI?",
+            "Which segment declined most?"
+          ])
+      : hasFinanceTimeseries
+        ? (isZh
+          ? [
+              "当前价格趋势如何？",
+              "最大回撤是多少？",
+              "哪些时间段成交量异常？",
+              "当前波动风险高吗？"
+            ]
+          : [
+              "How is the current price trend?",
+              "What is the max drawdown?",
+              "Which periods show unusual trading volume?",
+              "Is current volatility risk elevated?"
+            ])
+      : (isZh
+        ? ["这份报告最重要的发现是什么？", "下一步应该优先处理什么？", "哪些指标需要注意口径？"]
+        : ["What is the most important finding in this report?", "What should I prioritize next?", "Which metrics need caveats?"]);
+
+  return [
+    {
+      role: "assistant" as const,
+      content: isZh ? "可以围绕当前报告继续追问，例如：" : "You can ask follow-up questions about this report, for example:"
+    },
+    ...questions.slice(0, 4).map((content) => ({ role: "user" as const, content }))
+  ];
+}
+
 function ChatPanel({
   copy,
   className,
   isCollapsed,
-  onToggle
+  onToggle,
+  isReportView = false
 }: {
   copy: DashboardCopy;
   className?: string;
   isCollapsed: boolean;
   onToggle: () => void;
+  isReportView?: boolean;
 }) {
-  const isZh = copy.chat.title.includes("继续");
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
-    { role: "assistant", content: copy.chat.assistantMessage },
-    { role: "user", content: copy.chat.userQuestion },
-    { role: "assistant", content: copy.chat.assistantReply }
-  ]);
+  const isZh = copy.chat.title.includes("分析师");
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>(
+    buildReportChatMessages(copy, null, isReportView)
+  );
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setMessages([
-      { role: "assistant", content: copy.chat.assistantMessage },
-      { role: "user", content: copy.chat.userQuestion },
-      { role: "assistant", content: copy.chat.assistantReply }
-    ]);
+    let isCancelled = false;
+
+    if (!isReportView) {
+      setMessages(buildReportChatMessages(copy, null, false));
+      setInputValue("");
+      setErrorMessage(null);
+      return;
+    }
+
+    const refreshReportMessages = () => {
+      void fetch("/api/dashboard/reports", { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (!isCancelled) {
+            setMessages(buildReportChatMessages(copy, payload, true));
+          }
+        })
+        .catch(() => {
+          if (!isCancelled) {
+            setMessages(buildReportChatMessages(copy, null, true));
+          }
+        });
+    };
+
+    refreshReportMessages();
+    window.addEventListener("monarca-report-updated", refreshReportMessages);
     setInputValue("");
     setErrorMessage(null);
-  }, [copy.chat.assistantMessage, copy.chat.assistantReply, copy.chat.userQuestion]);
+
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("monarca-report-updated", refreshReportMessages);
+    };
+  }, [copy, isReportView]);
 
   const sendMessage = async () => {
     const content = inputValue.trim();
@@ -4920,9 +4916,7 @@ function ChatPanel({
               </div>
               <div>
                 <CardTitle className="text-sm">{copy.chat.title}</CardTitle>
-                {copy.chat.status ? (
-                  <p className="text-xs text-muted-foreground">{copy.chat.status}</p>
-                ) : null}
+                <p className="text-xs text-muted-foreground">{copy.chat.description}</p>
               </div>
             </div>
             <Button variant="ghost" size="icon" aria-label={copy.chat.collapseLabel} onClick={onToggle}>
@@ -5029,7 +5023,6 @@ function ConnectorPanel({
     message: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [isScanningSchema, setIsScanningSchema] = useState(false);
   const [schemaResult, setSchemaResult] = useState<{
     tableCount: number;
     tables: Array<{
@@ -5041,9 +5034,8 @@ function ConnectorPanel({
   const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
   const isFileSource = selectedSource.kind === "file";
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
-  const databaseType =
-    selectedSource.name === "MySQL" ? "mysql" : selectedSource.name === "PostgreSQL" ? "postgresql" : null;
-  const defaultDatabasePort = databaseType === "postgresql" ? "5432" : "3306";
+  const databaseType = selectedSource.name === "PostgreSQL" ? "postgresql" : null;
+  const defaultDatabasePort = "5432";
   const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";
   const showWizard = connectionPage || wizardStarted;
@@ -5208,43 +5200,6 @@ function ConnectorPanel({
       });
     } finally {
       setIsConnectingDatabase(false);
-    }
-  };
-
-  const handleScanSchema = async () => {
-    if (!databaseType || isScanningSchema) {
-      return;
-    }
-
-    setIsScanningSchema(true);
-
-    try {
-      const response = await fetch("/api/data-sources/introspect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(databaseConnectionPayload())
-      });
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || (isZh ? "扫描失败" : "Schema scan failed"));
-      }
-
-      setSchemaResult({
-        tableCount: payload.schema?.tableCount ?? 0,
-        tables: payload.schema?.tables ?? []
-      });
-      setConnectionResult({
-        ok: true,
-        message: isZh ? "数据结构扫描完成" : "Schema scan completed"
-      });
-    } catch (error) {
-      setConnectionResult({
-        ok: false,
-        message: error instanceof Error ? error.message : isZh ? "扫描失败" : "Schema scan failed"
-      });
-    } finally {
-      setIsScanningSchema(false);
     }
   };
 
@@ -5568,8 +5523,8 @@ function ConnectorPanel({
               ) : (
                 <div className="text-xs leading-5 text-muted-foreground">
                   {isZh
-                    ? "当前版本先支持 MySQL 和 PostgreSQL 的连接测试"
-                    : "This wizard currently supports connection testing for MySQL and PostgreSQL"}
+                    ? "当前版本仅支持 PostgreSQL 的连接测试"
+                    : "This wizard currently supports PostgreSQL connection testing"}
                 </div>
               )}
             </div>
@@ -5655,33 +5610,6 @@ function ConnectorPanel({
   );
 }
 
-function ReportsPanel({ copy }: { copy: DashboardCopy }) {
-  return (
-    <section id="reports" className="scroll-mt-20">
-      <div className="mb-3">
-        <h2 className="text-lg font-semibold tracking-tight">{navLabel(copy, "#reports")}</h2>
-        <p className="text-sm text-muted-foreground">{copy.reports.description}</p>
-      </div>
-      <Card>
-        <CardContent className="grid gap-3 p-4 sm:grid-cols-3">
-          {copy.reports.cards.map(([title, text]) => (
-            <div key={title} className="rounded-lg border border-dashed bg-background p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="grid size-9 place-items-center rounded-md bg-secondary">
-                  <FileText className="size-4" />
-                </div>
-                <Badge variant="secondary">{copy.reports.pending}</Badge>
-              </div>
-              <p className="text-sm font-medium">{title}</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
 type ReportMetricEvidenceResult = {
   metricId: string;
   metricName: string;
@@ -5753,57 +5681,13 @@ type ReportTrendChartViewData = {
 
 function ReportsPage({
   copy,
+  locale,
   hasConnectedDatabase
 }: {
   copy: DashboardCopy;
+  locale: Locale;
   hasConnectedDatabase: boolean;
 }) {
-  type StructuredReportMetric = {
-    metricId: string;
-    displayName: string;
-    category: string;
-    businessType: string;
-    displayValue: string;
-    formula: string;
-    explanation: string;
-    grain: string;
-    warning?: string;
-    isEstimated: boolean;
-  };
-  type StructuredReport = {
-    title: string;
-    generatedAt: string;
-    coreSummary: string;
-    dataOverview: string[];
-    coreMetricOverview: StructuredReportMetric[];
-    modules: Array<{
-      businessType: string;
-      title: string;
-      summary: string;
-      coreMetrics: StructuredReportMetric[];
-      metricExplanation: string[];
-      businessMeaning: string[];
-      risks: string[];
-      nextBreakdowns: string[];
-    }>;
-    trendAnalysis: string[];
-    structureAnalysis: string[];
-    topObjectAnalysis: string[];
-    risks: string[];
-    opportunities: string[];
-    risksAndOpportunities?: string[];
-    generatedInsights?: GeneratedInsightsViewData;
-    recommendations: Array<{
-      title: string;
-      basedOn: string;
-      action: string;
-      reason: string;
-      priorityDimension: string;
-      priority: "High" | "Medium" | "Low";
-    }>;
-    limitations: string[];
-    evidence: string[];
-  };
   type ReportData = {
     briefing?: {
       title: string;
@@ -5814,7 +5698,7 @@ function ReportsPage({
         generatedAt?: string;
         dataSourceName?: string;
         metricResults?: ReportMetricEvidenceResult[];
-        structuredReport?: StructuredReport;
+        structuredReport?: StructuredReportViewData;
       } | null;
     } | null;
   };
@@ -5833,7 +5717,7 @@ function ReportsPage({
     setIsLoadingReport(true);
 
     try {
-      const response = await fetch("/api/dashboard/reports", {
+      const response = await fetch(`/api/dashboard/reports?locale=${encodeURIComponent(locale)}`, {
         cache: "no-store"
       });
       const payload = await response.json().catch(() => null) as ReportData | null;
@@ -5844,7 +5728,7 @@ function ReportsPage({
     } finally {
       setIsLoadingReport(false);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     void loadReportData();
@@ -5858,10 +5742,15 @@ function ReportsPage({
   const generateReport = async () => {
     setIsGeneratingReport(true);
     setReportGenerationMessage(null);
+    const isReportsZh = copy.reports.pageTitle === "分析报告";
 
     try {
       const response = await fetch("/api/dashboard/reports/generate", {
-        method: "POST"
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ locale })
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
@@ -5875,9 +5764,12 @@ function ReportsPage({
       }
 
       setReportGenerationMessage(
-        `已计算 ${payload.computedMetricCount ?? 0} 个指标，报告已更新 · 上次更新时间：${formatReportDate(payload.generatedAt)}`
+        isReportsZh
+          ? `已计算 ${payload.computedMetricCount ?? 0} 个指标，报告已更新 · 上次更新时间：${formatReportDate(payload.generatedAt)}`
+          : `Computed ${payload.computedMetricCount ?? 0} metrics. Report updated · Last updated: ${formatReportDate(payload.generatedAt)}`
       );
       await loadReportData();
+      window.dispatchEvent(new Event("monarca-report-updated"));
     } catch (error) {
       setReportGenerationMessage(error instanceof Error ? error.message : "Failed to generate report");
     } finally {
@@ -5888,6 +5780,11 @@ function ReportsPage({
   const lastReportUpdatedAt =
     reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
   const isReportsZh = copy.reports.pageTitle === "分析报告";
+  const briefing = reportData?.briefing ?? null;
+  const reportMetricResults = briefing?.payloadJson?.metricResults ?? [];
+  const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
+  const hasReportContent = Boolean(briefing) || hasReportMetrics;
+  const shouldShowOnboarding = !isLoadingReport && showOnboardingFlow && !hasConnectedDatabase && !hasReportContent;
 
   return (
     <section id="reports" className="flex min-h-full flex-col gap-3 scroll-mt-20">
@@ -5904,6 +5801,12 @@ function ReportsPage({
           </p>
         </div>
         <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
+          <div className="rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm">
+            {isReportsZh ? "上次更新时间" : "Last updated"}{" "}
+            <span className="text-slate-950">
+              {lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : (isReportsZh ? "尚未生成" : "Not generated yet")}
+            </span>
+          </div>
           <div className="flex w-full flex-nowrap items-center gap-2 xl:w-auto">
             <Button size="sm" onClick={generateReport} disabled={isGeneratingReport}>
               <RefreshCw className={cn(isGeneratingReport && "animate-spin")} />
@@ -5918,12 +5821,6 @@ function ReportsPage({
               {copy.reports.shareAction}
             </Button>
           </div>
-          <div className="rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm">
-            {isReportsZh ? "上次更新" : "Updated"}{" "}
-            <span className="text-slate-950">
-              {lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : (isReportsZh ? "尚未生成" : "Not generated yet")}
-            </span>
-          </div>
         </div>
       </div>
       {reportGenerationMessage ? (
@@ -5932,16 +5829,26 @@ function ReportsPage({
         </div>
       ) : null}
 
-      {showOnboardingFlow ? (
+      {shouldShowOnboarding ? (
         <OnboardingFlow copy={copy} onDismiss={dismissOnboardingFlow} />
       ) : null}
 
-      <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
+      {!shouldShowOnboarding && (hasConnectedDatabase || hasReportContent) ? (
+        <ReportSetupProgress
+          isZh={isReportsZh}
+          hasConnectedData={hasConnectedDatabase}
+          hasReport={hasReportMetrics}
+        />
+      ) : null}
+      {!hasConnectedDatabase && !hasReportContent && !shouldShowOnboarding ? (
+        <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        {reportData?.briefing?.payloadJson?.metricResults?.some((result) => result.status === "computed") ? (
+        {hasReportMetrics && briefing ? (
           <ReportGeneratedPanel
-            briefing={reportData.briefing}
-            metricResults={reportData.briefing.payloadJson.metricResults}
+            briefing={briefing}
+            metricResults={reportMetricResults}
+            locale={isReportsZh ? "zh" : "en"}
           />
         ) : isLoadingReport ? (
           <Card className="border bg-white shadow-sm">
@@ -7397,6 +7304,11 @@ function ReportMetricEvidencePanel({
 
             <ReportRecommendedCharts charts={recommendedCharts} />
 
+            <details className="rounded-xl border bg-white p-3 shadow-sm">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+                指标详情（{visibleResults.length}）
+              </summary>
+              <div className="mt-3 space-y-4">
             <div className="space-y-3 rounded-xl border bg-secondary/10 p-3">
               <div className="flex flex-wrap gap-2">
                 {reportMetricStatusFilters.map((filter) => (
@@ -7579,6 +7491,8 @@ function ReportMetricEvidencePanel({
                 当前筛选条件下没有指标。可以切换状态、类型或业务模块查看全部结果。
               </div>
             )}
+              </div>
+            </details>
           </>
         ) : (
           <div className="rounded-xl border bg-secondary/20 p-4 text-sm text-muted-foreground">
@@ -7971,32 +7885,6 @@ type StructuredReportViewData = {
   evidence: string[];
 };
 
-function ReportBulletSection({
-  title,
-  items
-}: {
-  title: string;
-  items: string[];
-}) {
-  return (
-    <Card className="border bg-white shadow-sm">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {items.length > 0 ? items.map((item) => (
-          <div key={item} className="flex gap-2 text-sm leading-6 text-muted-foreground">
-            <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
-            <span>{item}</span>
-          </div>
-        )) : (
-          <p className="text-sm text-muted-foreground">当前数据不足以支持该分析</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 function reportDetailFields(fields?: string[]) {
   return (fields ?? []).filter((field) => {
     const normalized = field.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -8030,6 +7918,42 @@ function evidenceObjectLabel(row: Record<string, string | number | null>, index 
     row.Group ??
     `对象 ${index + 1}`
   );
+}
+
+function isNumericBucketLabel(label: string) {
+  const normalized = label.trim();
+
+  return /^\d+(\.\d+)?$/.test(normalized) ||
+    /^\d+(\.\d+)?\s*[-–]\s*\d+(\.\d+)?$/.test(normalized);
+}
+
+function isBusinessObjectLabel(label: string) {
+  const normalized = label.trim().toLowerCase();
+
+  if (!normalized || normalized === "unknown" || /^对象\s*\d+$/.test(normalized)) return false;
+  if (isNumericBucketLabel(label)) return false;
+
+  return true;
+}
+
+function businessObjectRows(rows?: Array<Record<string, string | number | null>>, options?: { excludeTinySamples?: boolean }) {
+  return (rows ?? []).filter((row, index) => {
+    const label = evidenceObjectLabel(row, index);
+    const sampleSize = sentimentSampleSizeFromRow(row);
+
+    if (!isBusinessObjectLabel(label)) return false;
+    if (options?.excludeTinySamples && sampleSize != null && sampleSize < 5) return false;
+
+    return true;
+  });
+}
+
+function hasTinyObjectSample(rows?: Array<Record<string, string | number | null>>) {
+  return (rows ?? []).some((row) => {
+    const sampleSize = sentimentSampleSizeFromRow(row);
+
+    return sampleSize != null && sampleSize < 5;
+  });
 }
 
 function metricValueLabel(key: string) {
@@ -8119,7 +8043,7 @@ function evidenceObjectValues(row: Record<string, string | number | null>, limit
 }
 
 function evidenceObjectSummary(rows?: Array<Record<string, string | number | null>>) {
-  return (rows ?? [])
+  return businessObjectRows(rows)
     .slice(0, 3)
     .map((row, index) => {
       const label = evidenceObjectLabel(row, index);
@@ -8224,92 +8148,214 @@ function metricWarningLabel(metric: { warning?: string; isEstimated?: boolean })
   return "口径限制";
 }
 
-function StructuredReportView({ report }: { report: StructuredReportViewData }) {
+function StructuredReportView({ report, locale }: { report: StructuredReportViewData; locale: Locale }) {
+  const isZh = locale === "zh";
+  const text = {
+    fallbackFindingTitle: isZh ? "核心业务指标已完成计算" : "Core business metrics are available",
+    fallbackEvidence: isZh ? "关键指标已完成计算，完整口径可在详情中查看" : "Key metrics have been computed; definitions are available in details.",
+    fallbackDeeperAnalysis: isZh
+      ? "当前未形成足够对象级证据，因此不会包装成强业务发现。"
+      : "Object-level evidence is limited, so this is not presented as a strong business finding.",
+    fallbackImplication: isZh
+      ? "该结果适合辅助理解整体表现，具体风险或机会以对象级排名和分组对比为准。"
+      : "Use this to understand overall performance; object-level risks or opportunities require rankings or group comparisons.",
+    fallbackDecision: isZh ? "优先查看已识别的风险对象、增长机会和下一步行动。" : "Prioritize the identified risk objects, growth opportunities, and next actions.",
+    fallbackCaveat: isZh ? "对象级证据有限" : "Object-level evidence is limited",
+    fallbackSummary: isZh
+      ? "当前报告只展示业务指标、关键发现和下一步经营动作；技术口径已收起到详情。"
+      : "This report shows business metrics, key findings, and next actions. Technical lineage is kept in details.",
+    coreSummary: isZh ? "核心摘要" : "Executive Summary",
+    keyMetrics: isZh ? "关键指标" : "Key Metrics",
+    keyMetricsDescription: isZh
+      ? "只展示业务优先级最高的 6-8 个指标，完整口径放在详情里"
+      : "Only the 6-8 highest-priority business KPIs are shown; full definitions are kept in details.",
+    keyFindings: isZh ? "关键发现" : "Key Findings",
+    noKeyFindings: isZh
+      ? "当前没有足够的对象级或分组级业务证据生成关键发现；已计算指标可在关键指标和图表中查看。"
+      : "There is not enough object-level or group-level business evidence to produce key findings. Computed KPIs are available in the metric and chart sections.",
+    currentConclusion: isZh ? "当前结论" : "Current Conclusion",
+    evidence: isZh ? "证据" : "Evidence",
+    deeperAnalysis: isZh ? "进一步分析结论" : "Further Analysis",
+    lineageDetails: isZh ? "查看口径 / 关联逻辑" : "View definitions / lineage",
+    topCategoryContribution: isZh ? "头部类别贡献" : "Top Category Contribution",
+    category: isZh ? "类别" : "Category",
+    installs: isZh ? "安装量" : "Installs",
+    rating: isZh ? "评分" : "Rating",
+    negativeRateReviews: isZh ? "负向率 / 评论" : "Negative Rate / Reviews",
+    missingCategoryQuality: isZh
+      ? "当前只有类别规模排名，暂不能判断头部类别是否伴随质量风险。"
+      : "Only category scale ranking is available, so category-level quality risk cannot be judged yet.",
+    negativeCandidates: isZh ? "负向反馈候选对象" : "Negative Feedback Candidates",
+    negativeRate: isZh ? "负向率" : "Negative rate",
+    sampleSize: isZh ? "样本量" : "sample size",
+    sampleMissing: isZh ? "样本量缺失，无法判断可靠性" : "sample size missing; reliability cannot be judged",
+    negativeCount: isZh ? "负向数" : "negative count",
+    smallSampleLead: isZh ? "小样本线索" : "Small-sample lead",
+    validationLead: isZh ? "待验证线索" : "Needs validation",
+    negativeSampleCaveat: isZh
+      ? "对象级负向率需结合评论样本量判断；小样本 100% 负向率仅作为排查线索，不作为强风险结论。"
+      : "Object-level negative rates must be read with sample size; 100% negative rates from small samples are investigation leads, not strong risk conclusions.",
+    evidenceObjects: isZh ? "证据对象" : "Evidence Objects",
+    viewFullRanking: isZh ? "查看完整排名" : "View full ranking",
+    businessMeaning: isZh ? "业务含义" : "Business Meaning",
+    recommendedDecision: isZh ? "建议决策" : "Recommended Decision",
+    caveatPrefix: isZh ? "口径提醒：" : "Caveat: ",
+    businessRisks: isZh ? "业务风险" : "Business Risks",
+    businessRisksDescription: isZh
+      ? "基于阈值、趋势、分布、Top Share 或对象级聚合"
+      : "Based on thresholds, trends, distributions, top share, or object-level aggregations",
+    noBusinessRisks: isZh
+      ? "当前没有足够的对比、阈值或对象级证据生成业务风险"
+      : "There is not enough comparison, threshold, or object-level evidence to generate business risks.",
+    growthOpportunities: isZh ? "增长机会" : "Growth Opportunities",
+    growthDescription: isZh ? "只展示来自对象级排名或分组聚合的机会" : "Only opportunities backed by object rankings or group aggregations are shown.",
+    noGrowth: isZh ? "当前缺少对象级排名或分组对比，暂不能识别具体机会对象" : "Object-level rankings or group comparisons are missing, so specific opportunity objects cannot be identified yet.",
+    nextActions: isZh ? "下一步行动" : "Next Actions",
+    nextActionsDescription: isZh
+      ? "把已完成的分析结果转成经营动作；数据补强只保留影响可信度和 ROI 判断的事项。"
+      : "Turns completed analysis into operating actions; data improvements are limited to items that affect credibility or ROI decisions.",
+    businessActions: isZh ? "业务行动" : "Business Actions",
+    dataActions: isZh ? "数据补强" : "Data Improvements",
+    objects: isZh ? "对象：" : "Objects: ",
+    evidencePrefix: isZh ? "证据：" : "Evidence: ",
+    currentInsight: isZh ? "当前洞察" : "Current Insight",
+    systemJudgment: isZh ? "系统判断" : "System Judgment",
+    executionChecklist: isZh ? "查看执行清单" : "View execution checklist",
+    deliverable: isZh ? "产出物：" : "Deliverable: ",
+    expectedImpact: isZh ? "预期影响：" : "Expected impact: ",
+    whyNeeded: isZh ? "为什么需要：" : "Why needed: ",
+    executionAction: isZh ? "执行动作：" : "Action: ",
+    output: isZh ? "输出物：" : "Output: ",
+    decisionImpact: isZh ? "决策影响：" : "Decision impact: ",
+    requiredData: isZh ? "需要补充：" : "Required data: ",
+    noBusinessActions: isZh ? "当前没有足够的风险对象、机会对象或分组证据生成业务行动" : "There is not enough risk-object, opportunity-object, or group evidence to generate business actions.",
+    noDataActions: isZh ? "当前没有必须补强的数据字段或口径动作" : "No required data fields or definition improvements are needed right now.",
+    viewLimitations: isZh ? "查看口径与限制" : "View definitions and limitations",
+    limitationSummaryDefault: isZh ? "当前没有需要单独提示的口径限制" : "No standalone definition limitations need to be highlighted."
+  };
   const summaryBullets = report.coreSummaryBullets?.length ? report.coreSummaryBullets.slice(0, 3) : [report.coreSummary].filter(Boolean);
   const keyMetrics = report.coreMetricOverview.filter(isBusinessStructuredMetric).slice(0, 8);
+  const nonBusinessFindingPattern = /More aggregation evidence|Structured aggregation evidence|directional observation|technical|system missing|当前结论仍需要|当前缺少结构化聚合证据|方向性观察|缺少业务基准支撑强判断|可以用于判断|可以分析/i;
+  const findingHasBusinessContent = (item: {
+    title?: string;
+    summary?: string;
+    finding?: string;
+    currentConclusion?: string;
+    supportingEvidence?: string;
+    deeperAnalysisResult?: string;
+    businessMeaning?: string;
+    businessImplication?: string;
+    recommendedDecision?: string;
+    nextAction?: string;
+  }) => {
+    const joined = [
+      item.title,
+      item.summary,
+      item.finding,
+      item.currentConclusion,
+      item.supportingEvidence,
+      item.deeperAnalysisResult,
+      item.businessMeaning,
+      item.businessImplication,
+      item.recommendedDecision,
+      item.nextAction
+    ].filter(Boolean).join(" ");
+
+    return Boolean(joined.trim()) && !nonBusinessFindingPattern.test(joined);
+  };
   const structuredFindings = (report.generatedInsights?.keyFindings ?? [])
     .filter((item) => item.id !== "generic-directional")
+    .filter(findingHasBusinessContent)
     .slice(0, 4);
+  const fallbackFindings = (report.keyFindings ?? [])
+    .filter((item) => item && !nonBusinessFindingPattern.test(item))
+    .slice(0, 4)
+    .map((item, index) => ({
+      id: `finding-summary-${index}`,
+      title: isZh ? "关键业务发现" : "Key business finding",
+      summary: item,
+      finding: item,
+      currentConclusion: item,
+      supportingEvidence: "",
+      deeperAnalysisResult: "",
+      businessImplication: "",
+      recommendedDecision: "",
+      caveat: "",
+      businessMeaning: "",
+      riskOrOpportunity: undefined,
+      nextAction: "",
+      confidenceReason: "",
+      limitations: [],
+      evidenceMetrics: [],
+      evidenceValues: {},
+      evidenceObjects: [],
+      joinedTables: [],
+      joinKey: undefined,
+      nextBreakdown: [],
+      confidence: 0.65
+    }));
   const findings = structuredFindings.length
     ? structuredFindings
-    : (report.keyFindings?.length
-      ? report.keyFindings.map((item, index) => ({
-        id: `finding-summary-${index}`,
-        title: "当前结论仍需要更多聚合证据",
-        summary: item,
-        finding: item,
-        currentConclusion: item,
-        supportingEvidence: "当前缺少结构化聚合证据",
-        deeperAnalysisResult: "当前只有指标说明，不能定位具体对象、趋势变化或业务异常。",
-        businessImplication: "该判断只能作为方向性观察，不应直接进入强经营结论。",
-        recommendedDecision: "该结论暂不进入强经营判断。",
-        caveat: "当前缺少结构化洞察结果",
-        businessMeaning: "这是基于已计算指标生成的初步判断，缺少分组、排名或趋势时不能定位具体对象",
-        riskOrOpportunity: undefined,
-        nextAction: "该结论暂不进入强经营判断。",
-        confidenceReason: "当前没有足够的结构化 insight 结果，因此只保留低置信度方向判断",
-        limitations: ["当前缺少结构化洞察结果"],
-        evidenceMetrics: [],
-        evidenceValues: {},
-        evidenceObjects: [],
-        joinedTables: [],
-        joinKey: undefined,
-        nextBreakdown: [],
-        confidence: 0.55
-      }))
-      : report.modules.flatMap((module) =>
-        module.metricExplanation.map((item, index) => ({
-        id: `finding-${module.businessType}-${index}`,
-        title: `${module.title}仍需要业务维度支撑`,
-        summary: item,
-        finding: item,
-        currentConclusion: item,
-        supportingEvidence: "当前只有指标说明",
-        deeperAnalysisResult: "当前只有指标说明，不能直接推断对象来源、趋势变化或业务异常。",
-        businessImplication: "缺少结构化聚合证据时，该模块只能做方向性说明。",
-        recommendedDecision: "该模块暂不进入强优先级决策。",
-        caveat: "当前缺少分组聚合、排名或趋势结果",
-        businessMeaning: "当前只有指标说明，不能直接推断对象来源、趋势变化或业务异常",
-        riskOrOpportunity: undefined,
-        nextAction: "该模块暂不进入强优先级决策。",
-        confidenceReason: "缺少结构化聚合证据",
-        limitations: ["当前缺少分组聚合、排名或趋势结果"],
-        evidenceMetrics: [],
-        evidenceValues: {},
-        evidenceObjects: [],
-        joinedTables: [],
-        joinKey: undefined,
-        nextBreakdown: [],
-        confidence: 0.5
-      }))
-    )).slice(0, 5);
-  const backendBusinessRisks = report.generatedInsights?.businessRisks ?? report.businessRisks ?? [];
-  const backendGrowthOpportunities = report.generatedInsights?.growthOpportunities ?? report.growthOpportunities ?? [];
-  const backendDataLimitations = report.generatedInsights?.dataLimitations ?? report.dataLimitations ?? [];
-  const businessRiskItems = backendBusinessRisks.map((item) => ({
+    : fallbackFindings;
+  const earlyBusinessText = (value: string | undefined | null, fallback = "") => {
+    if (!value) return fallback;
+    if (nonBusinessFindingPattern.test(value)) return fallback;
+
+    return value
+      .replace(/CSV\s*-\s*[^，。；;]+/g, "")
+      .replace(/\b(joined tables?|join key|threshold|Top\/Bottom ranking support)\b/gi, "")
+      .trim() || fallback;
+  };
+  const backendBusinessRisks = isZh ? (report.generatedInsights?.businessRisks ?? report.businessRisks ?? []) : (report.businessRisks ?? []);
+  const backendGrowthOpportunities = isZh ? (report.generatedInsights?.growthOpportunities ?? report.growthOpportunities ?? []) : (report.growthOpportunities ?? []);
+  const backendDataLimitations = isZh ? (report.generatedInsights?.dataLimitations ?? report.dataLimitations ?? []) : (report.dataLimitations ?? []);
+  const businessRiskItems = backendBusinessRisks.flatMap((item) => {
+    const rawObjects = item.affectedObjects ?? item.objects ?? [];
+    const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
+    const hasOnlyTinyObjects = rawObjects.length > 0 && !visibleObjects.length && hasTinyObjectSample(rawObjects);
+    const objectSummary = evidenceObjectSummary(visibleObjects);
+
+    if (hasOnlyTinyObjects && /negative|sentiment|负向|负面|情绪/i.test([item.title, item.businessImpact, item.businessMeaning].join(" "))) {
+      return [];
+    }
+
+    return [{
       id: item.id,
-      title: item.title,
-      badge: item.severity === "high" ? "高风险" : item.severity === "low" ? "低风险" : "关注",
-      body: `${(item.affectedObjects ?? item.objects ?? []).length ? `涉及对象：${evidenceObjectSummary(item.affectedObjects ?? item.objects)}。` : ""}${item.comparison ? `${item.comparison}。` : ""}${item.businessImpact ?? item.businessMeaning}。系统判断：${item.recommendedAction}`
-    })).slice(0, 5);
-  const growthOpportunityItems = backendGrowthOpportunities.map((item) => ({
-      id: item.id,
-      title: item.title,
-      badge: item.priority === "high" ? "高机会" : item.priority === "low" ? "低优先级" : "机会",
+      title: earlyBusinessText(item.title, isZh ? "业务风险" : "Business risk"),
+      badge: item.severity === "high" ? (isZh ? "高风险" : "High") : item.severity === "low" ? (isZh ? "低风险" : "Low") : (isZh ? "关注" : "Watch"),
       body: [
-        (item.targetObjects ?? item.objects ?? []).length ? `候选对象：${evidenceObjectSummary(item.targetObjects ?? item.objects)}。` : "",
+        objectSummary ? `${isZh ? "涉及对象" : "Objects"}：${objectSummary}。` : "",
         item.comparison ? `${item.comparison}。` : "",
-        item.businessMeaning ? `${item.businessMeaning}。` : "",
-        item.recommendedAction ? `系统判断：${item.recommendedAction}` : ""
+        earlyBusinessText(item.businessImpact ?? item.businessMeaning, ""),
+        item.recommendedAction ? ` ${isZh ? "建议决策" : "Decision"}：${earlyBusinessText(item.recommendedAction, "")}` : ""
+      ].filter(Boolean).join("")
+    }];
+  }).slice(0, 5);
+  const growthOpportunityItems = backendGrowthOpportunities.flatMap((item) => {
+    const rawObjects = item.targetObjects ?? item.objects ?? [];
+    const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
+    const objectSummary = evidenceObjectSummary(visibleObjects);
+    const title = earlyBusinessText(item.title, isZh ? "增长机会" : "Growth opportunity");
+
+    return [{
+      id: item.id,
+      title,
+      badge: item.priority === "high" ? (isZh ? "高机会" : "High") : item.priority === "low" ? (isZh ? "低优先级" : "Low") : (isZh ? "机会" : "Opportunity"),
+      body: [
+        objectSummary ? `${isZh ? "候选对象" : "Candidates"}：${objectSummary}。` : "",
+        item.comparison ? `${item.comparison}。` : "",
+        item.businessMeaning ? `${earlyBusinessText(item.businessMeaning, "")}。` : "",
+        item.recommendedAction ? `${isZh ? "建议决策" : "Decision"}：${earlyBusinessText(item.recommendedAction, "")}` : ""
       ].join("")
-    })).slice(0, 5);
+    }];
+  }).filter((item) => item.body.trim()).slice(0, 5);
   const limitationCards = backendDataLimitations.slice(0, 5).map((item) => ({
     id: item.id,
     title: item.title ?? "数据口径与限制",
     body: `${item.limitation ?? item.message}${item.impact ? `。影响：${item.impact}` : ""}${item.suggestedFix ? `。建议：${item.suggestedFix}` : ""}`
   }));
   const insightActions = report.generatedInsights?.recommendedActions ?? [];
-  const nextActionPlan = report.generatedInsights?.nextActionPlan;
+  const nextActionPlan = isZh ? report.generatedInsights?.nextActionPlan : undefined;
   const nextActionInsights = nextActionPlan?.actionInsights ?? nextActionPlan?.priorityActions ?? [];
   const missingDataRequests = nextActionPlan?.missingDataRequests ?? [];
   const actionCaveats = nextActionPlan?.caveats ?? [];
@@ -8473,8 +8519,10 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index)
     .slice(0, Math.min(2, Math.max(0, 5 - businessNextActions.length)));
   const limitationSummary = limitationCards.length
-    ? "部分指标存在估算、未去重、缺少 benchmark 或样本量限制，已在相关行动建议中标注"
-    : "当前没有需要单独提示的口径限制";
+    ? isZh
+      ? "部分指标存在估算、未去重、缺少 benchmark 或样本量限制，已在相关行动建议中标注"
+      : "Some metrics have estimation, deduplication, benchmark, or sample-size caveats. They are marked in the relevant actions."
+    : text.limitationSummaryDefault;
   const limitations = [
     ...report.dataOverview,
     ...report.limitations,
@@ -8865,21 +8913,21 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
   const businessSummaryBullets = summaryBullets
     .map((item) => businessSafeFindingText(
       item,
-      "当前报告只展示业务指标、关键发现和下一步经营动作；技术口径已收起到详情。",
+      text.fallbackSummary,
       {}
     ))
     .filter((item) => item && !hasTechnicalLineageText(item))
     .slice(0, 3);
   const visibleSummaryBullets = businessSummaryBullets.length
     ? businessSummaryBullets
-    : ["当前报告只展示业务指标、关键发现和下一步经营动作；技术口径已收起到详情。"];
+    : [text.fallbackSummary];
 
   return (
     <div className="grid gap-3">
       <Card className="border-emerald-100 bg-emerald-50/35 shadow-sm">
         <CardContent className="p-5">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold text-emerald-800">核心摘要</p>
+            <p className="text-xs font-semibold text-emerald-800">{text.coreSummary}</p>
             <Badge variant="secondary">AI Brief</Badge>
           </div>
           <div className="mt-3 grid gap-2">
@@ -8895,8 +8943,8 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
 
       <Card className="border bg-white shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">关键指标</CardTitle>
-          <CardDescription>只展示业务优先级最高的 6-8 个指标，完整口径放在详情里</CardDescription>
+          <CardTitle className="text-base">{text.keyMetrics}</CardTitle>
+          <CardDescription>{text.keyMetricsDescription}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {keyMetrics.map((metric) => (
@@ -8918,10 +8966,10 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
 
       <Card className="border bg-white shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">关键发现</CardTitle>
+          <CardTitle className="text-base">{text.keyFindings}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
-          {findings.map((item) => {
+          {findings.length ? findings.map((item) => {
             const technicalDetails = findingTechnicalDetails(item);
             const categoryInsight = categoryInstallInsight(item);
             const negativeRows = negativeFeedbackRows(item);
@@ -8929,29 +8977,29 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
             return (
             <div key={item.id} className="rounded-2xl border p-4">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-semibold">{businessSafeFindingText(item.title, "关键业务发现", item)}</p>
+                <p className="text-sm font-semibold">{businessSafeFindingText(item.title, isZh ? "关键业务发现" : "Key business finding", item)}</p>
                 <Badge variant="secondary">{Math.round((item.confidence ?? 0.7) * 100)}%</Badge>
               </div>
               <div className="mt-3 space-y-3">
                 <div>
-                  <p className="text-xs font-semibold text-slate-500">当前结论</p>
+                  <p className="text-xs font-semibold text-slate-500">{text.currentConclusion}</p>
                   <p className="mt-1 text-sm leading-6 text-slate-700">{findingConclusion(item)}</p>
                 </div>
                 {findingEvidence(item) ? (
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">证据</p>
+                    <p className="text-xs font-semibold text-slate-500">{text.evidence}</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">{findingEvidence(item)}</p>
                   </div>
                 ) : null}
                 {findingDeeperAnalysis(item) ? (
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">进一步分析结论</p>
+                    <p className="text-xs font-semibold text-slate-500">{text.deeperAnalysis}</p>
                     <p className="mt-1 text-xs leading-5 text-emerald-800">{findingDeeperAnalysis(item)}</p>
                   </div>
                 ) : null}
                 {technicalDetails.length ? (
                   <details className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs leading-5 text-slate-600">
-                    <summary className="cursor-pointer font-medium text-slate-700">查看口径 / 关联逻辑</summary>
+                    <summary className="cursor-pointer font-medium text-slate-700">{text.lineageDetails}</summary>
                     <div className="mt-2 space-y-1">
                       {technicalDetails.map((line) => (
                         <p key={line}>{line}</p>
@@ -8963,10 +9011,10 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
               {categoryInsight ? (
                 <div className="mt-3 rounded-xl bg-emerald-50/60 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold text-emerald-900">头部类别贡献</p>
+                    <p className="text-xs font-semibold text-emerald-900">{text.topCategoryContribution}</p>
                     {categoryInsight.share != null ? (
                       <Badge variant="secondary" className="text-emerald-800">
-                        Top 3 Category Installs Share：{formatPercent(categoryInsight.share)}
+                        Top 3 Category Installs Share: {formatPercent(categoryInsight.share)}
                       </Badge>
                     ) : null}
                   </div>
@@ -8980,16 +9028,18 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                   </div>
                   {categoryInsight.share != null ? (
                     <p className="mt-2 text-xs leading-5 text-emerald-900">
-                      前三类合计约 {formatReportMetricValue(categoryInsight.topSum)} installs，占总安装量 {formatPercent(categoryInsight.share)}。
+                      {isZh
+                        ? `前三类合计约 ${formatReportMetricValue(categoryInsight.topSum)} installs，占总安装量 ${formatPercent(categoryInsight.share)}。`
+                        : `The top three categories total about ${formatReportMetricValue(categoryInsight.topSum)} installs, accounting for ${formatPercent(categoryInsight.share)} of total installs.`}
                     </p>
                   ) : null}
                   {categoryInsight.hasQualityData ? (
                     <div className="mt-3 overflow-hidden rounded-lg border border-emerald-100 bg-white">
                       <div className="grid grid-cols-4 gap-2 border-b bg-emerald-50/70 px-3 py-2 text-[11px] font-semibold text-emerald-900">
-                        <span>类别</span>
-                        <span>安装量</span>
-                        <span>评分</span>
-                        <span>负向率 / 评论</span>
+                        <span>{text.category}</span>
+                        <span>{text.installs}</span>
+                        <span>{text.rating}</span>
+                        <span>{text.negativeRateReviews}</span>
                       </div>
                       {categoryInsight.rows.map((row) => (
                         <div key={`${row.label}-quality`} className="grid grid-cols-4 gap-2 border-b px-3 py-2 text-[11px] text-slate-700 last:border-b-0">
@@ -9005,14 +9055,14 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                     </div>
                   ) : (
                     <p className="mt-2 rounded-lg bg-white/80 px-3 py-2 text-xs leading-5 text-amber-900">
-                      当前只有类别规模排名，暂不能判断头部类别是否伴随质量风险。
+                      {text.missingCategoryQuality}
                     </p>
                   )}
                 </div>
               ) : null}
               {negativeRows.length ? (
                 <div className="mt-3 rounded-xl bg-amber-50/70 p-3">
-                  <p className="text-xs font-semibold text-amber-950">负向反馈候选对象</p>
+                  <p className="text-xs font-semibold text-amber-950">{text.negativeCandidates}</p>
                   <div className="mt-2 grid gap-1">
                     {negativeRows.map((row) => {
                       const rate = row.negativeRate == null
@@ -9025,24 +9075,24 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                         <div key={row.label} className="grid gap-1 rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-amber-950 md:grid-cols-[1fr_auto] md:items-center">
                           <span className="min-w-0 truncate font-medium">{row.label}</span>
                           <span className="flex flex-wrap items-center gap-2 text-amber-800">
-                            <span>负向率 {rate}</span>
-                            <span>{missingSample ? "样本量缺失，无法判断可靠性" : `样本量 ${row.sampleSize}`}</span>
-                            <span>负向数 {row.negativeCount ?? "-"}</span>
-                            {smallSample ? <Badge variant="secondary" className="text-amber-800">小样本线索</Badge> : null}
-                            {missingSample ? <Badge variant="secondary" className="text-amber-800">待验证线索</Badge> : null}
+                            <span>{text.negativeRate} {rate}</span>
+                            <span>{missingSample ? text.sampleMissing : `${text.sampleSize} ${row.sampleSize}`}</span>
+                            <span>{text.negativeCount} {row.negativeCount ?? "-"}</span>
+                            {smallSample ? <Badge variant="secondary" className="text-amber-800">{text.smallSampleLead}</Badge> : null}
+                            {missingSample ? <Badge variant="secondary" className="text-amber-800">{text.validationLead}</Badge> : null}
                           </span>
                         </div>
                       );
                     })}
                   </div>
                   <p className="mt-2 text-xs leading-5 text-amber-900">
-                    对象级负向率需结合评论样本量判断；小样本 100% 负向率仅作为排查线索，不作为强风险结论。
+                    {text.negativeSampleCaveat}
                   </p>
                 </div>
               ) : null}
               {item.evidenceObjects?.length && !categoryInsight && !negativeRows.length ? (
                 <div className="mt-3 rounded-xl bg-emerald-50/60 p-3">
-                  <p className="text-xs font-semibold text-emerald-900">证据对象</p>
+                  <p className="text-xs font-semibold text-emerald-900">{text.evidenceObjects}</p>
                   <div className="mt-2 grid gap-1">
                     {item.evidenceObjects.slice(0, 3).map((row, index) => {
                       const label = evidenceObjectLabel(row, index);
@@ -9058,7 +9108,7 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                   </div>
                   {item.evidenceObjects.length > 3 ? (
                     <details className="mt-2 text-xs text-emerald-900">
-                      <summary className="cursor-pointer font-medium">查看完整排名</summary>
+                      <summary className="cursor-pointer font-medium">{text.viewFullRanking}</summary>
                       <div className="mt-2 max-h-44 overflow-auto rounded-lg border border-emerald-100 bg-white">
                         {item.evidenceObjects.slice(3, 10).map((row, index) => {
                           const label = evidenceObjectLabel(row, index + 3);
@@ -9078,7 +9128,7 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
               ) : null}
               {findingImplication(item) ? (
                 <div className="mt-3">
-                  <p className="text-xs font-semibold text-slate-500">业务含义</p>
+                  <p className="text-xs font-semibold text-slate-500">{text.businessMeaning}</p>
                   <p className="mt-1 text-xs leading-5 text-slate-500">{findingImplication(item)}</p>
                 </div>
               ) : null}
@@ -9089,12 +9139,12 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
               ) : null}
               {findingDecision(item) ? (
                 <div className="mt-3">
-                  <p className="text-xs font-semibold text-slate-500">建议决策</p>
+                  <p className="text-xs font-semibold text-slate-500">{text.recommendedDecision}</p>
                   <p className="mt-1 text-xs leading-5 text-slate-700">{findingDecision(item)}</p>
                 </div>
               ) : null}
               {findingCaveat(item) ? (
-                <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">口径提醒：{findingCaveat(item)}</p>
+                <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{text.caveatPrefix}{findingCaveat(item)}</p>
               ) : null}
               {item.limitations?.length ? (
                 <div className="mt-3 space-y-1">
@@ -9107,7 +9157,9 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
               ) : null}
             </div>
             );
-          })}
+          }) : (
+            <p className="text-sm leading-6 text-muted-foreground md:col-span-2">{text.noKeyFindings}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -9115,8 +9167,8 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
         {businessRiskItems.length ? (
           <Card className="border bg-white shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">业务风险</CardTitle>
-              <CardDescription>基于阈值、趋势、分布、Top Share 或对象级聚合</CardDescription>
+              <CardTitle className="text-base">{text.businessRisks}</CardTitle>
+              <CardDescription>{text.businessRisksDescription}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {businessRiskItems.map((item) => (
@@ -9133,18 +9185,18 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
         ) : (
           <Card className="border bg-white shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">业务风险</CardTitle>
-              <CardDescription>基于阈值、趋势、分布、Top Share 或对象级聚合</CardDescription>
+              <CardTitle className="text-base">{text.businessRisks}</CardTitle>
+              <CardDescription>{text.businessRisksDescription}</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-xs leading-5 text-muted-foreground">当前没有足够的对比、阈值或对象级证据生成业务风险</p>
+              <p className="text-xs leading-5 text-muted-foreground">{text.noBusinessRisks}</p>
             </CardContent>
           </Card>
         )}
         <Card className="border bg-white shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">增长机会</CardTitle>
-            <CardDescription>只展示来自对象级排名或分组聚合的机会</CardDescription>
+            <CardTitle className="text-base">{text.growthOpportunities}</CardTitle>
+            <CardDescription>{text.growthDescription}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {growthOpportunityItems.length ? growthOpportunityItems.map((item) => (
@@ -9161,7 +9213,7 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                 ) : null}
               </div>
             )) : (
-              <p className="text-xs leading-5 text-muted-foreground">当前缺少对象级排名或分组对比，暂不能识别具体机会对象</p>
+              <p className="text-xs leading-5 text-muted-foreground">{text.noGrowth}</p>
             )}
           </CardContent>
         </Card>
@@ -9169,12 +9221,12 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
 
       <Card className="border bg-white shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">下一步行动</CardTitle>
-          <CardDescription>把已完成的分析结果转成经营动作；数据补强只保留影响可信度和 ROI 判断的事项。</CardDescription>
+          <CardTitle className="text-base">{text.nextActions}</CardTitle>
+          <CardDescription>{text.nextActionsDescription}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div>
-            <p className="text-xs font-semibold text-slate-500">业务行动</p>
+            <p className="text-xs font-semibold text-slate-500">{text.businessActions}</p>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               {businessNextActions.length ? businessNextActions.map((item) => {
                 const objects = item.targetObjects?.length ? item.targetObjects : item.referencedObjects;
@@ -9190,19 +9242,19 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                       <Badge variant="secondary">{item.priority === "high" ? "High" : item.priority === "low" ? "Low" : "Medium"}</Badge>
                     </div>
                     {objects?.length ? (
-                      <p className="mt-1 text-xs leading-5 text-emerald-800">对象：{objects.join("、")}</p>
+                      <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{objects.join(isZh ? "、" : ", ")}</p>
                     ) : null}
                     {item.keyEvidence ?? item.evidence ? (
-                      <p className="mt-2 text-xs leading-5 text-slate-600">证据：{item.keyEvidence ?? item.evidence}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-600">{text.evidencePrefix}{item.keyEvidence ?? item.evidence}</p>
                     ) : null}
                     <div className="mt-3 rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs font-semibold text-slate-700">当前洞察</p>
+                      <p className="text-xs font-semibold text-slate-700">{text.currentInsight}</p>
                       <p className="mt-2 text-xs leading-5 text-slate-700">
                         {item.currentFinding ?? "当前报告已形成对象、分组或指标级判断。"}
                       </p>
                       {item.businessMeaning ? (
                         <>
-                          <p className="mt-3 text-xs font-semibold text-slate-700">业务含义</p>
+                          <p className="mt-3 text-xs font-semibold text-slate-700">{text.businessMeaning}</p>
                           <p className="mt-2 text-xs leading-5 text-muted-foreground">
                             {item.businessMeaning}
                           </p>
@@ -9210,15 +9262,15 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                       ) : null}
                       {item.recommendedAction ?? item.action ? (
                         <>
-                          <p className="mt-3 text-xs font-semibold text-slate-700">系统判断</p>
+                          <p className="mt-3 text-xs font-semibold text-slate-700">{text.systemJudgment}</p>
                           <p className="mt-2 text-xs leading-5 text-emerald-800">
                             {displayActionText(item.recommendedAction ?? item.action ?? "")}
                           </p>
                         </>
                       ) : null}
                       {executionStepsFor(item).length ? (
-                        <details className="mt-2 text-xs leading-5 text-slate-500">
-                          <summary className="cursor-pointer font-medium text-slate-600">查看执行清单</summary>
+                        <details className="mt-3 text-xs leading-5 text-slate-600">
+                          <summary className="cursor-pointer font-semibold text-slate-700">{text.executionChecklist}</summary>
                           <ol className="mt-2 list-decimal space-y-1 pl-4">
                             {executionStepsFor(item).map((step) => (
                               <li key={step}>{step}</li>
@@ -9227,10 +9279,10 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                         </details>
                       ) : null}
                     </div>
-                    <p className="mt-2 text-xs leading-5 text-slate-700">产出物：{deliverableForDisplay(item)}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">预期影响：{item.expectedImpact ?? item.expectedOutcome}</p>
+                    <p className="mt-2 text-xs leading-5 text-slate-700">{text.deliverable}{deliverableForDisplay(item)}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{item.expectedImpact ?? item.expectedOutcome}</p>
                     {caveatText ? (
-                      <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">口径提醒：{caveatText}</p>
+                      <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{text.caveatPrefix}{caveatText}</p>
                     ) : null}
                     {caveats.length ? (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -9248,23 +9300,23 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                     <p className="text-sm font-semibold">{item.title}</p>
                     <Badge variant="secondary">{item.priority}</Badge>
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">依据：{item.basedOn}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{text.evidencePrefix}{item.basedOn}</p>
                   {item.referencedObjects?.length ? (
-                    <p className="mt-1 text-xs leading-5 text-emerald-800">对象：{item.referencedObjects.join("、")}</p>
+                    <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{item.referencedObjects.join(isZh ? "、" : ", ")}</p>
                   ) : null}
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">执行动作：{displayActionText(item.action, item.referencedFields)}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">预期影响：{item.reason}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.executionAction}{displayActionText(item.action, item.referencedFields)}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{item.reason}</p>
                   {actionDetails(item.referencedFields)}
                 </div>
               ))}
               {!businessNextActions.length && !fallbackPriorityActions.filter((item) => item.type !== "data_quality_action").length ? (
-                <p className="text-xs leading-5 text-muted-foreground">当前没有足够的风险对象、机会对象或分组证据生成业务行动</p>
+                <p className="text-xs leading-5 text-muted-foreground">{text.noBusinessActions}</p>
               ) : null}
             </div>
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-slate-500">数据补强</p>
+            <p className="text-xs font-semibold text-slate-500">{text.dataActions}</p>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               {dataNextActions.length ? dataNextActions.map((item) => {
                 const caveats = conciseCaveats(item.caveats);
@@ -9276,12 +9328,12 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                     <p className="text-sm font-semibold">{actionTitleText(item)}</p>
                     <Badge variant="secondary">{item.priority}</Badge>
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">为什么需要：{copy.whyNeeded}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">执行动作：{copy.action}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-700">输出物：{copy.output}</p>
-                  <p className="mt-1 text-xs leading-5 text-emerald-800">决策影响：{copy.decisionImpact}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{text.whyNeeded}{copy.whyNeeded}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.executionAction}{copy.action}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-700">{text.output}{copy.output}</p>
+                  <p className="mt-1 text-xs leading-5 text-emerald-800">{text.decisionImpact}{copy.decisionImpact}</p>
                   {item.requiredDataIfAny?.length ? (
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">需要补充：{item.requiredDataIfAny.join("、")}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.requiredData}{item.requiredDataIfAny.join(isZh ? "、" : ", ")}</p>
                   ) : null}
                   {caveats.length ? (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -9293,7 +9345,7 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
                 </div>
                 );
               }) : (
-                <p className="text-xs leading-5 text-muted-foreground">当前没有必须补强的数据字段或口径动作</p>
+                <p className="text-xs leading-5 text-muted-foreground">{text.noDataActions}</p>
               )}
             </div>
           </div>
@@ -9301,7 +9353,7 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
       </Card>
 
       <details className="rounded-2xl border bg-white p-4 shadow-sm">
-        <summary className="cursor-pointer text-sm font-semibold">查看口径与限制</summary>
+        <summary className="cursor-pointer text-sm font-semibold">{text.viewLimitations}</summary>
         <div className="mt-3 grid gap-2">
           <p className="text-xs leading-5 text-muted-foreground">{limitationSummary}</p>
           {limitationCards.map((item) => (
@@ -9327,7 +9379,8 @@ function StructuredReportView({ report }: { report: StructuredReportViewData }) 
 
 function ReportGeneratedPanel({
   briefing,
-  metricResults
+  metricResults,
+  locale = "en"
 }: {
   briefing: {
     title: string;
@@ -9341,6 +9394,7 @@ function ReportGeneratedPanel({
     } | null;
   };
   metricResults: ReportMetricEvidenceResult[];
+  locale?: Locale;
 }) {
   const computedResults = metricResults
     .filter((result) => result.status === "computed")
@@ -9353,7 +9407,7 @@ function ReportGeneratedPanel({
   return (
     <div className="grid gap-3">
       {structuredReport ? (
-        <StructuredReportView report={structuredReport} />
+        <StructuredReportView report={structuredReport} locale={locale} />
       ) : (
         <>
       <Card className="border bg-white shadow-sm">
@@ -9436,6 +9490,59 @@ function ReportGeneratedPanel({
         </Card>
       ) : null}
     </div>
+  );
+}
+
+function ReportSetupProgress({
+  isZh,
+  hasConnectedData,
+  hasReport
+}: {
+  isZh: boolean;
+  hasConnectedData: boolean;
+  hasReport: boolean;
+}) {
+  const steps = isZh
+    ? [
+        { label: "数据已连接", done: hasConnectedData },
+        { label: "字段已识别", done: hasConnectedData },
+        { label: "指标已生成", done: hasReport },
+        { label: "报告已生成", done: hasReport }
+      ]
+    : [
+        { label: "Data connected", done: hasConnectedData },
+        { label: "Schema mapped", done: hasConnectedData },
+        { label: "Metrics generated", done: hasReport },
+        { label: "Report ready", done: hasReport }
+      ];
+
+  return (
+    <Card className="border-emerald-100 bg-white/90 shadow-sm">
+      <CardContent className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          {steps.map((step) => (
+            <div
+              key={step.label}
+              className={cn(
+                "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
+                step.done
+                  ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                  : "border-slate-200 bg-secondary/35 text-muted-foreground"
+              )}
+            >
+              <CheckCircle2 className={cn("size-3.5", step.done ? "text-emerald-700" : "text-slate-400")} />
+              {step.label}
+            </div>
+          ))}
+        </div>
+        <Button asChild variant="outline" size="sm" className="w-full md:w-auto">
+          <a href="/dashboard/import-data">
+            {isZh ? "管理数据源" : "Manage data sources"}
+            <ArrowRight />
+          </a>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -9609,7 +9716,7 @@ function ReportPage({ locale }: { locale: Locale }) {
     let isCancelled = false;
 
     setIsLoadingReportEvidence(true);
-    void fetch("/api/dashboard/reports", { cache: "no-store" })
+    void fetch(`/api/dashboard/reports?locale=${encodeURIComponent(locale)}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (!isCancelled) {
@@ -9626,7 +9733,7 @@ function ReportPage({ locale }: { locale: Locale }) {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   const trendDataBase = [
     { period: "05-01", revenue: 126, arr: 412, cac: 43, retention: 89, activation: 48, conversion: 12.8 },
@@ -9846,8 +9953,10 @@ export function Dashboard({
   const isReportsView = view === "reports";
   const hasChatPanel = view !== "settings";
   const activeTarget =
-    view === "import-data" || view === "import-data-connect" || view === "metrics" || view === "schema"
-      ? "#data"
+    view === "import-data" || view === "import-data-connect"
+      ? "#import-data"
+      : view === "metrics" || view === "schema"
+        ? "#metrics"
       : view === "report"
         ? "#report"
       : isReportsView
@@ -9923,7 +10032,9 @@ export function Dashboard({
               hasChatPanel
                 ? isChatCollapsed
                   ? "xl:grid-cols-[minmax(0,1fr)_76px]"
-                  : "xl:grid-cols-[minmax(0,1fr)_430px]"
+                  : isReportsView
+                    ? "xl:grid-cols-[minmax(0,1fr)_360px]"
+                    : "xl:grid-cols-[minmax(0,1fr)_400px]"
                 : "xl:grid-cols-1"
             )}
           >
@@ -9956,7 +10067,7 @@ export function Dashboard({
               </div>
             ) : view === "reports" ? (
               <div className="flex min-h-0 min-w-0 flex-col xl:col-start-1">
-                <ReportsPage copy={copy} hasConnectedDatabase={connectedSources.length > 0} />
+                <ReportsPage copy={copy} locale={locale} hasConnectedDatabase={connectedSources.length > 0} />
               </div>
             ) : view === "report" ? (
               <div className="min-w-0 xl:col-start-1">
@@ -9974,6 +10085,7 @@ export function Dashboard({
                 copy={copy}
                 isCollapsed={isChatCollapsed}
                 onToggle={() => setIsChatCollapsed((current) => !current)}
+                isReportView={isReportsView || view === "report"}
                 className="min-w-0 xl:sticky xl:top-[76px] xl:col-start-2 xl:row-span-4 xl:row-start-1"
               />
             ) : null}

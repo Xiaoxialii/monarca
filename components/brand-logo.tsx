@@ -1,10 +1,14 @@
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 function ButterflyMark({ label, className }: { label: string; className?: string }) {
   return (
-    <img
+    <Image
       src="/brand-mark.png"
       alt={label}
+      width={64}
+      height={64}
+      priority
       className={cn("shrink-0 object-contain", className)}
     />
   );

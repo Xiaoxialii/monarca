@@ -171,7 +171,6 @@ const apiErrors = read("lib/api-errors.ts");
 for (const token of [
   "pool timeout",
   "failed to retrieve a connection from pool",
-  "can't connect to mysql server on",
   "connection timed out",
   "server has gone away",
   "econnrefused",

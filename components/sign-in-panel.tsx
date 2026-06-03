@@ -7,13 +7,10 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
-import { AuthIdentifierField } from "@/components/auth-identifier-field";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { normalizeAuthIdentifier } from "@/lib/auth-identifiers";
 import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
-import { fallbackPhoneCountryCode } from "@/lib/phone-countries";
 
 const signInCopy = {
   en: {
@@ -22,28 +19,27 @@ const signInCopy = {
     privacy: "Privacy",
     terms: "Terms",
     emailMethod: "Email",
-    phoneMethod: "Phone",
     emailLabel: "Email",
     emailPlaceholder: "you@example.com",
-    phoneLabel: "Phone number",
-    phonePlaceholder: "Phone number",
     codeLabel: "Verification code",
     codePlaceholder: "Enter code",
     codeSignIn: "Sign in with code",
-    codeIntro: "The country code is detected automatically. You can change it before sending the code.",
     sendCode: "Send code",
     sendingCode: "Sending...",
     verifyCode: "Verify and sign in",
     verifyingCode: "Verifying...",
     resendCode: "Resend code",
-    changeIdentifier: "Use another email or phone",
+    changeIdentifier: "Use another email",
     sentCode: "Code sent to",
-    otherMethods: "Password or social login",
+    otherMethods: "Password login",
     codeMethods: "Verification code login",
-    missingIdentifier: "Enter your email or phone number.",
+    continueWithGoogle: "Continue with Google",
+    divider: "or",
+    googleUnavailable: "Google sign-in is not available right now.",
+    missingIdentifier: "Enter your email.",
     missingCode: "Enter the verification code.",
     codeUnavailable: "Verification code login is not enabled for this account. Use another sign-in method.",
-    secondFactorRequired: "This account needs an extra verification step. Use password or social login below.",
+    secondFactorRequired: "This account needs an extra verification step. Use password login below.",
     forgotEmail: "Forgot email?",
     note: "Not your computer? Use a private browsing window to sign in",
     createAccount: "Create account",
@@ -58,28 +54,27 @@ const signInCopy = {
     privacy: "隐私",
     terms: "条款",
     emailMethod: "邮箱",
-    phoneMethod: "手机号",
     emailLabel: "邮箱",
     emailPlaceholder: "you@example.com",
-    phoneLabel: "手机号",
-    phonePlaceholder: "手机号",
     codeLabel: "验证码",
     codePlaceholder: "请输入验证码",
     codeSignIn: "验证码登录",
-    codeIntro: "国家/地区区号会自动识别，发送前也可以手动切换。",
     sendCode: "发送验证码",
     sendingCode: "发送中...",
     verifyCode: "验证并登录",
     verifyingCode: "验证中...",
     resendCode: "重新发送",
-    changeIdentifier: "换一个邮箱或手机号",
+    changeIdentifier: "换一个邮箱",
     sentCode: "验证码已发送至",
-    otherMethods: "密码或第三方登录",
+    otherMethods: "密码登录",
     codeMethods: "验证码登录",
-    missingIdentifier: "请输入邮箱或手机号。",
+    continueWithGoogle: "使用 Google 登录",
+    divider: "或",
+    googleUnavailable: "当前无法使用 Google 登录。",
+    missingIdentifier: "请输入邮箱。",
     missingCode: "请输入验证码。",
     codeUnavailable: "当前账号未启用验证码登录，请使用下面的其他登录方式。",
-    secondFactorRequired: "这个账号还需要额外验证，请使用下面的密码或第三方登录。",
+    secondFactorRequired: "这个账号还需要额外验证，请使用下面的密码登录。",
     forgotEmail: "忘记邮箱？",
     note: "这不是你的电脑？请使用无痕窗口登录当前演示会直接进入数据看板",
     createAccount: "创建账号",
@@ -91,9 +86,7 @@ const signInCopy = {
 } as const;
 
 type SignInCopy = (typeof signInCopy)[CopyLocale];
-type CodeFactor =
-  | Extract<SignInFirstFactor, { strategy: "phone_code" }>
-  | Extract<SignInFirstFactor, { strategy: "email_code" }>;
+type CodeFactor = Extract<SignInFirstFactor, { strategy: "email_code" }>;
 
 export function SignInPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -157,6 +150,14 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
       <SignInBrand copy={copy} />
       <div className="flex w-full min-w-0 flex-col items-center lg:items-end">
         <div className="w-full max-w-full rounded-lg border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_20px_50px_rgba(15,23,42,0.07)] sm:max-w-[560px] sm:p-8">
+        <GoogleSignInButton copy={copy} />
+
+        <div className="my-5 flex items-center gap-5 text-sm text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          <span>{copy.divider}</span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+
         <div className="mb-5 grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
           <button
             type="button"
@@ -192,10 +193,10 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
                 cardBox: "w-full shadow-none border-0",
                 card: "w-full shadow-none p-0",
                 header: "hidden",
-                socialButtonsBlockButton:
-                  "h-14 rounded-md border border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm hover:bg-slate-50",
+                socialButtonsBlockButton: "hidden",
                 socialButtonsBlockButtonText: "text-base font-medium",
                 socialButtonsProviderIcon: "size-5",
+                dividerRow: "hidden",
                 formFieldInput: "h-14 rounded-md border-slate-300 text-base",
                 formButtonPrimary: "h-14 rounded-md bg-primary px-6 text-base hover:bg-primary/90 text-primary-foreground",
                 footer: "hidden"
@@ -209,13 +210,50 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
   );
 }
 
+function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
+  const { isLoaded, signIn } = useSignIn();
+  const [error, setError] = useState("");
+
+  function getErrorMessage(errorValue: unknown) {
+    if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
+      const clerkError = errorValue as { errors?: Array<{ longMessage?: string; message?: string }> };
+      return clerkError.errors?.[0]?.longMessage || clerkError.errors?.[0]?.message || copy.googleUnavailable;
+    }
+
+    return errorValue instanceof Error ? errorValue.message : copy.googleUnavailable;
+  }
+
+  async function startGoogleSignIn() {
+    if (!isLoaded) return;
+
+    setError("");
+
+    try {
+      await signIn.authenticateWithRedirect({
+        strategy: "oauth_google",
+        redirectUrl: "/sign-in/sso-callback",
+        redirectUrlComplete: "/dashboard"
+      });
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button type="button" variant="outline" onClick={() => void startGoogleSignIn()} disabled={!isLoaded} className="h-14 w-full rounded-md border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+        <span className="text-xl font-semibold text-[#4285f4]">G</span>
+        {copy.continueWithGoogle}
+      </Button>
+      {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
 function CodeSignIn({ copy }: { copy: SignInCopy }) {
   const router = useRouter();
   const { isLoaded, signIn, setActive } = useSignIn();
-  const [authMethod, setAuthMethod] = useState<"email" | "phone">("email");
   const [emailAddress, setEmailAddress] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [phoneCountryCode, setPhoneCountryCode] = useState(fallbackPhoneCountryCode);
   const [code, setCode] = useState("");
   const [factor, setFactor] = useState<CodeFactor | null>(null);
   const [sentTo, setSentTo] = useState("");
@@ -236,18 +274,16 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
     return errorValue instanceof Error ? errorValue.message : copy.codeUnavailable;
   }
 
-  function findCodeFactor(factors: SignInFirstFactor[], method: "email" | "phone"): CodeFactor | null {
-    const phoneFactor = factors.find((item): item is Extract<SignInFirstFactor, { strategy: "phone_code" }> => item.strategy === "phone_code");
+  function findCodeFactor(factors: SignInFirstFactor[]): CodeFactor | null {
     const emailFactor = factors.find((item): item is Extract<SignInFirstFactor, { strategy: "email_code" }> => item.strategy === "email_code");
 
-    return method === "phone" ? phoneFactor || emailFactor || null : emailFactor || phoneFactor || null;
+    return emailFactor || null;
   }
 
   async function sendCode(nextFactor?: CodeFactor) {
     if (!isLoaded) return;
 
-    const trimmedIdentifier =
-      authMethod === "email" ? emailAddress.trim() : normalizeAuthIdentifier(phoneNumber, phoneCountryCode);
+    const trimmedIdentifier = emailAddress.trim();
     const selectedFactor = nextFactor || factor;
 
     if (!trimmedIdentifier && !selectedFactor) {
@@ -270,7 +306,7 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
           return;
         }
 
-        currentFactor = findCodeFactor(result.supportedFirstFactors || [], authMethod);
+        currentFactor = findCodeFactor(result.supportedFirstFactors || []);
       }
 
       if (!currentFactor) {
@@ -278,18 +314,10 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
         return;
       }
 
-      if (currentFactor.strategy === "phone_code") {
-        await signIn.prepareFirstFactor({
-          strategy: "phone_code",
-          phoneNumberId: currentFactor.phoneNumberId,
-          channel: currentFactor.channel || "sms"
-        });
-      } else {
-        await signIn.prepareFirstFactor({
-          strategy: "email_code",
-          emailAddressId: currentFactor.emailAddressId
-        });
-      }
+      await signIn.prepareFirstFactor({
+        strategy: "email_code",
+        emailAddressId: currentFactor.emailAddressId
+      });
 
       setFactor(currentFactor);
       setSentTo(currentFactor.safeIdentifier);
@@ -355,62 +383,19 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
           }}
         >
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMethod("email");
-                  setError("");
-                }}
-                className={`h-12 rounded-[5px] text-base font-medium transition ${
-                  authMethod === "email" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {copy.emailMethod}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMethod("phone");
-                  setError("");
-                }}
-                className={`h-12 rounded-[5px] text-base font-medium transition ${
-                  authMethod === "phone" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {copy.phoneMethod}
-              </button>
-            </div>
-
-            {authMethod === "email" ? (
-              <div className="space-y-2">
-                <label className="sr-only" htmlFor="otp-email">
-                  {copy.emailLabel}
-                </label>
-                <Input
-                  id="otp-email"
-                  autoComplete="email"
-                  inputMode="email"
-                  type="email"
-                  value={emailAddress}
-                  onChange={(event) => setEmailAddress(event.target.value)}
-                  placeholder={copy.emailPlaceholder}
-                  className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
-                />
-              </div>
-            ) : (
-              <AuthIdentifierField
-                id="otp-phone"
-                label={copy.phoneLabel}
-                locale={copy === signInCopy.zh ? "zh" : "en"}
-                value={phoneNumber}
-                countryCode={phoneCountryCode}
-                onValueChange={setPhoneNumber}
-                onCountryChange={setPhoneCountryCode}
-                placeholder={copy.phonePlaceholder}
-              />
-            )}
-            <p className="px-1 text-sm leading-6 text-slate-500">{copy.codeIntro}</p>
+            <label className="sr-only" htmlFor="otp-email">
+              {copy.emailLabel}
+            </label>
+            <Input
+              id="otp-email"
+              autoComplete="email"
+              inputMode="email"
+              type="email"
+              value={emailAddress}
+              onChange={(event) => setEmailAddress(event.target.value)}
+              placeholder={copy.emailPlaceholder}
+              className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
+            />
           </div>
 
           {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}

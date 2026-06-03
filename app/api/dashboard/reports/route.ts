@@ -115,6 +115,7 @@ export async function GET(request: Request) {
       }
     });
     const localeMatchedBriefing = briefingLocale(briefing) === requestedLocale ? briefing : null;
+    const selectedBriefing = localeMatchedBriefing ?? briefing;
 
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
@@ -145,16 +146,19 @@ export async function GET(request: Request) {
     const businessMetrics = metrics.filter((metric) => isBusinessFacingMetricDefinition(metric));
     const visibleMetricIds = new Set(businessMetrics.map((metric) => metric.id));
     const visibleMetricsById = new Map(businessMetrics.map((metric) => [metric.id, metric]));
-    const visibleBriefing = filterBriefingMetricResults(localeMatchedBriefing, visibleMetricIds, visibleMetricsById);
-    const insights = localeMatchedBriefing?.insights ?? [];
+    const visibleBriefing = filterBriefingMetricResults(selectedBriefing, visibleMetricIds, visibleMetricsById);
+    const insights = selectedBriefing?.insights ?? [];
     const recommendations = insights.flatMap((insight) => insight.recommendations);
 
     return NextResponse.json({
       workspaceId: session.workspace.id,
-      hasData: Boolean(localeMatchedBriefing || insights.length || recommendations.length),
+      hasData: Boolean(selectedBriefing || insights.length || recommendations.length),
       briefing: visibleBriefing,
       insights,
       recommendations,
+      requestedLocale,
+      reportLocale: briefingLocale(selectedBriefing),
+      usedLocaleFallback: Boolean(!localeMatchedBriefing && selectedBriefing),
       analysisReport: analysisReportFromSnapshot(latestSnapshot)
     });
   } catch (error) {

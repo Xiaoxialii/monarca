@@ -3,7 +3,7 @@ import { RecommendationStatus, UsageActionType, WorkspaceRole } from "@prisma/cl
 import { prisma } from "@/lib/prisma";
 import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { checkUserEntitlement, consumeCredit, EntitlementError } from "@/lib/entitlements";
+import { checkUserEntitlement, consumeCredit, EntitlementError, entitlementErrorMessage } from "@/lib/entitlements";
 import { computeMetricResultsForContexts, type MetricResultValue } from "@/lib/metric-results";
 import { buildMockAiBrief } from "@/lib/report-generation/ai-brief-generator";
 import { contextualMetricName } from "@/lib/report-generation/metric-name-normalizer";
@@ -230,18 +230,42 @@ function groupMetricResultsByType(results: MetricResultValue[]) {
 }
 
 export async function POST(request: Request) {
+  let responseLocale: ReportLocale = "en";
+
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     const payload = await request.json().catch(() => null);
     const requestedLocale = normalizeReportLocale(asRecord(payload).locale);
     const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
+    responseLocale = reportLocale;
     if (requestedLocale && requestedLocale !== session.user.locale) {
       await prisma.user.update({
         where: { id: session.user.id },
         data: { locale: requestedLocale }
       });
     }
-    await checkUserEntitlement(session.user.id, UsageActionType.GENERATE_REPORT);
+    const latestBriefingForLocale = await prisma.dailyBriefing.findFirst({
+      where: {
+        workspaceId: session.workspace.id
+      },
+      orderBy: {
+        briefingDate: "desc"
+      },
+      select: {
+        payloadJson: true
+      }
+    });
+    const latestBriefingLocale = asRecord(latestBriefingForLocale?.payloadJson).locale;
+    const hasKnownLatestBriefingLocale = latestBriefingLocale === "zh" || latestBriefingLocale === "en";
+    const isLocaleOnlyRegeneration = Boolean(
+      requestedLocale &&
+      latestBriefingForLocale &&
+      (!hasKnownLatestBriefingLocale || latestBriefingLocale !== reportLocale)
+    );
+
+    if (!isLocaleOnlyRegeneration) {
+      await checkUserEntitlement(session.user.id, UsageActionType.GENERATE_REPORT);
+    }
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -516,17 +540,19 @@ export async function POST(request: Request) {
       });
     }
 
-    const creditUsage = await consumeCredit({
-      userId: session.user.id,
-      actionType: UsageActionType.GENERATE_REPORT,
-      amount: 1,
-      metadata: {
-        briefingId: briefing.id,
-        workspaceId: session.workspace.id,
-        generatedAt: payloadJson.generatedAt,
-        computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length
-      }
-    });
+    const creditUsage = isLocaleOnlyRegeneration
+      ? null
+      : await consumeCredit({
+          userId: session.user.id,
+          actionType: UsageActionType.GENERATE_REPORT,
+          amount: 1,
+          metadata: {
+            briefingId: briefing.id,
+            workspaceId: session.workspace.id,
+            generatedAt: payloadJson.generatedAt,
+            computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length
+          }
+        });
 
     return NextResponse.json({
       ok: true,
@@ -540,8 +566,9 @@ export async function POST(request: Request) {
       failedMetricCount: metricResults.filter((result) => result.status === "failed").length,
       skippedMetricCount: metricResults.filter((result) => result.status === "skipped").length,
       entitlement: {
-        creditId: creditUsage.creditId,
-        remainingReports: creditUsage.remaining
+        creditId: creditUsage?.creditId ?? null,
+        remainingReports: creditUsage?.remaining ?? null,
+        consumed: Boolean(creditUsage)
       }
     });
   } catch (error) {
@@ -556,7 +583,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: error.code,
-          message: error.message,
+          message: entitlementErrorMessage(error.code, responseLocale),
           upgradeUrl: "/checkout/professional",
           oneTimeUrl: "/checkout/trial"
         },

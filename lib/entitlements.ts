@@ -28,6 +28,31 @@ export class EntitlementError extends Error {
   }
 }
 
+export type EntitlementMessageLocale = "en" | "zh";
+
+export function entitlementErrorMessage(code: EntitlementErrorCode, locale: EntitlementMessageLocale = "en") {
+  const messages: Record<EntitlementErrorCode, Record<EntitlementMessageLocale, string>> = {
+    NO_ACTIVE_PLAN: {
+      en: "The selected plan is not available.",
+      zh: "所选套餐不可用。"
+    },
+    CREDIT_USED_UP: {
+      en: "Your service credits have been used up. Please buy another one-time service or upgrade your plan.",
+      zh: "当前服务额度已用完，请再次购买或升级套餐。"
+    },
+    SUBSCRIPTION_EXPIRED: {
+      en: "Your subscription has expired or the payment failed. Please reactivate your plan.",
+      zh: "订阅已过期或支付失败，请重新开通。"
+    },
+    PAYMENT_REQUIRED: {
+      en: "No service credits are available. Please buy a one-time service or start a monthly plan.",
+      zh: "当前无可用服务额度，请购买一次服务或开通月服务。"
+    }
+  };
+
+  return messages[code][locale];
+}
+
 export const defaultPlans = [
   {
     code: "starter-one-time",

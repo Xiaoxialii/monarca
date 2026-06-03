@@ -73,8 +73,6 @@ const dashboardCopy = {
   en: {
     navItems: [
       { label: "Analysis Report", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
-      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "Metrics", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
       { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -772,8 +770,6 @@ const dashboardCopy = {
   zh: {
     navItems: [
       { label: "分析报告", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
-      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "指标", href: "/dashboard/metrics", target: "#metrics", icon: LineChart },
       { label: "报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -5754,13 +5750,14 @@ function ReportsPage({
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
+        code?: string;
         computedMetricCount?: number;
         generatedAt?: string;
         message?: string;
       } | null;
 
       if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || "Failed to generate report");
+        throw new Error(reportGenerationErrorMessage(payload, locale));
       }
 
       setReportGenerationMessage(
@@ -5771,7 +5768,8 @@ function ReportsPage({
       await loadReportData();
       window.dispatchEvent(new Event("monarca-report-updated"));
     } catch (error) {
-      setReportGenerationMessage(error instanceof Error ? error.message : "Failed to generate report");
+      const fallback = isReportsZh ? "报告生成失败" : "Failed to generate report";
+      setReportGenerationMessage(error instanceof Error ? localeSafeText(error.message, fallback, locale) : fallback);
     } finally {
       setIsGeneratingReport(false);
     }
@@ -5890,6 +5888,47 @@ function formatReportMetricValue(value: unknown) {
   return value == null ? "-" : String(value);
 }
 
+function containsCjkText(value?: string | null) {
+  return /[\u3400-\u9fff]/.test(value ?? "");
+}
+
+function reportGenerationErrorMessage(
+  payload: { code?: string; message?: string } | null,
+  locale: Locale
+) {
+  const isZh = locale === "zh";
+  const fallback = isZh ? "报告生成失败" : "Failed to generate report";
+  const entitlementMessages: Record<string, { en: string; zh: string }> = {
+    NO_ACTIVE_PLAN: {
+      en: "The selected plan is not available.",
+      zh: "所选套餐不可用。"
+    },
+    CREDIT_USED_UP: {
+      en: "Your service credits have been used up. Please buy another one-time service or upgrade your plan.",
+      zh: "当前服务额度已用完，请再次购买或升级套餐。"
+    },
+    SUBSCRIPTION_EXPIRED: {
+      en: "Your subscription has expired or the payment failed. Please reactivate your plan.",
+      zh: "订阅已过期或支付失败，请重新开通。"
+    },
+    PAYMENT_REQUIRED: {
+      en: "No service credits are available. Please buy a one-time service or start a monthly plan.",
+      zh: "当前无可用服务额度，请购买一次服务或开通月服务。"
+    }
+  };
+  const localized = payload?.code ? entitlementMessages[payload.code]?.[isZh ? "zh" : "en"] : undefined;
+
+  return localized ?? localeSafeText(payload?.message, fallback, locale);
+}
+
+function localeSafeText(value: string | undefined | null, fallback: string, locale: Locale) {
+  const text = value?.trim();
+  if (!text) return fallback;
+  if (locale === "en" && containsCjkText(text)) return fallback;
+
+  return text;
+}
+
 function titleCaseMetricText(value: string) {
   return value
     .replace(/[_-]+/g, " ")
@@ -5950,7 +5989,8 @@ function dedupeReportMetricResults(results: ReportMetricEvidenceResult[]) {
   return Array.from(byKey.values());
 }
 
-function objectMetricDisplay(result: ReportMetricEvidenceResult) {
+function objectMetricDisplay(result: ReportMetricEvidenceResult, locale: Locale = "zh") {
+  const isZh = locale === "zh";
   const rawName = contextualMetricName(result.displayName || result.metricName, result.formula);
   const byMatch = /^(.+?)\s+by\s+(.+)$/i.exec(rawName.trim());
   const formulaDimension = /\s+BY\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)/i.exec(result.formula)?.[1]
@@ -5986,8 +6026,10 @@ function objectMetricDisplay(result: ReportMetricEvidenceResult) {
     value: `${topRow.dimension}: ${formattedValue}`,
     dimensionLabel: titleCaseMetricText(dimensionPart),
     helper: isRating && topRow.sampleSize != null
-      ? `平均评分 · 样本量 ${formatReportMetricValue(topRow.sampleSize)}`
-      : "对象级结果，不是全局总值"
+      ? (isZh
+        ? `平均评分 · 样本量 ${formatReportMetricValue(topRow.sampleSize)}`
+        : `Average rating · sample size ${formatReportMetricValue(topRow.sampleSize)}`)
+      : (isZh ? "对象级结果，不是全局总值" : "Object-level result, not a global total")
   };
 }
 
@@ -6153,6 +6195,34 @@ const reportMetricTypeLabelMap: Record<ReportMetricTypeFilter, string> = {
   auxiliary: "辅助指标"
 };
 
+const reportMetricStatusFilterLabelMap: Record<ReportMetricStatusFilter, { zh: string; en: string }> = {
+  all: { zh: "全部", en: "All" },
+  verified: { zh: "已验证", en: "Verified" },
+  estimated: { zh: "估算值", en: "Estimated" },
+  dedup: { zh: "未去重", en: "Raw / not deduped" },
+  smallSample: { zh: "小样本", en: "Small sample" },
+  limited: { zh: "口径限制", en: "Definition caveats" },
+  failed: { zh: "计算失败", en: "Failed" }
+};
+
+const reportMetricTypeFilterLabelMap: Record<ReportMetricTypeFilter, { zh: string; en: string }> = {
+  all: { zh: "全部类型", en: "All types" },
+  core: { zh: "核心指标", en: "Core metrics" },
+  comparison: { zh: "对比指标", en: "Comparison metrics" },
+  distribution: { zh: "分布指标", en: "Distribution metrics" },
+  ranking: { zh: "排名指标", en: "Ranking metrics" },
+  trend: { zh: "趋势指标", en: "Trend metrics" },
+  auxiliary: { zh: "辅助指标", en: "Auxiliary metrics" }
+};
+
+function reportMetricStatusFilterLabel(value: ReportMetricStatusFilter, locale: Locale) {
+  return locale === "zh" ? reportMetricStatusFilterLabelMap[value].zh : reportMetricStatusFilterLabelMap[value].en;
+}
+
+function reportMetricTypeFilterLabel(value: ReportMetricTypeFilter, locale: Locale) {
+  return locale === "zh" ? reportMetricTypeFilterLabelMap[value].zh : reportMetricTypeFilterLabelMap[value].en;
+}
+
 function metricWarningTypes(result: ReportMetricEvidenceResult) {
   return new Set([
     ...(Array.isArray(result.warningTypes) ? result.warningTypes : []),
@@ -6260,7 +6330,8 @@ function reportMetricDisplayType(result: ReportMetricEvidenceResult): ReportMetr
   return "core";
 }
 
-function inferReportMetricBusinessModule(result: ReportMetricEvidenceResult) {
+function inferReportMetricBusinessModule(result: ReportMetricEvidenceResult, locale: Locale = "zh") {
+  const isZh = locale === "zh";
   const text = normalizeReportMetricText([
     result.businessType,
     result.metricCategory,
@@ -6273,21 +6344,23 @@ function inferReportMetricBusinessModule(result: ReportMetricEvidenceResult) {
   ].filter(Boolean).join(" "));
 
   if (text.includes("sentiment") || text.includes("review") || text.includes("rating")) {
-    return text.includes("review") || text.includes("sentiment") ? "用户反馈" : "评分与质量";
+    return text.includes("review") || text.includes("sentiment")
+      ? (isZh ? "用户反馈" : "Customer Feedback")
+      : (isZh ? "评分与质量" : "Ratings & Quality");
   }
   if (text.includes("app") || text.includes("installs") || text.includes("download") || text.includes("category")) {
     return text.includes("price") || text.includes("paid") || text.includes("monetization")
-      ? "变现"
-      : "市场规模";
+      ? (isZh ? "变现" : "Monetization")
+      : (isZh ? "市场规模" : "Market Scale");
   }
   if (text.includes("revenue") || text.includes("sales") || text.includes("gmv") || text.includes("amount")) {
-    return "收入与销售";
+    return isZh ? "收入与销售" : "Revenue & Sales";
   }
   if (text.includes("cost") || text.includes("margin") || text.includes("profit") || text.includes("roi")) {
-    return "成本与利润";
+    return isZh ? "成本与利润" : "Cost & Profit";
   }
   if (text.includes("conversion") || text.includes("cvr") || text.includes("retention") || text.includes("churn")) {
-    return "转化与留存";
+    return isZh ? "转化与留存" : "Conversion & Retention";
   }
   if (
     text.includes("close") ||
@@ -6296,15 +6369,15 @@ function inferReportMetricBusinessModule(result: ReportMetricEvidenceResult) {
     text.includes("return") ||
     text.includes("volatility")
   ) {
-    return "金融 / 时间序列";
+    return isZh ? "金融 / 时间序列" : "Finance / Time Series";
   }
   if (reportMetricDisplayType(result) === "ranking" || reportMetricScope(result) !== "global") {
-    return "排名与对象";
+    return isZh ? "排名与对象" : "Rankings & Objects";
   }
   if (hasLimitedReportMetricScope(result)) {
-    return "数据质量";
+    return isZh ? "数据质量" : "Data Quality";
   }
-  return "通用业务指标";
+  return isZh ? "通用业务指标" : "Business Metrics";
 }
 
 function isReportDashboardMetric(result: ReportMetricEvidenceResult) {
@@ -6390,40 +6463,46 @@ function selectReportCoreKpis(results: ReportMetricEvidenceResult[]) {
     .slice(0, 8);
 }
 
-function reportMetricBadges(result: ReportMetricEvidenceResult, maxCount = 2) {
+function reportMetricBadges(result: ReportMetricEvidenceResult, maxCount = 2, locale: Locale = "zh") {
+  const isZh = locale === "zh";
   const badges: Array<{ label: string; className?: string }> = [];
 
   if (result.status === "failed") {
-    badges.push({ label: "计算失败", className: "text-rose-700" });
+    badges.push({ label: isZh ? "计算失败" : "Failed", className: "text-rose-700" });
   } else if (result.status === "computed" || result.validationStatus === "passed") {
-    badges.push({ label: "已验证", className: "text-emerald-700" });
+    badges.push({ label: isZh ? "已验证" : "Verified", className: "text-emerald-700" });
   }
-  if (isEstimatedReportMetric(result)) badges.push({ label: "估算值", className: "text-amber-700" });
-  if (requiresDedupedReportMetric(result)) badges.push({ label: "未去重", className: "text-amber-700" });
-  if (isSmallSampleReportMetric(result)) badges.push({ label: "小样本", className: "text-amber-700" });
+  if (isEstimatedReportMetric(result)) badges.push({ label: isZh ? "估算值" : "Estimated", className: "text-amber-700" });
+  if (requiresDedupedReportMetric(result)) badges.push({ label: isZh ? "未去重" : "Raw", className: "text-amber-700" });
+  if (isSmallSampleReportMetric(result)) badges.push({ label: isZh ? "小样本" : "Small sample", className: "text-amber-700" });
   if (result.isDiagnosticMetric || reportMetricDisplayType(result) === "auxiliary") {
-    badges.push({ label: "辅助指标", className: "text-slate-600" });
+    badges.push({ label: isZh ? "辅助指标" : "Auxiliary", className: "text-slate-600" });
   }
   if (metricWarningTypes(result).has("missing_benchmark")) {
-    badges.push({ label: "缺少基准", className: "text-amber-700" });
+    badges.push({ label: isZh ? "缺少基准" : "No benchmark", className: "text-amber-700" });
   }
 
   return badges.slice(0, maxCount);
 }
 
-function reportMetricShortDescription(result: ReportMetricEvidenceResult) {
+function reportMetricShortDescription(result: ReportMetricEvidenceResult, locale: Locale = "zh") {
+  const isZh = locale === "zh";
   const name = normalizeReportMetricText(`${result.displayName ?? ""} ${result.metricName}`);
-  const businessModule = inferReportMetricBusinessModule(result);
+  const businessModule = inferReportMetricBusinessModule(result, locale);
 
-  if (name.includes("negative_sentiment_rate")) return "整体负向反馈占比，用于判断用户体验风险";
-  if (name.includes("positive_sentiment_rate")) return "整体正向反馈占比，用于判断用户满意度";
-  if (name.includes("review_volume")) return "有效评论样本量";
-  if (name.includes("total_installs")) return "安装规模指标，注意原始口径限制";
-  if (name.includes("average_rating")) return "公开评分的平均水平";
-  if (name.includes("estimated")) return "方向性估算指标，不代表真实收入";
-  if (businessModule === "金融 / 时间序列") return "金融时序指标，用于观察价格、收益或交易规模";
-  if (businessModule === "排名与对象") return "对象级结果，适合放入排名和排查线索";
-  return `${businessModule}下的业务指标`;
+  if (name.includes("negative_sentiment_rate")) return isZh ? "整体负向反馈占比，用于判断用户体验风险" : "Overall negative feedback share for user experience risk.";
+  if (name.includes("positive_sentiment_rate")) return isZh ? "整体正向反馈占比，用于判断用户满意度" : "Overall positive feedback share for user satisfaction.";
+  if (name.includes("review_volume")) return isZh ? "有效评论样本量" : "Valid review sample size.";
+  if (name.includes("total_installs")) return isZh ? "安装规模指标，注意原始口径限制" : "Install scale metric; raw definitions may need deduplication.";
+  if (name.includes("average_rating")) return isZh ? "公开评分的平均水平" : "Average public rating level.";
+  if (name.includes("estimated")) return isZh ? "方向性估算指标，不代表真实收入" : "Directional estimate, not actual revenue.";
+  if (businessModule === (isZh ? "金融 / 时间序列" : "Finance / Time Series")) {
+    return isZh ? "金融时序指标，用于观察价格、收益或交易规模" : "Finance time-series metric for price, return, or trading scale.";
+  }
+  if (businessModule === (isZh ? "排名与对象" : "Rankings & Objects")) {
+    return isZh ? "对象级结果，适合放入排名和排查线索" : "Object-level result for rankings and investigation leads.";
+  }
+  return isZh ? `${businessModule}下的业务指标` : `Business metric in ${businessModule}.`;
 }
 
 type ReportChartType =
@@ -7174,6 +7253,7 @@ function ReportMetricEvidencePanel({
   timeConfig,
   trendMetrics,
   trendCharts,
+  locale = "zh",
   isLoading = false
 }: {
   metricResults?: ReportMetricEvidenceResult[];
@@ -7181,8 +7261,10 @@ function ReportMetricEvidencePanel({
   timeConfig?: ReportTimeConfigViewData;
   trendMetrics?: ReportTrendMetricViewData[];
   trendCharts?: ReportTrendChartViewData[];
+  locale?: Locale;
   isLoading?: boolean;
 }) {
+  const isZh = locale === "zh";
   const [statusFilter, setStatusFilter] = useState<ReportMetricStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<ReportMetricTypeFilter>("all");
   const [moduleFilter, setModuleFilter] = useState("all");
@@ -7191,18 +7273,18 @@ function ReportMetricEvidencePanel({
   const computedResults = displayResults.filter((result) => result.status === "computed");
   const coreKpis = selectReportCoreKpis(displayResults);
   const recommendedCharts = recommendReportCharts(displayResults);
-  const modules = Array.from(new Set(displayResults.map(inferReportMetricBusinessModule))).sort();
+  const modules = Array.from(new Set(displayResults.map((result) => inferReportMetricBusinessModule(result, locale)))).sort();
   const visibleResults = displayResults
     .filter((result) => matchesReportMetricStatusFilter(result, statusFilter))
     .filter((result) => matchesReportMetricTypeFilter(result, typeFilter))
     .filter((result) => typeFilter !== "all" || reportMetricDisplayType(result) !== "ranking")
-    .filter((result) => moduleFilter === "all" || inferReportMetricBusinessModule(result) === moduleFilter)
+    .filter((result) => moduleFilter === "all" || inferReportMetricBusinessModule(result, locale) === moduleFilter)
     .sort((left, right) =>
-      inferReportMetricBusinessModule(left).localeCompare(inferReportMetricBusinessModule(right), "zh-Hans-CN") ||
+      inferReportMetricBusinessModule(left, locale).localeCompare(inferReportMetricBusinessModule(right, locale), isZh ? "zh-Hans-CN" : "en-US") ||
       reportCoreKpiPriority(left) - reportCoreKpiPriority(right)
     );
   const groupedResults = visibleResults.reduce((groups, result) => {
-    const businessModule = inferReportMetricBusinessModule(result);
+    const businessModule = inferReportMetricBusinessModule(result, locale);
     const values = groups.get(businessModule) ?? [];
     values.push(result);
     groups.set(businessModule, values);
@@ -7225,27 +7307,29 @@ function ReportMetricEvidencePanel({
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle className="text-base">业务 KPI 看板</CardTitle>
+            <CardTitle className="text-base">{isZh ? "业务 KPI 看板" : "Business KPI Dashboard"}</CardTitle>
             <CardDescription>
-              按当前数据行业自动选择核心指标，公式、字段和计算时间默认收起
+              {isZh
+                ? "按当前数据行业自动选择核心指标，公式、字段和计算时间默认收起"
+                : "Core KPIs are selected for the current business context. Formulas, fields, and calculation time are kept in details."}
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="secondary">{displayResults.length} 个可展示指标</Badge>
-            <span>上次更新时间：{formatReportDate(generatedAt ?? latestComputedAt)}</span>
+            <Badge variant="secondary">{isZh ? `${displayResults.length} 个可展示指标` : `${displayResults.length} displayable metrics`}</Badge>
+            <span>{isZh ? "上次更新时间" : "Last updated"}：{formatReportDate(generatedAt ?? latestComputedAt)}</span>
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading ? (
           <div className="rounded-xl border bg-secondary/20 p-4 text-sm text-muted-foreground">
-            正在读取最新报告证据
+            {isZh ? "正在读取最新报告证据" : "Loading the latest report evidence"}
           </div>
         ) : displayResults.length ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               {coreKpis.map((result) => {
-                const metricDisplay = objectMetricDisplay(result);
+                const metricDisplay = objectMetricDisplay(result, locale);
                 const trendMetric = trendMetricForReportMetric(result, trendMetrics);
                 const deltaText = trendMetric ? trendDeltaText(trendMetric) : null;
                 return (
@@ -7254,7 +7338,7 @@ function ReportMetricEvidencePanel({
                       <div className="flex min-w-0 items-start justify-between gap-3">
                         <p className="min-w-0 text-sm font-semibold leading-5">{metricDisplay.title}</p>
                         <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                          {reportMetricBadges(result).slice(0, 1).map((badge) => (
+                          {reportMetricBadges(result, 2, locale).slice(0, 1).map((badge) => (
                             <Badge key={badge.label} variant="secondary" className={cn("text-[11px]", badge.className)}>
                               {badge.label}
                             </Badge>
@@ -7262,13 +7346,13 @@ function ReportMetricEvidencePanel({
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {reportMetricBadges(result).slice(1).map((badge) => (
+                        {reportMetricBadges(result, 2, locale).slice(1).map((badge) => (
                           <Badge key={badge.label} variant="secondary" className={cn("text-[11px]", badge.className)}>
                             {badge.label}
                           </Badge>
                         ))}
                       </div>
-                      <p className="text-xs leading-5 text-muted-foreground">{reportMetricShortDescription(result)}</p>
+                      <p className="text-xs leading-5 text-muted-foreground">{reportMetricShortDescription(result, locale)}</p>
                     </div>
                     <p className="mt-4 text-2xl font-semibold tracking-tight">{metricDisplay.value}</p>
                     {deltaText ? (
@@ -7279,14 +7363,14 @@ function ReportMetricEvidencePanel({
                         {deltaText}
                       </p>
                     ) : null}
-                    <p className="mt-2 text-xs text-muted-foreground">{inferReportMetricBusinessModule(result)}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{inferReportMetricBusinessModule(result, locale)}</p>
                     <details className="mt-3 text-xs text-muted-foreground">
-                      <summary className="cursor-pointer font-medium text-foreground">查看口径</summary>
+                      <summary className="cursor-pointer font-medium text-foreground">{isZh ? "查看口径" : "View definition"}</summary>
                       <div className="mt-2 space-y-2 rounded-lg bg-secondary/30 p-2">
                         <code className="block overflow-x-auto">{result.formula}</code>
-                        <p>数据源：{result.sourceDataset ?? "-"}</p>
-                        <p>计算时间：{formatReportDate(result.computedAt)}</p>
-                        {result.warning ? <p>提醒：{result.warning}</p> : null}
+                        <p>{isZh ? "数据源" : "Data source"}：{result.sourceDataset ?? "-"}</p>
+                        <p>{isZh ? "计算时间" : "Calculated at"}：{formatReportDate(result.computedAt)}</p>
+                        {result.warning ? <p>{isZh ? "提醒" : "Warning"}：{result.warning}</p> : null}
                       </div>
                     </details>
                   </div>
@@ -7306,7 +7390,7 @@ function ReportMetricEvidencePanel({
 
             <details className="rounded-xl border bg-white p-3 shadow-sm">
               <summary className="cursor-pointer text-sm font-semibold text-slate-900">
-                指标详情（{visibleResults.length}）
+                {isZh ? `指标详情（${visibleResults.length}）` : `Metric details (${visibleResults.length})`}
               </summary>
               <div className="mt-3 space-y-4">
             <div className="space-y-3 rounded-xl border bg-secondary/10 p-3">
@@ -7323,7 +7407,7 @@ function ReportMetricEvidencePanel({
                         : "bg-white text-muted-foreground hover:bg-secondary"
                     )}
                   >
-                    {filter.label}
+                    {reportMetricStatusFilterLabel(filter.value, locale)}
                   </button>
                 ))}
               </div>
@@ -7340,7 +7424,7 @@ function ReportMetricEvidencePanel({
                         : "bg-white text-muted-foreground hover:bg-secondary"
                     )}
                   >
-                    {filter.label}
+                    {reportMetricTypeFilterLabel(filter.value, locale)}
                   </button>
                 ))}
               </div>
@@ -7355,7 +7439,7 @@ function ReportMetricEvidencePanel({
                       : "bg-white text-muted-foreground hover:bg-secondary"
                   )}
                 >
-                  全部模块
+                  {isZh ? "全部模块" : "All modules"}
                 </button>
                 {modules.map((module) => (
                   <button
@@ -7393,13 +7477,15 @@ function ReportMetricEvidencePanel({
                       <div>
                         <h3 className="text-sm font-semibold">{module}</h3>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {results.length} 个{typeFilter === "all" ? "指标" : reportMetricTypeLabelMap[typeFilter]}
+                          {isZh
+                            ? `${results.length} 个${typeFilter === "all" ? "指标" : reportMetricTypeLabelMap[typeFilter]}`
+                            : `${results.length} ${typeFilter === "all" ? "metrics" : reportMetricTypeFilterLabel(typeFilter, locale)}`}
                         </p>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                       {primaryResults.map((result) => {
-                        const metricDisplay = objectMetricDisplay(result);
+                        const metricDisplay = objectMetricDisplay(result, locale);
                         return (
                           <div key={`${module}-${result.metricId}`} className="rounded-xl border bg-white px-4 py-3 text-sm">
                             <div className="flex items-start justify-between gap-3">
@@ -7407,12 +7493,12 @@ function ReportMetricEvidencePanel({
                                 <p className="font-semibold leading-5">{metricDisplay.title}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
                                   {metricDisplay.dimensionLabel
-                                    ? `${metricDisplay.dimensionLabel}：${result.rows?.[0]?.dimension} · ${metricDisplay.helper}`
-                                    : reportMetricShortDescription(result)}
+                                    ? `${metricDisplay.dimensionLabel}: ${result.rows?.[0]?.dimension} · ${metricDisplay.helper}`
+                                    : reportMetricShortDescription(result, locale)}
                                 </p>
                               </div>
                               <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                                {reportMetricBadges(result).map((badge) => (
+                                {reportMetricBadges(result, 2, locale).map((badge) => (
                                   <Badge key={badge.label} variant="secondary" className={cn("text-[11px]", badge.className)}>
                                     {badge.label}
                                   </Badge>
@@ -7421,14 +7507,14 @@ function ReportMetricEvidencePanel({
                             </div>
                             <p className="mt-4 text-xl font-semibold">{metricDisplay.value}</p>
                             <details className="mt-3 text-xs text-muted-foreground">
-                              <summary className="cursor-pointer font-medium text-foreground">查看口径</summary>
+                              <summary className="cursor-pointer font-medium text-foreground">{isZh ? "查看口径" : "View definition"}</summary>
                               <div className="mt-2 space-y-2 rounded-lg bg-secondary/30 p-2">
                                 <code className="block overflow-x-auto">{result.formula}</code>
-                                <p>数据源：{result.sourceDataset ?? "-"}</p>
-                                <p>范围：{reportMetricScope(result)}</p>
-                                <p>计算时间：{formatReportDate(result.computedAt)}</p>
-                                {result.warning ? <p>提醒：{result.warning}</p> : null}
-                                {result.error ? <p className="text-rose-700">错误：{result.error}</p> : null}
+                                <p>{isZh ? "数据源" : "Data source"}：{result.sourceDataset ?? "-"}</p>
+                                <p>{isZh ? "范围" : "Scope"}：{reportMetricScope(result)}</p>
+                                <p>{isZh ? "计算时间" : "Calculated at"}：{formatReportDate(result.computedAt)}</p>
+                                {result.warning ? <p>{isZh ? "提醒" : "Warning"}：{result.warning}</p> : null}
+                                {result.error ? <p className="text-rose-700">{isZh ? "错误" : "Error"}：{result.error}</p> : null}
                               </div>
                             </details>
                           </div>
@@ -7438,11 +7524,11 @@ function ReportMetricEvidencePanel({
                     {foldedResults.length ? (
                       <details className="mt-3 rounded-xl border bg-secondary/20 p-3 text-sm">
                         <summary className="cursor-pointer font-medium text-slate-900">
-                          查看分布详情和辅助指标（{foldedResults.length}）
+                          {isZh ? `查看分布详情和辅助指标（${foldedResults.length}）` : `View distribution details and auxiliary metrics (${foldedResults.length})`}
                         </summary>
                         <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                           {foldedResults.map((result) => {
-                            const metricDisplay = objectMetricDisplay(result);
+                            const metricDisplay = objectMetricDisplay(result, locale);
                             return (
                               <div key={`${module}-folded-${result.metricId}`} className="rounded-xl border bg-white px-4 py-3 text-sm">
                                 <div className="flex items-start justify-between gap-3">
@@ -7450,12 +7536,12 @@ function ReportMetricEvidencePanel({
                                     <p className="font-semibold leading-5">{metricDisplay.title}</p>
                                     <p className="mt-1 text-xs text-muted-foreground">
                                       {metricDisplay.dimensionLabel
-                                        ? `${metricDisplay.dimensionLabel}：${result.rows?.[0]?.dimension} · ${metricDisplay.helper}`
-                                        : reportMetricShortDescription(result)}
+                                        ? `${metricDisplay.dimensionLabel}: ${result.rows?.[0]?.dimension} · ${metricDisplay.helper}`
+                                        : reportMetricShortDescription(result, locale)}
                                     </p>
                                   </div>
                                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                                    {reportMetricBadges(result).map((badge) => (
+                                    {reportMetricBadges(result, 2, locale).map((badge) => (
                                       <Badge key={badge.label} variant="secondary" className={cn("text-[11px]", badge.className)}>
                                         {badge.label}
                                       </Badge>
@@ -7464,14 +7550,14 @@ function ReportMetricEvidencePanel({
                                 </div>
                                 <p className="mt-4 text-xl font-semibold">{metricDisplay.value}</p>
                                 <details className="mt-3 text-xs text-muted-foreground">
-                                  <summary className="cursor-pointer font-medium text-foreground">查看口径</summary>
+                                  <summary className="cursor-pointer font-medium text-foreground">{isZh ? "查看口径" : "View definition"}</summary>
                                   <div className="mt-2 space-y-2 rounded-lg bg-secondary/30 p-2">
                                     <code className="block overflow-x-auto">{result.formula}</code>
-                                    <p>数据源：{result.sourceDataset ?? "-"}</p>
-                                    <p>范围：{reportMetricScope(result)}</p>
-                                    <p>计算时间：{formatReportDate(result.computedAt)}</p>
-                                    {result.warning ? <p>提醒：{result.warning}</p> : null}
-                                    {result.error ? <p className="text-rose-700">错误：{result.error}</p> : null}
+                                    <p>{isZh ? "数据源" : "Data source"}：{result.sourceDataset ?? "-"}</p>
+                                    <p>{isZh ? "范围" : "Scope"}：{reportMetricScope(result)}</p>
+                                    <p>{isZh ? "计算时间" : "Calculated at"}：{formatReportDate(result.computedAt)}</p>
+                                    {result.warning ? <p>{isZh ? "提醒" : "Warning"}：{result.warning}</p> : null}
+                                    {result.error ? <p className="text-rose-700">{isZh ? "错误" : "Error"}：{result.error}</p> : null}
                                   </div>
                                 </details>
                               </div>
@@ -7488,7 +7574,9 @@ function ReportMetricEvidencePanel({
               </div>
             ) : (
               <div className="rounded-xl border bg-secondary/20 p-4 text-sm text-muted-foreground">
-                当前筛选条件下没有指标。可以切换状态、类型或业务模块查看全部结果。
+                {isZh
+                  ? "当前筛选条件下没有指标。可以切换状态、类型或业务模块查看全部结果。"
+                  : "No metrics match the current filters. Change status, type, or business module to view more results."}
               </div>
             )}
               </div>
@@ -7496,7 +7584,9 @@ function ReportMetricEvidencePanel({
           </>
         ) : (
           <div className="rounded-xl border bg-secondary/20 p-4 text-sm text-muted-foreground">
-            暂无可展示的业务指标。系统内部字段、调试指标和无效值已被过滤。
+            {isZh
+              ? "暂无可展示的业务指标。系统内部字段、调试指标和无效值已被过滤。"
+              : "No displayable business metrics yet. Internal fields, debug metrics, and invalid values are filtered out."}
           </div>
         )}
       </CardContent>
@@ -8140,12 +8230,13 @@ function formatPercent(share: number) {
   return `${(share * 100).toFixed(1)}%`;
 }
 
-function metricWarningLabel(metric: { warning?: string; isEstimated?: boolean }) {
+function metricWarningLabel(metric: { warning?: string; isEstimated?: boolean }, locale: Locale = "zh") {
+  const isZh = locale === "zh";
   if (!metric.warning) return null;
-  if (metric.isEstimated) return "估算值";
-  if (/去重|重复|原始记录/.test(metric.warning)) return "未去重";
+  if (metric.isEstimated) return isZh ? "估算值" : "Estimated";
+  if (/去重|重复|原始记录|dedup|duplicate|raw/i.test(metric.warning)) return isZh ? "未去重" : "Raw";
 
-  return "口径限制";
+  return isZh ? "口径限制" : "Caveat";
 }
 
 function StructuredReportView({ report, locale }: { report: StructuredReportViewData; locale: Locale }) {
@@ -8233,7 +8324,11 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     viewLimitations: isZh ? "查看口径与限制" : "View definitions and limitations",
     limitationSummaryDefault: isZh ? "当前没有需要单独提示的口径限制" : "No standalone definition limitations need to be highlighted."
   };
-  const summaryBullets = report.coreSummaryBullets?.length ? report.coreSummaryBullets.slice(0, 3) : [report.coreSummary].filter(Boolean);
+  const rawSummaryBullets = report.coreSummaryBullets?.length ? report.coreSummaryBullets : [report.coreSummary].filter(Boolean);
+  const summaryBullets = rawSummaryBullets
+    .map((item) => localeSafeText(item, "", locale))
+    .filter(Boolean)
+    .slice(0, 3);
   const keyMetrics = report.coreMetricOverview.filter(isBusinessStructuredMetric).slice(0, 8);
   const nonBusinessFindingPattern = /More aggregation evidence|Structured aggregation evidence|directional observation|technical|system missing|当前结论仍需要|当前缺少结构化聚合证据|方向性观察|缺少业务基准支撑强判断|可以用于判断|可以分析/i;
   const findingHasBusinessContent = (item: {
@@ -8261,7 +8356,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       item.nextAction
     ].filter(Boolean).join(" ");
 
-    return Boolean(joined.trim()) && !nonBusinessFindingPattern.test(joined);
+    return Boolean(joined.trim()) &&
+      !nonBusinessFindingPattern.test(joined) &&
+      (locale === "zh" || !containsCjkText(joined));
   };
   const structuredFindings = (report.generatedInsights?.keyFindings ?? [])
     .filter((item) => item.id !== "generic-directional")
@@ -8269,6 +8366,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     .slice(0, 4);
   const fallbackFindings = (report.keyFindings ?? [])
     .filter((item) => item && !nonBusinessFindingPattern.test(item))
+    .filter((item) => locale === "zh" || !containsCjkText(item))
     .slice(0, 4)
     .map((item, index) => ({
       id: `finding-summary-${index}`,
@@ -8300,6 +8398,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
   const earlyBusinessText = (value: string | undefined | null, fallback = "") => {
     if (!value) return fallback;
     if (nonBusinessFindingPattern.test(value)) return fallback;
+    if (locale === "en" && containsCjkText(value)) return fallback;
 
     return value
       .replace(/CSV\s*-\s*[^，。；;]+/g, "")
@@ -8631,6 +8730,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
   };
   const displayFindingSummary = (item: { summary?: string; finding?: string; businessMeaning?: string }) => {
     const raw = item.summary ?? item.finding ?? "";
+    if (locale === "en" && containsCjkText(raw)) {
+      return text.fallbackSummary;
+    }
     const mixedMetricList = raw.includes(" 为 ") &&
       raw.split("；").length >= 3 &&
       /installs|category|trading volume|sentiment|rating/i.test(raw);
@@ -8649,17 +8751,24 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const source = `${text} ${(item?.joinedTables ?? []).join(" ")} ${item?.joinKey ?? ""}`;
 
     if (/app/i.test(source)) {
-      return "当前可在 App 视角同时观察安装量、评分和用户反馈；高安装但评分或反馈偏弱的 App 应优先进入排查清单。";
+      return isZh
+        ? "当前可在 App 视角同时观察安装量、评分和用户反馈；高安装但评分或反馈偏弱的 App 应优先进入排查清单。"
+        : "The report can compare installs, ratings, and user feedback from the same App view. Apps with high scale but weak quality signals should be prioritized for review.";
     }
 
     if (/product|sku|商品|产品/i.test(source)) {
-      return "当前可在产品视角对比规模、质量和反馈表现；高规模低质量对象应优先优化，高质量低规模对象可作为增长候选。";
+      return isZh
+        ? "当前可在产品视角对比规模、质量和反馈表现；高规模低质量对象应优先优化，高质量低规模对象可作为增长候选。"
+        : "The report can compare scale, quality, and feedback at the product level. High-scale low-quality objects should be optimized first, while high-quality low-scale objects can be growth candidates.";
     }
 
-    return "当前可在同一业务对象视角对比关键表现；报告应优先呈现风险对象、机会对象和对应业务动作。";
+    return isZh
+      ? "当前可在同一业务对象视角对比关键表现；报告应优先呈现风险对象、机会对象和对应业务动作。"
+      : "The report can compare key business performance from the same object view and should prioritize risk objects, opportunity objects, and the actions tied to them.";
   };
   const businessSafeFindingText = (text: string, fallback: string, item?: { joinedTables?: string[]; joinKey?: string }) => {
     if (!text) return fallback;
+    if (locale === "en" && containsCjkText(text)) return fallback || businessFindingFallback(text, item);
     if (!hasTechnicalLineageText(text)) return text;
 
     const cleaned = text
@@ -8754,7 +8863,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     joinKey?: string;
   }) => safeFindingText(
     item.currentConclusion ?? displayFindingSummary(item),
-    "当前已有指标结果，但旧报告缺少可直接展示的系统判断。",
+    isZh ? "当前已有指标结果，但旧报告缺少可直接展示的系统判断。" : "Metrics are available, but this saved report does not include a directly displayable business conclusion.",
     item
   );
   const findingEvidence = (item: {
@@ -8784,7 +8893,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     joinKey?: string;
   }) => safeFindingText(
     item.deeperAnalysisResult ?? item.finding ?? item.summary ?? "",
-    "当前缺少结构化进一步分析结论；本卡片不展示任务式建议。",
+    isZh ? "当前缺少结构化进一步分析结论；本卡片不展示任务式建议。" : "Structured deeper analysis is not available for this saved report.",
     item
   );
   const findingDecision = (item: {
@@ -8798,7 +8907,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     return decision
       ? safeFindingText(
         decision,
-        "建议先把相关对象加入体验排查清单，重点查看负面反馈、评分变化、用户影响面和可执行优化项。",
+        isZh
+          ? "建议先把相关对象加入体验排查清单，重点查看负面反馈、评分变化、用户影响面和可执行优化项。"
+          : "Put the relevant objects on the experience review list and focus on negative feedback, rating changes, user impact, and actionable fixes.",
         item
       )
       : "";
@@ -8953,12 +9064,18 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                 <p className="text-sm font-semibold">{metric.displayName}</p>
                 {metric.warning ? (
                   <Badge variant="secondary" className="shrink-0 text-amber-800">
-                    {metricWarningLabel(metric)}
+                    {metricWarningLabel(metric, locale)}
                   </Badge>
                 ) : null}
               </div>
               <p className="mt-3 text-2xl font-semibold tracking-tight">{metric.displayValue}</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">{metric.explanation}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {localeSafeText(
+                  metric.explanation,
+                  isZh ? "当前报告中的核心业务指标。" : "Core business KPI from the current report.",
+                  locale
+                )}
+              </p>
             </div>
           ))}
         </CardContent>
@@ -9794,6 +9911,7 @@ function ReportPage({ locale }: { locale: Locale }) {
         timeConfig={latestTimeConfig}
         trendMetrics={latestTrendMetrics}
         trendCharts={latestTrendCharts}
+        locale={locale}
         isLoading={isLoadingReportEvidence}
       />
 

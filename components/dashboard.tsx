@@ -6971,19 +6971,34 @@ function ReportChartTooltip({ active, payload, label }: { active?: boolean; payl
   );
 }
 
+function reportHorizontalAxisLabel(value: unknown) {
+  const label = String(value ?? "");
+
+  return label.length > 26 ? `${label.slice(0, 23)}...` : label;
+}
+
+function reportHorizontalAxisWidth(data: ReportChartDatum[]) {
+  const maxLabelLength = data.reduce((max, row) => Math.max(max, reportHorizontalAxisLabel(row.label).length), 0);
+
+  return Math.min(220, Math.max(132, maxLabelLength * 7 + 28));
+}
+
 function ReportHorizontalBarChart({ chart }: { chart: ReportChartConfig }) {
+  const axisWidth = reportHorizontalAxisWidth(chart.data);
+
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chart.data} layout="vertical" margin={{ top: 4, right: 20, bottom: 4, left: 8 }}>
+        <BarChart data={chart.data} layout="vertical" margin={{ top: 4, right: 20, bottom: 4, left: 4 }}>
           <CartesianGrid horizontal={false} strokeDasharray="3 3" />
           <XAxis type="number" tickFormatter={(value) => formatReportMetricValue(value)} />
           <YAxis
             dataKey="label"
             type="category"
-            width={118}
+            width={axisWidth}
             tick={{ fontSize: 11 }}
             tickLine={false}
+            tickFormatter={reportHorizontalAxisLabel}
           />
           <Tooltip content={<ReportChartTooltip />} />
           <Bar dataKey="value" name={chart.yAxis ?? "数值"} radius={[0, 6, 6, 0]} fill="#047857" />

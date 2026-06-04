@@ -8108,33 +8108,56 @@ function hasTinyObjectSample(rows?: Array<Record<string, string | number | null>
   });
 }
 
-function metricValueLabel(key: string) {
+function metricValueLabel(key: string, locale: Locale = "zh") {
+  const raw = key.trim();
   const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  const label = (() => {
+    if (["records", "count", "sample_size", "samplesize", "sentiment_sample_size", "sentimentsamplesize"].includes(normalized) || /^样本量$/.test(raw)) {
+      return { zh: "样本量", en: "Sample size" };
+    }
+    if (["negative_count", "negativecount", "negative_reviews", "negativereviews"].includes(normalized) || /^负向.*数$/.test(raw) || /^负面.*数$/.test(raw)) {
+      return { zh: "负向数", en: "Negative count" };
+    }
+    if (["positive_count", "positivecount", "positive_reviews", "positivereviews"].includes(normalized) || /^正向.*数$/.test(raw)) {
+      return { zh: "正向数", en: "Positive count" };
+    }
+    if (["reviews", "review_count", "reviewcount"].includes(normalized) || /^评论数$/.test(raw)) {
+      return { zh: "评论数", en: "Reviews" };
+    }
+    if ((normalized.includes("negative") && normalized.includes("rate")) || /^负向.*率$/.test(raw) || /^负面.*率$/.test(raw)) {
+      return { zh: "负向率", en: "Negative rate" };
+    }
+    if ((normalized.includes("positive") && normalized.includes("rate")) || /^正向.*率$/.test(raw)) {
+      return { zh: "正向率", en: "Positive rate" };
+    }
+    if (normalized.includes("rating") || /^评分$/.test(raw)) {
+      return { zh: "评分", en: "Rating" };
+    }
+    if (normalized.includes("installs") || /^安装量$/.test(raw)) {
+      return { zh: "安装量", en: "Installs" };
+    }
+    if (normalized.includes("revenue") || normalized.includes("value") || /^估算值$/.test(raw)) {
+      return { zh: "估算值", en: "Estimated value" };
+    }
 
-  if (["records", "count", "sample_size", "samplesize", "sentiment_sample_size", "sentimentsamplesize"].includes(normalized)) {
-    return "样本量";
-  }
-  if (["negative_count", "negativecount", "negative_reviews", "negativereviews"].includes(normalized)) return "负向数";
-  if (["positive_count", "positivecount", "positive_reviews", "positivereviews"].includes(normalized)) return "正向数";
-  if (["reviews", "review_count", "reviewcount"].includes(normalized)) return "评论数";
-  if (normalized.includes("negative") && normalized.includes("rate")) return "负向率";
-  if (normalized.includes("positive") && normalized.includes("rate")) return "正向率";
-  if (normalized.includes("rating")) return "评分";
-  if (normalized.includes("installs")) return "安装量";
-  if (normalized.includes("revenue") || normalized.includes("value")) return "估算值";
+    return null;
+  })();
 
-  return titleCaseMetricText(key);
+  if (label) return locale === "zh" ? label.zh : label.en;
+
+  return locale === "zh" ? titleCaseMetricText(key) : titleCaseMetricText(raw);
 }
 
-function metricValueText(key: string, value: string | number | null) {
+function metricValueText(key: string, value: string | number | null, locale: Locale = "zh") {
   if (value == null) return null;
   const normalized = key.toLowerCase();
+  const separator = locale === "zh" ? "：" : ": ";
 
   if (typeof value === "number" && (normalized.includes("rate") || normalized.includes("share") || normalized.includes("ratio")) && Math.abs(value) <= 1) {
-    return `${metricValueLabel(key)}：${(value * 100).toFixed(1)}%`;
+    return `${metricValueLabel(key, locale)}${separator}${(value * 100).toFixed(1)}%`;
   }
 
-  return `${metricValueLabel(key)}：${formatReportMetricValue(value)}`;
+  return `${metricValueLabel(key, locale)}${separator}${formatReportMetricValue(value)}`;
 }
 
 function evidenceRowNumber(row: Record<string, string | number | null>, keys: string[]) {
@@ -8150,7 +8173,7 @@ function evidenceRowNumber(row: Record<string, string | number | null>, keys: st
   return null;
 }
 
-function evidenceObjectValues(row: Record<string, string | number | null>, limit = 4) {
+function evidenceObjectValues(row: Record<string, string | number | null>, limit = 4, locale: Locale = "zh") {
   const hiddenKeys = new Set(["dimension", "App", "Product", "product", "category", "Category", "group", "Group"]);
   const priorityKeys = [
     "negativeRate",
@@ -8185,11 +8208,13 @@ function evidenceObjectValues(row: Record<string, string | number | null>, limit
 
       return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
     })
-    .map(([key, value]) => metricValueText(key, value))
+    .map(([key, value]) => metricValueText(key, value, locale))
     .filter((value): value is string => Boolean(value));
   const negativeRate = evidenceRowNumber(row, ["negativeRate", "negative_rate"]);
   const sampleSize = evidenceRowNumber(row, ["sentimentSampleSize", "sentiment_sample_size", "sampleSize", "sample_size", "records", "reviews"]);
-  const smallSampleNote = negativeRate != null && sampleSize != null && sampleSize < 20 ? "小样本线索" : null;
+  const smallSampleNote = negativeRate != null && sampleSize != null && sampleSize < 20
+    ? (locale === "zh" ? "小样本线索" : "Small-sample lead")
+    : null;
 
   return [...entries.slice(0, limit), smallSampleNote].filter((value): value is string => Boolean(value));
 }
@@ -8478,7 +8503,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
         if (!isBusinessObjectLabel(label)) return "";
         if (locale === "en" && containsCjkText(label)) return "";
 
-        const values = evidenceObjectValues(row, 2)
+        const values = evidenceObjectValues(row, 2, locale)
           .map((value) => localeDynamicText(value))
           .filter(Boolean);
 
@@ -9449,12 +9474,12 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                   <div className="mt-2 grid gap-1">
                     {item.evidenceObjects.slice(0, 3).map((row, index) => {
                       const label = evidenceObjectLabel(row, index);
-                      const values = evidenceObjectValues(row).join(" · ");
+                      const values = evidenceObjectValues(row, 4, locale).join(" · ");
 
                       return (
-                        <div key={`${label}-${index}`} className="flex items-center justify-between gap-3 text-xs leading-5 text-emerald-950">
-                          <span className="min-w-0 truncate font-medium">{label}</span>
-                          {values ? <span className="shrink-0 text-emerald-800">{values}</span> : null}
+                        <div key={`${label}-${index}`} className="rounded-lg bg-white/60 px-2 py-1.5 text-xs leading-5 text-emerald-950">
+                          <p className="font-medium break-words">{label}</p>
+                          {values ? <p className="mt-0.5 break-words text-emerald-800">{values}</p> : null}
                         </div>
                       );
                     })}
@@ -9465,12 +9490,12 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                       <div className="mt-2 max-h-44 overflow-auto rounded-lg border border-emerald-100 bg-white">
                         {item.evidenceObjects.slice(3, 10).map((row, index) => {
                           const label = evidenceObjectLabel(row, index + 3);
-                          const values = evidenceObjectValues(row).join(" · ");
+                          const values = evidenceObjectValues(row, 4, locale).join(" · ");
 
                           return (
-                            <div key={`${label}-detail-${index}`} className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0">
-                              <span className="min-w-0 truncate">{label}</span>
-                              {values ? <span className="shrink-0 text-muted-foreground">{values}</span> : null}
+                            <div key={`${label}-detail-${index}`} className="border-b px-3 py-2 last:border-b-0">
+                              <p className="break-words font-medium text-slate-700">{label}</p>
+                              {values ? <p className="mt-0.5 break-words text-muted-foreground">{values}</p> : null}
                             </div>
                           );
                         })}

@@ -8406,8 +8406,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     ].filter(Boolean).join(" ");
 
     return Boolean(joined.trim()) &&
-      !nonBusinessFindingPattern.test(joined) &&
-      (locale === "zh" || !containsCjkText(joined));
+      !nonBusinessFindingPattern.test(joined);
   };
   const structuredFindings = (report.generatedInsights?.keyFindings ?? [])
     .filter((item) => item.id !== "generic-directional")
@@ -8497,9 +8496,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
 
     return joined;
   };
-  const backendBusinessRisks = isZh ? (report.generatedInsights?.businessRisks ?? report.businessRisks ?? []) : (report.businessRisks ?? []);
-  const backendGrowthOpportunities = isZh ? (report.generatedInsights?.growthOpportunities ?? report.growthOpportunities ?? []) : (report.growthOpportunities ?? []);
-  const backendDataLimitations = isZh ? (report.generatedInsights?.dataLimitations ?? report.dataLimitations ?? []) : (report.dataLimitations ?? []);
+  const backendBusinessRisks = report.generatedInsights?.businessRisks ?? report.businessRisks ?? [];
+  const backendGrowthOpportunities = report.generatedInsights?.growthOpportunities ?? report.growthOpportunities ?? [];
+  const backendDataLimitations = report.generatedInsights?.dataLimitations ?? report.dataLimitations ?? [];
   const businessRiskItems = backendBusinessRisks.flatMap((item) => {
     const rawObjects = item.affectedObjects ?? item.objects ?? [];
     const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
@@ -8525,7 +8524,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       id: item.id,
       title: earlyBusinessText(item.title, isZh ? "业务风险" : "Business risk"),
       badge: item.severity === "high" ? (isZh ? "高风险" : "High") : item.severity === "low" ? (isZh ? "低风险" : "Low") : (isZh ? "关注" : "Watch"),
-      body
+      body: localeDynamicText(body, isZh ? "当前报告已识别需要关注的业务风险。" : "The report identified a business risk that needs attention.")
     }];
   }).slice(0, 5);
   const growthOpportunityItems = backendGrowthOpportunities.flatMap((item) => {
@@ -8549,7 +8548,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       id: item.id,
       title,
       badge: item.priority === "high" ? (isZh ? "高机会" : "High") : item.priority === "low" ? (isZh ? "低优先级" : "Low") : (isZh ? "机会" : "Opportunity"),
-      body
+      body: localeDynamicText(body, isZh ? "当前报告已识别可进一步验证的增长机会。" : "The report identified a growth opportunity that can be validated further.")
     }];
   }).filter((item) => item.body.trim()).slice(0, 5);
   const limitationCards = backendDataLimitations.slice(0, 5).map((item) => ({
@@ -8561,7 +8560,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     )
   }));
   const insightActions = report.generatedInsights?.recommendedActions ?? [];
-  const nextActionPlan = isZh ? report.generatedInsights?.nextActionPlan : undefined;
+  const nextActionPlan = report.generatedInsights?.nextActionPlan;
   const nextActionInsights = nextActionPlan?.actionInsights ?? nextActionPlan?.priorityActions ?? [];
   const missingDataRequests = nextActionPlan?.missingDataRequests ?? [];
   const actionCaveats = nextActionPlan?.caveats ?? [];
@@ -8623,6 +8622,84 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     .sort()
     .slice(0, 4)
     .join("|");
+  const visibleActionObjects = (objects?: string[]) => (objects ?? [])
+    .map((object) => localeDynamicText(object, ""))
+    .map((object) => object.trim())
+    .filter((object) => object && isBusinessObjectLabel(object) && !/^-?\d+(\.\d+)?$/.test(object))
+    .slice(0, 5);
+  const actionFallbackCopy = (item: {
+    actionType?: string;
+    title?: string;
+    targetObjects?: string[];
+    referencedObjects?: string[];
+    recommendedAction?: string;
+    action?: string;
+    expectedImpact?: string;
+    expectedOutcome?: string;
+    deliverable?: string;
+  }) => {
+    const objects = visibleActionObjects(item.targetObjects?.length ? item.targetObjects : item.referencedObjects);
+    const objectText = objects.length ? objects.join(", ") : "the identified objects";
+
+    if (item.actionType === "reduce_negative_feedback") {
+      return {
+        title: "Review negative-feedback app candidates",
+        currentFinding: `${objectText} have been flagged as negative-feedback candidates in the current report.`,
+        businessMeaning: "These apps may concentrate user experience issues. Treat them as investigation leads when sample size is limited.",
+        recommendedAction: "Review negative comments, group issues by feature defects, performance, ads experience, version changes, pricing, and compatibility, then prioritize the top themes.",
+        deliverable: "Negative feedback issue list",
+        expectedImpact: "Reduce the impact of negative feedback on ratings, retention, conversion, and word of mouth."
+      };
+    }
+
+    if (item.actionType === "scale_opportunity_object" || item.actionType === "expand_high_performing_segment") {
+      return {
+        title: "Screen high-quality growth candidates",
+        currentFinding: `${objectText} are the strongest category or object candidates in the current report.`,
+        businessMeaning: "These segments already show scale or quality signals and can be used to build a focused growth-test pool.",
+        recommendedAction: "Screen for apps with ratings above the overall average or 4.5+, negative sentiment below the overall average, enough review samples, and room to grow installs.",
+        deliverable: "Growth-test candidate list",
+        expectedImpact: "Turn category scale into validated ASO, recommendation, or paid acquisition tests."
+      };
+    }
+
+    if (item.actionType === "fix_data_quality_for_decision") {
+      return {
+        title: "Generate deduped scale metrics",
+        currentFinding: "Some scale metrics may use raw records and can be inflated by duplicate entities.",
+        businessMeaning: "Raw scale can overstate market size, review volume, or concentration.",
+        recommendedAction: "Generate Deduped Total Installs, Deduped Total Reviews, and Deduped Top Share, then compare them with the raw metrics.",
+        deliverable: "Raw vs Deduped comparison table",
+        expectedImpact: "Improve confidence in market scale, concentration, and opportunity prioritization."
+      };
+    }
+
+    if (item.actionType === "collect_missing_business_data") {
+      return {
+        title: "Add actual revenue and cost fields",
+        currentFinding: "Estimated value can support directional prioritization, but actual ROI cannot be verified without revenue and cost fields.",
+        businessMeaning: "Monetization decisions need actual revenue, cost, ad spend, or acquisition cost fields.",
+        recommendedAction: "Add paid_amount, order_amount, transaction_amount, revenue, cost, ad_spend, and acquisition_cost to validate estimated value and calculate actual ROI / ROAS.",
+        deliverable: "Estimated Value vs Actual Revenue / ROI / ROAS validation table",
+        expectedImpact: "Determine whether estimated value can support monetization, campaign return, and resource allocation decisions."
+      };
+    }
+
+    return {
+      title: "Prioritize the identified operating action",
+      currentFinding: objects.length
+        ? `${objectText} are the main objects surfaced by the current report.`
+        : "The current report has surfaced an actionable operating signal.",
+      businessMeaning: "This signal can guide the next operating decision, but the details should stay tied to the available evidence.",
+      recommendedAction: "Use the identified objects and metrics to decide the next operating action.",
+      deliverable: "Operating action checklist",
+      expectedImpact: "Improve the accuracy and focus of the next operating decision."
+    };
+  };
+  const localizedActionField = (
+    value: string | undefined | null,
+    fallback: string
+  ) => localeDynamicText(value, fallback);
   const actionTitleText = (item: {
     actionType?: string;
     title: string;
@@ -8644,7 +8721,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     }
     if (item.actionType === "reduce_negative_feedback") return isZh ? "排查负向反馈候选 App" : "Review negative-feedback app candidates";
 
-    return localeDynamicText(item.title, isZh ? item.title : "Recommended action");
+    return localeDynamicText(item.title, isZh ? item.title : actionFallbackCopy(item).title);
   };
   const conciseCaveats = (caveats?: string[]) => (caveats ?? []).map((caveat) => {
     if (!isZh) {
@@ -8763,7 +8840,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       </details>
     );
   };
-  const displayActionText = (action: string, fields?: string[]) => {
+  const displayActionText = (action: string, fields?: string[], fallback?: string) => {
     const detailFields = reportDetailFields(fields);
     const fieldPhrase = detailFields.length
       ? isZh
@@ -8777,7 +8854,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       .replace(/\s+/g, " ")
       .trim();
 
-    return localeDynamicText(cleaned, isZh ? "" : "Use the identified objects to decide the next operating action.");
+    return localeDynamicText(cleaned, fallback ?? (isZh ? "" : "Use the identified objects to decide the next operating action."));
   };
   const executionStepsFor = (item: {
     actionType?: string;
@@ -8786,12 +8863,15 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     recommendedAction?: string;
     action?: string;
   }) => {
-    if (item.executionSteps?.length) return item.executionSteps
+    const providedSteps = item.executionSteps?.length ? item.executionSteps
       .slice(0, 5)
       .map((step) => localeDynamicText(step))
-      .filter(Boolean);
+      .filter(Boolean) : [];
 
-    const objects = item.targetObjects?.length ? item.targetObjects.join(isZh ? "、" : ", ") : (isZh ? "重点对象" : "the priority objects");
+    if (providedSteps.length) return providedSteps;
+
+    const localizedObjects = visibleActionObjects(item.targetObjects);
+    const objects = localizedObjects.length ? localizedObjects.join(isZh ? "、" : ", ") : (isZh ? "重点对象" : "the priority objects");
     if (item.actionType === "reduce_negative_feedback") {
       return isZh
         ? [
@@ -8823,13 +8903,13 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
         ];
     }
 
-    return [displayActionText(item.recommendedAction ?? item.action ?? "")].filter(Boolean);
+    return [displayActionText(item.recommendedAction ?? item.action ?? "", undefined, actionFallbackCopy(item).recommendedAction)].filter(Boolean);
   };
   const deliverableForDisplay = (item: {
     actionType?: string;
     deliverable?: string;
   }) => {
-    if (item.deliverable) return localeDynamicText(item.deliverable, isZh ? item.deliverable : "Operating action output");
+    if (item.deliverable) return localeDynamicText(item.deliverable, isZh ? item.deliverable : actionFallbackCopy(item).deliverable);
     if (item.actionType === "reduce_negative_feedback") return isZh ? "负向反馈问题清单" : "Negative feedback issue list";
     if (item.actionType === "scale_opportunity_object") return isZh ? "增长实验候选清单" : "Growth-test candidate list";
     if (item.actionType === "expand_high_performing_segment") return isZh ? "头部类别质量风险对比表" : "Top category quality-risk comparison table";
@@ -8868,7 +8948,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
 
     return {
       whyNeeded: localeDynamicText(item.whyItMatters ?? item.evidence, isZh ? "该数据会影响报告可信度和经营判断。" : "This data affects report credibility and operating decisions."),
-      action: displayActionText(item.recommendedAction ?? item.action ?? ""),
+      action: displayActionText(item.recommendedAction ?? item.action ?? "", undefined, actionFallbackCopy(item).recommendedAction),
       output: localeDynamicText(item.deliverable, isZh ? "数据补强结果" : "Data improvement output"),
       decisionImpact: localeDynamicText(item.expectedImpact ?? item.expectedOutcome, isZh ? "提升后续报告和行动优先级判断的可信度。" : "Improve confidence in future reports and action prioritization.")
     };
@@ -8884,7 +8964,9 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
 
     if (mixedMetricList) {
       return item.businessMeaning ??
-        "这些指标来自不同业务模块，只能说明当前已完成基础计算；需要按业务模块分别解读，不能混成同一个经营结论";
+        (isZh
+          ? "这些指标来自不同业务模块，只能说明当前已完成基础计算；需要按业务模块分别解读，不能混成同一个经营结论"
+          : "These metrics come from different business modules. They show that baseline calculations are complete, but they should be interpreted by module rather than merged into one operating conclusion.");
     }
 
     return raw;
@@ -8961,30 +9043,39 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const lines: string[] = [];
 
     if (joinedTables.length) {
-      lines.push(`关联数据：${joinedTables.map(technicalDatasetLabel).join("、")}`);
+      lines.push(isZh
+        ? `关联数据：${joinedTables.map(technicalDatasetLabel).join("、")}`
+        : `Linked data: ${joinedTables.map(technicalDatasetLabel).join(", ")}`
+      );
     } else if (sourceDatasets.length) {
-      lines.push(`关联数据：${sourceDatasets.map(technicalDatasetLabel).join("、")}`);
+      lines.push(isZh
+        ? `关联数据：${sourceDatasets.map(technicalDatasetLabel).join("、")}`
+        : `Linked data: ${sourceDatasets.map(technicalDatasetLabel).join(", ")}`
+      );
     }
 
     if (joinKey) {
-      lines.push(`关联字段：${joinKey}`);
+      lines.push(isZh ? `关联字段：${joinKey}` : `Join field: ${joinKey}`);
     }
 
     const fieldMapping = details.fieldMapping ? Object.entries(details.fieldMapping) : [];
     if (fieldMapping.length) {
-      lines.push(`字段映射：${fieldMapping.slice(0, 4).map(([from, to]) => `${from} → ${to}`).join("；")}`);
+      lines.push(isZh
+        ? `字段映射：${fieldMapping.slice(0, 4).map(([from, to]) => `${from} → ${to}`).join("；")}`
+        : `Field mapping: ${fieldMapping.slice(0, 4).map(([from, to]) => `${from} → ${to}`).join("; ")}`
+      );
     }
 
     if (typeof details.joinConfidence === "number") {
-      lines.push(`关联置信度：${Math.round(details.joinConfidence * 100)}%`);
+      lines.push(isZh ? `关联置信度：${Math.round(details.joinConfidence * 100)}%` : `Join confidence: ${Math.round(details.joinConfidence * 100)}%`);
     }
 
     if (details.caveat) {
-      lines.push(`口径提醒：${details.caveat}`);
+      lines.push(isZh ? `口径提醒：${details.caveat}` : `Caveat: ${localeDynamicText(details.caveat, "See definition details.")}`);
     }
 
     if (item.confidenceReason) {
-      lines.push(`置信度依据：${item.confidenceReason}`);
+      lines.push(isZh ? `置信度依据：${item.confidenceReason}` : `Confidence reason: ${localeDynamicText(item.confidenceReason, "See definition details.")}`);
     }
 
     if (!lines.length && [
@@ -8994,7 +9085,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       item.businessImplication,
       item.businessMeaning
     ].some(hasTechnicalLineageText)) {
-      lines.push("技术关联信息已收起，主报告仅展示业务结论。");
+      lines.push(isZh ? "技术关联信息已收起，主报告仅展示业务结论。" : "Technical lineage is collapsed; the main report only shows business conclusions.");
     }
 
     return lines;
@@ -9163,7 +9254,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const hasAppObject = /\bApp\b|应用|Call of Duty|DEER HUNTER|Discover Mobile/i.test(body);
 
     return hasCategoryOpportunity && !hasAppObject
-      ? "当前只有类别级机会，尚未定位具体 App 级增长对象。"
+      ? (isZh ? "当前只有类别级机会，尚未定位具体 App 级增长对象。" : "Only category-level opportunities are available; specific app-level growth objects have not been identified yet.")
       : "";
   };
   const businessSummaryBullets = summaryBullets
@@ -9412,7 +9503,11 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                 <div className="mt-3 space-y-1">
                   {item.limitations.slice(0, 2).map((limitation) => (
                     <p key={limitation} className="text-xs leading-5 text-slate-500">
-                      {businessSafeFindingText(limitation, "该限制已收入口径详情。", item)}
+                      {businessSafeFindingText(
+                        limitation,
+                        isZh ? "该限制已收入口径详情。" : "This limitation is available in the definition details.",
+                        item
+                      )}
                     </p>
                   ))}
                 </div>
@@ -9491,7 +9586,8 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
             <p className="text-xs font-semibold text-slate-500">{text.businessActions}</p>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               {businessNextActions.length ? businessNextActions.map((item) => {
-                const objects = item.targetObjects?.length ? item.targetObjects : item.referencedObjects;
+                const actionCopy = actionFallbackCopy(item);
+                const objects = visibleActionObjects(item.targetObjects?.length ? item.targetObjects : item.referencedObjects);
                 const caveats = conciseBusinessCaveats(item.caveats);
                 const caveatText = businessActionCaveatText(item.caveats);
 
@@ -9508,22 +9604,22 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                     ) : null}
                     {item.keyEvidence ?? item.evidence ? (
                       <p className="mt-2 text-xs leading-5 text-slate-600">
-                        {text.evidencePrefix}{localeDynamicText(item.keyEvidence ?? item.evidence, isZh ? "当前报告已形成可执行证据。" : "The report has produced actionable evidence.")}
+                        {text.evidencePrefix}{localizedActionField(item.keyEvidence ?? item.evidence, isZh ? "当前报告已形成可执行证据。" : "The report has produced actionable evidence.")}
                       </p>
                     ) : null}
                     <div className="mt-3 rounded-xl bg-slate-50 p-3">
                       <p className="text-xs font-semibold text-slate-700">{text.currentInsight}</p>
                       <p className="mt-2 text-xs leading-5 text-slate-700">
-                        {localeDynamicText(
+                        {localizedActionField(
                           item.currentFinding,
-                          isZh ? "当前报告已形成对象、分组或指标级判断。" : "The report has identified object, group, or metric-level signals."
+                          isZh ? "当前报告已形成对象、分组或指标级判断。" : actionCopy.currentFinding
                         )}
                       </p>
                       {item.businessMeaning ? (
                         <>
                           <p className="mt-3 text-xs font-semibold text-slate-700">{text.businessMeaning}</p>
                           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                            {localeDynamicText(item.businessMeaning, isZh ? "该发现会影响后续经营判断。" : "This finding affects the next operating decision.")}
+                            {localizedActionField(item.businessMeaning, isZh ? "该发现会影响后续经营判断。" : actionCopy.businessMeaning)}
                           </p>
                         </>
                       ) : null}
@@ -9531,7 +9627,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                         <>
                           <p className="mt-3 text-xs font-semibold text-slate-700">{text.systemJudgment}</p>
                           <p className="mt-2 text-xs leading-5 text-emerald-800">
-                            {displayActionText(item.recommendedAction ?? item.action ?? "")}
+                            {displayActionText(item.recommendedAction ?? item.action ?? "", undefined, actionCopy.recommendedAction)}
                           </p>
                         </>
                       ) : null}
@@ -9548,7 +9644,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-700">{text.deliverable}{deliverableForDisplay(item)}</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {text.expectedImpact}{localeDynamicText(item.expectedImpact ?? item.expectedOutcome, isZh ? "提升后续经营判断的准确性。" : "Improve the accuracy of the next operating decision.")}
+                      {text.expectedImpact}{localizedActionField(item.expectedImpact ?? item.expectedOutcome, isZh ? "提升后续经营判断的准确性。" : actionCopy.expectedImpact)}
                     </p>
                     {caveatText ? (
                       <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{text.caveatPrefix}{caveatText}</p>
@@ -9566,15 +9662,15 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
               }) : fallbackPriorityActions.filter((item) => item.type !== "data_quality_action").slice(0, 3).map((item) => (
                 <div key={item.title} className="rounded-2xl border p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{item.title}</p>
+                    <p className="text-sm font-semibold">{localeDynamicText(item.title, isZh ? item.title : "Recommended action")}</p>
                     <Badge variant="secondary">{item.priority}</Badge>
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{text.evidencePrefix}{item.basedOn}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{text.evidencePrefix}{localizedActionField(item.basedOn, isZh ? "当前报告已形成可执行证据。" : "The report has produced actionable evidence.")}</p>
                   {item.referencedObjects?.length ? (
-                    <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{item.referencedObjects.join(isZh ? "、" : ", ")}</p>
+                    <p className="mt-1 text-xs leading-5 text-emerald-800">{text.objects}{visibleActionObjects(item.referencedObjects).join(isZh ? "、" : ", ")}</p>
                   ) : null}
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.executionAction}{displayActionText(item.action, item.referencedFields)}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{localeDynamicText(item.reason, isZh ? "提升后续经营判断的准确性。" : "Improve the accuracy of the next operating decision.")}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.executionAction}{displayActionText(item.action, item.referencedFields, "Use the identified objects to decide the next operating action.")}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.expectedImpact}{localizedActionField(item.reason, isZh ? "提升后续经营判断的准确性。" : "Improve the accuracy of the next operating decision.")}</p>
                   {actionDetails(item.referencedFields)}
                 </div>
               ))}
@@ -9632,12 +9728,16 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
             </div>
           ))}
           {limitations.slice(0, 10).map((item) => (
-            <p key={item} className="text-xs leading-5 text-muted-foreground">{item}</p>
+            <p key={item} className="text-xs leading-5 text-muted-foreground">
+              {localeDynamicText(item, isZh ? "该限制已收入口径详情。" : "This limitation is available in the definition details.")}
+            </p>
           ))}
           {actionCaveats.map((item) => (
             <div key={item.id} className="rounded-xl border bg-secondary/10 p-3">
-              <p className="text-xs font-semibold">{item.type}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.message}</p>
+              <p className="text-xs font-semibold">{localeDynamicText(item.type, isZh ? "口径提醒" : "Caveat")}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {localeDynamicText(item.message, isZh ? "该限制已收入口径详情。" : "This caveat is available in the definition details.")}
+              </p>
             </div>
           ))}
         </div>

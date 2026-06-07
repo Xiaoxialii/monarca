@@ -42,6 +42,11 @@ const paymentCopy = {
     selectorBadge: "Step 1",
     selectorTitle: "Choose a plan first",
     selectorSubtitle: "Select the plan you want to start, then confirm details below",
+    currentPlan: "Current plan",
+    noActivePlan: "No active plan",
+    loadingPlan: "Loading current plan...",
+    monthlyPlan: "Monthly service",
+    oneTimePlan: "One-time service",
     addonLabel: "Add-on service",
     secure: "Secure checkout",
     formTitle: "Checkout details",
@@ -173,6 +178,11 @@ const paymentCopy = {
     selectorBadge: "第 1 步",
     selectorTitle: "先选择套餐",
     selectorSubtitle: "选择要开始的方案，下方结算信息会自动更新",
+    currentPlan: "当前套餐",
+    noActivePlan: "暂无套餐",
+    loadingPlan: "正在加载当前套餐...",
+    monthlyPlan: "月服务",
+    oneTimePlan: "一次服务",
     addonLabel: "附加服务",
     secure: "安全结算",
     formTitle: "付费信息",
@@ -305,9 +315,20 @@ function PlanBadge({ children }: { children: React.ReactNode }) {
   );
 }
 
+type BillingEntitlementSummary = {
+  planType: "FREE" | "ONE_TIME" | "MONTHLY";
+  status: "free" | "active" | "trialing" | "past_due" | "canceled" | "unpaid" | "expired";
+  canConnectDataSource: boolean;
+  canGenerateReport: boolean;
+  remainingReportGenerations: number | null;
+  isUnlimitedReports: boolean;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  upgradeRequiredReason: string | null;
+};
+
 export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
-  const [fromHome, setFromHome] = useState(false);
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
@@ -315,23 +336,49 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState("");
   const [checkoutStatus, setCheckoutStatus] = useState<"success" | "cancelled" | null>(null);
+  const [entitlement, setEntitlement] = useState<BillingEntitlementSummary | null>(null);
+  const [isLoadingEntitlement, setIsLoadingEntitlement] = useState(true);
   const [locale] = useLocale("en");
   const [checkoutCurrency, setCheckoutCurrency] = useState<CheckoutCurrency>("cny");
   const router = useRouter();
   const copy = paymentCopy[getCopyLocale(locale)];
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
-    const from = searchParams.get("from");
     const checkout = searchParams.get("checkout");
     const message = searchParams.get("message");
 
-    setFromHome(from === "home");
     setCheckoutStatus(checkout === "success" || checkout === "cancelled" ? checkout : null);
     setCheckoutMessage(checkout === "error" && message ? message : "");
   }, []);
   useEffect(() => {
     setCheckoutCurrency(getCopyLocale(locale) === "zh" ? "cny" : "usd");
   }, [locale]);
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadEntitlement() {
+      setIsLoadingEntitlement(true);
+
+      try {
+        const response = await fetch("/api/billing/entitlement", { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+
+        if (isMounted && response.ok && payload?.ok) {
+          setEntitlement(payload.entitlement as BillingEntitlementSummary);
+        }
+      } catch {
+        if (isMounted) setEntitlement(null);
+      } finally {
+        if (isMounted) setIsLoadingEntitlement(false);
+      }
+    }
+
+    void loadEntitlement();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const backLabel =
     getCopyLocale(locale) === "zh" ? "返回" : "Back";
@@ -344,6 +391,18 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
     : null;
   const selectedPrice = selectedCurrencyPrice?.price ?? selected.price;
   const selectedDue = selectedCurrencyPrice?.due ?? selected.due;
+  const currentPlanName =
+    entitlement?.planType === "MONTHLY"
+      ? copy.monthlyPlan
+      : entitlement?.planType === "ONE_TIME"
+        ? copy.oneTimePlan
+        : copy.noActivePlan;
+  const currentPlanTypeLabel =
+    entitlement?.planType === "MONTHLY"
+      ? copy.monthlyPlan
+      : entitlement?.planType === "ONE_TIME"
+        ? copy.oneTimePlan
+        : null;
 
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -414,11 +473,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   };
 
   const handleGoBack = () => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-      return;
-    }
-    router.push(fromHome ? "/" : "/dashboard");
+    router.push("/dashboard");
   };
 
   return (
@@ -487,7 +542,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
 
         <Card className="mb-5 overflow-hidden rounded-[28px] border-slate-200/80 bg-white/88 shadow-[0_18px_70px_rgba(15,23,42,0.08)] backdrop-blur">
           <CardContent className="p-5 sm:p-6">
-            <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <Badge variant="secondary" className="mb-3 rounded-full">
                   {copy.selectorBadge}
@@ -496,6 +551,21 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                   {copy.selectorTitle}
                 </h1>
                 <p className="mt-2 text-sm leading-6 text-slate-500">{copy.selectorSubtitle}</p>
+              </div>
+              <div className="w-full rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 sm:w-auto sm:min-w-56">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  {copy.currentPlan}
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-950">
+                    {isLoadingEntitlement ? copy.loadingPlan : currentPlanName}
+                  </span>
+                  {!isLoadingEntitlement && currentPlanTypeLabel ? (
+                    <Badge variant="secondary" className="rounded-full">
+                      {currentPlanTypeLabel}
+                    </Badge>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className="grid gap-3 lg:grid-cols-3">

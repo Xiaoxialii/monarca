@@ -3,6 +3,7 @@
 import { Show, useUser } from "@clerk/nextjs";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   BrainCircuit,
@@ -13,10 +14,12 @@ import {
   GitBranch,
   Languages,
   LineChart,
+  ListChecks,
   MoveRight,
   Search,
   Sparkles,
   Target,
+  TrendingUp,
   Zap
 } from "lucide-react";
 import Link from "next/link";
@@ -44,10 +47,10 @@ const integrations = [
 ];
 
 const featureMeta = [
-  { icon: Activity, className: "bg-emerald-100/80" },
-  { icon: GitBranch, className: "bg-lime-100/75" },
-  { icon: BrainCircuit, className: "bg-teal-100/80" },
-  { icon: Target, className: "bg-emerald-100/70" }
+  { icon: Database, className: "bg-emerald-100/80" },
+  { icon: AlertTriangle, className: "bg-lime-100/75" },
+  { icon: ListChecks, className: "bg-teal-100/80" },
+  { icon: TrendingUp, className: "bg-emerald-100/70" }
 ];
 
 const teamRoleIcons = [Database, GitBranch, BarChart3, Search, Target];
@@ -285,7 +288,7 @@ const homepageCopy = {
         { role: "经营洞察", text: "解释变化，定位关键根因" },
         { role: "增长运营", text: "把洞察转化为增长行动" }
       ],
-      primaryCta: "生成第一份报告",
+      primaryCta: "免费生成第一份报告",
       secondaryCta: "查看演示工作区",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
     },
@@ -316,20 +319,20 @@ const homepageCopy = {
       title: "蝴蝶效应能帮你做什么",
       cards: [
         {
-          title: "检测异常",
-          text: "持续监控收入、激活、漏斗和留存变化"
+          title: "汇总分散数据",
+          text: "把 Excel、数据库和业务系统的数据集中到一个平台，自动生成分析报告"
         },
         {
-          title: "定位根因",
-          text: "把指标变化追溯到渠道、客群、账户、产品事件和计费状态"
+          title: "发现异常并定位原因",
+          text: "自动监控关键指标变化，并拆解到渠道、客户、产品、地区或时间段"
         },
         {
-          title: "获得建议",
-          text: "输出优先级、负责人、预期影响和置信度"
+          title: "生成行动建议",
+          text: "给出优先级、建议动作、影响范围和下一步处理方向"
         },
         {
-          title: "追踪影响",
-          text: "持续衡量每个行动是否真的推动了目标指标"
+          title: "追踪行动效果",
+          text: "持续观察行动后指标是否改善，形成数据驱动闭环"
         }
       ]
     },

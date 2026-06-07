@@ -3,7 +3,7 @@
 import { ArrowRight, CheckCircle2, Home } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { getCopyLocale, useLocale } from "@/lib/locale";
 
@@ -15,6 +15,9 @@ const successCopy = {
     dashboard: "Go to dashboard",
     home: "Back to homepage",
     session: "Checkout session",
+    confirming: "Activating your plan access...",
+    confirmed: "Plan access is active. You can connect data and generate reports now.",
+    confirmFailed: "Payment succeeded, but plan access was not activated automatically. Please refresh or contact support.",
     plans: {
       trial: "One-time trial",
       "database-setup": "Database setup",
@@ -28,6 +31,9 @@ const successCopy = {
     dashboard: "返回 Dashboard",
     home: "返回主页",
     session: "付款编号",
+    confirming: "正在开通套餐权限...",
+    confirmed: "套餐权限已开通，现在可以连接数据并生成报告。",
+    confirmFailed: "付款已成功，但套餐权限未自动开通。请刷新页面或联系支持。",
     plans: {
       trial: "单次体验",
       "database-setup": "数据库搭建",
@@ -49,6 +55,51 @@ function CheckoutSuccessContent() {
   const plan = searchParams?.get("plan") ?? null;
   const sessionId = searchParams?.get("session_id") ?? null;
   const planLabel = isPaidPlan(plan) ? copy.plans[plan] : copy.plans.professional;
+  const [confirmationStatus, setConfirmationStatus] = useState<"idle" | "confirming" | "confirmed" | "failed">(
+    sessionId ? "confirming" : "idle"
+  );
+  const [confirmationMessage, setConfirmationMessage] = useState("");
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    let canceled = false;
+
+    setConfirmationStatus("confirming");
+    setConfirmationMessage("");
+
+    fetch("/api/stripe/checkout/confirm", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ sessionId })
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.ok) {
+          throw new Error(typeof data.message === "string" ? data.message : copy.confirmFailed);
+        }
+
+        return data;
+      })
+      .then(() => {
+        if (!canceled) {
+          setConfirmationStatus("confirmed");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!canceled) {
+          setConfirmationStatus("failed");
+          setConfirmationMessage(error instanceof Error ? error.message : copy.confirmFailed);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [copy.confirmFailed, sessionId]);
 
   return (
     <main className="flex min-h-screen items-center justify-center px-5 py-10">
@@ -72,6 +123,19 @@ function CheckoutSuccessContent() {
               </span>
             ) : null}
           </div>
+          {confirmationStatus !== "idle" ? (
+            <p
+              className={`mt-3 text-xs leading-5 ${
+                confirmationStatus === "failed" ? "text-amber-700" : "text-emerald-700"
+              }`}
+            >
+              {confirmationStatus === "confirming"
+                ? copy.confirming
+                : confirmationStatus === "confirmed"
+                  ? copy.confirmed
+                  : confirmationMessage || copy.confirmFailed}
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2">

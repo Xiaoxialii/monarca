@@ -4,6 +4,7 @@ import {
   hasDisplayableMetricValue,
   isGlobalBusinessMetricResult
 } from "@/lib/metric-visibility";
+import { businessMetricLanguage } from "@/lib/report-generation/business-language";
 import { contextualMetricName } from "@/lib/report-generation/metric-name-normalizer";
 
 type PromptDataSource = {
@@ -45,9 +46,17 @@ function formatValue(value: unknown) {
 
 function resultSentence(result: MetricResultValue, locale: ReportLocale = "zh") {
   const name = contextualMetricName(result.metricName, result.formula);
+  const metric = businessMetricLanguage({
+    metricName: result.metricName,
+    displayName: result.displayName,
+    formula: result.formula,
+    unit: result.unit,
+    locale
+  });
+
   return locale === "zh"
-    ? `${name} 为 ${formatValue(result.value)}`
-    : `${name}: ${formatValue(result.value)}`;
+    ? `${name} 为 ${formatValue(result.value)}，代表当前${metric.pluralLabel}水平`
+    : `${name}: ${formatValue(result.value)}, representing current ${metric.pluralLabel}`;
 }
 
 export function buildAiBriefPrompt({
@@ -83,6 +92,9 @@ export function buildAiBriefPrompt({
       "3. Use only metric_results, data source names, and schema summaries.",
       "4. Include executive conclusions, key changes, risk signals, likely causes, business impact, recommended actions, and evidence.",
       "5. Write for business operators, not as a technical log.",
+      "6. Before writing each insight, identify the metric meaning, dimension meaning, concrete top objects, comparison evidence, and next analysis step.",
+      "7. Never treat field names such as category, records, customer_segment, App, or Sentiment as risk objects. Use concrete values and metric evidence.",
+      "8. For Records/Count metrics, say record count, sample size, or occurrences; do not say contribution unless paired with a business value metric.",
       "",
       "Data sources:",
       sourceLines || "- None",
@@ -106,6 +118,9 @@ export function buildAiBriefPrompt({
     "3. 只基于 metric_results、数据源名称和 schema 摘要生成分析",
     "4. 输出内容包括：核心结论、关键变化、异常信号、可能原因、业务影响、行动建议、证据链",
     "5. 语气要像给业务负责人看的简报，不要像技术日志",
+    "6. 每条结论必须先识别 metric 含义、dimension 含义、具体对象、对比证据和下一步分析方向",
+    "7. 不要把 category、records、customer_segment、App、Sentiment 这类字段名当成风险对象；必须使用具体字段值和指标证据",
+    "8. Records/Count 只能表达为记录数量、样本数量或出现次数；不能单独写成业务贡献或业务风险",
     "",
     "数据源：",
     sourceLines || "- 无",

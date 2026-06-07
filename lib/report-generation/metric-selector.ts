@@ -13,6 +13,7 @@ import {
 } from "@/lib/metric-visibility";
 import { contextualMetricName, metricNameKey, normalizeMetricName } from "@/lib/report-generation/metric-name-normalizer";
 import { reportSkillRegistry } from "@/lib/report-generation/skill-registry";
+import { businessMetricLanguage, topDimensionInsightText } from "@/lib/report-generation/business-language";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -244,11 +245,28 @@ function explanationForMetric(metric: ReportMetricResultInput, definition?: Repo
   const displayValue = formatReportMetricValue(metric.value, metric.metricName);
 
   if (metric.rows?.length) {
-    return `${name} 的头部对象为 ${metric.rows[0].dimension}，该对象数值为 ${formatReportMetricValue(metric.rows[0].value, metric.metricName)}，可作为优先拆解对象`;
+    const insightText = topDimensionInsightText({
+      metricName: metric.metricName,
+      displayName: metric.displayName,
+      formula: metric.formula,
+      dimension: /\bby\s+([A-Za-z_][\w.]*)/i.exec(metric.metricName)?.[1] ?? /\bBY\s+([A-Za-z_][\w.]*)/i.exec(metric.formula)?.[1],
+      values: metric.rows.map((row) => row.dimension),
+      locale: "zh"
+    });
+
+    return `${insightText.conclusion}${insightText.explanation}${insightText.nextAction}`;
   }
 
   if (definition?.definition) {
-    return `${name} 为 ${displayValue}，口径为：${definition.definition}`;
+    const metricLanguage = businessMetricLanguage({
+      metricName: metric.metricName,
+      displayName: metric.displayName,
+      formula: metric.formula,
+      unit: metric.unit,
+      locale: "zh"
+    });
+
+    return `${name} 为 ${displayValue}，代表当前${metricLanguage.pluralLabel}水平；口径为：${definition.definition}`;
   }
 
   return `${name} 为 ${displayValue}，按照 ${formulaGrain(metric.formula)} 计算`;

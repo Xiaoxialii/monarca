@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { RecommendationStatus, UsageActionType, WorkspaceRole } from "@prisma/client";
+import { RecommendationStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { checkUserEntitlement, consumeCredit, EntitlementError, entitlementErrorMessage } from "@/lib/entitlements";
 import { computeMetricResultsForContexts, type MetricResultValue } from "@/lib/metric-results";
+import {
+  markReportGenerationFailed,
+  markReportGenerationSucceeded,
+  ReportAccessError,
+  startReportGeneration
+} from "@/lib/report-entitlements";
 import { buildMockAiBrief } from "@/lib/report-generation/ai-brief-generator";
 import { contextualMetricName } from "@/lib/report-generation/metric-name-normalizer";
 import { buildReportPrompt } from "@/lib/report-generation/report-prompt-builder";
@@ -230,42 +235,42 @@ function groupMetricResultsByType(results: MetricResultValue[]) {
 }
 
 export async function POST(request: Request) {
-  let responseLocale: ReportLocale = "en";
+  let generationLogId: string | null = null;
+  let generationWorkspaceId: string | null = null;
 
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     const payload = await request.json().catch(() => null);
-    const requestedLocale = normalizeReportLocale(asRecord(payload).locale);
+    const payloadRecord = asRecord(payload);
+    const userRequested = asRecord(payload).userRequested === true;
+    generationWorkspaceId = session.workspace.id;
+
+    if (!userRequested) {
+      return NextResponse.json(
+        { ok: false, code: "USER_ACTION_REQUIRED", message: "Report generation requires an explicit user action." },
+        { status: 400 }
+      );
+    }
+
+    const requestedLocale = normalizeReportLocale(payloadRecord.locale);
     const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
-    responseLocale = reportLocale;
     if (requestedLocale && requestedLocale !== session.user.locale) {
       await prisma.user.update({
         where: { id: session.user.id },
         data: { locale: requestedLocale }
       });
     }
-    const latestBriefingForLocale = await prisma.dailyBriefing.findFirst({
-      where: {
-        workspaceId: session.workspace.id
-      },
-      orderBy: {
-        briefingDate: "desc"
-      },
-      select: {
-        payloadJson: true
-      }
-    });
-    const latestBriefingLocale = asRecord(latestBriefingForLocale?.payloadJson).locale;
-    const hasKnownLatestBriefingLocale = latestBriefingLocale === "zh" || latestBriefingLocale === "en";
-    const isLocaleOnlyRegeneration = Boolean(
-      requestedLocale &&
-      latestBriefingForLocale &&
-      (!hasKnownLatestBriefingLocale || latestBriefingLocale !== reportLocale)
-    );
 
-    if (!isLocaleOnlyRegeneration) {
-      await checkUserEntitlement(session.user.id, UsageActionType.GENERATE_REPORT);
-    }
+    const requestId = typeof payloadRecord.idempotencyKey === "string"
+      ? payloadRecord.idempotencyKey
+      : request.headers.get("idempotency-key") ?? request.headers.get("x-idempotency-key") ?? crypto.randomUUID();
+    const generationAccess = await startReportGeneration({
+      workspaceId: session.workspace.id,
+      reportType: "full_report",
+      idempotencyKey: requestId
+    });
+    generationLogId = generationAccess.log.id;
+
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -540,19 +545,11 @@ export async function POST(request: Request) {
       });
     }
 
-    const creditUsage = isLocaleOnlyRegeneration
-      ? null
-      : await consumeCredit({
-          userId: session.user.id,
-          actionType: UsageActionType.GENERATE_REPORT,
-          amount: 1,
-          metadata: {
-            briefingId: briefing.id,
-            workspaceId: session.workspace.id,
-            generatedAt: payloadJson.generatedAt,
-            computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length
-          }
-        });
+    const reportUsage = await markReportGenerationSucceeded({
+      logId: generationLogId,
+      workspaceId: session.workspace.id,
+      reportId: briefing.id
+    });
 
     return NextResponse.json({
       ok: true,
@@ -566,26 +563,35 @@ export async function POST(request: Request) {
       failedMetricCount: metricResults.filter((result) => result.status === "failed").length,
       skippedMetricCount: metricResults.filter((result) => result.status === "skipped").length,
       entitlement: {
-        creditId: creditUsage?.creditId ?? null,
-        remainingReports: creditUsage?.remaining ?? null,
-        consumed: Boolean(creditUsage)
+        accessType: reportUsage.log.accessType,
+        consumed: Boolean(reportUsage.consumed)
       }
     });
   } catch (error) {
+    if (generationLogId && generationWorkspaceId) {
+      await markReportGenerationFailed({
+        logId: generationLogId,
+        workspaceId: generationWorkspaceId,
+        errorMessage: error instanceof Error ? error.message : "Failed to generate report."
+      }).catch(() => null);
+    }
+
     const authResponse = workspaceAuthErrorResponse(error);
 
     if (authResponse) {
       return authResponse;
     }
 
-    if (error instanceof EntitlementError) {
+    if (error instanceof ReportAccessError) {
       return NextResponse.json(
         {
           ok: false,
+          error: error.code,
           code: error.code,
-          message: entitlementErrorMessage(error.code, responseLocale),
-          upgradeUrl: "/checkout/professional",
-          oneTimeUrl: "/checkout/trial"
+          message: error.message,
+          upgradeRequired: true,
+          upgradeUrl: "/settings/billing",
+          oneTimeUrl: "/settings/billing"
         },
         { status: error.status }
       );

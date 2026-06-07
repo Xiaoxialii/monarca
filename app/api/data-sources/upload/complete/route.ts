@@ -1,37 +1,54 @@
 import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
+import { fileExtension, inferTablesFromCsvText, tableNameFromFile } from "@/lib/file-upload-schema";
+import { prisma } from "@/lib/prisma";
+import { apiErrorResponse } from "@/lib/api-errors";
+import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
+import { getSupabaseObjectInfo, isWorkspaceSupabaseUploadPath, readSupabaseObjectText } from "@/lib/supabase-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
-import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
-import { storeUploadInR2 } from "@/lib/r2-storage";
-import { apiErrorResponse } from "@/lib/api-errors";
-import { fileExtension, inferTablesFromUploadFile } from "@/lib/file-upload-schema";
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_BYTES = 9 * 1024 * 1024;
+const MAX_DIRECT_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_FILE_NAME_LENGTH = 180;
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
 
-  if (message.includes("DATABASE_URL must be a PostgreSQL connection string")) {
-    return "数据库连接地址不是 PostgreSQL。请把 DATABASE_URL 改为 Neon/PostgreSQL 连接串后重试。";
-  }
-
-  if (message.includes("pool timeout") || message.includes("failed to retrieve a connection")) {
-    return "数据库暂时无法连接，请检查 PostgreSQL / Neon 连接地址后再上传文件";
-  }
-
-  if (
-    message.includes("too large") ||
-    message.includes("too many") ||
-    message.includes("Unsupported")
-  ) {
+  if (message.includes("too large") || message.includes("too many") || message.includes("Unsupported")) {
     return message;
+  }
+
+  if (message.includes("Supabase Storage is not configured")) {
+    return "Supabase Storage is not configured.";
+  }
+
+  if (message.includes("Supabase Storage lookup failed")) {
+    return message;
+  }
+
+  if (message.includes("Uploaded file was not found")) {
+    return "Uploaded file was not found in Supabase Storage. Please retry the upload.";
+  }
+
+  if (message.includes("Uploaded file is empty or unavailable")) {
+    return "Uploaded file is empty or unavailable in Supabase Storage. Please retry the upload.";
   }
 
   return "File upload failed";
@@ -41,16 +58,30 @@ export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     await requireCanConnectDataSource(session.workspace.id);
-    const formData = await request.formData();
-    const file = formData.get("file");
 
-    if (!(file instanceof File)) {
-      return NextResponse.json({ ok: false, message: "File is required" }, { status: 400 });
-    }
-
-    const extension = fileExtension(file.name);
+    const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const path = stringValue(payload?.path);
+    const fileName = stringValue(payload?.fileName);
+    const mimeType = stringValue(payload?.mimeType) || "application/octet-stream";
+    const fileSize = toNumber(payload?.fileSize);
+    const extension = fileExtension(fileName);
     const isCsv = extension === "csv";
     const isExcel = ["xls", "xlsx"].includes(extension);
+
+    if (!path || !isWorkspaceSupabaseUploadPath(session.workspace.id, path)) {
+      return NextResponse.json({ ok: false, message: "Uploaded file path is invalid." }, { status: 400 });
+    }
+
+    if (!fileName) {
+      return NextResponse.json({ ok: false, message: "File name is required." }, { status: 400 });
+    }
+
+    if (fileName.length > MAX_FILE_NAME_LENGTH) {
+      return NextResponse.json(
+        { ok: false, message: `File name is too long. Maximum supported length: ${MAX_FILE_NAME_LENGTH}.` },
+        { status: 400 }
+      );
+    }
 
     if (!isCsv && !isExcel) {
       return NextResponse.json(
@@ -59,35 +90,38 @@ export async function POST(request: Request) {
       );
     }
 
-    if (file.name.length > MAX_FILE_NAME_LENGTH) {
-      return NextResponse.json(
-        { ok: false, message: `File name is too long. Maximum supported length: ${MAX_FILE_NAME_LENGTH}.` },
-        { status: 400 }
-      );
+    if (!fileSize || fileSize <= 0) {
+      return NextResponse.json({ ok: false, message: "File size is required." }, { status: 400 });
     }
 
-    if (file.size <= 0) {
-      return NextResponse.json({ ok: false, message: "File is empty" }, { status: 400 });
-    }
-
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (fileSize > MAX_DIRECT_UPLOAD_BYTES) {
       return NextResponse.json(
-        { ok: false, message: `File is too large. Maximum upload size is ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB.` },
+        { ok: false, message: `File is too large. Maximum upload size is ${Math.floor(MAX_DIRECT_UPLOAD_BYTES / 1024 / 1024)}MB.` },
         { status: 413 }
       );
     }
 
-    const tables = await inferTablesFromUploadFile(file);
+    await getSupabaseObjectInfo(path);
+
+    const tables = isCsv
+      ? inferTablesFromCsvText(fileName, await readSupabaseObjectText(path))
+      : [{ name: tableNameFromFile(fileName), columns: [] }];
     const scannedAt = new Date().toISOString();
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const provider = isCsv ? "CSV" : "Excel";
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(tables);
+    const storage = {
+      provider: "supabase-storage",
+      bucket: stringValue(payload?.bucket),
+      path,
+      url: null
+    };
     const schemaPayload = {
       scannedAt,
-      fileName: file.name,
-      fileSize: file.size,
+      fileName,
+      fileSize,
       tables,
       semanticLayer,
       analysisReport
@@ -98,17 +132,18 @@ export async function POST(request: Request) {
         data: {
           workspaceId: session.workspace.id,
           type: sourceType,
-          name: `${provider} - ${file.name}`,
+          name: `${provider} - ${fileName}`,
           provider,
           isActive: true,
           status: ConnectionStatus.CONNECTED,
           connectionMode: "Upload",
           authMethod: "File",
           config: {
-            fileName: file.name,
-            fileSize: file.size,
-            mimeType: file.type || null,
-            extension
+            fileName,
+            fileSize,
+            mimeType,
+            extension,
+            storage
           },
           schemas: schemaPayload,
           connectedAt: new Date(),
@@ -161,44 +196,8 @@ export async function POST(request: Request) {
       workspaceId: session.workspace.id,
       userId: session.user.id
     }).catch((metricGenerationError) => {
-      console.error("Failed to generate metrics after upload", metricGenerationError);
+      console.error("Failed to generate metrics after direct upload", metricGenerationError);
     });
-    let storedFile: Awaited<ReturnType<typeof storeUploadInR2>> = null;
-    let storageWarning: string | null = null;
-
-    try {
-      storedFile = await storeUploadInR2({
-        workspaceId: session.workspace.id,
-        dataSourceId: result.dataSource.id,
-        file
-      });
-    } catch (storageError) {
-      storageWarning = "Original file storage failed; schema import was saved.";
-      console.warn("Skipping original upload storage after schema import", storageError);
-    }
-
-    if (storedFile) {
-      await prisma.dataSourceConnection.update({
-        where: {
-          id: result.dataSource.id
-        },
-        data: {
-          isActive: true,
-          config: {
-            fileName: file.name,
-            fileSize: file.size,
-            mimeType: file.type || null,
-            extension,
-            storage: {
-              provider: "cloudflare-r2",
-              bucket: storedFile.bucket,
-              key: storedFile.key,
-              url: storedFile.url
-            }
-          }
-        }
-      });
-    }
 
     return NextResponse.json({
       ok: true,
@@ -211,17 +210,10 @@ export async function POST(request: Request) {
         connectionMode: result.dataSource.connectionMode,
         authMethod: result.dataSource.authMethod,
         config: {
-          fileName: file.name,
-          fileSize: file.size,
+          fileName,
+          fileSize,
           extension,
-          storage: storedFile
-            ? {
-                provider: "cloudflare-r2",
-                bucket: storedFile.bucket,
-                key: storedFile.key,
-                url: storedFile.url
-              }
-            : null
+          storage
         },
         schema: {
           tableCount: tables.length,
@@ -243,28 +235,21 @@ export async function POST(request: Request) {
         businessEntityCount: semanticLayer.entities.length,
         generatedMetricCount,
         analysisReport
-      },
-      storageWarning
+      }
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
 
-    if (authResponse) {
-      return authResponse;
-    }
+    if (authResponse) return authResponse;
 
     if (error instanceof BillingEntitlementError) {
       return NextResponse.json(
-        {
-          ok: false,
-          code: error.code,
-          message: error.message,
-          upgradeUrl: "/settings/billing",
-          oneTimeUrl: "/settings/billing"
-        },
+        { ok: false, code: error.code, message: error.message, upgradeUrl: "/settings/billing" },
         { status: error.status }
       );
     }
+
+    console.error("Direct upload completion failed", error);
 
     return apiErrorResponse(error, uploadErrorMessage(error));
   }

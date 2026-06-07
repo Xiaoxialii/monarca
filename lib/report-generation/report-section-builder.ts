@@ -177,6 +177,110 @@ function selectKeyMetrics(modules: BusinessModuleReport[]) {
   return keyMetrics.slice(0, 8);
 }
 
+function zhMetricName(metric: { displayName: string; name?: string }) {
+  const raw = `${metric.displayName} ${metric.name ?? ""}`.toLowerCase();
+
+  if (/total\s*customers?|customer\s*count|customers?\s*total|unique\s*customers?/.test(raw)) return "客户总数";
+  if (/total\s*orders?|order\s*count|orders?\s*total/.test(raw)) return "订单总数";
+  if (/revenue|sales\s*amount|total\s*sales|gmv/.test(raw)) return "销售额";
+  if (/\baov\b|average\s*order\s*value|客单价/.test(raw)) return "客单价";
+  if (/repeat\s*purchase\s*rate|repurchase|复购/.test(raw)) return "复购率";
+  if (/products?|sku|商品/.test(raw)) return "商品数";
+
+  return metric.displayName;
+}
+
+function metricValueText(metric?: { displayValue: string }) {
+  return metric?.displayValue?.trim();
+}
+
+function findMetricByName(metrics: BusinessModuleReport["coreMetrics"], patterns: RegExp[]) {
+  return metrics.find((metric) => {
+    const text = `${metric.name} ${metric.displayName}`.toLowerCase();
+    return patterns.some((pattern) => pattern.test(text));
+  });
+}
+
+function zhCommerceSummary(module: BusinessModuleReport) {
+  if (!["ecommerce", "sales", "orders"].includes(module.businessType)) {
+    return null;
+  }
+
+  const metrics = module.coreMetrics;
+  const customers = findMetricByName(metrics, [/total\s*customers?/, /customer\s*count/, /unique\s*customers?/]);
+  const orders = findMetricByName(metrics, [/total\s*orders?/, /order\s*count/]);
+  const revenue = findMetricByName(metrics, [/revenue/, /sales\s*amount/, /total\s*sales/, /gmv/]);
+  const aov = findMetricByName(metrics, [/\baov\b/, /average\s*order\s*value/]);
+  const repeatRate = findMetricByName(metrics, [/repeat\s*purchase\s*rate/, /repurchase/]);
+  const product = findMetricByName(metrics, [/products?/, /\bsku\b/]);
+
+  if (customers && orders) {
+    const parts = [
+      `本次数据覆盖 ${metricValueText(customers)} 位客户和 ${metricValueText(orders)} 笔订单`,
+      revenue ? `销售额为 ${metricValueText(revenue)}` : "",
+      aov ? `客单价为 ${metricValueText(aov)}` : "",
+      repeatRate ? `复购率为 ${metricValueText(repeatRate)}` : ""
+    ].filter(Boolean);
+
+    return `${parts.join("，")}，样本规模可以支持基础的电商经营分析。后续可重点分析客户贡献、订单规模、商品表现、复购情况和销售趋势。`;
+  }
+
+  if (customers) {
+    return `本次数据覆盖 ${metricValueText(customers)} 位客户，可用于分析客户结构、订单贡献和复购情况。`;
+  }
+
+  if (orders) {
+    return `当前共有 ${metricValueText(orders)} 笔订单，说明数据可以支持订单规模、商品表现和销售趋势分析。`;
+  }
+
+  if (revenue) {
+    return `当前${zhMetricName(revenue)}为 ${metricValueText(revenue)}，可作为判断销售规模、订单贡献和后续增长趋势的核心入口。`;
+  }
+
+  if (aov) {
+    return `当前${zhMetricName(aov)}为 ${metricValueText(aov)}，可用于观察客户消费水平，并结合订单数和销售额判断增长质量。`;
+  }
+
+  if (repeatRate) {
+    return `当前${zhMetricName(repeatRate)}为 ${metricValueText(repeatRate)}，可用于判断客户回购表现和长期经营稳定性。`;
+  }
+
+  if (product) {
+    return `当前${zhMetricName(product)}为 ${metricValueText(product)}，后续可结合订单和销售额分析商品贡献与头部集中度。`;
+  }
+
+  return null;
+}
+
+function zhBusinessSummaryForMetric(module: BusinessModuleReport, metric: BusinessModuleReport["coreMetrics"][number]) {
+  const label = zhMetricName(metric);
+  const value = metric.displayValue;
+
+  if (module.businessType === "ecommerce" || module.businessType === "sales" || module.businessType === "orders") {
+    if (label === "客户总数") {
+      return `本次数据覆盖 ${value} 位客户，可用于分析客户结构、订单贡献和复购情况。`;
+    }
+
+    if (label === "订单总数") {
+      return `当前共有 ${value} 笔订单，说明数据可以支持订单规模、商品表现和销售趋势分析。`;
+    }
+
+    if (label === "销售额") {
+      return `当前销售额为 ${value}，可用于判断销售规模，并结合订单数、客单价和商品表现分析增长来源。`;
+    }
+
+    if (label === "客单价") {
+      return `当前客单价为 ${value}，反映客户单次消费水平，建议结合订单量和商品结构判断增长质量。`;
+    }
+
+    if (label === "复购率") {
+      return `当前复购率为 ${value}，反映客户持续购买能力，建议结合客户分层和订单周期分析留存质量。`;
+    }
+  }
+
+  return `${label}为 ${value}，可作为${module.title}的核心观察点，后续应结合关键业务维度拆解主要贡献来源。`;
+}
+
 function coreSummaryBullets(modules: BusinessModuleReport[], generatedInsights: GeneratedInsights | undefined, locale: ReportLocale) {
   if (locale === "zh" && generatedInsights?.executiveSummary.length) {
     return generatedInsights.executiveSummary.slice(0, 3).map((insight) =>
@@ -196,7 +300,19 @@ function coreSummaryBullets(modules: BusinessModuleReport[], generatedInsights: 
     ).slice(0, 3);
   }
 
-  return bullets.slice(0, 3);
+  const commerceSummaries = modules.flatMap((module) => {
+    const summary = zhCommerceSummary(module);
+    return summary ? [summary] : [];
+  });
+  const metricSummaries = modules.flatMap((module) =>
+    module.coreMetrics.slice(0, 2).map((metric) => zhBusinessSummaryForMetric(module, metric))
+  );
+
+  return Array.from(new Set([...commerceSummaries, ...metricSummaries, ...bullets])).slice(0, 3);
+}
+
+export function buildZhCoreSummaryBulletsForTest(modules: BusinessModuleReport[]) {
+  return coreSummaryBullets(modules, undefined, "zh");
 }
 
 function keyFindings(modules: BusinessModuleReport[], generatedInsights: GeneratedInsights | undefined, locale: ReportLocale) {

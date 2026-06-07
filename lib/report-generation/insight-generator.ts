@@ -45,6 +45,37 @@ export function metricBusinessInsight(metric: SelectedReportMetric) {
   return `${metric.displayName} 为 ${metric.displayValue}，可作为当前模块的核心观察点；建议按${breakdown}验证主要贡献来源`;
 }
 
+function zhMetricName(metric: SelectedReportMetric) {
+  const raw = `${metric.displayName} ${metric.name}`.toLowerCase();
+
+  if (/total\s*customers?|customer\s*count|customers?\s*total|unique\s*customers?/.test(raw)) return "客户总数";
+  if (/total\s*orders?|order\s*count|orders?\s*total/.test(raw)) return "订单总数";
+  if (/revenue|sales\s*amount|total\s*sales|gmv/.test(raw)) return "销售额";
+  if (/\baov\b|average\s*order\s*value|客单价/.test(raw)) return "客单价";
+  if (/repeat\s*purchase\s*rate|repurchase|复购/.test(raw)) return "复购率";
+
+  return metric.displayName;
+}
+
+function commerceCoreSummary(module: BusinessModuleReport) {
+  if (!["ecommerce", "sales", "orders"].includes(module.businessType)) {
+    return null;
+  }
+
+  const metricByPattern = (patterns: RegExp[]) => module.coreMetrics.find((metric) => {
+    const raw = `${metric.displayName} ${metric.name}`.toLowerCase();
+    return patterns.some((pattern) => pattern.test(raw));
+  });
+  const customers = metricByPattern([/total\s*customers?/, /customer\s*count/, /unique\s*customers?/]);
+  const orders = metricByPattern([/total\s*orders?/, /order\s*count/]);
+
+  if (customers && orders) {
+    return `本次数据覆盖 ${customers.displayValue} 位客户和 ${orders.displayValue} 笔订单，样本规模可以支持基础的电商经营分析`;
+  }
+
+  return null;
+}
+
 export function buildModuleSummary(title: string, metrics: SelectedReportMetric[]) {
   if (metrics.length === 0) {
     return `${title}当前没有足够的已验证指标支撑分析`;
@@ -68,8 +99,11 @@ export function buildCoreSummary(modules: BusinessModuleReport[]) {
   const highlights = populatedModules
     .slice(0, 3)
     .map((module) => {
+      const commerceSummary = commerceCoreSummary(module);
+      if (commerceSummary) return commerceSummary;
+
       const metric = module.coreMetrics[0];
-      return `${metric.displayName} 为 ${metric.displayValue}`;
+      return `${zhMetricName(metric)}为 ${metric.displayValue}`;
     });
 
   return `本次报告优先关注 ${populatedModules.map((module) => module.title).join("、")}。${highlights.join("；")}，下方只展示最需要关注的指标、发现和行动`;

@@ -89,33 +89,37 @@ enum SubscriptionPlan {
 }
 
 enum SubscriptionStatus {
+  FREE
   ACTIVE
+  TRIALING
   CANCELED
   PAST_DUE
-  PENDING
+  UNPAID
+  EXPIRED
 }
 
 enum PlanType {
+  FREE
   ONE_TIME
   MONTHLY
 }
 
-enum UserSubscriptionStatus {
-  ACTIVE
-  CANCELED
-  EXPIRED
-  PAYMENT_FAILED
+enum BillingCycle {
+  NONE
+  ONE_TIME
+  MONTHLY
 }
 
-enum UserCreditSourceType {
-  ONE_TIME_PURCHASE
-  MONTHLY_SUBSCRIPTION
+enum BillingProvider {
+  STRIPE
+  MANUAL
 }
 
-enum UserCreditStatus {
-  ACTIVE
-  USED_UP
-  EXPIRED
+enum ReportGenerationJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 enum PaymentOrderType {
@@ -128,14 +132,6 @@ enum PaymentOrderStatus {
   PAID
   FAILED
   REFUNDED
-}
-
-enum UsageActionType {
-  GENERATE_REPORT
-  AI_FOLLOW_UP
-  DATABASE_CONNECTION
-  EXPORT_REPORT
-  HUMAN_SERVICE
 }
 
 enum WorkspaceMemberStatus {
@@ -158,10 +154,7 @@ model User {
   maintainedMetrics MetricDefinition[] @relation("MetricMaintainer")
   assignedTickets  SupportTicket[]    @relation("TicketAssignee")
   submittedTickets SupportTicket[]   @relation("TicketSubmitter")
-  userSubscriptions UserSubscription[]
-  userCredits       UserCredit[]
   paymentOrders     PaymentOrder[]
-  usageLogs         UsageLog[]
 }
 
 model Workspace {
@@ -179,6 +172,10 @@ model Workspace {
   briefings         DailyBriefing[]
   supportTickets    SupportTicket[]
   subscriptions     WorkspaceSubscription[]
+  usageAllowances   WorkspaceUsageAllowance[]
+  reportGenerationJobs ReportGenerationJob[]
+  reportEntitlement ReportEntitlement?
+  reportGenerationLogs ReportGenerationLog[]
 }
 
 model WorkspaceMember {
@@ -319,25 +316,94 @@ model ActionRecommendation {
 }
 
 model WorkspaceSubscription {
-  id          String             @id @default(cuid())
-  workspaceId String
-  plan        SubscriptionPlan
-  status      SubscriptionStatus @default(PENDING)
-  amount      Int
-  currency    String             @default("CNY")
-  interval    String?
-  startedAt   DateTime?
-  endedAt     DateTime?
-  startPeriod DateTime?
-  endPeriod   DateTime?
-  trialEndsAt DateTime?
-  cancelAt    DateTime?
-  planVersion String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                      String             @id @default(cuid())
+  workspaceId             String
+  planType                PlanType           @default(FREE)
+  status                  SubscriptionStatus @default(FREE)
+  billingCycle            BillingCycle       @default(NONE)
+  provider                BillingProvider    @default(MANUAL)
+  providerCustomerId      String?
+  providerSubscriptionId  String?            @unique
+  providerPaymentIntentId String?
+  currentPeriodStart      DateTime?
+  currentPeriodEnd        DateTime?
+  cancelAtPeriodEnd       Boolean            @default(false)
+  canceledAt              DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  workspace               Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, status])
+  @@index([workspaceId, planType])
+  @@index([providerPaymentIntentId])
+}
+
+model WorkspaceUsageAllowance {
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  reportGenerationsAllowed Int       @default(0)
+  reportGenerationsUsed    Int       @default(0)
+  source                   String
+  referenceId              String
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, referenceId])
+  @@index([workspaceId, createdAt])
+}
+
+model ReportGenerationJob {
+  id             String                    @id @default(cuid())
+  workspaceId    String
+  reportId       String?
+  status         ReportGenerationJobStatus @default(PENDING)
+  errorMessage   String?
+  metadata       Json?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  failedAt       DateTime?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  workspace      Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([reportId])
+}
+
+model ReportEntitlement {
+  id                       String    @id @default(cuid())
+  workspaceId              String    @unique
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  firstFreeReportUsed      Boolean   @default(false)
+  firstFreeReportUsedAt    DateTime?
+  oneTimeReportAvailable   Boolean   @default(false)
+  oneTimeReportPurchasedAt DateTime?
+  oneTimeReportUsedAt      DateTime?
+  subscriptionStatus       String    @default("free")
+  subscriptionPlan         String?   @default("free")
+  monthlyUnlimited         Boolean   @default(false)
+  currentPeriodStart       DateTime?
+  currentPeriodEnd         DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+}
+
+model ReportGenerationLog {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  reportId       String?
+  reportType     String
+  accessType     String
+  status         String
+  idempotencyKey String?   @unique
+  errorMessage   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([workspaceId, status, createdAt])
+  @@index([reportId])
 }
 
 model Plan {
@@ -356,62 +422,15 @@ model Plan {
   isActive                Boolean       @default(true)
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
-  subscriptions           UserSubscription[]
-  credits                 UserCredit[]
   orders                  PaymentOrder[]
 
   @@index([type, isActive])
 }
 
-model UserSubscription {
-  id                     String                 @id @default(cuid())
-  userId                 String
-  planId                 String
-  status                 UserSubscriptionStatus @default(ACTIVE)
-  currentPeriodStart     DateTime
-  currentPeriodEnd       DateTime
-  cancelAtPeriodEnd      Boolean                @default(false)
-  paymentProvider        String?
-  providerSubscriptionId String?                 @unique
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan                   Plan                   @relation(fields: [planId], references: [id], onDelete: Restrict)
-  credits                UserCredit[]
-
-  @@index([userId, status])
-  @@index([planId, status])
-}
-
-model UserCredit {
-  id                String               @id @default(cuid())
-  userId            String
-  planId            String
-  subscriptionId    String?
-  paymentOrderId    String?              @unique
-  sourceType        UserCreditSourceType
-  reportCreditsTotal Int                 @default(0)
-  reportCreditsUsed  Int                 @default(0)
-  aiTokenTotal      Int                  @default(0)
-  aiTokenUsed       Int                  @default(0)
-  validFrom         DateTime             @default(now())
-  validUntil        DateTime?
-  status            UserCreditStatus     @default(ACTIVE)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan              Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
-  subscription      UserSubscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  paymentOrder      PaymentOrder?        @relation(fields: [paymentOrderId], references: [id], onDelete: SetNull)
-  usageLogs         UsageLog[]
-
-  @@index([userId, status, validUntil])
-  @@index([planId, sourceType])
-}
-
 model PaymentOrder {
   id                String             @id @default(cuid())
   userId            String
+  workspaceId       String?
   planId            String
   orderType         PaymentOrderType
   amount            Decimal            @db.Decimal(10, 2)
@@ -424,25 +443,10 @@ model PaymentOrder {
   paidAt            DateTime?
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan              Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
-  credit            UserCredit?
 
   @@index([userId, status])
+  @@index([workspaceId, status])
   @@index([planId, orderType])
-}
-
-model UsageLog {
-  id          String          @id @default(cuid())
-  userId      String
-  actionType  UsageActionType
-  creditId    String?
-  usageAmount Int             @default(1)
-  metadata    Json?
-  createdAt   DateTime        @default(now())
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  credit      UserCredit?     @relation(fields: [creditId], references: [id], onDelete: SetNull)
-
-  @@index([userId, actionType, createdAt])
-  @@index([creditId, createdAt])
 }
 
 model SupportTicket {

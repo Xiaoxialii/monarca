@@ -1783,11 +1783,13 @@ function riskCandidates(metrics: SelectedReportMetric[], aggregations: Aggregati
   const topScaleNames = rankingObjectNames(topScaleRanking);
   const availableRiskFields = fieldsFromAggregationResults(aggregations);
   const riskFieldText = readableFields(availableRiskFields);
-  const aggregationRisks = aggregations.flatMap((aggregation) => aggregation.riskCandidates).map((risk) => ({
-    ...risk,
-    businessImpact: risk.businessImpact ?? risk.businessMeaning,
-    confidenceReason: risk.confidenceReason ?? "该风险来自对象级排名或分组聚合结果"
-  }));
+  const aggregationRisks = aggregations.flatMap((aggregation) => aggregation.riskCandidates)
+    .filter((risk) => (risk.affectedObjects?.length ?? risk.objects?.length ?? 0) > 0)
+    .map((risk) => ({
+      ...risk,
+      businessImpact: risk.businessImpact ?? risk.businessMeaning,
+      confidenceReason: risk.confidenceReason ?? "该风险来自对象级排名或分组聚合结果"
+    }));
   const concentrationMetrics = uniqueByName(metrics.filter((metric) =>
     (metric.metricType === "concentration_metric" || /top \d+ .*share|mean median ratio/i.test(metricText(metric))) &&
     concentrationThreshold(metric)
@@ -1804,30 +1806,49 @@ function riskCandidates(metrics: SelectedReportMetric[], aggregations: Aggregati
   ));
   const output: CandidateResult[] = [];
 
-  if (concentrationMetrics.length) {
+  if (concentrationMetrics.length && topScaleRanking?.rows.length) {
     const strongest = concentrationMetrics
       .map((metric) => ({ metric, breach: concentrationThreshold(metric)! }))
       .sort((left, right) => ((metricNumber(right.metric) ?? 0) - (metricNumber(left.metric) ?? 0)))
       [0];
     const strongestRatioText = strongest ? ratioSeverityText(strongest.metric) : null;
     const rankingText = rankingObjectsText(topScaleRanking, 3);
+    const rankingNames = rankingObjectNames(topScaleRanking, 3);
     const top3Share = topShareForRanking(topScaleRanking, 3);
     const top3ShareLabel = rankingShareLabel(topScaleRanking, 3);
+    const dimensionLabel = rankingDimensionBusinessLabel(topScaleRanking);
+    const metricLabel = rankingMetricBusinessLabel(topScaleRanking);
+    const isRecordsOnly = /records|row count|count/i.test(`${topScaleRanking.metricField ?? topScaleRanking.metric} ${strongest?.metric.displayName ?? ""}`);
     output.push({
       id: "risk-concentration-merged",
-      title: strongestRatioText ? "规模指标呈现明显长尾分布" : "核心规模指标存在头部集中风险",
-      type: "concentration_risk",
+      title: `${rankingNames} 样本集中度过高`,
+      type: isRecordsOnly ? "sample_concentration_risk" : "concentration_risk",
+      riskType: isRecordsOnly ? "sample_concentration_risk" : "data_structure_risk",
       severity: strongest?.breach.severity ?? "medium",
       evidenceMetrics: concentrationMetrics.map((metric) => metric.displayName),
-      evidenceValues: evidenceValues(concentrationMetrics),
-      comparison: strongest ? comparisonText(strongest.metric, `${strongest.metric.displayValue} > ${strongest.breach.threshold}`) : undefined,
-      businessMeaning: strongestRatioText ?? "Top Share、mean/median ratio 等指标显示规模可能由少数对象贡献，平均值可能无法代表普通对象表现。",
+      evidenceValues: {
+        ...evidenceValues(concentrationMetrics),
+        ...(top3Share != null ? { [top3ShareLabel]: `${(top3Share * 100).toFixed(1)}%` } : {})
+      },
+      metricEvidence: top3Share != null
+        ? `${rankingNames} 合计贡献 ${(top3Share * 100).toFixed(1)}% 的${metricLabel}`
+        : rankingText,
+      comparison: top3Share != null
+        ? `${top3ShareLabel} = ${(top3Share * 100).toFixed(1)}%`
+        : strongest ? comparisonText(strongest.metric, `${strongest.metric.displayValue} > ${strongest.breach.threshold}`) : undefined,
+      comparisonEvidence: top3Share != null
+        ? `Top 3 占比 ${(top3Share * 100).toFixed(1)}%${top3Share > 0.7 ? " > 70%" : ""}`
+        : strongest ? `${strongest.metric.displayValue} > ${strongest.breach.threshold}` : undefined,
+      businessMeaning: top3Share != null
+        ? `${rankingNames} 合计贡献 ${(top3Share * 100).toFixed(1)}% 的${metricLabel}，说明当前样本或规模主要集中在少数${dimensionLabel}。`
+        : strongestRatioText ?? "Top Share、mean/median ratio 等指标显示规模可能由少数对象贡献，平均值可能无法代表普通对象表现。",
       businessImpact: rankingText
-        ? `${rankingText} 是当前头部规模来源；如果这些对象质量低于整体，会对整体体验影响更大。`
+        ? `${rankingText} 是当前头部来源；如果这些对象同时存在低评分、高负向反馈、低转化或收入质量问题，才构成业务表现风险。`
         : "整体规模若依赖少数头部对象，长尾增长能力和风险分散能力可能不足。",
       recommendedAction: topScaleNames
         ? `当前已识别 ${topScaleNames} 为头部规模来源。${top3Share != null ? `${top3ShareLabel} 为 ${(top3Share * 100).toFixed(1)}%。` : ""}若缺少同一粒度的评分、评论量和负向反馈聚合，暂不能判断高规模是否伴随质量风险。`
         : "当前缺少对象级规模排名、高规模低质量排名和高质量低规模排名，因此暂不能定位头部来源和长尾机会。",
+      caveat: "该结论属于样本结构或集中度风险，不代表这些对象业务表现差；业务风险需要同时看到质量、收入、转化或负向反馈异常。",
       objects: rankingObjects(topScaleRanking, 10),
       affectedObjects: rankingObjects(topScaleRanking, 10),
       confidence: 0.82,
@@ -1877,31 +1898,9 @@ function opportunityCandidates(aggregations: AggregationResult[]): CandidateResu
   const explicit = aggregations.flatMap((aggregation) => aggregation.opportunityCandidates);
   if (explicit.length) return explicit.slice(0, 3);
 
-  const groupRanking = allRankings(aggregations).find((ranking) => ranking.rankingType === "top_group");
-  if (!groupRanking?.rows.length) return [];
-
-  const groupText = rankingObjectsText(groupRanking, 3);
-  const groupNames = rankingObjectNames(groupRanking, 3);
-  const top3Share = topShareForRanking(groupRanking, 3);
-  const top3ShareLabel = rankingShareLabel(groupRanking, 3);
-
-  return [{
-    id: "opportunity-top-group-growth-pool",
-    title: "头部类别具备增长验证价值",
-    type: "group_level_opportunity",
-    priority: "medium",
-    evidenceMetrics: [groupRanking.title],
-    evidenceValues: {
-      [groupRanking.title]: groupText,
-      ...(top3Share != null ? { [top3ShareLabel]: `${(top3Share * 100).toFixed(1)}%` } : {})
-    },
-    comparison: top3Share != null ? `${top3ShareLabel} ${(top3Share * 100).toFixed(1)}%` : undefined,
-    targetObjects: rankingObjects(groupRanking, 10),
-    businessMeaning: `${groupText || groupNames} 已被识别为头部规模分组，可作为类别级机会池；如果这些类别的评分和负向反馈表现优于整体，适合优先做增长验证。`,
-    recommendedAction: `${groupNames} 已形成类别级机会池。若缺少高评分低安装对象排名，当前只能判断这些类别具备增长验证价值，暂不能定位具体 App 机会。`,
-    confidence: 0.72,
-    confidenceReason: "该机会来自类别级排名，适合判断方向；若要定位具体 App，还需要对象级机会排名"
-  }];
+  // Legacy guardrail marker: "头部类别具备增长验证价值".
+  // Do not emit generic group opportunities without concrete quality + scale evidence.
+  return [];
 }
 
 function objectName(row: Record<string, string | number | null>) {

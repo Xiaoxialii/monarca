@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { ConnectionStatus, DataSourceType, UsageActionType, WorkspaceRole } from "@prisma/client";
+import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { checkUserEntitlement, consumeCredit, EntitlementError } from "@/lib/entitlements";
+import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import {
   normalizeDatabaseType,
@@ -24,7 +24,7 @@ function jsonError(message: string, status = 400) {
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-    await checkUserEntitlement(session.user.id, UsageActionType.DATABASE_CONNECTION);
+    await requireCanConnectDataSource(session.workspace.id);
     const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const type = normalizeDatabaseType(payload?.type);
 
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
           type: DataSourceType.POSTGRESQL,
           name: `${provider} - ${config.database}`,
           provider,
+          isActive: true,
           status: ConnectionStatus.CONNECTED,
           connectionMode: typeof payload?.mode === "string" ? payload.mode : "Import",
           authMethod: "Database",
@@ -118,18 +119,6 @@ export async function POST(request: Request) {
       return { dataSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };
     });
 
-    await consumeCredit({
-      userId: session.user.id,
-      actionType: UsageActionType.DATABASE_CONNECTION,
-      amount: 1,
-      metadata: {
-        workspaceId: session.workspace.id,
-        dataSourceId: result.dataSource.id,
-        sourceType: result.dataSource.type,
-        provider: result.dataSource.provider
-      }
-    });
-
     return NextResponse.json({
       ok: true,
       dataSource: {
@@ -170,14 +159,14 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    if (error instanceof EntitlementError) {
+    if (error instanceof BillingEntitlementError) {
       return NextResponse.json(
         {
           ok: false,
           code: error.code,
           message: error.message,
-          upgradeUrl: "/checkout/professional",
-          oneTimeUrl: "/checkout/trial"
+          upgradeUrl: "/settings/billing",
+          oneTimeUrl: "/settings/billing"
         },
         { status: error.status }
       );

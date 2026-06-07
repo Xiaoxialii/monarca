@@ -184,10 +184,26 @@ export type CandidateResult = {
   id: string;
   title: string;
   type: string;
+  riskType?:
+    | "business_performance_risk"
+    | "sample_concentration_risk"
+    | "high_volume_low_quality_risk"
+    | "negative_feedback_risk"
+    | "conversion_risk"
+    | "revenue_quality_risk"
+    | "data_structure_risk";
+  opportunityType?:
+    | "high_quality_low_scale"
+    | "high_conversion_low_traffic"
+    | "high_margin_low_sales"
+    | "positive_feedback_low_exposure"
+    | "segment_growth_candidate";
   severity?: "high" | "medium" | "low";
   priority?: "high" | "medium" | "low";
   evidenceMetrics: string[];
   evidenceValues: Record<string, string | number | null>;
+  metricEvidence?: string;
+  comparisonEvidence?: string;
   comparison?: string;
   objects?: Array<Record<string, string | number | null>>;
   affectedObjects?: Array<Record<string, string | number | null>>;
@@ -195,6 +211,7 @@ export type CandidateResult = {
   businessMeaning: string;
   businessImpact?: string;
   recommendedAction: string;
+  caveat?: string;
   confidence: number;
   confidenceReason?: string;
 };

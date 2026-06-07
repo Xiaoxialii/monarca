@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ConnectionStatus } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
@@ -100,7 +101,10 @@ export async function GET() {
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
-        isActive: true
+        OR: [
+          { isActive: true },
+          { status: ConnectionStatus.CONNECTED }
+        ]
       },
       include: {
         schemaSnapshots: {

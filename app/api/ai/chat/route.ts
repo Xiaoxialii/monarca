@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { UsageActionType } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
-import { checkUserEntitlement, consumeCredit, EntitlementError } from "@/lib/entitlements";
+import { BillingEntitlementError, requireCanGenerateReport } from "@/lib/billing/entitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -75,10 +74,6 @@ function extractOutputText(payload: unknown) {
     .trim();
 }
 
-function estimateTokens(text: string) {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspace();
@@ -107,12 +102,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const estimatedMaxTokens = estimateTokens(inputText) + MAX_OUTPUT_TOKENS;
-    const entitlement = await checkUserEntitlement(session.user.id, UsageActionType.AI_FOLLOW_UP);
-
-    if (Number.isFinite(entitlement.remaining) && entitlement.remaining < estimatedMaxTokens) {
-      throw new EntitlementError("CREDIT_USED_UP", "AI 使用额度不足，请升级套餐或购买新额度。");
-    }
+    await requireCanGenerateReport(session.workspace.id);
 
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -151,22 +141,11 @@ export async function POST(request: Request) {
     }
 
     const reply = extractOutputText(data);
-    const consumed = await consumeCredit({
-      userId: session.user.id,
-      actionType: UsageActionType.AI_FOLLOW_UP,
-      amount: estimateTokens(`${inputText}\n${reply}`),
-      metadata: {
-        workspaceId: session.workspace.id,
-        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini"
-      }
-    });
-
     return NextResponse.json({
       ok: true,
       reply: reply || "I could not generate a reply. Please try again.",
       entitlement: {
-        creditId: consumed.creditId,
-        remainingAiTokens: consumed.remaining
+        metered: false
       }
     });
   } catch (error) {
@@ -176,14 +155,14 @@ export async function POST(request: Request) {
       return authResponse;
     }
 
-    if (error instanceof EntitlementError) {
+    if (error instanceof BillingEntitlementError) {
       return NextResponse.json(
         {
           ok: false,
           code: error.code,
           message: error.message,
-          upgradeUrl: "/checkout/professional",
-          oneTimeUrl: "/checkout/trial"
+          upgradeUrl: "/settings/billing",
+          oneTimeUrl: "/settings/billing"
         },
         { status: error.status }
       );

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { createPaymentOrderForUser, findPlanForCheckout } from "@/lib/entitlements";
+import { createPaymentOrderForUser, findPlanForCheckout } from "@/lib/billing/checkout-orders";
 import { prisma } from "@/lib/prisma";
 import {
   isStripeCheckoutCurrency,
@@ -18,25 +18,23 @@ function stringValue(value: unknown) {
 
 function appUrl(request: Request) {
   const requestOrigin = new URL(request.url).origin;
+
+  // Stripe should return users to the same host that started checkout.
+  // A configured custom domain can be stale before DNS is ready, so it must not
+  // override localhost, preview URLs, or the active production domain.
+  if (requestOrigin.startsWith("http://") || requestOrigin.startsWith("https://")) {
+    return requestOrigin;
+  }
+
   const configuredUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
     process.env.VERCEL_PROJECT_PRODUCTION_URL ||
     process.env.VERCEL_URL;
-  const normalizedConfiguredUrl = configuredUrl
-    ? configuredUrl.startsWith("http")
-      ? configuredUrl
-      : `https://${configuredUrl}`
-    : "";
 
-  const requestHost = new URL(requestOrigin).hostname;
-  const isLocalRequest = requestHost === "localhost" || requestHost === "127.0.0.1";
+  if (!configuredUrl) return requestOrigin;
 
-  if (!isLocalRequest) {
-    return requestOrigin;
-  }
-
-  return normalizedConfiguredUrl || requestOrigin;
+  return configuredUrl.startsWith("http") ? configuredUrl : `https://${configuredUrl}`;
 }
 
 type CheckoutPayload = Record<string, unknown>;
@@ -74,7 +72,8 @@ function checkoutErrorMessage(error: unknown) {
 
     if (
       error.message.includes("PaymentOrder") ||
-      error.message.includes("UserCredit") ||
+      error.message.includes("WorkspaceUsageAllowance") ||
+      error.message.includes("WorkspaceSubscription") ||
       error.message.includes("Plan")
     ) {
       return "付款权限表尚未初始化，请先执行数据库迁移后重试。";
@@ -96,7 +95,8 @@ async function getCheckoutUser(fallbackEmail: string) {
       return {
         appUserId: userSession.user.id,
         clerkUserId: userSession.user.clerkUserId,
-        email: userSession.user.email
+        email: userSession.user.email,
+        workspace: userSession.workspace
       };
     }
   } catch (error) {
@@ -178,8 +178,11 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
       entitlementPlan = await findPlanForCheckout(plan);
 
       if (checkoutUser.appUserId) {
+        const workspaceId = "workspace" in checkoutUser ? checkoutUser.workspace?.id : undefined;
+
         paymentOrder = await createPaymentOrderForUser({
           userId: checkoutUser.appUserId,
+          workspaceId,
           plan: entitlementPlan
         });
       }
@@ -197,6 +200,7 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
     };
 
     if (checkoutUser.appUserId) metadata.appUserId = checkoutUser.appUserId;
+    if ("workspace" in checkoutUser && checkoutUser.workspace?.id) metadata.workspaceId = checkoutUser.workspace.id;
     if (paymentOrder) metadata.paymentOrderId = paymentOrder.id;
 
     if (entitlementPlan) {

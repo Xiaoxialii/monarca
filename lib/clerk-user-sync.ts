@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { WorkspaceMemberStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { ensureReportEntitlement } from "@/lib/report-entitlements";
 
 function createWorkspaceSlug(clerkUserId: string) {
   return `workspace-${clerkUserId.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase()}`;
@@ -66,6 +67,8 @@ export async function syncClerkUserById(
   ) ?? user.memberships[0];
 
   if (existingMembership) {
+    await ensureReportEntitlement(existingMembership.workspace.id);
+
     return {
       user,
       workspace: existingMembership.workspace,
@@ -97,6 +100,7 @@ export async function syncClerkUserById(
         joinedAt: new Date()
       }
     });
+    await ensureReportEntitlement(pendingInvite.workspace.id);
 
     return {
       user,
@@ -122,6 +126,7 @@ export async function syncClerkUserById(
       joinedAt: new Date()
     }
   });
+  await ensureReportEntitlement(workspace.id);
 
   return {
     user,

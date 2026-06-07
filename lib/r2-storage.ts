@@ -1,4 +1,5 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
 type StoredUpload = {
@@ -35,6 +36,98 @@ export function isR2Configured() {
   return Boolean(r2Config());
 }
 
+function r2Client(config: NonNullable<ReturnType<typeof r2Config>>) {
+  return new S3Client({
+    region: "auto",
+    endpoint: config.endpoint,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey
+    }
+  });
+}
+
+export function uploadKeyForWorkspace(workspaceId: string, fileName: string) {
+  return [
+    "workspaces",
+    workspaceId,
+    "uploads",
+    `${randomUUID()}-${safeFileName(fileName)}`
+  ].join("/");
+}
+
+export function isWorkspaceUploadKey(workspaceId: string, key: string) {
+  return key.startsWith(`workspaces/${workspaceId}/uploads/`) ||
+    key.startsWith(`workspaces/${workspaceId}/data-sources/`);
+}
+
+export async function createPresignedUploadUrl(params: {
+  workspaceId: string;
+  fileName: string;
+  contentType?: string | null;
+}) {
+  const config = r2Config();
+
+  if (!config) {
+    throw new Error("R2 storage is not configured.");
+  }
+
+  const key = uploadKeyForWorkspace(params.workspaceId, params.fileName);
+  const contentType = params.contentType || "application/octet-stream";
+  const command = new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    ContentType: contentType,
+    Metadata: {
+      workspaceId: params.workspaceId,
+      originalFileName: params.fileName
+    }
+  });
+
+  return {
+    bucket: config.bucket,
+    key,
+    uploadUrl: await getSignedUrl(r2Client(config), command, { expiresIn: 15 * 60 }),
+    publicUrl: config.publicBaseUrl ? `${config.publicBaseUrl.replace(/\/$/, "")}/${key}` : null,
+    contentType
+  };
+}
+
+async function streamToBuffer(stream: unknown) {
+  if (!stream || typeof stream !== "object" || !("transformToByteArray" in stream)) {
+    const chunks: Buffer[] = [];
+
+    for await (const chunk of stream as AsyncIterable<Uint8Array | Buffer | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    return Buffer.concat(chunks);
+  }
+
+  return Buffer.from(await (stream as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray());
+}
+
+export async function readR2ObjectText(key: string) {
+  const config = r2Config();
+
+  if (!config) {
+    throw new Error("R2 storage is not configured.");
+  }
+
+  const response = await r2Client(config).send(
+    new GetObjectCommand({
+      Bucket: config.bucket,
+      Key: key
+    })
+  );
+
+  if (!response.Body) {
+    throw new Error("Uploaded file is empty or unavailable.");
+  }
+
+  return (await streamToBuffer(response.Body)).toString("utf8");
+}
+
 export async function storeUploadInR2(params: {
   workspaceId: string;
   dataSourceId: string;
@@ -54,16 +147,7 @@ export async function storeUploadInR2(params: {
     `${randomUUID()}-${safeFileName(params.file.name)}`
   ].join("/");
 
-  const client = new S3Client({
-    region: "auto",
-    endpoint: config.endpoint,
-    credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey
-    }
-  });
-
-  await client.send(
+  await r2Client(config).send(
     new PutObjectCommand({
       Bucket: config.bucket,
       Key: key,

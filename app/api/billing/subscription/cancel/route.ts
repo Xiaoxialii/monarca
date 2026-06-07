@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { UserSubscriptionStatus } from "@prisma/client";
+import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe/server";
 import { requireAuth, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -9,10 +9,13 @@ export const dynamic = "force-dynamic";
 export async function POST() {
   try {
     const session = await requireAuth();
-    const subscription = await prisma.userSubscription.findFirst({
+    const subscription = await prisma.workspaceSubscription.findFirst({
       where: {
-        userId: session.user.id,
-        status: UserSubscriptionStatus.ACTIVE,
+        workspaceId: session.workspace.id,
+        planType: "MONTHLY",
+        status: {
+          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+        },
         currentPeriodEnd: {
           gte: new Date()
         }
@@ -29,19 +32,17 @@ export async function POST() {
       );
     }
 
-    if (subscription.paymentProvider === "stripe" && subscription.providerSubscriptionId) {
+    if (subscription.provider === "STRIPE" && subscription.providerSubscriptionId) {
       await getStripe().subscriptions.update(subscription.providerSubscriptionId, {
         cancel_at_period_end: true
       });
     }
 
-    const updatedSubscription = await prisma.userSubscription.update({
+    const updatedSubscription = await prisma.workspaceSubscription.update({
       where: { id: subscription.id },
       data: {
+        status: SubscriptionStatus.CANCELED,
         cancelAtPeriodEnd: true
-      },
-      include: {
-        plan: true
       }
     });
 

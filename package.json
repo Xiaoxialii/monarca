@@ -9,14 +9,18 @@
     "lint": "eslint .",
     "postinstall": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
-    "test:guardrails": "node scripts/report-guardrails-check.mjs"
+    "test:guardrails": "node scripts/report-guardrails-check.mjs",
+    "test:report-entitlements": "node --test tests/report-entitlements.test.mjs",
+    "test:report-summary": "node --test tests/zh-report-summary.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",
+    "@aws-sdk/s3-request-presigner": "^3.1062.0",
     "@clerk/nextjs": "^7.3.5",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@radix-ui/react-slot": "^1.1.1",
+    "@supabase/supabase-js": "^2.107.0",
     "@types/pg": "^8.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

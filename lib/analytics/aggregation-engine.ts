@@ -10,6 +10,7 @@ import type {
   ReportMetricResultInput,
   TimeTrendResult
 } from "@/lib/report-generation/report-types";
+import { businessDimensionLanguage, businessMetricLanguage } from "@/lib/report-generation/business-language";
 
 export type AggregationContext = {
   dataSource: Pick<DataSourceConnection, "id" | "name" | "type" | "config">;
@@ -134,12 +135,31 @@ function readableMetricName(metric: string) {
     .trim();
 }
 
+function formatNumber(value: number) {
+  if (!Number.isFinite(value)) return "-";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
 function topNames(rows: Array<Record<string, string | number | null>>, field: string, count = 3) {
   return rows
     .slice(0, count)
     .map((row) => String(row[field] ?? row.dimension ?? ""))
     .filter(Boolean)
     .join("、");
+}
+
+function topRowsObjectText(rows: Array<Record<string, string | number | null>>, count = 3) {
+  return topNames(rows, "dimension", count);
+}
+
+function candidateMetricEvidence(rows: Array<Record<string, string | number | null>>, metricKey: string, count = 3) {
+  return rows
+    .slice(0, count)
+    .map((row) => `${String(row.dimension ?? "").trim()}=${formatNumber(numericValue(row[metricKey]))}`)
+    .filter((item) => !item.endsWith("="))
+    .join("；");
 }
 
 function sumRows(rows: Array<Record<string, string | number | null>>, metric: string) {
@@ -467,30 +487,44 @@ function buildRankings(table: SchemaTable, businessType: ReportBusinessType, row
   const concentrationThresholdBreached = (top1Share != null && top1Share > 0.5) || (top5Share != null && top5Share > 0.8);
 
   if (concentrationThresholdBreached && scaleRows.length) {
+    const dimension = businessDimensionLanguage(objectColumn.name, "zh");
+    const metric = businessMetricLanguage({ metricField: rankingMetric, locale: "zh" });
+    const topObjects = topRowsObjectText(scaleRows, 3);
+    const shareValue = top5Share ?? top1Share;
+    const shareLabel = top5Share != null ? "Top 5" : "Top 1";
+    const metricEvidence = `${topObjects} ${top5Share != null ? "合计" : ""}贡献 ${((shareValue ?? 0) * 100).toFixed(1)}% 的${metric.pluralLabel}`;
+    const isSampleOnly = metric.key === "records";
+
     output.risk.push({
       id: `${normalize(table.name)}-${normalize(objectColumn.name)}-${normalize(rankingMetric)}-concentration`,
-      title: `${readableMetricName(rankingMetric)} 存在头部集中风险`,
-      type: "concentration_risk",
+      title: `${topObjects} 样本集中度过高`,
+      type: isSampleOnly ? "sample_concentration_risk" : "concentration_risk",
+      riskType: isSampleOnly ? "sample_concentration_risk" : "data_structure_risk",
       severity: (top1Share ?? 0) > 0.5 || (top5Share ?? 0) > 0.85 ? "high" : "medium",
       evidenceMetrics: [
-        `Top 1 ${objectColumn.name} ${readableMetricName(rankingMetric)} Share`,
+        `Top 1 ${dimension.label} ${metric.pluralLabel} Share`,
+        `Top 5 ${dimension.label} ${metric.pluralLabel} Share`,
         `Top 5 ${objectColumn.name} ${readableMetricName(rankingMetric)} Share`
       ],
       evidenceValues: {
-        top1Share,
-        top5Share,
-        topObjects: topNames(scaleRows, "dimension")
+        top1Share: top1Share != null ? `${(top1Share * 100).toFixed(1)}%` : null,
+        top5Share: top5Share != null ? `${(top5Share * 100).toFixed(1)}%` : null,
+        topObjects,
+        metricEvidence: candidateMetricEvidence(scaleRows, rankingMetric, 3)
       },
       objects: scaleRows,
       affectedObjects: scaleRows,
-      comparison: top5Share != null
-        ? `Top 5 ${objectColumn.name} ${readableMetricName(rankingMetric)} Share = ${(top5Share * 100).toFixed(1)}%`
-        : undefined,
-      businessMeaning: `${topNames(scaleRows, "dimension")} 等头部对象贡献了主要 ${readableMetricName(rankingMetric)}，需要确认规模是否过度依赖少数对象`,
-      businessImpact: "如果规模过度集中，增长稳定性和风险分散能力会变弱",
-      recommendedAction: `比较 ${topNames(scaleRows, "dimension")} 与长尾对象的质量、反馈和转化表现`,
+      metricEvidence,
+      comparison: `${shareLabel} ${dimension.label} ${metric.pluralLabel} Share = ${((shareValue ?? 0) * 100).toFixed(1)}%，超过头部集中阈值`,
+      comparisonEvidence: shareLabel === "Top 5"
+        ? `Top 5 占比 ${((shareValue ?? 0) * 100).toFixed(1)}% > 80%`
+        : `Top 1 占比 ${((shareValue ?? 0) * 100).toFixed(1)}% > 50%`,
+      businessMeaning: `${metricEvidence}，说明当前样本主要集中在少数${dimension.pluralLabel}。这属于样本结构风险，不代表这些${dimension.pluralLabel}业务表现差。`,
+      businessImpact: "如果这些头部对象表现异常，整体分析结论会被放大影响；但缺少质量、转化、收入或负向反馈证据时，不能直接判定为业务风险。",
+      recommendedAction: `比较 ${topObjects} 与长尾${dimension.pluralLabel}的评分、转化、收入或负向反馈，再判断是否构成业务表现风险。`,
+      caveat: "records 或规模占比只能用于判断样本集中度、覆盖度和置信度，不能单独代表业务价值或业务风险。",
       confidence: 0.84,
-      confidenceReason: "该风险来自对象级 ranking 和 Top Share 阈值对比"
+      confidenceReason: "该风险来自对象级 ranking 和 Top Share 阈值对比，已按样本结构风险处理"
     });
   }
 
@@ -779,24 +813,35 @@ function candidatesFromGroupBys(tableName: string, groupBys: GroupByResult[]) {
       const top5Share = rankingTopShare([...groupBy.rows].sort((left, right) => numericValue(right[scaleKey]) - numericValue(left[scaleKey])), scaleKey, 5);
 
       if (top5Share != null && top5Share > 0.8) {
+        const dimension = businessDimensionLanguage(groupBy.dimension, "zh");
+        const metric = businessMetricLanguage({ metricField: scaleKey, locale: "zh" });
+        const topObjects = topRowsObjectText(topScaleRows, 3);
+        const metricEvidence = `${topObjects} 合计贡献 ${(top5Share * 100).toFixed(1)}% 的${metric.pluralLabel}`;
+        const isSampleOnly = metric.key === "records";
+
         risks.push({
           id: `${normalize(tableName)}-${normalize(groupBy.dimension)}-${normalize(scaleKey)}-group-concentration`,
-          title: `${groupBy.dimension} 维度存在头部集中风险`,
-          type: "concentration_risk",
+          title: `${topObjects} 样本集中度过高`,
+          type: isSampleOnly ? "sample_concentration_risk" : "concentration_risk",
+          riskType: isSampleOnly ? "sample_concentration_risk" : "data_structure_risk",
           severity: top5Share > 0.9 ? "high" : "medium",
-          evidenceMetrics: [`Top 5 ${groupBy.dimension} ${readableMetricName(scaleKey)} Share`],
+          evidenceMetrics: [`Top 5 ${dimension.label} ${metric.pluralLabel} Share`],
           evidenceValues: {
-            top5Share,
-            topGroups: topNames(topScaleRows, "dimension")
+            top5Share: `${(top5Share * 100).toFixed(1)}%`,
+            topGroups: topObjects,
+            metricEvidence: candidateMetricEvidence(topScaleRows, scaleKey, 3)
           },
           objects: topScaleRows,
           affectedObjects: topScaleRows,
-          comparison: `Top 5 ${groupBy.dimension} ${readableMetricName(scaleKey)} Share = ${(top5Share * 100).toFixed(1)}%`,
-          businessMeaning: `${topNames(topScaleRows, "dimension")} 等分组贡献了主要 ${readableMetricName(scaleKey)}`,
-          businessImpact: "业务规模可能依赖少数分组，长尾分组贡献不足",
-          recommendedAction: `比较 ${topNames(topScaleRows, "dimension")} 与其他 ${groupBy.dimension} 分组的质量和反馈表现`,
+          metricEvidence,
+          comparison: `Top 5 ${dimension.label} ${metric.pluralLabel} Share = ${(top5Share * 100).toFixed(1)}%，超过 80% 头部集中阈值`,
+          comparisonEvidence: `Top 5 占比 ${(top5Share * 100).toFixed(1)}% > 80%`,
+          businessMeaning: `${metricEvidence}，说明当前数据样本主要集中在少数${dimension.pluralLabel}。该结论更像样本结构风险，不代表这些${dimension.pluralLabel}业务表现差。`,
+          businessImpact: "如果这些头部分组表现异常，整体报告结论会更容易被它们主导；但在缺少评分、转化、收入或负向反馈证据前，不能直接判断为业务表现风险。",
+          recommendedAction: `下一步比较 ${topObjects} 与其他${dimension.pluralLabel}的评分、转化、收入或负向反馈，确认是否存在具体业务异常。`,
+          caveat: "records 或样本占比只能说明样本结构和覆盖度，不能单独证明收入、体验或增长风险。",
           confidence: 0.82,
-          confidenceReason: "该风险来自 groupBy 聚合和 Top Share 阈值对比"
+          confidenceReason: "该风险来自 groupBy 聚合和 Top Share 阈值对比，已按样本结构风险处理"
         });
       }
     }
@@ -812,20 +857,31 @@ function candidatesFromGroupBys(tableName: string, groupBys: GroupByResult[]) {
         .slice(0, 5);
 
       if (highQualityLowScale.length) {
+        const dimension = businessDimensionLanguage(groupBy.dimension, "zh");
+        const qualityMetric = businessMetricLanguage({ metricField: qualityKey, locale: "zh" });
+        const scaleMetric = businessMetricLanguage({ metricField: scaleKey, locale: "zh" });
+        const topObjects = topRowsObjectText(highQualityLowScale, 3);
+
         opportunities.push({
           id: `${normalize(tableName)}-${normalize(groupBy.dimension)}-high-quality-low-scale`,
-          title: "高质量低规模分组适合进入增长候选池",
+          title: `${topObjects} 可作为小规模增长测试候选`,
           type: "high_quality_low_scale",
+          opportunityType: "high_quality_low_scale",
           priority: "medium",
           evidenceMetrics: [qualityKey, scaleKey],
           evidenceValues: {
-            examples: topNames(highQualityLowScale, "dimension")
+            examples: topObjects,
+            qualityEvidence: candidateMetricEvidence(highQualityLowScale, qualityKey, 3),
+            scaleEvidence: candidateMetricEvidence(highQualityLowScale, scaleKey, 3)
           },
           objects: highQualityLowScale,
           targetObjects: highQualityLowScale,
-          comparison: `${topNames(highQualityLowScale, "dimension")} 的 ${readableMetricName(qualityKey)} 高于 P75，但 ${readableMetricName(scaleKey)} 不高`,
-          businessMeaning: "这些分组质量较好但规模不足，适合验证曝光、渠道或投放机会",
-          recommendedAction: `对 ${topNames(highQualityLowScale, "dimension")} 做小规模增长测试，并观察规模提升后质量是否保持`,
+          metricEvidence: `${topObjects} 的${qualityMetric.pluralLabel}高于 P75，且${scaleMetric.pluralLabel}不高`,
+          comparison: `${topObjects} 的 ${readableMetricName(qualityKey)} 高于 P75，但 ${readableMetricName(scaleKey)} 低于或接近中位数`,
+          comparisonEvidence: `${qualityMetric.pluralLabel} >= P75，${scaleMetric.pluralLabel} <= median`,
+          businessMeaning: `${topObjects} 在当前${dimension.pluralLabel}中质量表现较好但规模还不高，适合作为低风险增长验证对象。`,
+          recommendedAction: `对 ${topObjects} 做小规模曝光、渠道或投放测试，并观察规模提升后${qualityMetric.pluralLabel}是否保持。`,
+          caveat: "该机会需要继续确认样本量是否足够，以及增长后质量是否保持稳定。",
           confidence: 0.76,
           confidenceReason: "该机会来自 groupBy 的质量和规模交叉判断"
         });

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { isBusinessFacingMetricDefinition, isBusinessFacingMetricText } from "@/lib/metric-visibility";
+import { getReportEntitlementState } from "@/lib/report-entitlements";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -14,10 +15,6 @@ function analysisReportFromSnapshot(snapshot: { schemaJson: unknown; qualityRepo
   }
 
   return asRecord(snapshot.qualityReport).analysisReport ?? asRecord(snapshot.schemaJson).analysisReport ?? null;
-}
-
-function normalizeReportLocale(value: unknown) {
-  return value === "zh" ? "zh" : "en";
 }
 
 function briefingLocale(
@@ -82,15 +79,13 @@ function filterBriefingMetricResults(
   };
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const session = await syncCurrentClerkUser();
 
     if (!session) {
       return NextResponse.json({ hasData: false, briefing: null, insights: [], recommendations: [] }, { status: 401 });
     }
-
-    const requestedLocale = normalizeReportLocale(new URL(request.url).searchParams.get("locale") ?? session.user.locale);
 
     const briefing = await prisma.dailyBriefing.findFirst({
       where: {
@@ -114,8 +109,7 @@ export async function GET(request: Request) {
         }
       }
     });
-    const localeMatchedBriefing = briefingLocale(briefing) === requestedLocale ? briefing : null;
-    const selectedBriefing = localeMatchedBriefing ?? briefing;
+    const selectedBriefing = briefing;
 
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
@@ -149,6 +143,7 @@ export async function GET(request: Request) {
     const visibleBriefing = filterBriefingMetricResults(selectedBriefing, visibleMetricIds, visibleMetricsById);
     const insights = selectedBriefing?.insights ?? [];
     const recommendations = insights.flatMap((insight) => insight.recommendations);
+    const reportEntitlement = await getReportEntitlementState(session.workspace.id);
 
     return NextResponse.json({
       workspaceId: session.workspace.id,
@@ -156,9 +151,10 @@ export async function GET(request: Request) {
       briefing: visibleBriefing,
       insights,
       recommendations,
-      requestedLocale,
+      requestedLocale: session.user.locale === "zh" ? "zh" : "en",
       reportLocale: briefingLocale(selectedBriefing),
-      usedLocaleFallback: Boolean(!localeMatchedBriefing && selectedBriefing),
+      usedLocaleFallback: false,
+      reportEntitlement,
       analysisReport: analysisReportFromSnapshot(latestSnapshot)
     });
   } catch (error) {

@@ -5,11 +5,13 @@ import { syncClerkUserById } from "@/lib/clerk-user-sync";
 import {
   createPaymentOrderForUser,
   findPlanForCheckout,
-  grantCreditForPaidOrder
-} from "@/lib/entitlements";
+  grantEntitlementForPaidOrder
+} from "@/lib/billing/checkout-orders";
+import { upsertMonthlyWorkspaceSubscription } from "@/lib/billing/entitlements";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe/server";
-import { PaymentOrderStatus, UserSubscriptionStatus } from "@prisma/client";
+import { stripeSubscriptionPeriod } from "@/lib/stripe/subscription-period";
+import { PaymentOrderStatus, SubscriptionStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -53,23 +55,11 @@ function checkoutEmail(session: Stripe.Checkout.Session) {
   return session.customer_details?.email ?? session.customer_email ?? undefined;
 }
 
-function subscriptionPeriod(subscription: Stripe.Subscription) {
-  const rawSubscription = subscription as Stripe.Subscription & {
-    current_period_start?: number | null;
-    current_period_end?: number | null;
-  };
-
-  return {
-    currentPeriodStart: unixToDate(rawSubscription.current_period_start),
-    currentPeriodEnd: unixToDate(rawSubscription.current_period_end)
-  };
-}
-
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   let orderId = session.metadata?.paymentOrderId;
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : undefined;
   let periodStart = unixToDate(session.created);
-  let periodEnd = session.expires_at ? unixToDate(session.expires_at) : undefined;
+  let periodEnd: Date | undefined;
 
   if (!orderId) {
     const existingOrder = await prisma.paymentOrder.findUnique({
@@ -91,6 +81,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     const entitlementPlan = await findPlanForCheckout(plan);
     const paymentOrder = await createPaymentOrderForUser({
       userId: userSession.user.id,
+      workspaceId: userSession.workspace.id,
       plan: entitlementPlan,
       providerSessionId: session.id
     });
@@ -100,15 +91,18 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   if (subscriptionId) {
     const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-    const period = subscriptionPeriod(subscription);
+    const period = stripeSubscriptionPeriod(subscription);
     periodStart = period.currentPeriodStart ?? periodStart;
     periodEnd = period.currentPeriodEnd ?? periodEnd;
+  } else {
+    periodEnd = session.expires_at ? unixToDate(session.expires_at) : undefined;
   }
 
-  await grantCreditForPaidOrder({
+  await grantEntitlementForPaidOrder({
     orderId,
     providerPaymentId: checkoutProviderPaymentId(session),
     subscriptionId,
+    customerId: stripeObjectId(session.customer) ?? null,
     periodStart,
     periodEnd
   });
@@ -119,109 +113,42 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 
   if (!subscriptionId) return;
 
-  const subscription = await prisma.userSubscription.findUnique({
-    where: { providerSubscriptionId: subscriptionId },
-    include: { plan: true }
+  const subscription = await prisma.workspaceSubscription.findUnique({
+    where: { providerSubscriptionId: subscriptionId }
   });
 
   if (!subscription) return;
 
   const periodStart = unixToDate(invoice.period_start) ?? new Date();
   const periodEnd = unixToDate(invoice.period_end) ?? new Date(Date.now() + 30 * 86_400_000);
-  const existingCreditForPeriod = await prisma.userCredit.findFirst({
-    where: {
-      subscriptionId: subscription.id,
-      validFrom: {
-        lt: periodEnd
-      },
-      OR: [
-        {
-          validUntil: null
-        },
-        {
-          validUntil: {
-            gt: periodStart
-          }
-        }
-      ]
+
+  await prisma.workspaceSubscription.update({
+    where: { id: subscription.id },
+    data: {
+      status: SubscriptionStatus.ACTIVE,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd
     }
   });
-
-  if (existingCreditForPeriod) {
-    await prisma.userSubscription.update({
-      where: { id: subscription.id },
-      data: {
-        status: UserSubscriptionStatus.ACTIVE,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd
-      }
-    });
-
-    return;
-  }
-
-  const existingOrder = await prisma.paymentOrder.findUnique({
-    where: {
-      providerPaymentId: invoice.id
+  await prisma.reportEntitlement.upsert({
+    where: { workspaceId: subscription.workspaceId },
+    update: {
+      subscriptionStatus: "active",
+      subscriptionPlan: "monthly",
+      monthlyUnlimited: true,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd
     },
-    include: {
-      credit: true
+    create: {
+      workspaceId: subscription.workspaceId,
+      firstFreeReportUsed: false,
+      oneTimeReportAvailable: false,
+      subscriptionStatus: "active",
+      subscriptionPlan: "monthly",
+      monthlyUnlimited: true,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd
     }
-  });
-
-  if (existingOrder?.credit) return;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.userSubscription.update({
-      where: { id: subscription.id },
-      data: {
-        status: UserSubscriptionStatus.ACTIVE,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd
-      }
-    });
-
-    const order = await tx.paymentOrder.upsert({
-      where: {
-        providerPaymentId: invoice.id
-      },
-      update: {
-        status: PaymentOrderStatus.PAID,
-        paidAt: new Date()
-      },
-      create: {
-        userId: subscription.userId,
-        planId: subscription.planId,
-        orderType: "MONTHLY",
-        amount: subscription.plan.price,
-        currency: subscription.plan.currency,
-        status: PaymentOrderStatus.PAID,
-        paymentProvider: "stripe",
-        providerPaymentId: invoice.id,
-        paidAt: new Date()
-      }
-    });
-
-    await tx.userCredit.upsert({
-      where: {
-        paymentOrderId: order.id
-      },
-      update: {},
-      create: {
-        userId: subscription.userId,
-        planId: subscription.planId,
-        subscriptionId: subscription.id,
-        paymentOrderId: order.id,
-        sourceType: "MONTHLY_SUBSCRIPTION",
-        reportCreditsTotal: subscription.plan.reportQuota,
-        reportCreditsUsed: 0,
-        aiTokenTotal: subscription.plan.aiTokenQuota,
-        aiTokenUsed: 0,
-        validFrom: periodStart,
-        validUntil: periodEnd,
-        status: "ACTIVE"
-      }
-    });
   });
 }
 
@@ -230,10 +157,33 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
 
   if (!subscriptionId) return;
 
-  await prisma.userSubscription.updateMany({
-    where: { providerSubscriptionId: subscriptionId },
-    data: { status: UserSubscriptionStatus.PAYMENT_FAILED }
+  const subscriptions = await prisma.workspaceSubscription.findMany({
+    where: { providerSubscriptionId: subscriptionId }
   });
+
+  await prisma.workspaceSubscription.updateMany({
+    where: { providerSubscriptionId: subscriptionId },
+    data: { status: SubscriptionStatus.PAST_DUE }
+  });
+
+  for (const subscription of subscriptions) {
+    await prisma.reportEntitlement.upsert({
+      where: { workspaceId: subscription.workspaceId },
+      update: {
+        subscriptionStatus: "expired",
+        subscriptionPlan: "free",
+        monthlyUnlimited: false
+      },
+      create: {
+        workspaceId: subscription.workspaceId,
+        firstFreeReportUsed: false,
+        oneTimeReportAvailable: false,
+        subscriptionStatus: "expired",
+        subscriptionPlan: "free",
+        monthlyUnlimited: false
+      }
+    });
+  }
 }
 
 async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
@@ -253,25 +203,74 @@ async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
 }
 
 async function handleSubscriptionEvent(subscription: Stripe.Subscription) {
-  const { currentPeriodStart, currentPeriodEnd } = subscriptionPeriod(subscription);
+  const { currentPeriodStart, currentPeriodEnd } = stripeSubscriptionPeriod(subscription);
+  const workspaceId = subscription.metadata?.workspaceId;
   const status =
-    subscription.status === "active" || subscription.status === "trialing"
-      ? UserSubscriptionStatus.ACTIVE
+    subscription.status === "active"
+      ? SubscriptionStatus.ACTIVE
+      : subscription.status === "trialing"
+        ? SubscriptionStatus.TRIALING
       : subscription.status === "canceled"
-        ? UserSubscriptionStatus.CANCELED
-        : subscription.status === "past_due" || subscription.status === "unpaid"
-          ? UserSubscriptionStatus.PAYMENT_FAILED
-          : UserSubscriptionStatus.EXPIRED;
+        ? currentPeriodEnd && currentPeriodEnd > new Date()
+          ? SubscriptionStatus.CANCELED
+          : SubscriptionStatus.EXPIRED
+        : subscription.status === "past_due"
+          ? SubscriptionStatus.PAST_DUE
+          : subscription.status === "unpaid"
+            ? SubscriptionStatus.UNPAID
+            : SubscriptionStatus.EXPIRED;
 
-  await prisma.userSubscription.updateMany({
+  if (workspaceId) {
+    await upsertMonthlyWorkspaceSubscription({
+      workspaceId,
+      providerSubscriptionId: subscription.id,
+      providerCustomerId: stripeObjectId(subscription.customer) ?? null,
+      status,
+      currentPeriodStart,
+      currentPeriodEnd,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end || status === SubscriptionStatus.CANCELED,
+      canceledAt: unixToDate(subscription.canceled_at) ?? null
+    });
+    return;
+  }
+
+  const updated = await prisma.workspaceSubscription.findMany({
+    where: { providerSubscriptionId: subscription.id }
+  });
+
+  await prisma.workspaceSubscription.updateMany({
     where: { providerSubscriptionId: subscription.id },
     data: {
       status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end || status === SubscriptionStatus.CANCELED,
       currentPeriodStart: currentPeriodStart ?? undefined,
-      currentPeriodEnd: currentPeriodEnd ?? undefined
+      currentPeriodEnd: currentPeriodEnd ?? undefined,
+      canceledAt: unixToDate(subscription.canceled_at) ?? undefined
     }
   });
+
+  for (const item of updated) {
+    await prisma.reportEntitlement.upsert({
+      where: { workspaceId: item.workspaceId },
+      update: {
+        subscriptionStatus: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING ? "active" : status === SubscriptionStatus.EXPIRED ? "expired" : "cancelled",
+        subscriptionPlan: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING ? "monthly" : "free",
+        monthlyUnlimited: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING,
+        currentPeriodStart: currentPeriodStart ?? undefined,
+        currentPeriodEnd: currentPeriodEnd ?? undefined
+      },
+      create: {
+        workspaceId: item.workspaceId,
+        firstFreeReportUsed: false,
+        oneTimeReportAvailable: false,
+        subscriptionStatus: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING ? "active" : status === SubscriptionStatus.EXPIRED ? "expired" : "cancelled",
+        subscriptionPlan: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING ? "monthly" : "free",
+        monthlyUnlimited: status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING,
+        currentPeriodStart: currentPeriodStart ?? undefined,
+        currentPeriodEnd: currentPeriodEnd ?? undefined
+      }
+    });
+  }
 }
 
 export async function POST(request: Request) {

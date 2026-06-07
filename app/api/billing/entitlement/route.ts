@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUserEntitlementSummary } from "@/lib/entitlements";
+import { getBillingAccessState } from "@/lib/billing/entitlements";
 import { requireAuth, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const session = await requireAuth();
-    const entitlement = await getUserEntitlementSummary(session.user.id);
+    const entitlement = await getBillingAccessState(session.workspace.id);
 
     return NextResponse.json({ ok: true, entitlement });
   } catch (error) {

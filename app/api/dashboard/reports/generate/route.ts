@@ -14,9 +14,9 @@ import {
 } from "@/lib/report-entitlements";
 import { buildMockAiBrief } from "@/lib/report-generation/ai-brief-generator";
 import { contextualMetricName } from "@/lib/report-generation/metric-name-normalizer";
+import { buildReportTimeArtifacts } from "@/lib/report-time-artifacts.mjs";
 import { buildReportPrompt } from "@/lib/report-generation/report-prompt-builder";
 import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
-import type { AggregationResult } from "@/lib/report-generation/report-types";
 import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
 import {
   hasDisplayableMetricResult,
@@ -69,85 +69,6 @@ function compactText(value: unknown, maxLength = 180) {
   }
 
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-function trendDirection(currentValue: number | null, previousValue: number | null) {
-  if (currentValue == null || previousValue == null || previousValue === 0) return "unknown";
-  const deltaPercent = (currentValue - previousValue) / Math.abs(previousValue);
-
-  if (Math.abs(deltaPercent) < 0.01) return "flat";
-  return deltaPercent > 0 ? "up" : "down";
-}
-
-function buildReportTimeArtifacts(aggregationResults: AggregationResult[], dateRange = resolveReportDateRange({ preset: "30D" })) {
-  const timeTrends = aggregationResults.flatMap((aggregation) =>
-    aggregation.timeTrends.map((trend) => ({ aggregation, trend }))
-  );
-
-  if (timeTrends.length === 0) {
-    return {
-      timeConfig: {
-        hasTimeField: false,
-        availableTimeFields: [],
-        selectedRange: dateRange.preset,
-        granularity: "month",
-        dateRangePreset: dateRange.preset,
-        startDate: dateRange.startDate ?? null,
-        endDate: dateRange.endDate ?? null
-      },
-      trendMetrics: [],
-      trendCharts: []
-    };
-  }
-
-  const periods = timeTrends.flatMap(({ trend }) => trend.rows.map((row) => new Date(row.period)));
-  const validPeriods = periods.filter((date) => Number.isFinite(date.getTime())).sort((left, right) => left.getTime() - right.getTime());
-  const spanDays = validPeriods.length > 1 ? (validPeriods.at(-1)!.getTime() - validPeriods[0].getTime()) / 86_400_000 : 0;
-  const hasFinanceTrend = timeTrends.some(({ aggregation }) => aggregation.businessType === "finance_timeseries");
-  const defaultRange = hasFinanceTrend ? "12M" : spanDays >= 30 ? "30D" : "ALL";
-  const firstTrend = timeTrends[0]?.trend;
-  const trendMetrics = timeTrends.map(({ aggregation, trend }) => {
-    const last = trend.rows.at(-1)?.value ?? null;
-    const previous = trend.rows.at(-2)?.value ?? null;
-    const absoluteChange = last != null && previous != null ? last - previous : null;
-    const percentChange = absoluteChange != null && previous ? absoluteChange / Math.abs(previous) : null;
-
-    return {
-      metricName: trend.metric,
-      businessModule: aggregation.businessType,
-      dateField: trend.dateField,
-      granularity: trend.bucket,
-      currentValue: last,
-      previousValue: previous,
-      absoluteChange,
-      percentChange,
-      trendDirection: trendDirection(last, previous),
-      timeSeries: trend.rows.map((row) => ({ date: row.period, value: row.value }))
-    };
-  });
-
-  return {
-      timeConfig: {
-        hasTimeField: true,
-        defaultTimeField: firstTrend?.dateField,
-        availableTimeFields: Array.from(new Set(timeTrends.flatMap(({ trend }) => trend.dateField ? [trend.dateField] : []))),
-        selectedRange: dateRange.preset === "ALL" ? defaultRange : dateRange.preset,
-        granularity: firstTrend?.bucket ?? "month",
-        dateRangePreset: dateRange.preset,
-        startDate: dateRange.startDate ?? null,
-        endDate: dateRange.endDate ?? null
-      },
-    trendMetrics,
-    trendCharts: trendMetrics.slice(0, 5).map((metric) => ({
-      title: `${contextualMetricName(metric.metricName, metric.metricName)} 趋势`,
-      chartType: /volume|orders|reviews|installs|tickets|records/i.test(metric.metricName) ? "bar_chart" : "line_chart",
-      xAxis: "date",
-      yAxis: contextualMetricName(metric.metricName, metric.metricName),
-      series: metric.timeSeries,
-      description: "按业务时间字段展示核心指标变化。",
-      insightHint: "用于识别增长、下滑和波动。"
-    }))
-  };
 }
 
 function tableKey(table: { name: string; schema?: string | null }) {
@@ -356,7 +277,7 @@ async function runReportGenerationJob(input: {
       metricResults,
       dateRange: input.resolvedDateRange
     });
-    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, input.resolvedDateRange);
+    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, input.resolvedDateRange, input.reportLocale);
     const structuredReport = buildStructuredAiReport({
       dataSourceCount: dataSources.length,
       metricResults,

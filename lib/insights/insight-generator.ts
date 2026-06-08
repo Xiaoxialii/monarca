@@ -1084,7 +1084,7 @@ function buildLimitations(
       "missing-time-trend",
       "缺少历史趋势",
       "当前缺少时间趋势聚合，无法判断增长、下滑或周期性变化",
-      "报告不能判断指标较上一周期是改善还是恶化",
+      "报告不能判断指标在当前区间较前一等长区间是改善还是恶化",
       "补充 date / created_at / timestamp 后生成 period comparison"
     ));
   }
@@ -1865,7 +1865,7 @@ function riskCandidates(metrics: SelectedReportMetric[], aggregations: Aggregati
     const type = negative ? "negative_feedback_risk" : decline ? "performance_decline_risk" : "threshold_breach_risk";
     output.push({
       id: `risk-${type}`,
-      title: negative ? "负向反馈超过关注阈值" : decline ? "核心指标较上一周期下降" : "指标超过系统关注阈值",
+      title: negative ? "负向反馈超过关注阈值" : decline ? "核心指标在可比周期内下降" : "指标超过系统关注阈值",
       type,
       severity: negativeThreshold(primary)?.severity ?? performanceDecline(primary)?.severity ?? "medium",
       evidenceMetrics: riskEvidence.map((metric) => metric.displayName),

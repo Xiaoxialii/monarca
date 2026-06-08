@@ -16,6 +16,10 @@ import type {
   TimeTrendResult
 } from "@/lib/report-generation/report-types";
 import { businessDimensionLanguage, businessMetricLanguage } from "@/lib/report-generation/business-language";
+import {
+  canUseRecordsAsDerivedTrendMetric,
+  selectTrendMetricCandidates
+} from "@/lib/report-trend-guardrails.mjs";
 
 export type AggregationContext = {
   dataSource: Pick<DataSourceConnection, "id" | "name" | "type" | "config">;
@@ -932,16 +936,7 @@ function buildTimeTrends(table: SchemaTable, businessType: ReportBusinessType, r
       : spanDays <= 180
         ? "week"
         : "month";
-  const valueColumns = (businessType === "finance_timeseries"
-    ? [
-      findColumn(table, ["close", "adj_close", "adj close"]),
-      findColumn(table, ["volume"])
-    ]
-    : [
-      findColumn(table, ["revenue", "sales", "gmv", "paid_amount", "order_amount"]),
-      findColumn(table, ["installs", "orders", "reviews", "users", "sessions", "tickets"]),
-      findColumn(table, ["rating", "score", "sentiment_polarity", "sentiment polarity"])
-    ]).filter((column): column is SchemaColumn => Boolean(column));
+  const valueColumns = selectTrendMetricCandidates(table.columns, businessType, 3) as SchemaColumn[];
   const groups = new Map<string, Array<Record<string, unknown>>>();
 
   for (const row of rows) {
@@ -954,7 +949,13 @@ function buildTimeTrends(table: SchemaTable, businessType: ReportBusinessType, r
 
   if (orderedGroups.length < 2) return [];
 
-  const columns = valueColumns.length ? valueColumns : [undefined];
+  const columns = valueColumns.length
+    ? valueColumns
+    : canUseRecordsAsDerivedTrendMetric(table.columns, businessType)
+      ? [undefined]
+      : [];
+
+  if (columns.length === 0) return [];
 
   return columns.slice(0, 3).flatMap((valueColumn) => {
     const trendRows = orderedGroups.map(([period, group]) => {

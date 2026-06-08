@@ -50,6 +50,17 @@ export type MetricResultValue = {
   absoluteChange?: number | null;
   percentChange?: number | null;
   direction?: "up" | "down" | "flat" | "unknown";
+  changeDirection?: "up" | "down" | "flat" | "unknown";
+  metricDirection?: "higher_is_better" | "lower_is_better" | "neutral";
+  currentRangeLabel?: string;
+  previousRangeLabel?: string;
+  currentStartDate?: string | null;
+  currentEndDate?: string | null;
+  previousStartDate?: string | null;
+  previousEndDate?: string | null;
+  changePercent?: number | null;
+  displayText?: string | null;
+  tooltipText?: string | null;
   dateRangePreset?: string;
   dateRangeStart?: string | null;
   dateRangeEnd?: string | null;
@@ -433,7 +444,9 @@ function comparisonValues(currentValue: unknown, previousValue: unknown) {
       previousValue: safePreviousValue,
       absoluteChange: null,
       percentChange: null,
-      direction: "unknown" as const
+      changePercent: null,
+      direction: "unknown" as const,
+      changeDirection: "unknown" as const
     };
   }
 
@@ -445,7 +458,9 @@ function comparisonValues(currentValue: unknown, previousValue: unknown) {
     previousValue: safePreviousValue,
     absoluteChange,
     percentChange,
-    direction: percentChange == null || Math.abs(percentChange) < 0.01 ? "flat" as const : percentChange > 0 ? "up" as const : "down" as const
+    changePercent: percentChange,
+    direction: percentChange == null || Math.abs(percentChange) < 0.01 ? "flat" as const : percentChange > 0 ? "up" as const : "down" as const,
+    changeDirection: percentChange == null || Math.abs(percentChange) < 0.01 ? "flat" as const : percentChange > 0 ? "up" as const : "down" as const
   };
 }
 

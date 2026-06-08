@@ -9,6 +9,7 @@ import { getReportEntitlementState } from "@/lib/report-entitlements";
 import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { dateRangeFromSearchParams, resolveReportDateRange } from "@/lib/report-date-range";
+import { buildReportTimeArtifacts } from "@/lib/report-time-artifacts.mjs";
 import {
   cacheIdentityFromPayload,
   getReportMetricCache,
@@ -114,79 +115,6 @@ function activeTableLabels(tables: Array<{ name: string; schema?: string | null 
 function metricBelongsToTables(metric: { formula: string }, tableLabels: Set<string>) {
   const text = metric.formula.toLowerCase();
   return Array.from(tableLabels).some((label) => text.includes(label.toLowerCase()));
-}
-
-function trendDirection(currentValue: number | null, previousValue: number | null) {
-  if (currentValue == null || previousValue == null || previousValue === 0) return "unknown";
-  const deltaPercent = (currentValue - previousValue) / Math.abs(previousValue);
-  if (Math.abs(deltaPercent) < 0.01) return "flat";
-  return deltaPercent > 0 ? "up" : "down";
-}
-
-function buildReportTimeArtifacts(aggregationResults: Awaited<ReturnType<typeof buildAggregationResults>>, dateRange: ReturnType<typeof resolveReportDateRange>) {
-  const timeTrends = aggregationResults.flatMap((aggregation) =>
-    aggregation.timeTrends.map((trend) => ({ aggregation, trend }))
-  );
-
-  if (timeTrends.length === 0) {
-    return {
-      timeConfig: {
-        hasTimeField: false,
-        availableTimeFields: [],
-        selectedRange: dateRange.preset,
-        granularity: "month",
-        dateRangePreset: dateRange.preset,
-        startDate: dateRange.startDate ?? null,
-        endDate: dateRange.endDate ?? null
-      },
-      trendMetrics: [],
-      trendCharts: []
-    };
-  }
-
-  const firstTrend = timeTrends[0]?.trend;
-  const trendMetrics = timeTrends.map(({ aggregation, trend }) => {
-    const last = trend.rows.at(-1)?.value ?? null;
-    const previous = trend.rows.at(-2)?.value ?? null;
-    const absoluteChange = last != null && previous != null ? last - previous : null;
-    const percentChange = absoluteChange != null && previous ? absoluteChange / Math.abs(previous) : null;
-
-    return {
-      metricName: trend.metric,
-      businessModule: aggregation.businessType,
-      dateField: trend.dateField,
-      granularity: trend.bucket,
-      currentValue: last,
-      previousValue: previous,
-      absoluteChange,
-      percentChange,
-      trendDirection: trendDirection(last, previous),
-      timeSeries: trend.rows.map((row) => ({ date: row.period, value: row.value }))
-    };
-  });
-
-  return {
-    timeConfig: {
-      hasTimeField: true,
-      defaultTimeField: firstTrend?.dateField,
-      availableTimeFields: Array.from(new Set(timeTrends.flatMap(({ trend }) => trend.dateField ? [trend.dateField] : []))),
-      selectedRange: dateRange.preset,
-      granularity: firstTrend?.bucket ?? "month",
-      dateRangePreset: dateRange.preset,
-      startDate: dateRange.startDate ?? null,
-      endDate: dateRange.endDate ?? null
-    },
-    trendMetrics,
-    trendCharts: trendMetrics.slice(0, 5).map((metric) => ({
-      title: `${metric.metricName} 趋势`,
-      chartType: /volume|orders|reviews|installs|tickets|records/i.test(metric.metricName) ? "bar_chart" : "line_chart",
-      xAxis: "date",
-      yAxis: metric.metricName,
-      series: metric.timeSeries,
-      description: "按业务时间字段展示核心指标变化。",
-      insightHint: "用于识别增长、下滑和波动。"
-    }))
-  };
 }
 
 async function latestWorkspaceSnapshotVersion(workspaceId: string) {
@@ -317,7 +245,7 @@ async function buildDateRangedReportPayload({
 
   const metricResults = await computeMetricResultsForContexts({ contexts, metrics: executableMetrics, dateRange });
   const aggregationResults = await buildAggregationResults({ contexts, metricResults, dateRange });
-  const timeArtifacts = buildReportTimeArtifacts(aggregationResults, dateRange);
+  const timeArtifacts = buildReportTimeArtifacts(aggregationResults, dateRange, locale);
   const structuredReport = buildStructuredAiReport({
     dataSourceCount: dataSources.length,
     metricResults,

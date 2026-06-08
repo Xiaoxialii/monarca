@@ -11,7 +11,9 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "test:guardrails": "node scripts/report-guardrails-check.mjs",
     "test:report-entitlements": "node --test tests/report-entitlements.test.mjs",
-    "test:report-summary": "node --test tests/zh-report-summary.test.mjs"
+    "test:report-summary": "node --test tests/zh-report-summary.test.mjs",
+    "test:trend-guardrails": "node --test tests/report-trend-guardrails.test.mjs",
+    "test:report-time-artifacts": "node --test tests/report-time-artifacts.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",

@@ -67,6 +67,10 @@ import {
 } from "@/lib/locale";
 import { hasDisplayableMetricResult } from "@/lib/metric-visibility";
 import { contextualMetricName } from "@/lib/report-generation/metric-name-normalizer";
+import {
+  isValidTrendMetricName,
+  isValidTrendSeries
+} from "@/lib/report-trend-guardrails.mjs";
 import { cn } from "@/lib/utils";
 
 const dashboardCopy = {
@@ -5800,6 +5804,17 @@ type ReportMetricEvidenceResult = {
   absoluteChange?: number | null;
   percentChange?: number | null;
   direction?: "up" | "down" | "flat" | "unknown";
+  changeDirection?: "up" | "down" | "flat" | "unknown";
+  metricDirection?: MetricDirection;
+  currentRangeLabel?: string;
+  previousRangeLabel?: string;
+  currentStartDate?: string | null;
+  currentEndDate?: string | null;
+  previousStartDate?: string | null;
+  previousEndDate?: string | null;
+  changePercent?: number | null;
+  displayText?: string | null;
+  tooltipText?: string | null;
   dateRangePreset?: string;
   dateRangeStart?: string | null;
   dateRangeEnd?: string | null;
@@ -5833,6 +5848,7 @@ type ReportMetricEvidenceResult = {
 };
 
 type ReportTimeRange = "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
+type MetricDirection = "higher_is_better" | "lower_is_better" | "neutral";
 
 type SelectedReportDateRange = {
   preset: ReportTimeRange;
@@ -5860,6 +5876,17 @@ type ReportTrendMetricViewData = {
   previousValue?: number | null;
   absoluteChange?: number | null;
   percentChange?: number | null;
+  currentRangeLabel?: string;
+  previousRangeLabel?: string;
+  currentStartDate?: string | null;
+  currentEndDate?: string | null;
+  previousStartDate?: string | null;
+  previousEndDate?: string | null;
+  changePercent?: number | null;
+  changeDirection?: "up" | "down" | "flat" | "unknown";
+  metricDirection?: MetricDirection;
+  displayText?: string | null;
+  tooltipText?: string | null;
   trendDirection?: "up" | "down" | "flat" | "volatile" | "unknown";
   timeSeries?: Array<{ date: string; value: number | null }>;
 };
@@ -6995,6 +7022,8 @@ type ReportChartType =
   | "scatter_plot"
   | "line_chart";
 
+type ReportChartGroup = "core_trends" | "risk_quality" | "structure" | "relationship" | "monetization" | "auxiliary";
+
 type ReportChartDatum = {
   label: string;
   value: number;
@@ -7011,12 +7040,23 @@ type ReportChartConfig = {
   description: string;
   insightHint: string;
   priority: number;
+  group: ReportChartGroup;
+  chartGroup: ReportChartGroup;
+  businessQuestion: string;
+  linkedInsightIds: string[];
+  linkedMetricIds: string[];
   displaySize: "medium" | "large" | "full_width";
   metricIds: string[];
   data: ReportChartDatum[];
   xAxis?: string;
   yAxis?: string;
   caveats?: string[];
+  aggregationType?: "SUM" | "AVG" | "COUNT" | "COUNT_DISTINCT" | "MAX" | "MIN";
+  dimensionLabel?: string;
+  metricLabel?: string;
+  timeField?: string;
+  incompletePeriod?: boolean;
+  debugNote?: string;
 };
 
 const reportChartColors = ["#047857", "#0f172a", "#0ea5e9", "#f59e0b", "#e11d48", "#7c3aed", "#64748b"];
@@ -7054,6 +7094,426 @@ function localizedReportChartText(value: string | undefined, locale: Locale) {
   return translations[normalized] ?? value;
 }
 
+function chartGroupLabel(group: ReportChartGroup, locale: Locale) {
+  const isZh = locale === "zh";
+  if (group === "core_trends") return isZh ? "核心趋势" : "Core trends";
+  if (group === "risk_quality") return isZh ? "风险与质量" : "Risk & quality";
+  if (group === "structure") return isZh ? "结构分析" : "Structure";
+  if (group === "relationship") return isZh ? "关系分析" : "Relationships";
+  if (group === "monetization") return isZh ? "变现 / 定价分析" : "Monetization / pricing";
+  return isZh ? "辅助分析" : "Auxiliary";
+}
+
+function chartGroupDescription(group: ReportChartGroup, locale: Locale) {
+  const isZh = locale === "zh";
+  if (group === "core_trends") return isZh ? "优先展示销售额、订单量、客户数和客单价等结果指标。" : "Outcome metrics such as sales, orders, customers, and order value.";
+  if (group === "risk_quality") return isZh ? "展示评分、退款、负向反馈和转化等风险质量信号。" : "Risk and quality signals such as ratings, refunds, negative feedback, and conversion.";
+  if (group === "structure") return isZh ? "展示品类、渠道、客户群体等结构差异。" : "Breakdowns across category, channel, segment, and similar dimensions.";
+  if (group === "relationship") return isZh ? "展示指标之间的关系，解释变化来源。" : "Relationships between metrics that explain changes.";
+  if (group === "monetization") return isZh ? "展示价格、折扣和变现相关辅助分析。" : "Pricing, discount, and monetization analysis.";
+  return isZh ? "展示辅助分布和诊断指标，默认折叠。" : "Supporting distributions and diagnostic metrics, folded by default.";
+}
+
+function chartMetricText(value = "", locale: Locale = "zh") {
+  const normalized = normalizeReportMetricText(value);
+  const raw = value.toLowerCase();
+  const isZh = locale === "zh";
+
+  const zhEntries: Array<[RegExp, string]> = [
+    [/average.*customer.*rating|customer.*rating|average_rating|rating|score/, "平均客户评分"],
+    [/gross_sales|grosssales|sales_amount|total_sales|sales|revenue|gmv|estimated_gmv/, "销售额"],
+    [/discount_amount|discountamount|discount/, "折扣金额"],
+    [/average_order_value|aov|average.*price|avg.*price/, "平均价格"],
+    [/price/, "价格"],
+    [/total_orders|order_count|orders|records/, "订单数"],
+    [/total_customers|customer_count|customers/, "客户数"],
+    [/install/, "安装量"],
+    [/review_volume|reviews/, "评论量"],
+    [/negative_sentiment_rate/, "负向反馈率"],
+    [/positive_sentiment_rate/, "正向反馈率"],
+    [/conversion_rate|cvr/, "转化率"],
+    [/trading_volume|volume/, "交易量"],
+    [/close_price|close/, "收盘价"]
+  ];
+
+  if (isZh) {
+    if (/评分/.test(value)) return /客户/.test(value) ? "平均客户评分" : "平均评分";
+    if (/销售额|销售金额|收入/.test(value)) return "销售额";
+    if (/折扣/.test(value)) return "折扣金额";
+    if (/订单/.test(value)) return "订单数";
+    if (/客户/.test(value)) return "客户数";
+    if (/价格/.test(value)) return /平均/.test(value) ? "平均价格" : "价格";
+    if (/gross\s*sales/.test(raw)) return "销售额";
+    if (/discount\s*amount/.test(raw)) return "折扣金额";
+    const match = zhEntries.find(([pattern]) => pattern.test(normalized));
+    if (match) return match[1];
+    return value
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^./, (letter) => letter.toUpperCase());
+  }
+
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function chartDimensionText(value = "", locale: Locale = "zh") {
+  const normalized = normalizeReportMetricText(value);
+  const isZh = locale === "zh";
+  if (!isZh) return chartMetricText(value, locale);
+  if (/category|品类/.test(normalized)) return "品类";
+  if (/sales_channel|saleschannel|channel|source|platform/.test(normalized)) return "渠道";
+  if (/customer_segment|customersegment|segment/.test(normalized)) return "客户群体";
+  if (/region|country|city/.test(normalized)) return "地区";
+  if (/status/.test(normalized)) return "状态";
+  if (/product|sku|app/.test(normalized)) return "对象";
+  return value || "分组";
+}
+
+function inferChartAggregationType(text = "", chartType?: ReportChartType): NonNullable<ReportChartConfig["aggregationType"]> {
+  const normalized = normalizeReportMetricText(text);
+  if (/avg|average|mean|rating|score|rate|ratio|price/.test(normalized) && !/total|sum|gross/.test(normalized)) return "AVG";
+  if (/count_distinct|unique|distinct/.test(normalized)) return "COUNT_DISTINCT";
+  if (/count|orders|customers|records|reviews|tickets|sessions/.test(normalized) || chartType === "ranking_table") return "COUNT";
+  if (/max|highest/.test(normalized)) return "MAX";
+  if (/min|lowest/.test(normalized)) return "MIN";
+  return "SUM";
+}
+
+function rankingChartTitle(result: ReportMetricEvidenceResult, locale: Locale, yAxis: string) {
+  const isZh = locale === "zh";
+  const byMatch = /\bBY\s+(.+)$/i.exec(result.formula);
+  const dimension = chartDimensionText(byMatch?.[1] ?? result.rows?.[0]?.dimension ?? result.metricName, locale);
+  const aggregation = inferChartAggregationType(`${result.metricName} ${result.displayName ?? ""} ${result.formula}`, "horizontal_bar_chart");
+  const metric = chartMetricText(yAxis || result.metricName, locale);
+
+  if (!isZh) return `${dimension} ranking by ${aggregation} ${metric}`;
+  if (aggregation === "AVG") return `各${dimension}${metric.startsWith("平均") ? metric : `平均${metric}`}排名`;
+  if (aggregation === "COUNT" || aggregation === "COUNT_DISTINCT") return `各${dimension}${metric}排名`;
+  return `各${dimension}总${metric}排名`;
+}
+
+function trendChartTitle(metricName: string, locale: Locale) {
+  const metric = chartMetricText(metricName, locale);
+  return locale === "zh" ? `${metric}趋势` : `${metric} trend`;
+}
+
+function isRatingChartMetric(label = "") {
+  return /rating|score|评分/i.test(label);
+}
+
+function hasInvalidRatingRange(label: string, data: ReportChartDatum[]) {
+  return isRatingChartMetric(label) && data.some((row) => row.value < 0 || row.value > 5);
+}
+
+function parseChartDate(value: string) {
+  return parseReportTrendDate(value);
+}
+
+function isLatestBucketIncomplete(data: ReportChartDatum[], aggregationType?: ReportChartConfig["aggregationType"]) {
+  const latest = data.at(-1);
+  if (!latest) return false;
+
+  const latestDate = parseChartDate(latest.label);
+  if (latestDate) {
+    const now = new Date();
+    const sameDay = latestDate.getFullYear() === now.getFullYear() &&
+      latestDate.getMonth() === now.getMonth() &&
+      latestDate.getDate() === now.getDate();
+    const monthBucket = /^\d{4}-\d{2}$/.test(latest.label);
+    const sameMonth = monthBucket && latestDate.getFullYear() === now.getFullYear() && latestDate.getMonth() === now.getMonth();
+    const yearBucket = /^\d{4}$/.test(latest.label);
+    const sameYear = yearBucket && latestDate.getFullYear() === now.getFullYear();
+    if (sameDay || sameMonth || sameYear) return true;
+  }
+
+  if (["COUNT", "COUNT_DISTINCT", "SUM"].includes(String(aggregationType ?? "")) && data.length >= 4) {
+    const previous = data.slice(-4, -1);
+    const average = previous.reduce((sum, row) => sum + Math.abs(row.value), 0) / previous.length;
+    return average > 0 && Math.abs(latest.value) < average * 0.5;
+  }
+
+  return false;
+}
+
+function trendInsight(chart: Pick<ReportChartConfig, "data" | "yAxis" | "aggregationType" | "incompletePeriod">, locale: Locale) {
+  const isZh = locale === "zh";
+  const data = chart.data;
+  const metric = chartMetricText(chart.yAxis ?? "", locale);
+  if (data.length < 2) return isZh ? `${metric}当前可用趋势点不足，暂不判断变化。` : `${metric} has too few trend points to infer a change.`;
+
+  const completeData = chart.incompletePeriod ? data.slice(0, -1) : data;
+  const usable = completeData.length >= 2 ? completeData : data;
+  const max = usable.reduce((best, row) => row.value > best.value ? row : best, usable[0]);
+  const first = usable[0];
+  const last = usable.at(-1)!;
+  const change = first.value ? (last.value - first.value) / Math.abs(first.value) : 0;
+  const caveat = chart.incompletePeriod
+    ? (isZh ? "最近一期数据可能未完整，末尾变化仅作参考。" : "The latest period may be incomplete, so the end movement is for reference only.")
+    : "";
+
+  let sentence: string;
+  if (/discount|折扣/.test(metric.toLowerCase())) {
+    sentence = isZh
+      ? `${metric}在 ${max.label} 达到高点，可能对应促销或折扣活动。`
+      : `${metric} peaked around ${max.label}, which may align with promotion or discount activity.`;
+  } else if (/评分|rating|score/i.test(metric)) {
+    const range = Math.max(...usable.map((row) => row.value)) - Math.min(...usable.map((row) => row.value));
+    sentence = isZh
+      ? `${metric}${range < 0.3 ? "整体较稳定" : "出现波动"}，最近完整周期为 ${last.label}。`
+      : `${metric} is ${range < 0.3 ? "mostly stable" : "moving noticeably"}, with ${last.label} as the latest complete period.`;
+  } else if (Math.abs(change) < 0.05) {
+    sentence = isZh
+      ? `${metric}整体较稳定，峰值出现在 ${max.label}。`
+      : `${metric} is broadly stable, with a peak around ${max.label}.`;
+  } else if (change > 0) {
+    sentence = isZh
+      ? `${metric}从 ${first.label} 到 ${last.label} 整体上升，峰值出现在 ${max.label}。`
+      : `${metric} increased from ${first.label} to ${last.label}, peaking around ${max.label}.`;
+  } else {
+    sentence = isZh
+      ? `${metric}在 ${max.label} 达到峰值后回落，最近完整周期为 ${last.label}。`
+      : `${metric} peaked around ${max.label} and then pulled back by ${last.label}.`;
+  }
+
+  return caveat ? `${sentence}${caveat}` : sentence;
+}
+
+function rankingInsight(chart: Pick<ReportChartConfig, "data" | "yAxis" | "dimensionLabel" | "aggregationType">, locale: Locale) {
+  const isZh = locale === "zh";
+  const top = chart.data[0];
+  const second = chart.data[1];
+  const metric = chartMetricText(chart.yAxis ?? "", locale);
+  const dimension = chart.dimensionLabel ?? (isZh ? "分组" : "group");
+  if (!top) return isZh ? `${dimension}排名暂无足够数据。` : `There is not enough data for the ${dimension} ranking.`;
+  const gap = second && second.value ? Math.abs((top.value - second.value) / Math.abs(second.value)) : null;
+  if (isZh) {
+    return gap != null && gap > 0.3
+      ? `${top.label} 的${metric}最高，明显高于其他${dimension}。`
+      : `${top.label} 的${metric}排名最高，可优先查看其对整体表现的贡献。`;
+  }
+  return gap != null && gap > 0.3
+    ? `${top.label} leads ${metric} and is clearly above other ${dimension}.`
+    : `${top.label} leads ${metric}; review its contribution to the overall result.`;
+}
+
+function chartInsight(chart: ReportChartConfig, locale: Locale) {
+  if (chart.chartType === "line_chart" || chart.chartType === "bar_chart") return trendInsight(chart, locale);
+  if (chart.chartType === "horizontal_bar_chart" || chart.chartType === "ranking_table") return rankingInsight(chart, locale);
+  if (chart.chartType === "scatter_plot") return chart.insightHint;
+  if (chart.chartType === "donut_chart") {
+    const top = [...chart.data].sort((left, right) => right.value - left.value)[0];
+    return locale === "zh"
+      ? `${top?.label ?? "主要分组"}占比最高，是当前结构中的主要组成部分。`
+      : `${top?.label ?? "The leading segment"} has the largest share in the current mix.`;
+  }
+  return chart.insightHint;
+}
+
+function chartGroupFromConfig(chart: Pick<ReportChartConfig, "chartType" | "yAxis" | "title">): ReportChartGroup {
+  const text = normalizeReportMetricText(`${chart.title} ${chart.yAxis ?? ""}`);
+  if (chart.chartType === "scatter_plot") return "relationship";
+  if (/price|discount|折扣|价格/.test(text)) return "monetization";
+  if (/refund|churn|negative|risk|quality|rating|score|sentiment|评分|质量|负向/.test(text)) return "risk_quality";
+  if (chart.chartType === "horizontal_bar_chart" || chart.chartType === "ranking_table" || chart.chartType === "donut_chart") return "structure";
+  return "core_trends";
+}
+
+function chartPriority(chart: Pick<ReportChartConfig, "group" | "yAxis" | "chartType" | "priority">) {
+  const text = normalizeReportMetricText(chart.yAxis ?? "");
+  if (chart.group === "core_trends") {
+    if (/revenue|sales|gmv|销售额/.test(text)) return 1;
+    if (/orders|订单/.test(text)) return 2;
+    if (/customers|客户/.test(text)) return 3;
+    if (/average_order_value|客单价/.test(text)) return 4;
+    return 8 + chart.priority;
+  }
+  if (chart.group === "risk_quality") return 10 + chart.priority;
+  if (chart.group === "structure") return 20 + chart.priority;
+  if (chart.group === "relationship") return 30 + chart.priority;
+  if (chart.group === "monetization") return 45 + chart.priority;
+  return 70 + chart.priority;
+}
+
+type ChartRecommendationSignal = {
+  id: string;
+  text: string;
+  evidenceMetrics: string[];
+};
+
+type ChartRecommendationContext = {
+  keyFindings?: ChartRecommendationSignal[];
+  businessRisks?: ChartRecommendationSignal[];
+  growthOpportunities?: ChartRecommendationSignal[];
+  nextActions?: ChartRecommendationSignal[];
+  coreKpis?: ReportMetricEvidenceResult[];
+};
+
+function recommendationSignalsFromStructuredReport(report?: StructuredReportViewData | null): ChartRecommendationSignal[] {
+  const generated = report?.generatedInsights;
+  const nextActions = generated?.nextActionPlan?.actionInsights ?? [];
+  const items = [
+    ...(generated?.keyFindings ?? []),
+    ...(generated?.businessRisks ?? []),
+    ...(generated?.growthOpportunities ?? []),
+    ...nextActions
+  ];
+
+  return items.map((item, index) => {
+    const record = item as Record<string, unknown>;
+    return {
+      id: typeof record.id === "string" ? record.id : `insight-${index}`,
+      text: [
+        record.title,
+        record.summary,
+        record.finding,
+        record.currentConclusion,
+        record.supportingEvidence,
+        record.businessMeaning,
+        record.recommendedDecision,
+        record.recommendedAction,
+        record.evidence
+      ].filter(Boolean).join(" "),
+      evidenceMetrics: Array.isArray(record.evidenceMetrics) ? record.evidenceMetrics.map(String) : []
+    };
+  });
+}
+
+function chartSignalScore(chart: Pick<ReportChartConfig, "yAxis" | "title" | "businessQuestion">, signals: ChartRecommendationSignal[] = []) {
+  const chartText = normalizeReportMetricText(`${chart.title} ${chart.yAxis ?? ""} ${chart.businessQuestion}`);
+  return signals.reduce((score, signal) => {
+    const signalText = normalizeReportMetricText(`${signal.text} ${signal.evidenceMetrics.join(" ")}`);
+    if (!signalText) return score;
+    if (/total_orders|orders|订单/.test(signalText) && /orders|订单/.test(chartText)) return score + 80;
+    if (/total_customers|customers|客户/.test(signalText) && /customers|客户/.test(chartText)) return score + 80;
+    if (/estimated_gmv|gross_sales|grosssales|revenue|gmv|销售额/.test(signalText) && /sales|revenue|gmv|销售额/.test(chartText)) return score + 90;
+    if (/category|品类|contribution/.test(signalText) && /category|品类/.test(chartText)) return score + 70;
+    if (/rating|score|评分/.test(signalText) && /rating|score|评分/.test(chartText)) return score + 70;
+    if (/discount|折扣/.test(signalText) && /discount|折扣/.test(chartText)) return score + 70;
+    return signal.evidenceMetrics.some((metric) => chartText.includes(normalizeReportMetricText(metric))) ? score + 50 : score;
+  }, 0);
+}
+
+function chartLinkedInsightIds(chart: Pick<ReportChartConfig, "yAxis" | "title" | "businessQuestion">, signals: ChartRecommendationSignal[] = []) {
+  const chartText = normalizeReportMetricText(`${chart.title} ${chart.yAxis ?? ""} ${chart.businessQuestion}`);
+  return signals.flatMap((signal) => {
+    const signalText = normalizeReportMetricText(`${signal.text} ${signal.evidenceMetrics.join(" ")}`);
+    if (
+      signal.evidenceMetrics.some((metric) => chartText.includes(normalizeReportMetricText(metric))) ||
+      (/total_orders|orders|订单/.test(signalText) && /orders|订单/.test(chartText)) ||
+      (/total_customers|customers|客户/.test(signalText) && /customers|客户/.test(chartText)) ||
+      (/estimated_gmv|gross_sales|grosssales|revenue|gmv|销售额/.test(signalText) && /sales|revenue|gmv|销售额/.test(chartText)) ||
+      (/category|品类|contribution/.test(signalText) && /category|品类/.test(chartText)) ||
+      (/rating|score|评分/.test(signalText) && /rating|score|评分/.test(chartText)) ||
+      (/discount|折扣/.test(signalText) && /discount|折扣/.test(chartText))
+    ) {
+      return [signal.id];
+    }
+    return [];
+  });
+}
+
+function chartBusinessQuestion(chart: Pick<ReportChartConfig, "group" | "yAxis" | "dimensionLabel" | "chartType">, locale: Locale) {
+  const isZh = locale === "zh";
+  const metric = chartMetricText(chart.yAxis ?? "", locale);
+  if (chart.group === "core_trends") return isZh ? `${metric}是否在当前周期发生明显变化？` : `Is ${metric} changing materially in the current period?`;
+  if (chart.group === "risk_quality") return isZh ? `${metric}是否暴露风险或质量变化？` : `Does ${metric} reveal a risk or quality change?`;
+  if (chart.group === "structure") return isZh ? `哪些${chart.dimensionLabel ?? "分组"}贡献了主要${metric}？` : `Which ${chart.dimensionLabel ?? "groups"} contribute the most ${metric}?`;
+  if (chart.group === "relationship") return isZh ? `两个关键指标之间是否存在风险或机会关系？` : "Is there a risk or opportunity relationship between key metrics?";
+  if (chart.group === "monetization") return isZh ? `${metric}是否解释了收入或价格变化？` : `Does ${metric} explain revenue or pricing changes?`;
+  return isZh ? `${metric}是否提供辅助诊断线索？` : `Does ${metric} provide supporting diagnostic context?`;
+}
+
+function finalizeChart(chart: ReportChartConfig, locale: Locale, signals: ChartRecommendationSignal[] = []): ReportChartConfig {
+  const group = chart.group ?? chart.chartGroup ?? chartGroupFromConfig(chart);
+  const linkedInsightIds = Array.from(new Set([...(chart.linkedInsightIds ?? []), ...chartLinkedInsightIds(chart, signals)]));
+  const linkedMetricIds = Array.from(new Set([...(chart.linkedMetricIds ?? []), ...(chart.metricIds ?? [])]));
+  const signalScore = chartSignalScore(chart, signals);
+
+  return {
+    ...chart,
+    group,
+    chartGroup: group,
+    businessQuestion: chart.businessQuestion || chartBusinessQuestion({ ...chart, group }, locale),
+    linkedInsightIds,
+    linkedMetricIds,
+    priority: Math.max(0, chart.priority - signalScore),
+    insightHint: chart.insightHint || chartInsight({ ...chart, group, chartGroup: group, businessQuestion: chart.businessQuestion || "", linkedInsightIds, linkedMetricIds }, locale)
+  };
+}
+
+function chartDedupeKey(chart: ReportChartConfig) {
+  const metric = normalizeReportMetricText(chart.metricLabel ?? chart.yAxis ?? chart.title);
+  const dimension = normalizeReportMetricText(chart.dimensionLabel ?? "");
+  const question = normalizeReportMetricText(chart.businessQuestion);
+  const xAxis = normalizeReportMetricText(chart.timeField ?? chart.xAxis ?? "");
+  return [
+    chart.chartType,
+    chart.metricIds[0] ?? "",
+    metric,
+    dimension,
+    xAxis,
+    normalizeReportMetricText(chart.aggregationType ?? ""),
+    question
+  ].join("|");
+}
+
+function chartDisplayDedupeKeys(chart: ReportChartConfig) {
+  const title = normalizeReportMetricText(chart.title);
+  const metric = normalizeReportMetricText(chart.metricLabel ?? chart.yAxis ?? chart.title);
+  const xAxis = normalizeReportMetricText(chart.timeField ?? chart.xAxis ?? "");
+  const question = normalizeReportMetricText(chart.businessQuestion);
+  const metricTrendKey = metric && xAxis ? `${chart.chartType}|metric-time|${metric}|${xAxis}` : "";
+  const titleKey = title ? `${chart.chartType}|title|${title}` : "";
+  const questionKey = question ? `${chart.chartType}|question|${question}` : "";
+
+  return Array.from(new Set([titleKey, metricTrendKey, questionKey].filter(Boolean)));
+}
+
+function mergeChartText(left: string, right: string) {
+  if (!right || left.includes(right)) return left;
+  if (!left) return right;
+  return `${left} ${right}`;
+}
+
+function dedupeCharts(charts: ReportChartConfig[], locale: Locale, signals: ChartRecommendationSignal[] = []) {
+  const byKey = new Map<string, ReportChartConfig>();
+
+  for (const rawChart of charts.map((chart) => finalizeChart(chart, locale, signals)).sort((left, right) => chartPriority(left) - chartPriority(right))) {
+    const keys = [
+      chartDedupeKey(rawChart),
+      `${rawChart.chartType}|${normalizeReportMetricText(rawChart.yAxis ?? rawChart.title)}|${normalizeReportMetricText(rawChart.xAxis ?? rawChart.timeField ?? "")}`,
+      `${rawChart.chartType}|${normalizeReportMetricText(rawChart.businessQuestion)}`
+    ];
+    const existingKey = keys.find((key) => byKey.has(key));
+
+    if (!existingKey) {
+      byKey.set(keys[0], rawChart);
+      continue;
+    }
+
+    const existing = byKey.get(existingKey)!;
+    const winner = chartPriority(rawChart) < chartPriority(existing) ? rawChart : existing;
+    const loser = winner === rawChart ? existing : rawChart;
+    byKey.delete(existingKey);
+    byKey.set(chartDedupeKey(winner), {
+      ...winner,
+      insightHint: mergeChartText(winner.insightHint, loser.insightHint),
+      linkedInsightIds: Array.from(new Set([...winner.linkedInsightIds, ...loser.linkedInsightIds])),
+      linkedMetricIds: Array.from(new Set([...winner.linkedMetricIds, ...loser.linkedMetricIds])),
+      caveats: Array.from(new Set([...(winner.caveats ?? []), ...(loser.caveats ?? [])]))
+    });
+  }
+
+  return Array.from(byKey.values()).sort((left, right) => chartPriority(left) - chartPriority(right));
+}
+
 function reportMetricNumericRows(result: ReportMetricEvidenceResult, limit = 10, locale: Locale = "zh") {
   const isZh = locale === "zh";
 
@@ -7076,11 +7536,6 @@ function reportMetricNumericRows(result: ReportMetricEvidenceResult, limit = 10,
     })
     .sort((left, right) => right.value - left.value)
     .slice(0, limit);
-}
-
-function reportMetricChartTitle(result: ReportMetricEvidenceResult) {
-  const display = objectMetricDisplay(result);
-  return display.title;
 }
 
 function isDateLikeDimension(value: string) {
@@ -7126,6 +7581,11 @@ function buildSentimentDistributionChart(results: ReportMetricEvidenceResult[], 
     description: isZh ? "展示正向、负向和中性反馈占比。" : "Shows the share of positive, negative, and neutral feedback.",
     insightHint: isZh ? "适合判断用户反馈结构，以及负向反馈是否达到关注阈值。" : "Use this to understand feedback mix and whether negative feedback reaches an attention threshold.",
     priority: 20,
+    group: "risk_quality",
+    chartGroup: "risk_quality",
+    businessQuestion: isZh ? "当前评论情绪结构是否暴露体验风险？" : "Does the sentiment mix reveal an experience risk?",
+    linkedInsightIds: [],
+    linkedMetricIds: metrics.map((metric) => metric.metricId),
     displaySize: "medium",
     metricIds: metrics.map((metric) => metric.metricId),
     data
@@ -7151,6 +7611,11 @@ function buildPaidDistributionChart(results: ReportMetricEvidenceResult[], local
     description: isZh ? "展示付费 App 占比和免费 App 占比。" : "Shows the share of paid and free apps.",
     insightHint: isZh ? "适合判断市场是否以免费下载、广告或内购模式为主。" : "Use this to see whether the market is dominated by free downloads, ads, or in-app monetization.",
     priority: 35,
+    group: "monetization",
+    chartGroup: "monetization",
+    businessQuestion: isZh ? "免费和付费构成是否影响变现模式判断？" : "Does the free vs paid mix affect monetization interpretation?",
+    linkedInsightIds: [],
+    linkedMetricIds: [paidRatio.metricId],
     displaySize: "medium",
     metricIds: [paidRatio.metricId],
     data: [
@@ -7171,7 +7636,6 @@ function buildRankingCharts(results: ReportMetricEvidenceResult[], locale: Local
       const rows = reportMetricNumericRows(result, 10, locale);
       if (rows.length < 2 || rows.some((row) => isDateLikeDimension(row.label))) return [];
 
-      const title = reportMetricChartTitle(result);
       const isRateOrQuality = metricNameIncludes(result, [
         "negative",
         "positive",
@@ -7183,6 +7647,12 @@ function buildRankingCharts(results: ReportMetricEvidenceResult[], locale: Local
         "churn"
       ]);
       const isCategoryScale = metricNameIncludes(result, ["category", "installs", "revenue", "orders", "volume", "reviews"]);
+      const yAxis = chartMetricText(contextualMetricName(result.displayName || result.metricName, result.formula), locale);
+      const aggregationType = inferChartAggregationType(`${result.metricName} ${result.displayName ?? ""} ${result.formula}`, isRateOrQuality ? "ranking_table" : "horizontal_bar_chart");
+      const dimensionLabel = chartDimensionText(/\bBY\s+(.+)$/i.exec(result.formula)?.[1] ?? result.metricName, locale);
+      const title = rankingChartTitle(result, locale, yAxis);
+      const group = chartGroupFromConfig({ chartType: isRateOrQuality ? "ranking_table" : "horizontal_bar_chart", yAxis, title });
+      const businessQuestion = chartBusinessQuestion({ chartType: isRateOrQuality ? "ranking_table" : "horizontal_bar_chart", yAxis, dimensionLabel, group }, locale);
 
       return [{
         id: `ranking-${result.metricId}`,
@@ -7192,14 +7662,20 @@ function buildRankingCharts(results: ReportMetricEvidenceResult[], locale: Local
         description: isRateOrQuality
           ? (isZh ? "展示对象级质量或反馈排名。" : "Shows object-level quality or feedback rankings.")
           : (isZh ? "展示分组或对象的规模排名。" : "Shows scale rankings across groups or objects."),
-        insightHint: isCategoryScale
-          ? (isZh ? "适合判断规模来源是否集中在头部类别或对象。" : "Use this to see whether scale is concentrated in top categories or objects.")
-          : (isZh ? "适合定位高表现、低表现或需要排查的对象。" : "Use this to find high performers, low performers, or objects that need review."),
+        insightHint: rankingInsight({ data: rows, yAxis, dimensionLabel, aggregationType }, locale),
         priority: isCategoryScale ? 10 : 25,
+        group,
+        chartGroup: group,
+        businessQuestion,
+        linkedInsightIds: [],
+        linkedMetricIds: [result.metricId],
         displaySize: isRateOrQuality ? "large" : "large",
         metricIds: [result.metricId],
         data: rows,
-        yAxis: contextualMetricName(result.displayName || result.metricName, result.formula),
+        yAxis,
+        aggregationType,
+        dimensionLabel,
+        metricLabel: yAxis,
         caveats: reportMetricBadges(result, 4, locale).map((badge) => badge.label)
       } satisfies ReportChartConfig];
     })
@@ -7210,24 +7686,50 @@ function buildTrendCharts(results: ReportMetricEvidenceResult[], locale: Locale 
   const isZh = locale === "zh";
 
   return results.flatMap((result) => {
-    const rows = reportMetricNumericRows(result, 24, locale);
+    const rows = reportMetricNumericRows(result, 24, locale)
+      .sort((left, right) => left.label.localeCompare(right.label));
     if (rows.length < 3 || !rows.every((row) => isDateLikeDimension(row.label))) return [];
+    const yAxis = chartMetricText(contextualMetricName(result.displayName || result.metricName, result.formula), locale);
+    if (!isValidTrendMetricName(result.metricName, result.metricCategory) || !isValidTrendSeries({
+      metricName: result.metricName,
+      metricCategory: result.metricCategory,
+      yAxis,
+      values: rows.map((row) => row.value)
+    })) return [];
+    if (hasInvalidRatingRange(yAxis, rows)) return [];
+    const aggregationType = inferChartAggregationType(`${result.metricName} ${result.displayName ?? ""} ${result.formula}`, "line_chart");
+    const incompletePeriod = isLatestBucketIncomplete(rows, aggregationType);
+    const title = trendChartTitle(yAxis, locale);
+    const group = chartGroupFromConfig({ chartType: "line_chart", yAxis, title });
+    const businessQuestion = chartBusinessQuestion({ chartType: "line_chart", yAxis, group }, locale);
+    const caveats = [
+      ...(incompletePeriod ? [isZh ? "未完整周期" : "Incomplete period"] : []),
+      ...(hasInvalidRatingRange(yAxis, rows) ? [isZh ? "评分范围异常" : "Invalid rating range"] : [])
+    ];
+    const chartBase = { data: rows, yAxis, aggregationType, incompletePeriod };
 
     return [{
       id: `trend-${result.metricId}`,
-      title: isZh
-        ? `${contextualMetricName(result.displayName || result.metricName, result.formula)} 趋势`
-        : `${contextualMetricName(result.displayName || result.metricName, result.formula)} trend`,
+      title,
       chartType: "line_chart",
       businessModule: inferReportMetricBusinessModule(result, locale),
       description: isZh ? "基于时间字段展示指标变化。" : "Shows metric changes over business time.",
-      insightHint: isZh ? "适合观察趋势、峰值和周期波动。" : "Use this to review trend shifts, peaks, and periodic volatility.",
+      insightHint: trendInsight(chartBase, locale),
       priority: 15,
+      group,
+      chartGroup: group,
+      businessQuestion,
+      linkedInsightIds: [],
+      linkedMetricIds: [result.metricId],
       displaySize: "large",
       metricIds: [result.metricId],
-      data: rows.reverse(),
+      data: rows,
       xAxis: isZh ? "时间" : "Time",
-      yAxis: contextualMetricName(result.displayName || result.metricName, result.formula)
+      yAxis,
+      aggregationType,
+      metricLabel: yAxis,
+      incompletePeriod,
+      caveats
     } satisfies ReportChartConfig];
   }).slice(0, 2);
 }
@@ -7253,6 +7755,234 @@ function reportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
   if (range === "ALL") return "全部";
   if (range === "CUSTOM") return "自定义";
   return range;
+}
+
+function comparisonCurrentRangeLabel(range: ReportTimeRange, locale: Locale) {
+  if (locale !== "zh") {
+    if (range === "CUSTOM") return "Current range";
+    if (range === "ALL") return "All-time scope";
+    return `Last ${range === "12M" ? "12 months" : `${reportTimeRangeDays[range] ?? 30} days`}`;
+  }
+
+  if (range === "7D") return "近 7 天";
+  if (range === "30D") return "近 30 天";
+  if (range === "90D") return "近 90 天";
+  if (range === "12M") return "近 12 个月";
+  if (range === "CUSTOM") return "当前区间";
+  return "全周期口径";
+}
+
+function comparisonPreviousRangeLabel(range: ReportTimeRange, locale: Locale) {
+  if (locale !== "zh") {
+    if (range === "CUSTOM") return "previous equal-length range";
+    if (range === "12M") return "previous 12 months";
+    return `previous ${reportTimeRangeDays[range] ?? 30} days`;
+  }
+
+  if (range === "7D") return "前 7 天";
+  if (range === "30D") return "前 30 天";
+  if (range === "90D") return "前 90 天";
+  if (range === "12M") return "前 12 个月";
+  return "前一等长区间";
+}
+
+function formatComparisonDate(value?: string | null) {
+  if (!value) return null;
+  const date = parseReportTrendDate(value);
+  return date ? date.toISOString().slice(0, 10) : value.slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function isoDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function previousRangeFromCurrent(currentStart?: string | null, currentEnd?: string | null) {
+  const start = currentStart ? parseReportTrendDate(currentStart) : null;
+  const end = currentEnd ? parseReportTrendDate(currentEnd) : null;
+
+  if (!start || !end || start.getTime() > end.getTime()) {
+    return { previousStartDate: null, previousEndDate: null };
+  }
+
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+
+  const durationDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+  const previousEnd = addDays(start, -1);
+  const previousStart = addDays(previousEnd, -durationDays + 1);
+
+  return {
+    previousStartDate: isoDateOnly(previousStart),
+    previousEndDate: isoDateOnly(previousEnd)
+  };
+}
+
+function signedComparisonPercent(value: number, locale: Locale) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1
+  })}%`;
+}
+
+function metricDirectionFromText(metricName: string, metricCategory?: string | null): MetricDirection {
+  const text = normalizeReportMetricText(`${metricName} ${metricCategory ?? ""}`);
+
+  if (/(cac|cost|refund|return|churn|cancel|negative|complaint|defect|error|failure|latency|delay|risk|loss|bad_debt|chargeback|unsubscribe|bounce)/.test(text)) {
+    return "lower_is_better";
+  }
+
+  if (/(neutral|estimate|estimated|diagnostic|ratio_unknown)/.test(text)) {
+    return "neutral";
+  }
+
+  return "higher_is_better";
+}
+
+function comparisonToneClass(changePercent: number | null | undefined, metricDirection: MetricDirection) {
+  if (changePercent == null || !Number.isFinite(changePercent) || metricDirection === "neutral" || Math.abs(changePercent) < 0.0001) {
+    return "text-slate-600";
+  }
+
+  const improved = metricDirection === "higher_is_better" ? changePercent > 0 : changePercent < 0;
+  return improved ? "text-emerald-700" : "text-rose-700";
+}
+
+type MetricComparisonDisplay = {
+  currentRangeLabel: string;
+  previousRangeLabel?: string;
+  currentStartDate?: string | null;
+  currentEndDate?: string | null;
+  previousStartDate?: string | null;
+  previousEndDate?: string | null;
+  changePercent?: number | null;
+  changeDirection: "up" | "down" | "flat" | "unknown";
+  metricDirection: MetricDirection;
+  displayText: string;
+  deltaText?: string;
+  tooltipText: string;
+  toneClass: string;
+  hasComparablePeriod: boolean;
+};
+
+function buildMetricComparisonDisplay({
+  range,
+  locale,
+  hasTimeField,
+  changePercent,
+  currentStartDate,
+  currentEndDate,
+  previousStartDate,
+  previousEndDate,
+  metricDirection,
+  displayText,
+  tooltipText
+}: {
+  range: ReportTimeRange;
+  locale: Locale;
+  hasTimeField: boolean;
+  changePercent?: number | null;
+  currentStartDate?: string | null;
+  currentEndDate?: string | null;
+  previousStartDate?: string | null;
+  previousEndDate?: string | null;
+  metricDirection: MetricDirection;
+  displayText?: string | null;
+  tooltipText?: string | null;
+}): MetricComparisonDisplay {
+  const isZh = locale === "zh";
+  const currentRangeLabel = comparisonCurrentRangeLabel(range, locale);
+  const previousRangeLabel = comparisonPreviousRangeLabel(range, locale);
+  const normalizedCurrentStart = formatComparisonDate(currentStartDate);
+  const normalizedCurrentEnd = formatComparisonDate(currentEndDate);
+  const inferredPreviousRange = previousRangeFromCurrent(normalizedCurrentStart, normalizedCurrentEnd);
+  const normalizedPreviousStart = formatComparisonDate(previousStartDate) ?? inferredPreviousRange.previousStartDate;
+  const normalizedPreviousEnd = formatComparisonDate(previousEndDate) ?? inferredPreviousRange.previousEndDate;
+  const hasComparablePeriod = range !== "ALL" && changePercent != null && Number.isFinite(changePercent);
+  const changeDirection = changePercent == null || !Number.isFinite(changePercent)
+    ? "unknown"
+    : Math.abs(changePercent) < 0.0001
+      ? "flat"
+      : changePercent > 0
+        ? "up"
+        : "down";
+
+  if (!hasTimeField) {
+    return {
+      currentRangeLabel: isZh ? "全周期口径" : "All-time scope",
+      changeDirection: "unknown",
+      metricDirection,
+      displayText: isZh ? "全周期口径" : "All-time scope",
+      tooltipText: isZh ? "当前数据缺少时间字段，无法生成周期对比。" : "The current data does not include a time field, so period comparison cannot be generated.",
+      toneClass: "text-slate-600",
+      hasComparablePeriod: false
+    };
+  }
+
+  if (range === "ALL") {
+    return {
+      currentRangeLabel,
+      changeDirection: "unknown",
+      metricDirection,
+      displayText: isZh ? "全周期口径" : "All-time scope",
+      tooltipText: tooltipText ?? (isZh ? "全周期口径。" : "All-time scope."),
+      toneClass: "text-slate-600",
+      hasComparablePeriod: false
+    };
+  }
+
+  if (!hasComparablePeriod) {
+    return {
+      currentRangeLabel,
+      previousRangeLabel,
+      currentStartDate: normalizedCurrentStart,
+      currentEndDate: normalizedCurrentEnd,
+      previousStartDate: normalizedPreviousStart,
+      previousEndDate: normalizedPreviousEnd,
+      changePercent: null,
+      changeDirection: "unknown",
+      metricDirection,
+      displayText: isZh ? "暂无可比周期" : "No comparable period",
+      tooltipText: tooltipText ?? (isZh
+        ? "当前指标暂无可用的前一对比周期。"
+        : "No previous comparison period is available for this metric."),
+      toneClass: "text-slate-600",
+      hasComparablePeriod: false
+    };
+  }
+
+  const percentText = signedComparisonPercent(changePercent, locale);
+  const computedDisplayText = isZh
+    ? `${currentRangeLabel}较${previousRangeLabel} ${percentText}`
+    : `${currentRangeLabel} vs ${previousRangeLabel} ${percentText}`;
+  const computedTooltipText = normalizedCurrentStart && normalizedCurrentEnd && normalizedPreviousStart && normalizedPreviousEnd
+    ? (isZh
+      ? `当前区间：${normalizedCurrentStart} 至 ${normalizedCurrentEnd}；对比区间：${normalizedPreviousStart} 至 ${normalizedPreviousEnd}。`
+      : `Current range: ${normalizedCurrentStart} to ${normalizedCurrentEnd}; comparison range: ${normalizedPreviousStart} to ${normalizedPreviousEnd}.`)
+    : (isZh ? "当前指标使用前一等长区间进行对比。" : "This metric is compared with the previous equal-length period.");
+
+  return {
+    currentRangeLabel,
+    previousRangeLabel,
+    currentStartDate: normalizedCurrentStart,
+    currentEndDate: normalizedCurrentEnd,
+    previousStartDate: normalizedPreviousStart,
+    previousEndDate: normalizedPreviousEnd,
+    changePercent,
+    changeDirection,
+    metricDirection,
+    displayText: displayText ?? computedDisplayText,
+    deltaText: isZh ? `较${previousRangeLabel} ${percentText}` : `vs ${previousRangeLabel} ${percentText}`,
+    tooltipText: tooltipText ?? computedTooltipText,
+    toneClass: comparisonToneClass(changePercent, metricDirection),
+    hasComparablePeriod: true
+  };
 }
 
 function reportDateRangeQuery(range: SelectedReportDateRange) {
@@ -7300,15 +8030,6 @@ function trendChartDataFromMetric(metric: ReportTrendMetricViewData, selectedRan
   })).filter((row) => Number.isFinite(row.value));
 }
 
-function trendDeltaText(metric: ReportTrendMetricViewData, locale: Locale = "zh") {
-  if (metric.percentChange == null || !Number.isFinite(metric.percentChange)) return null;
-  const sign = metric.percentChange > 0 ? "+" : "";
-
-  return locale === "zh"
-    ? `较上一周期 ${sign}${(metric.percentChange * 100).toFixed(1)}%`
-    : `vs previous period ${sign}${(metric.percentChange * 100).toFixed(1)}%`;
-}
-
 function trendDirectionFromValues(currentValue: number | null, previousValue: number | null): ReportTrendMetricViewData["trendDirection"] {
   if (currentValue == null || previousValue == null || previousValue === 0) return "unknown";
   const percentChange = (currentValue - previousValue) / Math.abs(previousValue);
@@ -7322,12 +8043,38 @@ function trendMetricsForSelectedRange(
   selectedRange: ReportTimeRange
 ): ReportTrendMetricViewData[] {
   return trendMetrics.map((metric) => {
-    const series = filterReportTrendSeries(metric.timeSeries ?? [], selectedRange)
+    const allSeries = (metric.timeSeries ?? [])
       .map((row) => ({ ...row, dateValue: parseReportTrendDate(row.date) }))
       .filter((row): row is { date: string; value: number; dateValue: Date } =>
         row.value != null && Number.isFinite(row.value) && Boolean(row.dateValue)
       )
       .sort((left, right) => left.dateValue.getTime() - right.dateValue.getTime());
+    const series = selectedRange === "ALL" || selectedRange === "CUSTOM"
+      ? allSeries
+      : filterReportTrendSeries(metric.timeSeries ?? [], selectedRange)
+        .map((row) => ({ ...row, dateValue: parseReportTrendDate(row.date) }))
+        .filter((row): row is { date: string; value: number; dateValue: Date } =>
+          row.value != null && Number.isFinite(row.value) && Boolean(row.dateValue)
+        )
+        .sort((left, right) => left.dateValue.getTime() - right.dateValue.getTime());
+    const latestDate = allSeries.at(-1)?.dateValue ?? null;
+    const metricDirection = metric.metricDirection ?? metricDirectionFromText(metric.metricName, metric.businessModule);
+
+    const currentRange = (() => {
+      if (!latestDate || selectedRange === "ALL" || selectedRange === "CUSTOM") return null;
+      const days = reportTimeRangeDays[selectedRange];
+      if (!days) return null;
+      const currentEnd = new Date(latestDate);
+      currentEnd.setHours(23, 59, 59, 999);
+      const currentStart = new Date(currentEnd);
+      currentStart.setDate(currentStart.getDate() - days + 1);
+      currentStart.setHours(0, 0, 0, 0);
+      const previousEnd = new Date(currentStart.getTime() - 1);
+      const previousStart = new Date(previousEnd);
+      previousStart.setDate(previousStart.getDate() - days + 1);
+      previousStart.setHours(0, 0, 0, 0);
+      return { currentStart, currentEnd, previousStart, previousEnd };
+    })();
 
     if (series.length === 0) {
       return {
@@ -7337,6 +8084,8 @@ function trendMetricsForSelectedRange(
         absoluteChange: null,
         percentChange: null,
         trendDirection: "unknown",
+        changeDirection: "unknown",
+        metricDirection,
         timeSeries: []
       };
     }
@@ -7349,14 +8098,37 @@ function trendMetricsForSelectedRange(
         absoluteChange: null,
         percentChange: null,
         trendDirection: "unknown",
+        changeDirection: "unknown",
+        metricDirection,
         timeSeries: series.map((row) => ({ date: row.date, value: row.value }))
       };
     }
 
-    const previousValue = series[0].value;
-    const currentValue = series.at(-1)!.value;
-    const absoluteChange = currentValue - previousValue;
-    const percentChange = previousValue ? absoluteChange / Math.abs(previousValue) : null;
+    const currentSeries = currentRange
+      ? allSeries.filter((row) => row.dateValue >= currentRange.currentStart && row.dateValue <= currentRange.currentEnd)
+      : series;
+    const previousSeries = currentRange
+      ? allSeries.filter((row) => row.dateValue >= currentRange.previousStart && row.dateValue <= currentRange.previousEnd)
+      : [];
+    const currentValue = currentSeries.at(-1)?.value ?? series.at(-1)!.value;
+    const previousValue = previousSeries.at(-1)?.value ?? (currentRange ? null : series[0].value);
+    const absoluteChange = previousValue != null ? currentValue - previousValue : null;
+    const percentChange = absoluteChange != null && previousValue ? absoluteChange / Math.abs(previousValue) : null;
+    const currentStartDate = currentRange ? isoDateOnly(currentRange.currentStart) : series[0].date;
+    const currentEndDate = currentRange ? isoDateOnly(currentRange.currentEnd) : series.at(-1)!.date;
+    const previousStartDate = currentRange ? isoDateOnly(currentRange.previousStart) : null;
+    const previousEndDate = currentRange ? isoDateOnly(currentRange.previousEnd) : null;
+    const comparison = buildMetricComparisonDisplay({
+      range: selectedRange,
+      locale: "zh",
+      hasTimeField: true,
+      changePercent: percentChange,
+      currentStartDate,
+      currentEndDate,
+      previousStartDate,
+      previousEndDate,
+      metricDirection
+    });
 
     return {
       ...metric,
@@ -7364,6 +8136,17 @@ function trendMetricsForSelectedRange(
       previousValue,
       absoluteChange,
       percentChange,
+      currentRangeLabel: comparison.currentRangeLabel,
+      previousRangeLabel: comparison.previousRangeLabel,
+      currentStartDate,
+      currentEndDate,
+      previousStartDate,
+      previousEndDate,
+      changePercent: percentChange,
+      changeDirection: comparison.changeDirection,
+      metricDirection,
+      displayText: comparison.displayText,
+      tooltipText: comparison.tooltipText,
       trendDirection: trendDirectionFromValues(currentValue, previousValue),
       timeSeries: series.map((row) => ({ date: row.date, value: row.value }))
     };
@@ -7394,23 +8177,48 @@ function reportTrendChartsFromPayload(
     const data = trendChartDataFromMetric(metric, selectedRange);
     if (data.length < 2) return [];
     const metricLabel = contextualMetricName(metric.metricName, metric.metricName);
+    if (!isValidTrendMetricName(metric.metricName) || !isValidTrendSeries({
+      metricName: metric.metricName,
+      yAxis: metricLabel,
+      values: data.map((row) => row.value)
+    })) return [];
+    const yAxis = chartMetricText(metricLabel, locale);
+    if (hasInvalidRatingRange(yAxis, data)) return [];
     const isVolume = /volume|orders|reviews|installs|tickets|records/i.test(metric.metricName);
+    const aggregationType = inferChartAggregationType(metric.metricName, isVolume ? "bar_chart" : "line_chart");
+    const incompletePeriod = isLatestBucketIncomplete(data, aggregationType);
+    const title = trendChartTitle(yAxis, locale);
+    const group = chartGroupFromConfig({ chartType: isVolume ? "bar_chart" : "line_chart", yAxis, title });
+    const businessQuestion = chartBusinessQuestion({ chartType: isVolume ? "bar_chart" : "line_chart", yAxis, group }, locale);
+    const caveats = incompletePeriod ? [isZh ? "未完整周期" : "Incomplete period"] : [];
+    const chartBase = { data, yAxis, aggregationType, incompletePeriod };
 
     return [{
       id: `payload-trend-${metric.metricName}-${index}`,
-      title: isZh ? `${metricLabel} 趋势` : `${metricLabel} trend`,
+      title,
       chartType: isVolume ? "bar_chart" : "line_chart",
       businessModule: metric.businessModule ?? (isZh ? "趋势分析" : "Trend Analysis"),
       description: isZh
         ? `按 ${metric.dateField ?? "业务时间"} 查看指标变化。`
         : `Shows changes by ${metric.dateField ?? "business time"}.`,
-      insightHint: trendDeltaText(metric, locale) ?? (isZh ? "用于识别增长、下滑和波动。" : "Use this to identify growth, decline, and volatility."),
+      insightHint: trendInsight(chartBase, locale),
       priority: index,
+      group,
+      chartGroup: group,
+      businessQuestion,
+      linkedInsightIds: [],
+      linkedMetricIds: [metric.metricName],
       displaySize: "large",
       metricIds: [],
       data,
       xAxis: isZh ? "时间" : "Time",
-      yAxis: metricLabel
+      yAxis,
+      aggregationType,
+      metricLabel: yAxis,
+      timeField: metric.dateField,
+      incompletePeriod,
+      caveats,
+      debugNote: metric.businessModule ? `${isZh ? "业务类型" : "Business type"}：${metric.businessModule}` : undefined
     } satisfies ReportChartConfig];
   });
 
@@ -7422,20 +8230,45 @@ function reportTrendChartsFromPayload(
       value: Number(row.value)
     })).filter((row) => Number.isFinite(row.value));
     if (data.length < 2) return [];
+    if (!isValidTrendMetricName(chart.yAxis ?? chart.title) || !isValidTrendSeries({
+      metricName: chart.yAxis ?? chart.title,
+      yAxis: chart.yAxis ?? chart.title,
+      values: data.map((row) => row.value)
+    })) return [];
+    const yAxis = chartMetricText(chart.yAxis ?? chart.title, locale);
+    if (hasInvalidRatingRange(yAxis, data)) return [];
+    const aggregationType = inferChartAggregationType(chart.yAxis ?? chart.title, chart.chartType === "bar_chart" ? "bar_chart" : "line_chart");
+    const incompletePeriod = isLatestBucketIncomplete(data, aggregationType);
+    const title = trendChartTitle(yAxis, locale);
+    const group = chartGroupFromConfig({ chartType: chart.chartType === "bar_chart" ? "bar_chart" : "line_chart", yAxis, title });
+    const businessQuestion = chartBusinessQuestion({ chartType: chart.chartType === "bar_chart" ? "bar_chart" : "line_chart", yAxis, group }, locale);
+    const caveats = incompletePeriod ? [isZh ? "未完整周期" : "Incomplete period"] : [];
+    const chartBase = { data, yAxis, aggregationType, incompletePeriod };
 
     return [{
       id: `payload-trend-chart-${index}`,
-      title: chart.title,
+      title,
       chartType: chart.chartType === "bar_chart" ? "bar_chart" : "line_chart",
       businessModule: isZh ? "趋势分析" : "Trend Analysis",
       description: chart.description ?? (isZh ? "按业务时间字段展示指标变化。" : "Shows metric changes by business time."),
-      insightHint: chart.insightHint ?? (isZh ? "用于识别增长、下滑和波动。" : "Use this to identify growth, decline, and volatility."),
+      insightHint: trendInsight(chartBase, locale),
       priority: index,
+      group,
+      chartGroup: group,
+      businessQuestion,
+      linkedInsightIds: [],
+      linkedMetricIds: [chart.yAxis ?? chart.title],
       displaySize: "large",
       metricIds: [],
       data,
       xAxis: chart.xAxis ?? (isZh ? "时间" : "Time"),
-      yAxis: chart.yAxis
+      yAxis,
+      aggregationType,
+      metricLabel: yAxis,
+      timeField: chart.xAxis,
+      incompletePeriod,
+      caveats,
+      debugNote: chart.yAxis ? `${isZh ? "原始字段" : "Raw field"}：${chart.yAxis}` : undefined
     } satisfies ReportChartConfig];
   }).slice(0, 4);
 }
@@ -7478,15 +8311,30 @@ function buildScatterChart(results: ReportMetricEvidenceResult[], locale: Locale
     description: isZh ? "把规模指标和质量指标放在一起，识别高规模低质量或高质量低规模对象。" : "Compares scale and quality to surface high-scale low-quality or high-quality low-scale objects.",
     insightHint: isZh ? "右下区域通常代表需要排查的高规模低质量对象，左上区域可作为增长候选。" : "Lower-quality high-scale objects need review; higher-quality lower-scale objects can become growth candidates.",
     priority: 18,
+    group: "relationship",
+    chartGroup: "relationship",
+    businessQuestion: isZh ? "规模增长是否伴随质量风险或机会？" : "Does scale growth come with quality risks or opportunities?",
+    linkedInsightIds: [],
+    linkedMetricIds: [scaleMetric.metricId, qualityMetric.metricId],
     displaySize: "large",
     metricIds: [scaleMetric.metricId, qualityMetric.metricId],
     data,
-    xAxis: contextualMetricName(scaleMetric.displayName || scaleMetric.metricName, scaleMetric.formula),
-    yAxis: contextualMetricName(qualityMetric.displayName || qualityMetric.metricName, qualityMetric.formula)
+    xAxis: chartMetricText(contextualMetricName(scaleMetric.displayName || scaleMetric.metricName, scaleMetric.formula), locale),
+    yAxis: chartMetricText(contextualMetricName(qualityMetric.displayName || qualityMetric.metricName, qualityMetric.formula), locale)
   };
 }
 
-function recommendReportCharts(results: ReportMetricEvidenceResult[], locale: Locale = "zh") {
+function recommendReportCharts(
+  results: ReportMetricEvidenceResult[],
+  locale: Locale = "zh",
+  context: ChartRecommendationContext = {}
+) {
+  const signals = [
+    ...(context.keyFindings ?? []),
+    ...(context.businessRisks ?? []),
+    ...(context.growthOpportunities ?? []),
+    ...(context.nextActions ?? [])
+  ];
   const computed = results
     .filter((result) => result.status === "computed")
     .filter(hasDisplayableMetricResult)
@@ -7500,11 +8348,11 @@ function recommendReportCharts(results: ReportMetricEvidenceResult[], locale: Lo
   ].filter(Boolean) as ReportChartConfig[];
   const byId = new Map<string, ReportChartConfig>();
 
-  for (const chart of charts.sort((left, right) => left.priority - right.priority)) {
+  for (const chart of dedupeCharts(charts, locale, signals)) {
     if (!byId.has(chart.id)) byId.set(chart.id, chart);
   }
 
-  return Array.from(byId.values()).slice(0, 5);
+  return Array.from(byId.values());
 }
 
 function matchesReportMetricStatusFilter(result: ReportMetricEvidenceResult, filter: ReportMetricStatusFilter) {
@@ -7526,11 +8374,13 @@ function ReportChartTooltip({
   active,
   payload,
   label,
+  chart,
   locale = "zh"
 }: {
   active?: boolean;
   payload?: Array<{ value?: unknown; name?: string; payload?: ReportChartDatum }>;
   label?: string;
+  chart?: ReportChartConfig;
   locale?: Locale;
 }) {
   const isZh = locale === "zh";
@@ -7545,6 +8395,15 @@ function ReportChartTooltip({
           {entry.name ?? (isZh ? "数值" : "Value")}：{formatReportMetricValue(entry.value)}
         </p>
       ))}
+      {chart?.dimensionLabel ? (
+        <p className="mt-1 text-muted-foreground">{isZh ? "维度" : "Dimension"}：{chart.dimensionLabel}</p>
+      ) : null}
+      {chart?.metricLabel || chart?.yAxis ? (
+        <p className="mt-1 text-muted-foreground">{isZh ? "指标" : "Metric"}：{chart.metricLabel ?? chart.yAxis}</p>
+      ) : null}
+      {chart?.aggregationType ? (
+        <p className="mt-1 text-muted-foreground">{isZh ? "聚合" : "Aggregation"}：{chart.aggregationType}</p>
+      ) : null}
       {datum?.secondaryLabel && datum.secondaryValue != null ? (
         <p className="mt-1 text-muted-foreground">
           {datum.secondaryLabel}：{formatReportMetricValue(datum.secondaryValue)}
@@ -7583,7 +8442,7 @@ function ReportHorizontalBarChart({ chart, locale = "zh" }: { chart: ReportChart
             tickLine={false}
             tickFormatter={reportHorizontalAxisLabel}
           />
-          <Tooltip content={<ReportChartTooltip locale={locale} />} />
+          <Tooltip content={<ReportChartTooltip chart={chart} locale={locale} />} />
           <Bar dataKey="value" name={chart.yAxis ?? (locale === "zh" ? "数值" : "Value")} radius={[0, 6, 6, 0]} fill="#047857" />
         </BarChart>
       </ResponsiveContainer>
@@ -7605,7 +8464,7 @@ function ReportLineChart({ chart, locale = "zh" }: { chart: ReportChartConfig; l
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
           <YAxis tickFormatter={(value) => formatReportMetricValue(value)} tick={{ fontSize: 11 }} tickLine={false} />
-          <Tooltip content={<ReportChartTooltip locale={locale} />} />
+          <Tooltip content={<ReportChartTooltip chart={chart} locale={locale} />} />
           <Area type="monotone" dataKey="value" name={chart.yAxis ?? (locale === "zh" ? "数值" : "Value")} stroke="#047857" fill={`url(#chart-fill-${chart.id})`} strokeWidth={2} />
           <Line type="monotone" dataKey="value" stroke="#047857" strokeWidth={2} dot={false} />
         </AreaChart>
@@ -7622,7 +8481,7 @@ function ReportBarTrendChart({ chart, locale = "zh" }: { chart: ReportChartConfi
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
           <YAxis tickFormatter={(value) => formatReportMetricValue(value)} tick={{ fontSize: 11 }} tickLine={false} />
-          <Tooltip content={<ReportChartTooltip locale={locale} />} />
+          <Tooltip content={<ReportChartTooltip chart={chart} locale={locale} />} />
           <Bar dataKey="value" name={chart.yAxis ?? (locale === "zh" ? "数值" : "Value")} radius={[6, 6, 0, 0]} fill="#047857" />
         </BarChart>
       </ResponsiveContainer>
@@ -7641,7 +8500,7 @@ function ReportDonutChart({ chart, locale = "zh" }: { chart: ReportChartConfig; 
                 <Cell key={entry.label} fill={reportChartColors[index % reportChartColors.length]} />
               ))}
             </Pie>
-            <Tooltip content={<ReportChartTooltip locale={locale} />} />
+            <Tooltip content={<ReportChartTooltip chart={chart} locale={locale} />} />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -7760,10 +8619,10 @@ function ReportRankingTable({ chart, locale = "zh" }: { chart: ReportChartConfig
 }
 
 function ReportChartCard({ chart, locale = "zh" }: { chart: ReportChartConfig; locale?: Locale }) {
-  const title = localizedMetricName(localizedReportChartText(chart.title, locale), locale);
-  const businessModule = localizedReportChartText(chart.businessModule, locale);
+  const title = locale === "zh" ? chart.title : localizedMetricName(localizedReportChartText(chart.title, locale), locale);
+  const groupLabel = chartGroupLabel(chart.group, locale);
   const description = localizedReportChartText(chart.description, locale);
-  const insightHint = localizedReportChartText(chart.insightHint, locale);
+  const insightHint = localizedReportChartText(chartInsight(chart, locale), locale);
   const caveats = chart.caveats?.map((caveat) => localizedReportChartText(caveat, locale));
 
   return (
@@ -7777,8 +8636,13 @@ function ReportChartCard({ chart, locale = "zh" }: { chart: ReportChartConfig; l
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold">{title}</h3>
             <Badge variant="secondary" className="text-[11px] text-emerald-700">
-              {businessModule}
+              {groupLabel}
             </Badge>
+            {chart.incompletePeriod ? (
+              <Badge variant="secondary" className="text-[11px] text-amber-700">
+                {locale === "zh" ? "未完整周期" : "Incomplete period"}
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
         </div>
@@ -7801,14 +8665,64 @@ function ReportChartCard({ chart, locale = "zh" }: { chart: ReportChartConfig; l
           ))}
         </div>
       ) : null}
+      {chart.debugNote ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">{locale === "zh" ? "查看口径" : "View definition"}</summary>
+          <p className="mt-1">{chart.debugNote}</p>
+        </details>
+      ) : null}
     </div>
   );
+}
+
+function ReportChartGroupSection({
+  group,
+  charts,
+  locale
+}: {
+  group: ReportChartGroup;
+  charts: ReportChartConfig[];
+  locale: Locale;
+}) {
+  if (!charts.length) return null;
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">{chartGroupLabel(group, locale)}</h3>
+          <p className="text-xs text-muted-foreground">{chartGroupDescription(group, locale)}</p>
+        </div>
+        <Badge variant="secondary">{locale === "zh" ? `${charts.length} 张` : `${charts.length} charts`}</Badge>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {charts.map((chart) => (
+          <ReportChartCard key={chart.id} chart={chart} locale={locale} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function chartSections(charts: ReportChartConfig[]) {
+  return (["core_trends", "risk_quality", "structure", "relationship", "monetization", "auxiliary"] as ReportChartGroup[])
+    .map((group) => ({
+      group,
+      charts: charts
+        .filter((chart) => chart.group === group)
+        .sort((left, right) => chartPriority(left) - chartPriority(right))
+    }));
 }
 
 function ReportRecommendedCharts({ charts, locale = "zh" }: { charts: ReportChartConfig[]; locale?: Locale }) {
   const isZh = locale === "zh";
 
   if (!charts.length) return null;
+  const sortedCharts = [...charts].sort((left, right) => chartPriority(left) - chartPriority(right));
+  const visibleCharts = sortedCharts.slice(0, 5);
+  const hiddenCharts = sortedCharts.slice(5);
+  const grouped = chartSections(visibleCharts);
+  const hiddenGrouped = chartSections(hiddenCharts);
 
   return (
     <div className="rounded-xl border bg-secondary/10 p-3">
@@ -7822,10 +8736,20 @@ function ReportRecommendedCharts({ charts, locale = "zh" }: { charts: ReportChar
         </div>
         <Badge variant="secondary">{isZh ? `${charts.length} 个图表` : `${charts.length} charts`}</Badge>
       </div>
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-        {charts.map((chart) => (
-          <ReportChartCard key={chart.id} chart={chart} locale={locale} />
+      <div className="space-y-5">
+        {grouped.map(({ group, charts: groupCharts }) => (
+          <ReportChartGroupSection key={group} group={group} charts={groupCharts} locale={locale} />
         ))}
+        {hiddenCharts.length ? (
+          <details className="rounded-xl border bg-white p-3">
+            <summary className="cursor-pointer text-sm font-medium">{isZh ? `查看更多图表（${hiddenCharts.length}）` : `View more charts (${hiddenCharts.length})`}</summary>
+            <div className="mt-4 space-y-5">
+              {hiddenGrouped.map(({ group, charts: groupCharts }) => (
+                <ReportChartGroupSection key={group} group={group} charts={groupCharts} locale={locale} />
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
     </div>
   );
@@ -7851,6 +8775,11 @@ function ReportTrendAnalysisSection({
   const isZh = locale === "zh";
   const hasTimeField = Boolean(timeConfig?.hasTimeField);
   const charts = hasTimeField ? reportTrendChartsFromPayload(trendMetrics, trendCharts, selectedRange, locale) : [];
+  const sortedCharts = [...charts].sort((left, right) => chartPriority(left) - chartPriority(right));
+  const visibleCharts = sortedCharts.slice(0, 5);
+  const hiddenCharts = sortedCharts.slice(5);
+  const chartGroups = chartSections(visibleCharts);
+  const hiddenChartGroups = chartSections(hiddenCharts);
 
   return (
     <div className="rounded-xl border bg-white p-4 shadow-sm">
@@ -7894,10 +8823,20 @@ function ReportTrendAnalysisSection({
       </div>
       {hasTimeField ? (
         charts.length ? (
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            {charts.map((chart) => (
-              <ReportChartCard key={chart.id} chart={chart} locale={locale} />
+          <div className="mt-4 space-y-5">
+            {chartGroups.map(({ group, charts: groupCharts }) => (
+              <ReportChartGroupSection key={group} group={group} charts={groupCharts} locale={locale} />
             ))}
+            {hiddenCharts.length ? (
+              <details className="rounded-xl border bg-white p-3">
+                <summary className="cursor-pointer text-sm font-medium">{isZh ? `查看更多图表（${hiddenCharts.length}）` : `View more charts (${hiddenCharts.length})`}</summary>
+                <div className="mt-4 space-y-5">
+                  {hiddenChartGroups.map(({ group, charts: groupCharts }) => (
+                    <ReportChartGroupSection key={group} group={group} charts={groupCharts} locale={locale} />
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </div>
         ) : (
           <div className="mt-4 rounded-xl border bg-secondary/20 p-4 text-sm leading-6 text-muted-foreground">
@@ -7944,6 +8883,7 @@ function metricMonitoringSeverityFromPercent(value: number): MetricMonitoringAle
 function buildMetricMonitoringAlerts(
   results: ReportMetricEvidenceResult[],
   trendMetrics: ReportTrendMetricViewData[] = [],
+  selectedRange: ReportTimeRange = "30D",
   locale: Locale = "zh"
 ): MetricMonitoringAlert[] {
   const isZh = locale === "zh";
@@ -7956,6 +8896,19 @@ function buildMetricMonitoringAlerts(
   for (const metric of trendAlerts) {
     const percentChange = metric.percentChange ?? 0;
     const metricName = localizedMetricName(metric.metricName, locale);
+    const comparison = buildMetricComparisonDisplay({
+      range: selectedRange,
+      locale,
+      hasTimeField: true,
+      changePercent: percentChange,
+      currentStartDate: metric.currentStartDate,
+      currentEndDate: metric.currentEndDate,
+      previousStartDate: metric.previousStartDate,
+      previousEndDate: metric.previousEndDate,
+      metricDirection: metric.metricDirection ?? metricDirectionFromText(metric.metricName, metric.businessModule),
+      displayText: metric.displayText,
+      tooltipText: metric.tooltipText
+    });
     const direction = percentChange > 0
       ? (isZh ? "上升" : "increased")
       : percentChange < 0
@@ -7964,10 +8917,12 @@ function buildMetricMonitoringAlerts(
 
     alerts.push({
       id: `trend-${normalizeReportMetricText(metric.metricName)}`,
-      title: isZh ? `${metricName} 较上一周期${direction}` : `${metricName} ${direction} vs previous period`,
+      title: isZh
+        ? `${metricName} ${comparison.currentRangeLabel}较${comparison.previousRangeLabel ?? "前一等长区间"}${direction}`
+        : `${metricName} ${direction} ${comparison.currentRangeLabel} vs ${comparison.previousRangeLabel ?? "previous equal-length range"}`,
       description: isZh
-        ? `${metricName} 较上一周期 ${signedPercentText(percentChange, locale)}。`
-        : `${metricName} changed ${signedPercentText(percentChange, locale)} compared with the previous period.`,
+        ? `${metricName} ${comparison.displayText}。`
+        : `${metricName} changed ${signedPercentText(percentChange, locale)} for ${comparison.currentRangeLabel} vs ${comparison.previousRangeLabel ?? "the previous equal-length range"}.`,
       severity: metricMonitoringSeverityFromPercent(percentChange),
       badge: isZh ? "周期变化" : "Period change",
       meta: metric.previousValue != null && metric.currentValue != null
@@ -8050,7 +9005,7 @@ function MetricMonitoringAlertsSection({
           <h3 className="text-base font-semibold">{isZh ? "异常变化" : "Unusual changes"}</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
             {isZh
-              ? "优先展示较上一周期变化、阈值触发和影响判断的口径提醒。"
+              ? "优先展示明确周期对比、阈值触发和影响判断的口径提醒。"
               : "Highlights period changes, threshold triggers, and definition caveats that affect interpretation."}
           </p>
         </div>
@@ -8090,6 +9045,7 @@ function ReportMetricEvidencePanel({
   timeConfig,
   trendMetrics,
   trendCharts,
+  structuredReport,
   selectedRange,
   onRangeChange,
   locale = "zh",
@@ -8100,6 +9056,7 @@ function ReportMetricEvidencePanel({
   timeConfig?: ReportTimeConfigViewData;
   trendMetrics?: ReportTrendMetricViewData[];
   trendCharts?: ReportTrendChartViewData[];
+  structuredReport?: StructuredReportViewData | null;
   selectedRange: ReportTimeRange;
   onRangeChange: (range: ReportTimeRange) => void;
   locale?: Locale;
@@ -8113,13 +9070,32 @@ function ReportMetricEvidencePanel({
   const selectedRangeTrendMetrics = trendMetricsForSelectedRange(trendMetrics, selectedRange);
   const computedResults = displayResults.filter((result) => result.status === "computed");
   const coreKpis = selectReportCoreKpis(displayResults);
-  const recommendedCharts = recommendReportCharts(displayResults, locale);
+  const recommendationSignals = recommendationSignalsFromStructuredReport(structuredReport);
+  const recommendationContext: ChartRecommendationContext = {
+    keyFindings: recommendationSignals,
+    businessRisks: recommendationSignals,
+    growthOpportunities: recommendationSignals,
+    nextActions: recommendationSignals,
+    coreKpis
+  };
+  const recommendedCharts = recommendReportCharts(displayResults, locale, recommendationContext);
   const selectedRangeTrendCharts = reportTrendChartsFromPayload(selectedRangeTrendMetrics, trendCharts, selectedRange, locale);
-  const selectedRangeRecommendedCharts = [
-    ...selectedRangeTrendCharts,
-    ...recommendedCharts.filter((chart) => !chart.id.startsWith("payload-trend"))
-  ].slice(0, 5);
-  const anomalyAlerts = buildMetricMonitoringAlerts(displayResults, selectedRangeTrendMetrics, locale);
+  const selectedRangeTrendDisplayKeys = new Set(
+    selectedRangeTrendCharts
+      .map((chart) => finalizeChart(chart, locale, recommendationSignals))
+      .flatMap(chartDisplayDedupeKeys)
+  );
+  const selectedRangeRecommendedCharts = dedupeCharts(
+    recommendedCharts
+      .filter((chart) => !chart.id.startsWith("payload-trend"))
+      .filter((chart) => {
+        const finalizedChart = finalizeChart(chart, locale, recommendationSignals);
+        return !chartDisplayDedupeKeys(finalizedChart).some((key) => selectedRangeTrendDisplayKeys.has(key));
+      }),
+    locale,
+    recommendationSignals
+  );
+  const anomalyAlerts = buildMetricMonitoringAlerts(displayResults, selectedRangeTrendMetrics, selectedRange, locale);
   const hasTimeField = Boolean(timeConfig?.hasTimeField);
   const modules = Array.from(new Set(displayResults.map((result) => inferReportMetricBusinessModule(result, locale)))).sort();
   const visibleResults = displayResults
@@ -8192,16 +9168,31 @@ function ReportMetricEvidencePanel({
               {coreKpis.map((result) => {
                 const metricDisplay = objectMetricDisplay(result, locale);
                 const trendMetric = trendMetricForReportMetric(result, selectedRangeTrendMetrics);
-                const deltaText = trendMetric ? trendDeltaText(trendMetric, locale) : null;
                 const hasBackendRangeValue = result.currentValue != null || result.value != null;
                 const displayValue = result.currentValue != null
                   ? formatReportMetricValue(result.currentValue)
                   : metricDisplay.value;
-                const kpiDeltaText = result.percentChange != null && Number.isFinite(result.percentChange)
-                  ? (isZh
-                    ? `较上一周期 ${result.percentChange > 0 ? "+" : ""}${(result.percentChange * 100).toFixed(1)}%`
-                    : `vs previous period ${result.percentChange > 0 ? "+" : ""}${(result.percentChange * 100).toFixed(1)}%`)
-                  : null;
+                const metricDirection = result.metricDirection ?? trendMetric?.metricDirection ?? metricDirectionFromText(
+                  `${result.metricName} ${result.displayName ?? ""}`,
+                  result.metricCategory ?? result.businessType
+                );
+                const fallbackPreviousRange = previousRangeFromCurrent(
+                  result.currentStartDate ?? result.dateRangeStart ?? timeConfig?.startDate,
+                  result.currentEndDate ?? result.dateRangeEnd ?? timeConfig?.endDate
+                );
+                const comparison = buildMetricComparisonDisplay({
+                  range: selectedRange,
+                  locale,
+                  hasTimeField: Boolean(hasTimeField && result.hasTimeField !== false),
+                  changePercent: result.changePercent ?? result.percentChange ?? trendMetric?.changePercent ?? trendMetric?.percentChange,
+                  currentStartDate: result.currentStartDate ?? result.dateRangeStart ?? trendMetric?.currentStartDate ?? timeConfig?.startDate,
+                  currentEndDate: result.currentEndDate ?? result.dateRangeEnd ?? trendMetric?.currentEndDate ?? timeConfig?.endDate,
+                  previousStartDate: result.previousStartDate ?? trendMetric?.previousStartDate ?? fallbackPreviousRange.previousStartDate,
+                  previousEndDate: result.previousEndDate ?? trendMetric?.previousEndDate ?? fallbackPreviousRange.previousEndDate,
+                  metricDirection,
+                  displayText: result.displayText ?? trendMetric?.displayText,
+                  tooltipText: result.tooltipText ?? trendMetric?.tooltipText
+                });
                 return (
                   <div key={`core-${result.metricId}`} className="rounded-xl border bg-white p-4 shadow-sm">
                     <div className="space-y-2">
@@ -8225,29 +9216,22 @@ function ReportMetricEvidencePanel({
                       <p className="text-xs leading-5 text-muted-foreground">{reportMetricShortDescription(result, locale)}</p>
                     </div>
                     <p className="mt-4 text-2xl font-semibold tracking-tight">{displayValue}</p>
-                    {kpiDeltaText || deltaText ? (
-                      <p className={cn(
-                        "mt-1 text-xs font-medium",
-                        result.direction === "down" || trendMetric?.trendDirection === "down" ? "text-rose-700" : "text-emerald-700"
-                      )}>
-                        {kpiDeltaText ?? deltaText}
+                    <div className="mt-2 space-y-1 text-xs">
+                      <p className="text-muted-foreground">
+                        {result.hasTimeField === false || !hasTimeField || !hasBackendRangeValue && !trendMetric
+                          ? (isZh ? "全周期口径" : "All-time scope")
+                          : comparison.currentRangeLabel}
                       </p>
-                    ) : hasTimeField && selectedRange !== "ALL" ? (
-                      <p className="mt-1 text-xs text-muted-foreground">{isZh ? "暂无上一周期数据" : "No previous period data"}</p>
-                    ) : null}
-                    {hasTimeField ? (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {result.hasTimeField === false
-                          ? isZh ? "暂无时间字段，显示全周期口径" : "No time field; showing all-time value"
-                          : selectedRange === "ALL"
-                            ? isZh ? "全周期口径" : "All-time scope"
-                            : hasBackendRangeValue
-                              ? isZh ? `${reportTimeRangeLabel(selectedRange, locale)} 口径` : `${reportTimeRangeLabel(selectedRange, locale)} scope`
-                              : isZh ? "该指标暂无可用时间序列，显示全周期口径" : "No time series for this metric; showing all-time value"}
+                      <p className={cn("flex items-center gap-1 font-medium", comparison.toneClass)}>
+                        <span>{comparison.hasComparablePeriod ? comparison.displayText : comparison.displayText}</span>
+                        <HelpCircle
+                          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                          aria-label={comparison.tooltipText}
+                        >
+                          <title>{comparison.tooltipText}</title>
+                        </HelpCircle>
                       </p>
-                    ) : (
-                      <p className="mt-2 text-xs text-muted-foreground">{isZh ? "全周期口径" : "All-time scope"}</p>
-                    )}
+                    </div>
                     <p className="mt-2 text-xs text-muted-foreground">{inferReportMetricBusinessModule(result, locale)}</p>
                     <details className="mt-3 text-xs text-muted-foreground">
                       <summary className="cursor-pointer font-medium text-foreground">{isZh ? "查看口径" : "View definition"}</summary>
@@ -11209,6 +12193,7 @@ function ReportPage({ locale }: { locale: Locale }) {
         timeConfig?: ReportTimeConfigViewData;
         trendMetrics?: ReportTrendMetricViewData[];
         trendCharts?: ReportTrendChartViewData[];
+        structuredReport?: StructuredReportViewData;
       } | null;
     } | null;
   };
@@ -11352,6 +12337,7 @@ function ReportPage({ locale }: { locale: Locale }) {
   const latestTimeConfig = reportData?.briefing?.payloadJson?.timeConfig;
   const latestTrendMetrics = reportData?.briefing?.payloadJson?.trendMetrics ?? [];
   const latestTrendCharts = reportData?.briefing?.payloadJson?.trendCharts ?? [];
+  const latestStructuredReport = reportData?.briefing?.payloadJson?.structuredReport ?? null;
   const hasRealReportMetrics = latestMetricResults.some((result) => result.status === "computed");
   const reportEntitlement = reportData?.reportEntitlement;
   const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
@@ -11402,6 +12388,7 @@ function ReportPage({ locale }: { locale: Locale }) {
         timeConfig={latestTimeConfig}
         trendMetrics={latestTrendMetrics}
         trendCharts={latestTrendCharts}
+        structuredReport={latestStructuredReport}
         selectedRange={selectedDateRange.preset}
         onRangeChange={handleReportRangeChange}
         locale={locale}

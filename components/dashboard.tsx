@@ -5795,6 +5795,16 @@ type ReportMetricEvidenceResult = {
   status: "computed" | "skipped" | "failed";
   scope?: "global" | "group" | "entity" | "ranking" | "comparison" | "diagnostic" | "internal";
   value?: number | string | null;
+  currentValue?: number | string | null;
+  previousValue?: number | string | null;
+  absoluteChange?: number | null;
+  percentChange?: number | null;
+  direction?: "up" | "down" | "flat" | "unknown";
+  dateRangePreset?: string;
+  dateRangeStart?: string | null;
+  dateRangeEnd?: string | null;
+  dateField?: string | null;
+  hasTimeField?: boolean;
   rows?: Array<{
     dimension: string;
     value: number | string | null;
@@ -5824,12 +5834,21 @@ type ReportMetricEvidenceResult = {
 
 type ReportTimeRange = "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
 
+type SelectedReportDateRange = {
+  preset: ReportTimeRange;
+  startDate?: string;
+  endDate?: string;
+};
+
 type ReportTimeConfigViewData = {
   hasTimeField: boolean;
   defaultTimeField?: string;
   availableTimeFields?: string[];
   selectedRange?: ReportTimeRange;
   granularity?: "day" | "week" | "month" | "year";
+  dateRangePreset?: ReportTimeRange;
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 type ReportTrendMetricViewData = {
@@ -5883,7 +5902,7 @@ function reportEntitlementMessage(entitlement: ReportEntitlementViewData | null 
   }
 
   if (entitlement.monthlyUnlimited && entitlement.subscriptionStatus === "active") {
-    return isZh ? "当前套餐：月度无限报告" : "Current plan: monthly unlimited reports";
+    return "";
   }
 
   if (entitlement.oneTimeReportAvailable) {
@@ -5985,6 +6004,7 @@ function ReportsPage({
         reportsPageDataCache = payload;
         setReportData(payload);
       }
+      return payload;
     } finally {
       setIsLoadingReport(false);
     }
@@ -6017,6 +6037,8 @@ function ReportsPage({
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
+        async?: boolean;
+        jobId?: string;
         code?: string;
         computedMetricCount?: number;
         generatedAt?: string;
@@ -6025,6 +6047,34 @@ function ReportsPage({
 
       if (!response.ok || !payload?.ok) {
         throw new Error(reportGenerationErrorMessage(payload, locale));
+      }
+
+      if (payload.async) {
+        setReportGenerationMessage(
+          isReportsZh ? "报告正在后台生成，完成后会自动刷新。" : "Report is generating in the background and will refresh when complete."
+        );
+
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          const latest = await loadReportData();
+          const generatedAt = latest?.briefing?.payloadJson?.generatedAt ?? latest?.briefing?.createdAt;
+          const hasMetrics = latest?.briefing?.payloadJson?.metricResults?.some((result) => result.status === "computed");
+
+          if (generatedAt && hasMetrics) {
+            setReportGenerationMessage(
+              isReportsZh
+                ? `报告已更新 · 上次更新时间：${formatReportDate(generatedAt)}`
+                : `Report updated · Last updated: ${formatReportDate(generatedAt)}`
+            );
+            window.dispatchEvent(new Event("monarca-report-updated"));
+            return;
+          }
+        }
+
+        setReportGenerationMessage(
+          isReportsZh ? "报告仍在后台生成，请稍后刷新查看。" : "Report is still generating. Refresh later to view it."
+        );
+        return;
       }
 
       setReportGenerationMessage(
@@ -6045,6 +6095,7 @@ function ReportsPage({
   const lastReportUpdatedAt =
     reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
   const reportEntitlement = reportData?.reportEntitlement;
+  const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
   const briefing = reportData?.briefing ?? null;
   const reportMetricResults = briefing?.payloadJson?.metricResults ?? [];
   const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
@@ -6092,9 +6143,11 @@ function ReportsPage({
               {lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : (isReportsZh ? "尚未生成" : "Not generated yet")}
             </span>
           </div>
-          <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
-            {reportEntitlementMessage(reportEntitlement, locale)}
-          </div>
+          {reportEntitlementText ? (
+            <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
+              {reportEntitlementText}
+            </div>
+          ) : null}
           <div className="flex w-full flex-nowrap items-center gap-2 xl:w-auto">
             {reportEntitlement?.canGenerateReport !== false ? (
               <Button size="sm" onClick={generateReport} disabled={isGeneratingReport} className="whitespace-nowrap">
@@ -7202,6 +7255,15 @@ function reportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
   return range;
 }
 
+function reportDateRangeQuery(range: SelectedReportDateRange) {
+  const params = new URLSearchParams({ dateRangePreset: range.preset });
+
+  if (range.startDate) params.set("startDate", range.startDate);
+  if (range.endDate) params.set("endDate", range.endDate);
+
+  return params.toString();
+}
+
 function parseReportTrendDate(value: string) {
   const normalized = /^\d{4}$/.test(value) ? `${value}-01-01` : /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
   const date = new Date(normalized);
@@ -7267,7 +7329,29 @@ function trendMetricsForSelectedRange(
       )
       .sort((left, right) => left.dateValue.getTime() - right.dateValue.getTime());
 
-    if (series.length < 2) return metric;
+    if (series.length === 0) {
+      return {
+        ...metric,
+        currentValue: null,
+        previousValue: null,
+        absoluteChange: null,
+        percentChange: null,
+        trendDirection: "unknown",
+        timeSeries: []
+      };
+    }
+
+    if (series.length === 1) {
+      return {
+        ...metric,
+        currentValue: series[0].value,
+        previousValue: null,
+        absoluteChange: null,
+        percentChange: null,
+        trendDirection: "unknown",
+        timeSeries: series.map((row) => ({ date: row.date, value: row.value }))
+      };
+    }
 
     const previousValue = series[0].value;
     const currentValue = series.at(-1)!.value;
@@ -8006,6 +8090,8 @@ function ReportMetricEvidencePanel({
   timeConfig,
   trendMetrics,
   trendCharts,
+  selectedRange,
+  onRangeChange,
   locale = "zh",
   isLoading = false
 }: {
@@ -8014,6 +8100,8 @@ function ReportMetricEvidencePanel({
   timeConfig?: ReportTimeConfigViewData;
   trendMetrics?: ReportTrendMetricViewData[];
   trendCharts?: ReportTrendChartViewData[];
+  selectedRange: ReportTimeRange;
+  onRangeChange: (range: ReportTimeRange) => void;
   locale?: Locale;
   isLoading?: boolean;
 }) {
@@ -8021,13 +8109,12 @@ function ReportMetricEvidencePanel({
   const [statusFilter, setStatusFilter] = useState<ReportMetricStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<ReportMetricTypeFilter>("all");
   const [moduleFilter, setModuleFilter] = useState("all");
-  const [selectedTrendRange, setSelectedTrendRange] = useState<ReportTimeRange>(timeConfig?.selectedRange ?? "30D");
   const displayResults = dedupeReportMetricResults((metricResults ?? []).filter(isReportDashboardMetric));
-  const selectedRangeTrendMetrics = trendMetricsForSelectedRange(trendMetrics, selectedTrendRange);
+  const selectedRangeTrendMetrics = trendMetricsForSelectedRange(trendMetrics, selectedRange);
   const computedResults = displayResults.filter((result) => result.status === "computed");
   const coreKpis = selectReportCoreKpis(displayResults);
   const recommendedCharts = recommendReportCharts(displayResults, locale);
-  const selectedRangeTrendCharts = reportTrendChartsFromPayload(selectedRangeTrendMetrics, trendCharts, selectedTrendRange, locale);
+  const selectedRangeTrendCharts = reportTrendChartsFromPayload(selectedRangeTrendMetrics, trendCharts, selectedRange, locale);
   const selectedRangeRecommendedCharts = [
     ...selectedRangeTrendCharts,
     ...recommendedCharts.filter((chart) => !chart.id.startsWith("payload-trend"))
@@ -8057,12 +8144,6 @@ function ReportMetricEvidencePanel({
     .sort()
     .at(-1);
 
-  useEffect(() => {
-    if (timeConfig?.selectedRange) {
-      setSelectedTrendRange(timeConfig.selectedRange);
-    }
-  }, [timeConfig?.selectedRange]);
-
   return (
     <Card className="border-slate-200/70 bg-white/90 shadow-sm">
       <CardHeader className="pb-3">
@@ -8084,10 +8165,10 @@ function ReportMetricEvidencePanel({
                   <button
                     key={range.value}
                     type="button"
-                    onClick={() => setSelectedTrendRange(range.value)}
+                    onClick={() => onRangeChange(range.value)}
                     className={cn(
                       "rounded-full px-3 py-1.5 text-xs font-medium transition",
-                      selectedTrendRange === range.value
+                      selectedRange === range.value
                         ? "bg-slate-900 text-white"
                         : "text-muted-foreground hover:bg-white"
                     )}
@@ -8112,6 +8193,15 @@ function ReportMetricEvidencePanel({
                 const metricDisplay = objectMetricDisplay(result, locale);
                 const trendMetric = trendMetricForReportMetric(result, selectedRangeTrendMetrics);
                 const deltaText = trendMetric ? trendDeltaText(trendMetric, locale) : null;
+                const hasBackendRangeValue = result.currentValue != null || result.value != null;
+                const displayValue = result.currentValue != null
+                  ? formatReportMetricValue(result.currentValue)
+                  : metricDisplay.value;
+                const kpiDeltaText = result.percentChange != null && Number.isFinite(result.percentChange)
+                  ? (isZh
+                    ? `较上一周期 ${result.percentChange > 0 ? "+" : ""}${(result.percentChange * 100).toFixed(1)}%`
+                    : `vs previous period ${result.percentChange > 0 ? "+" : ""}${(result.percentChange * 100).toFixed(1)}%`)
+                  : null;
                 return (
                   <div key={`core-${result.metricId}`} className="rounded-xl border bg-white p-4 shadow-sm">
                     <div className="space-y-2">
@@ -8134,15 +8224,30 @@ function ReportMetricEvidencePanel({
                       </div>
                       <p className="text-xs leading-5 text-muted-foreground">{reportMetricShortDescription(result, locale)}</p>
                     </div>
-                    <p className="mt-4 text-2xl font-semibold tracking-tight">{metricDisplay.value}</p>
-                    {deltaText ? (
+                    <p className="mt-4 text-2xl font-semibold tracking-tight">{displayValue}</p>
+                    {kpiDeltaText || deltaText ? (
                       <p className={cn(
                         "mt-1 text-xs font-medium",
-                        trendMetric?.trendDirection === "down" ? "text-rose-700" : "text-emerald-700"
+                        result.direction === "down" || trendMetric?.trendDirection === "down" ? "text-rose-700" : "text-emerald-700"
                       )}>
-                        {deltaText}
+                        {kpiDeltaText ?? deltaText}
                       </p>
+                    ) : hasTimeField && selectedRange !== "ALL" ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{isZh ? "暂无上一周期数据" : "No previous period data"}</p>
                     ) : null}
+                    {hasTimeField ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {result.hasTimeField === false
+                          ? isZh ? "暂无时间字段，显示全周期口径" : "No time field; showing all-time value"
+                          : selectedRange === "ALL"
+                            ? isZh ? "全周期口径" : "All-time scope"
+                            : hasBackendRangeValue
+                              ? isZh ? `${reportTimeRangeLabel(selectedRange, locale)} 口径` : `${reportTimeRangeLabel(selectedRange, locale)} scope`
+                              : isZh ? "该指标暂无可用时间序列，显示全周期口径" : "No time series for this metric; showing all-time value"}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">{isZh ? "全周期口径" : "All-time scope"}</p>
+                    )}
                     <p className="mt-2 text-xs text-muted-foreground">{inferReportMetricBusinessModule(result, locale)}</p>
                     <details className="mt-3 text-xs text-muted-foreground">
                       <summary className="cursor-pointer font-medium text-foreground">{isZh ? "查看口径" : "View definition"}</summary>
@@ -8162,8 +8267,8 @@ function ReportMetricEvidencePanel({
               timeConfig={timeConfig}
               trendMetrics={selectedRangeTrendMetrics}
               trendCharts={trendCharts}
-              selectedRange={selectedTrendRange}
-              onRangeChange={setSelectedTrendRange}
+              selectedRange={selectedRange}
+              onRangeChange={onRangeChange}
               showRangeSelector={false}
               locale={locale}
             />
@@ -11111,26 +11216,33 @@ function ReportPage({ locale }: { locale: Locale }) {
   const [isLoadingReportEvidence, setIsLoadingReportEvidence] = useState(() => !reportsPageDataCache);
   const [isUpdatingMetrics, setIsUpdatingMetrics] = useState(false);
   const [metricsUpdateMessage, setMetricsUpdateMessage] = useState<string | null>(null);
+  const [selectedDateRange, setSelectedDateRange] = useState<SelectedReportDateRange>({ preset: "30D" });
 
-  const loadReportEvidence = useCallback(async () => {
+  const loadReportEvidence = useCallback(async (dateRange: SelectedReportDateRange = selectedDateRange) => {
     setIsLoadingReportEvidence(true);
 
     try {
-      const response = await fetch("/api/dashboard/reports", { cache: "no-store" });
+      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}`, { cache: "no-store" });
       const payload = await response.json().catch(() => null) as LegacyReportData | null;
 
       if (response.ok) {
         reportsPageDataCache = payload;
         setReportData(payload);
       }
+      return payload;
     } finally {
       setIsLoadingReportEvidence(false);
     }
-  }, []);
+  }, [selectedDateRange]);
 
   useEffect(() => {
     void loadReportEvidence();
   }, [loadReportEvidence]);
+
+  const handleReportRangeChange = useCallback((range: ReportTimeRange) => {
+    const nextRange = { preset: range };
+    setSelectedDateRange(nextRange);
+  }, []);
 
   const updateMetrics = useCallback(async () => {
     setIsUpdatingMetrics(true);
@@ -11145,11 +11257,14 @@ function ReportPage({ locale }: { locale: Locale }) {
         body: JSON.stringify({
           locale,
           userRequested: true,
+          dateRange: selectedDateRange,
           idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
         })
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
+        async?: boolean;
+        jobId?: string;
         code?: string;
         computedMetricCount?: number;
         generatedAt?: string;
@@ -11160,12 +11275,36 @@ function ReportPage({ locale }: { locale: Locale }) {
         throw new Error(reportGenerationErrorMessage(payload, locale));
       }
 
+      if (payload.async) {
+        setMetricsUpdateMessage(isZh ? "报告正在后台生成，完成后会自动刷新。" : "Report is generating in the background and will refresh when complete.");
+
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          const latest = await loadReportEvidence(selectedDateRange);
+          const generatedAt = latest?.briefing?.payloadJson?.generatedAt ?? latest?.briefing?.createdAt;
+          const hasMetrics = latest?.briefing?.payloadJson?.metricResults?.some((result) => result.status === "computed");
+
+          if (generatedAt && hasMetrics) {
+            setMetricsUpdateMessage(
+              isZh
+                ? `报告已更新 · ${formatReportDate(generatedAt)}`
+                : `Report updated · ${formatReportDate(generatedAt)}`
+            );
+            window.dispatchEvent(new Event("monarca-report-updated"));
+            return;
+          }
+        }
+
+        setMetricsUpdateMessage(isZh ? "报告仍在后台生成，请稍后刷新查看。" : "Report is still generating. Refresh later to view it.");
+        return;
+      }
+
       setMetricsUpdateMessage(
         isZh
           ? `已更新 ${payload.computedMetricCount ?? 0} 个指标 · ${formatReportDate(payload.generatedAt)}`
           : `Updated ${payload.computedMetricCount ?? 0} metrics · ${formatReportDate(payload.generatedAt)}`
       );
-      await loadReportEvidence();
+      await loadReportEvidence(selectedDateRange);
       window.dispatchEvent(new Event("monarca-report-updated"));
     } catch (error) {
       const fallback = isZh ? "指标更新失败" : "Failed to update metrics";
@@ -11173,7 +11312,7 @@ function ReportPage({ locale }: { locale: Locale }) {
     } finally {
       setIsUpdatingMetrics(false);
     }
-  }, [isZh, loadReportEvidence, locale]);
+  }, [isZh, loadReportEvidence, locale, selectedDateRange]);
 
   const trendDataBase = [
     { period: "05-01", revenue: 126, arr: 412, cac: 43, retention: 89, activation: 48, conversion: 12.8 },
@@ -11215,6 +11354,7 @@ function ReportPage({ locale }: { locale: Locale }) {
   const latestTrendCharts = reportData?.briefing?.payloadJson?.trendCharts ?? [];
   const hasRealReportMetrics = latestMetricResults.some((result) => result.status === "computed");
   const reportEntitlement = reportData?.reportEntitlement;
+  const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
 
   return (
     <section id="report" className="flex flex-col gap-4 scroll-mt-20 xl:h-full">
@@ -11231,9 +11371,11 @@ function ReportPage({ locale }: { locale: Locale }) {
           {metricsUpdateMessage ? (
             <p className="text-xs font-medium text-muted-foreground">{metricsUpdateMessage}</p>
           ) : null}
-          <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
-            {reportEntitlementMessage(reportEntitlement, locale)}
-          </div>
+          {reportEntitlementText ? (
+            <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
+              {reportEntitlementText}
+            </div>
+          ) : null}
           {reportEntitlement?.canGenerateReport !== false ? (
             <Button type="button" onClick={() => void updateMetrics()} disabled={isUpdatingMetrics}>
               <RefreshCw className={cn("size-4", isUpdatingMetrics && "animate-spin")} />
@@ -11260,6 +11402,8 @@ function ReportPage({ locale }: { locale: Locale }) {
         timeConfig={latestTimeConfig}
         trendMetrics={latestTrendMetrics}
         trendCharts={latestTrendCharts}
+        selectedRange={selectedDateRange.preset}
+        onRangeChange={handleReportRangeChange}
         locale={locale}
         isLoading={isLoadingReportEvidence}
       />

@@ -1,9 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import { apiErrorResponse } from "@/lib/api-errors";
+import { computeMetricResultsForContexts } from "@/lib/metric-results";
 import { isBusinessFacingMetricDefinition, isBusinessFacingMetricText } from "@/lib/metric-visibility";
 import { getReportEntitlementState } from "@/lib/report-entitlements";
+import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { dateRangeFromSearchParams, resolveReportDateRange } from "@/lib/report-date-range";
+import {
+  cacheIdentityFromPayload,
+  getReportMetricCache,
+  reportMetricCacheKey,
+  type ReportMetricCachePayload,
+  upsertReportMetricCache
+} from "@/lib/report-metric-cache";
+import { tablesFromSchemaJson, validationFromLineage } from "@/lib/metric-validation";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -30,8 +43,8 @@ function briefingLocale(
   return locale === "zh" || locale === "en" ? locale : null;
 }
 
-function filterBriefingMetricResults(
-  briefing: Awaited<ReturnType<typeof prisma.dailyBriefing.findFirst>>,
+function filterBriefingMetricResults<T extends { payloadJson?: unknown } | null>(
+  briefing: T,
   visibleMetricIds: Set<string>,
   visibleMetricsById: Map<string, {
     id: string;
@@ -76,10 +89,275 @@ function filterBriefingMetricResults(
         );
       })
     }
+  } as T;
+}
+
+function uniqueTables(tables: ReturnType<typeof tablesFromSchemaJson>) {
+  const seen = new Set<string>();
+
+  return tables.filter((table) => {
+    const key = `${table.schema ?? ""}.${table.name}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function activeTableLabels(tables: Array<{ name: string; schema?: string | null }>) {
+  return new Set(tables.flatMap((table) => {
+    const labels = [table.name];
+    if (table.schema) labels.push(`${table.schema}.${table.name}`);
+    return labels;
+  }));
+}
+
+function metricBelongsToTables(metric: { formula: string }, tableLabels: Set<string>) {
+  const text = metric.formula.toLowerCase();
+  return Array.from(tableLabels).some((label) => text.includes(label.toLowerCase()));
+}
+
+function trendDirection(currentValue: number | null, previousValue: number | null) {
+  if (currentValue == null || previousValue == null || previousValue === 0) return "unknown";
+  const deltaPercent = (currentValue - previousValue) / Math.abs(previousValue);
+  if (Math.abs(deltaPercent) < 0.01) return "flat";
+  return deltaPercent > 0 ? "up" : "down";
+}
+
+function buildReportTimeArtifacts(aggregationResults: Awaited<ReturnType<typeof buildAggregationResults>>, dateRange: ReturnType<typeof resolveReportDateRange>) {
+  const timeTrends = aggregationResults.flatMap((aggregation) =>
+    aggregation.timeTrends.map((trend) => ({ aggregation, trend }))
+  );
+
+  if (timeTrends.length === 0) {
+    return {
+      timeConfig: {
+        hasTimeField: false,
+        availableTimeFields: [],
+        selectedRange: dateRange.preset,
+        granularity: "month",
+        dateRangePreset: dateRange.preset,
+        startDate: dateRange.startDate ?? null,
+        endDate: dateRange.endDate ?? null
+      },
+      trendMetrics: [],
+      trendCharts: []
+    };
+  }
+
+  const firstTrend = timeTrends[0]?.trend;
+  const trendMetrics = timeTrends.map(({ aggregation, trend }) => {
+    const last = trend.rows.at(-1)?.value ?? null;
+    const previous = trend.rows.at(-2)?.value ?? null;
+    const absoluteChange = last != null && previous != null ? last - previous : null;
+    const percentChange = absoluteChange != null && previous ? absoluteChange / Math.abs(previous) : null;
+
+    return {
+      metricName: trend.metric,
+      businessModule: aggregation.businessType,
+      dateField: trend.dateField,
+      granularity: trend.bucket,
+      currentValue: last,
+      previousValue: previous,
+      absoluteChange,
+      percentChange,
+      trendDirection: trendDirection(last, previous),
+      timeSeries: trend.rows.map((row) => ({ date: row.period, value: row.value }))
+    };
+  });
+
+  return {
+    timeConfig: {
+      hasTimeField: true,
+      defaultTimeField: firstTrend?.dateField,
+      availableTimeFields: Array.from(new Set(timeTrends.flatMap(({ trend }) => trend.dateField ? [trend.dateField] : []))),
+      selectedRange: dateRange.preset,
+      granularity: firstTrend?.bucket ?? "month",
+      dateRangePreset: dateRange.preset,
+      startDate: dateRange.startDate ?? null,
+      endDate: dateRange.endDate ?? null
+    },
+    trendMetrics,
+    trendCharts: trendMetrics.slice(0, 5).map((metric) => ({
+      title: `${metric.metricName} 趋势`,
+      chartType: /volume|orders|reviews|installs|tickets|records/i.test(metric.metricName) ? "bar_chart" : "line_chart",
+      xAxis: "date",
+      yAxis: metric.metricName,
+      series: metric.timeSeries,
+      description: "按业务时间字段展示核心指标变化。",
+      insightHint: "用于识别增长、下滑和波动。"
+    }))
   };
 }
 
-export async function GET() {
+async function latestWorkspaceSnapshotVersion(workspaceId: string) {
+  const snapshot = await prisma.schemaSnapshot.findFirst({
+    where: { workspaceId },
+    orderBy: { createdAt: "desc" },
+    select: { version: true }
+  });
+
+  return snapshot?.version ?? null;
+}
+
+async function refreshReportMetricCache({
+  workspaceId,
+  locale,
+  dateRange,
+  sourceSnapshotVersion
+}: {
+  workspaceId: string;
+  locale: "zh" | "en";
+  dateRange: ReturnType<typeof resolveReportDateRange>;
+  sourceSnapshotVersion?: number | null;
+}) {
+  const payload = await buildDateRangedReportPayload({ workspaceId, locale, dateRange });
+
+  if (!payload) return null;
+
+  const identity = cacheIdentityFromPayload({
+    workspaceId,
+    payload,
+    dateRange
+  });
+
+  await upsertReportMetricCache(prisma, {
+    ...identity,
+    payload,
+    sourceSnapshotVersion
+  });
+
+  return payload;
+}
+
+function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss" | "stale", cacheKey: string) {
+  return {
+    ...payload,
+    cache: {
+      status,
+      cacheKey,
+      generatedAt: payload.generatedAt,
+      staleAt: null
+    }
+  };
+}
+
+function prewarmCommonReportMetricCaches({
+  workspaceId,
+  locale,
+  activePreset,
+  sourceSnapshotVersion
+}: {
+  workspaceId: string;
+  locale: "zh" | "en";
+  activePreset: string;
+  sourceSnapshotVersion?: number | null;
+}) {
+  void workspaceId;
+  void locale;
+  void activePreset;
+  void sourceSnapshotVersion;
+}
+
+async function buildDateRangedReportPayload({
+  workspaceId,
+  locale,
+  dateRange
+}: {
+  workspaceId: string;
+  locale: "zh" | "en";
+  dateRange: ReturnType<typeof resolveReportDateRange>;
+}) {
+  const dataSources = await prisma.dataSourceConnection.findMany({
+    where: { workspaceId, isActive: true, status: "CONNECTED" },
+    orderBy: { updatedAt: "desc" }
+  });
+
+  const snapshots = await prisma.schemaSnapshot.findMany({
+    where: {
+      workspaceId,
+      dataSourceId: { in: dataSources.map((source) => source.id) }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  const snapshotBySource = new Map<string, typeof snapshots[number]>();
+  for (const snapshot of snapshots) {
+    if (snapshot.dataSourceId && !snapshotBySource.has(snapshot.dataSourceId)) {
+      snapshotBySource.set(snapshot.dataSourceId, snapshot);
+    }
+  }
+
+  const contexts = dataSources.flatMap((dataSource) => {
+    const snapshot = snapshotBySource.get(dataSource.id);
+    return snapshot ? [{ dataSource, tables: tablesFromSchemaJson(snapshot.schemaJson), schemaJson: snapshot.schemaJson }] : [];
+  });
+
+  if (contexts.length === 0) return null;
+
+  const tables = uniqueTables(contexts.flatMap((context) => context.tables));
+  const semanticLayer = buildSemanticLayer(tables.map((table) => ({
+    name: table.name,
+    schema: table.schema ?? undefined,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      type: column.type ?? "unknown",
+      nullable: column.nullable ?? true
+    }))
+  })));
+  const labels = activeTableLabels(tables);
+  const metrics = await prisma.metricDefinition.findMany({
+    where: { workspaceId, isActive: true },
+    orderBy: { createdAt: "asc" }
+  });
+  const executableMetrics = metrics
+    .filter((metric) => metricBelongsToTables(metric, labels))
+    .filter((metric) =>
+      isBusinessFacingMetricDefinition(metric) &&
+      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+    );
+
+  const metricResults = await computeMetricResultsForContexts({ contexts, metrics: executableMetrics, dateRange });
+  const aggregationResults = await buildAggregationResults({ contexts, metricResults, dateRange });
+  const timeArtifacts = buildReportTimeArtifacts(aggregationResults, dateRange);
+  const structuredReport = buildStructuredAiReport({
+    dataSourceCount: dataSources.length,
+    metricResults,
+    metrics: executableMetrics.map((metric) => ({
+      id: metric.id,
+      name: metric.name,
+      category: metric.category,
+      definition: metric.definition,
+      formula: metric.formula,
+      unit: metric.unit,
+      mappingJson: metric.mappingJson,
+      lineageJson: metric.lineageJson
+    })),
+    aggregationResults,
+    locale
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    locale,
+    dataSourceIds: dataSources.map((source) => source.id),
+    dataSourceName: dataSources.map((source) => source.name).join(locale === "zh" ? "、" : ", "),
+    dateRange: {
+      preset: dateRange.preset,
+      startDate: dateRange.startDate ?? null,
+      endDate: dateRange.endDate ?? null,
+      dateField: timeArtifacts.timeConfig.defaultTimeField ?? null,
+      generatedAt: new Date().toISOString()
+    },
+    semanticLayer,
+    metricResults,
+    aggregationResults,
+    timeConfig: timeArtifacts.timeConfig,
+    trendMetrics: timeArtifacts.trendMetrics,
+    trendCharts: timeArtifacts.trendCharts,
+    structuredReport
+  };
+}
+
+export async function GET(request: Request) {
   try {
     const session = await syncCurrentClerkUser();
 
@@ -87,6 +365,9 @@ export async function GET() {
       return NextResponse.json({ hasData: false, briefing: null, insights: [], recommendations: [] }, { status: 401 });
     }
 
+    const url = new URL(request.url);
+    const resolvedDateRange = resolveReportDateRange(dateRangeFromSearchParams(url.searchParams));
+    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id);
     const briefing = await prisma.dailyBriefing.findFirst({
       where: {
         workspaceId: session.workspace.id
@@ -140,7 +421,66 @@ export async function GET() {
     const businessMetrics = metrics.filter((metric) => isBusinessFacingMetricDefinition(metric));
     const visibleMetricIds = new Set(businessMetrics.map((metric) => metric.id));
     const visibleMetricsById = new Map(businessMetrics.map((metric) => [metric.id, metric]));
-    const visibleBriefing = filterBriefingMetricResults(selectedBriefing, visibleMetricIds, visibleMetricsById);
+    const locale = session.user.locale === "zh" ? "zh" : "en";
+    const cacheProbeKey = reportMetricCacheKey({
+      workspaceId: session.workspace.id,
+      dateRange: {
+        preset: resolvedDateRange.preset,
+        startDate: resolvedDateRange.startDate,
+        endDate: resolvedDateRange.endDate
+      }
+    });
+    const cacheResult = await getReportMetricCache(prisma, {
+      workspaceId: session.workspace.id,
+      dateRange: {
+        preset: resolvedDateRange.preset,
+        startDate: resolvedDateRange.startDate,
+        endDate: resolvedDateRange.endDate
+      }
+    });
+    let rangedPayload: ReportMetricCachePayload | null = cacheResult.payload;
+
+    if (rangedPayload && cacheResult.status === "stale") {
+      void refreshReportMetricCache({
+        workspaceId: session.workspace.id,
+        locale,
+        dateRange: resolvedDateRange,
+        sourceSnapshotVersion
+      }).catch(() => null);
+      prewarmCommonReportMetricCaches({
+        workspaceId: session.workspace.id,
+        locale,
+        activePreset: resolvedDateRange.preset,
+        sourceSnapshotVersion
+      });
+      rangedPayload = withCacheMeta(rangedPayload, "stale", cacheResult.cacheKey);
+    } else if (rangedPayload) {
+      rangedPayload = withCacheMeta(rangedPayload, "hit", cacheResult.cacheKey);
+    } else {
+      const freshPayload = await refreshReportMetricCache({
+        workspaceId: session.workspace.id,
+        locale,
+        dateRange: resolvedDateRange,
+        sourceSnapshotVersion
+      });
+      rangedPayload = freshPayload ? withCacheMeta(freshPayload, "miss", cacheProbeKey) : null;
+      prewarmCommonReportMetricCaches({
+        workspaceId: session.workspace.id,
+        locale,
+        activePreset: resolvedDateRange.preset,
+        sourceSnapshotVersion
+      });
+    }
+    const rangedBriefing = rangedPayload && selectedBriefing
+      ? {
+          ...selectedBriefing,
+          payloadJson: {
+            ...asRecord(selectedBriefing.payloadJson),
+            ...rangedPayload
+          }
+        }
+      : selectedBriefing;
+    const visibleBriefing = filterBriefingMetricResults(rangedBriefing, visibleMetricIds, visibleMetricsById);
     const insights = selectedBriefing?.insights ?? [];
     const recommendations = insights.flatMap((insight) => insight.recommendations);
     const reportEntitlement = await getReportEntitlementState(session.workspace.id);

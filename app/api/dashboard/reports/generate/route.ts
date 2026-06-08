@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { RecommendationStatus, WorkspaceRole } from "@prisma/client";
+import { ReportGenerationJobStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { computeMetricResultsForContexts, type MetricResultValue } from "@/lib/metric-results";
+import { normalizeReportDateRange, resolveReportDateRange } from "@/lib/report-date-range";
+import { cacheIdentityFromPayload, upsertReportMetricCache } from "@/lib/report-metric-cache";
 import {
   markReportGenerationFailed,
   markReportGenerationSucceeded,
@@ -77,7 +79,7 @@ function trendDirection(currentValue: number | null, previousValue: number | nul
   return deltaPercent > 0 ? "up" : "down";
 }
 
-function buildReportTimeArtifacts(aggregationResults: AggregationResult[]) {
+function buildReportTimeArtifacts(aggregationResults: AggregationResult[], dateRange = resolveReportDateRange({ preset: "30D" })) {
   const timeTrends = aggregationResults.flatMap((aggregation) =>
     aggregation.timeTrends.map((trend) => ({ aggregation, trend }))
   );
@@ -87,8 +89,11 @@ function buildReportTimeArtifacts(aggregationResults: AggregationResult[]) {
       timeConfig: {
         hasTimeField: false,
         availableTimeFields: [],
-        selectedRange: "ALL",
-        granularity: "month"
+        selectedRange: dateRange.preset,
+        granularity: "month",
+        dateRangePreset: dateRange.preset,
+        startDate: dateRange.startDate ?? null,
+        endDate: dateRange.endDate ?? null
       },
       trendMetrics: [],
       trendCharts: []
@@ -122,13 +127,16 @@ function buildReportTimeArtifacts(aggregationResults: AggregationResult[]) {
   });
 
   return {
-    timeConfig: {
-      hasTimeField: true,
-      defaultTimeField: firstTrend?.dateField,
-      availableTimeFields: Array.from(new Set(timeTrends.flatMap(({ trend }) => trend.dateField ? [trend.dateField] : []))),
-      selectedRange: defaultRange,
-      granularity: firstTrend?.bucket ?? "month"
-    },
+      timeConfig: {
+        hasTimeField: true,
+        defaultTimeField: firstTrend?.dateField,
+        availableTimeFields: Array.from(new Set(timeTrends.flatMap(({ trend }) => trend.dateField ? [trend.dateField] : []))),
+        selectedRange: dateRange.preset === "ALL" ? defaultRange : dateRange.preset,
+        granularity: firstTrend?.bucket ?? "month",
+        dateRangePreset: dateRange.preset,
+        startDate: dateRange.startDate ?? null,
+        endDate: dateRange.endDate ?? null
+      },
     trendMetrics,
     trendCharts: trendMetrics.slice(0, 5).map((metric) => ({
       title: `${contextualMetricName(metric.metricName, metric.metricName)} 趋势`,
@@ -234,6 +242,238 @@ function groupMetricResultsByType(results: MetricResultValue[]) {
   };
 }
 
+async function runReportGenerationJob(input: {
+  jobId: string;
+  generationLogId: string;
+  workspaceId: string;
+  userId: string;
+  reportLocale: ReportLocale;
+  resolvedDateRange: ReturnType<typeof resolveReportDateRange>;
+}) {
+  try {
+    await prisma.reportGenerationJob.update({
+      where: { id: input.jobId },
+      data: { status: ReportGenerationJobStatus.RUNNING, startedAt: new Date() }
+    });
+
+    const dataSources = await prisma.dataSourceConnection.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        isActive: true,
+        status: "CONNECTED"
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    if (dataSources.length === 0) {
+      throw new Error("No connected data source found for metric result execution");
+    }
+
+    const snapshots = await prisma.schemaSnapshot.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        dataSourceId: { in: dataSources.map((source) => source.id) }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    const snapshotBySource = new Map<string, typeof snapshots[number]>();
+
+    for (const snapshot of snapshots) {
+      if (snapshot.dataSourceId && !snapshotBySource.has(snapshot.dataSourceId)) {
+        snapshotBySource.set(snapshot.dataSourceId, snapshot);
+      }
+    }
+
+    const contexts = dataSources.flatMap((dataSource) => {
+      const snapshot = snapshotBySource.get(dataSource.id);
+      return snapshot ? [{
+        dataSource,
+        tables: tablesFromSchemaJson(snapshot.schemaJson),
+        schemaJson: snapshot.schemaJson
+      }] : [];
+    });
+
+    if (contexts.length === 0) {
+      throw new Error("No schema snapshot found for connected data sources");
+    }
+
+    const latestSnapshot = snapshots[0];
+    const tables = uniqueTables(contexts.flatMap((context) => context.tables));
+    const semanticLayer = buildSemanticLayer(tables.map((table) => ({
+      name: table.name,
+      schema: table.schema ?? undefined,
+      columns: table.columns.map((column) => ({
+        name: column.name,
+        type: column.type ?? "unknown",
+        nullable: column.nullable ?? true
+      }))
+    })));
+    const generatedMetricCount = await generateSemanticMetrics(prisma, {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      semanticLayer
+    });
+
+    await prisma.schemaSnapshot.update({
+      where: { id: latestSnapshot.id },
+      data: {
+        schemaJson: {
+          ...asRecord(latestSnapshot.schemaJson),
+          semanticLayer
+        },
+        qualityReport: {
+          ...asRecord(latestSnapshot.qualityReport),
+          semanticFieldCount: semanticLayer.fields.length,
+          businessEntityCount: semanticLayer.entities.length,
+          generatedMetricCount
+        }
+      }
+    });
+
+    await validateWorkspaceMetrics(prisma, {
+      workspaceId: input.workspaceId,
+      tables
+    });
+
+    const metrics = await prisma.metricDefinition.findMany({
+      where: { workspaceId: input.workspaceId, isActive: true },
+      orderBy: { createdAt: "asc" }
+    });
+    const visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
+    const executableMetrics = visibleMetrics.filter((metric) =>
+      isBusinessFacingMetricDefinition(metric) &&
+      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+    );
+    const metricResults = await computeMetricResultsForContexts({
+      contexts,
+      metrics: executableMetrics,
+      dateRange: input.resolvedDateRange
+    });
+    const displayableMetricResults = metricResults.filter((result) => hasDisplayableMetricResult(result));
+    const metricResultGroups = groupMetricResultsByType(metricResults);
+    const aggregationResults = await buildAggregationResults({
+      contexts,
+      metricResults,
+      dateRange: input.resolvedDateRange
+    });
+    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, input.resolvedDateRange);
+    const structuredReport = buildStructuredAiReport({
+      dataSourceCount: dataSources.length,
+      metricResults,
+      metrics: executableMetrics.map((metric) => ({
+        id: metric.id,
+        name: metric.name,
+        category: metric.category,
+        definition: metric.definition,
+        formula: metric.formula,
+        unit: metric.unit,
+        mappingJson: metric.mappingJson,
+        lineageJson: metric.lineageJson
+      })),
+      aggregationResults,
+      locale: input.reportLocale
+    });
+    const prompt = buildReportPrompt(structuredReport);
+    const mockReport = buildMockAiBrief(metricResults, input.reportLocale);
+    const fullSummary = structuredReport.coreSummary || mockReport.summary || buildBriefSummary(metricResults, input.reportLocale);
+    const summary = compactText(fullSummary);
+    const today = startOfToday();
+    const reportTitle = input.reportLocale === "zh" ? "AI 数据分析报告" : "AI Data Analysis Report";
+    const payloadJson = {
+      generatedFrom: "async_ai_brief",
+      locale: input.reportLocale,
+      generatedAt: new Date().toISOString(),
+      dateRange: {
+        preset: input.resolvedDateRange.preset,
+        startDate: input.resolvedDateRange.startDate ?? null,
+        endDate: input.resolvedDateRange.endDate ?? null,
+        dateField: reportTimeArtifacts.timeConfig.defaultTimeField ?? null,
+        generatedAt: new Date().toISOString()
+      },
+      dataSourceIds: dataSources.map((source) => source.id),
+      dataSourceName: dataSources.map((source) => source.name).join(input.reportLocale === "zh" ? "、" : ", "),
+      fullSummary,
+      metricResults,
+      metricResultGroups,
+      aggregationResults,
+      timeConfig: reportTimeArtifacts.timeConfig,
+      trendMetrics: reportTimeArtifacts.trendMetrics,
+      trendCharts: reportTimeArtifacts.trendCharts,
+      structuredReport,
+      prompt,
+      mockReport,
+      analysisReport: asRecord(latestSnapshot.qualityReport).analysisReport ?? asRecord(latestSnapshot.schemaJson).analysisReport ?? null
+    };
+    const cacheIdentity = cacheIdentityFromPayload({
+      workspaceId: input.workspaceId,
+      payload: payloadJson,
+      dateRange: input.resolvedDateRange
+    });
+
+    await upsertReportMetricCache(prisma, {
+      ...cacheIdentity,
+      payload: payloadJson,
+      sourceSnapshotVersion: latestSnapshot.version
+    });
+
+    const briefing = await prisma.dailyBriefing.upsert({
+      where: {
+        workspaceId_briefingDate: {
+          workspaceId: input.workspaceId,
+          briefingDate: today
+        }
+      },
+      create: {
+        workspaceId: input.workspaceId,
+        briefingDate: today,
+        title: reportTitle,
+        summary,
+        confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
+        payloadJson
+      },
+      update: {
+        title: reportTitle,
+        summary,
+        confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
+        payloadJson
+      }
+    });
+
+    await markReportGenerationSucceeded({
+      logId: input.generationLogId,
+      workspaceId: input.workspaceId,
+      reportId: briefing.id
+    });
+
+    await prisma.reportGenerationJob.update({
+      where: { id: input.jobId },
+      data: {
+        reportId: briefing.id,
+        status: ReportGenerationJobStatus.COMPLETED,
+        completedAt: new Date(),
+        metadata: {
+          computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
+          generatedAt: payloadJson.generatedAt
+        }
+      }
+    });
+  } catch (error) {
+    await markReportGenerationFailed({
+      logId: input.generationLogId,
+      workspaceId: input.workspaceId,
+      errorMessage: error instanceof Error ? error.message : "Failed to generate report."
+    }).catch(() => null);
+    await prisma.reportGenerationJob.update({
+      where: { id: input.jobId },
+      data: {
+        status: ReportGenerationJobStatus.FAILED,
+        failedAt: new Date(),
+        errorMessage: error instanceof Error ? error.message : "Failed to generate report."
+      }
+    }).catch(() => null);
+  }
+}
+
 export async function POST(request: Request) {
   let generationLogId: string | null = null;
   let generationWorkspaceId: string | null = null;
@@ -254,6 +494,8 @@ export async function POST(request: Request) {
 
     const requestedLocale = normalizeReportLocale(payloadRecord.locale);
     const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
+    const requestedDateRange = normalizeReportDateRange(payloadRecord.dateRange);
+    const resolvedDateRange = resolveReportDateRange(requestedDateRange);
     if (requestedLocale && requestedLocale !== session.user.locale) {
       await prisma.user.update({
         where: { id: session.user.id },
@@ -270,303 +512,42 @@ export async function POST(request: Request) {
       idempotencyKey: requestId
     });
     generationLogId = generationAccess.log.id;
-
-    const dataSources = await prisma.dataSourceConnection.findMany({
-      where: {
+    const generationJob = await prisma.reportGenerationJob.create({
+      data: {
         workspaceId: session.workspace.id,
-        isActive: true,
-        status: "CONNECTED"
-      },
-      orderBy: {
-        updatedAt: "desc"
-      }
-    });
-
-    if (dataSources.length === 0) {
-      return NextResponse.json(
-        { ok: false, message: "No connected data source found for metric result execution" },
-        { status: 400 }
-      );
-    }
-
-    const snapshots = await prisma.schemaSnapshot.findMany({
-      where: {
-        workspaceId: session.workspace.id,
-        dataSourceId: {
-          in: dataSources.map((source) => source.id)
+        status: ReportGenerationJobStatus.PENDING,
+        metadata: {
+          requestId,
+          dateRange: {
+            preset: resolvedDateRange.preset,
+            startDate: resolvedDateRange.startDate ?? null,
+            endDate: resolvedDateRange.endDate ?? null
+          },
+          locale: reportLocale
         }
-      },
-      orderBy: {
-        createdAt: "desc"
       }
     });
-    const snapshotBySource = new Map<string, typeof snapshots[number]>();
 
-    for (const snapshot of snapshots) {
-      if (snapshot.dataSourceId && !snapshotBySource.has(snapshot.dataSourceId)) {
-        snapshotBySource.set(snapshot.dataSourceId, snapshot);
-      }
-    }
-
-    const contexts = dataSources.flatMap((dataSource) => {
-      const snapshot = snapshotBySource.get(dataSource.id);
-
-      if (!snapshot) {
-        return [];
-      }
-
-      return [{
-        dataSource,
-        tables: tablesFromSchemaJson(snapshot.schemaJson),
-        schemaJson: snapshot.schemaJson
-      }];
-    });
-
-    if (contexts.length === 0) {
-      return NextResponse.json({ ok: false, message: "No schema snapshot found for connected data sources" }, { status: 404 });
-    }
-
-    const latestSnapshot = snapshots[0];
-    const tables = uniqueTables(contexts.flatMap((context) => context.tables));
-    const semanticLayer = buildSemanticLayer(tables.map((table) => ({
-      name: table.name,
-      schema: table.schema ?? undefined,
-      columns: table.columns.map((column) => ({
-        name: column.name,
-        type: column.type ?? "unknown",
-        nullable: column.nullable ?? true
-      }))
-    })));
-    const generatedMetricCount = await generateSemanticMetrics(prisma, {
+    void runReportGenerationJob({
+      jobId: generationJob.id,
+      generationLogId: generationAccess.log.id,
       workspaceId: session.workspace.id,
       userId: session.user.id,
-      semanticLayer
+      reportLocale,
+      resolvedDateRange
     });
 
-    await prisma.schemaSnapshot.update({
-      where: {
-        id: latestSnapshot.id
+    return NextResponse.json(
+      {
+        ok: true,
+        async: true,
+        jobId: generationJob.id,
+        status: "queued",
+        message: reportLocale === "zh" ? "报告生成已开始，完成后会自动刷新。" : "Report generation has started and will refresh when complete."
       },
-      data: {
-        schemaJson: {
-          ...asRecord(latestSnapshot.schemaJson),
-          semanticLayer
-        },
-        qualityReport: {
-          ...asRecord(latestSnapshot.qualityReport),
-          semanticFieldCount: semanticLayer.fields.length,
-          businessEntityCount: semanticLayer.entities.length,
-          generatedMetricCount
-        }
-      }
-    });
-
-    await validateWorkspaceMetrics(prisma, {
-      workspaceId: session.workspace.id,
-      tables
-    });
-
-    const metrics = await prisma.metricDefinition.findMany({
-      where: {
-        workspaceId: session.workspace.id,
-        isActive: true
-      },
-      orderBy: {
-        createdAt: "asc"
-      }
-    });
-    const visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
-    const executableMetrics = visibleMetrics.filter((metric) =>
-      isBusinessFacingMetricDefinition(metric) &&
-      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+      { status: 202 }
     );
-    const metricResults = await computeMetricResultsForContexts({
-      contexts,
-      metrics: executableMetrics
-    });
-    const displayableMetricResults = metricResults.filter((result) => hasDisplayableMetricResult(result));
-    const metricResultGroups = groupMetricResultsByType(metricResults);
-    const aggregationResults = await buildAggregationResults({
-      contexts,
-      metricResults
-    });
-    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults);
-    const structuredReport = buildStructuredAiReport({
-      dataSourceCount: dataSources.length,
-      metricResults,
-      metrics: executableMetrics.map((metric) => ({
-        id: metric.id,
-        name: metric.name,
-        category: metric.category,
-        definition: metric.definition,
-        formula: metric.formula,
-        unit: metric.unit,
-        mappingJson: metric.mappingJson,
-        lineageJson: metric.lineageJson
-      })),
-      aggregationResults,
-      locale: reportLocale
-    });
-    const prompt = buildReportPrompt(structuredReport);
-    const mockReport = buildMockAiBrief(metricResults, reportLocale);
-    const fullSummary = structuredReport.coreSummary || mockReport.summary || buildBriefSummary(metricResults, reportLocale);
-    const summary = compactText(fullSummary);
-    const today = startOfToday();
-    const reportTitle = reportLocale === "zh" ? "AI 数据分析报告" : "AI Data Analysis Report";
-    const payloadJson = {
-      generatedFrom: "mock_ai_brief",
-      locale: reportLocale,
-      generatedAt: new Date().toISOString(),
-      dataSourceIds: dataSources.map((source) => source.id),
-      dataSourceName: dataSources.map((source) => source.name).join(reportLocale === "zh" ? "、" : ", "),
-      fullSummary,
-      metricResults,
-      metricResultGroups,
-      aggregationResults,
-      timeConfig: reportTimeArtifacts.timeConfig,
-      trendMetrics: reportTimeArtifacts.trendMetrics,
-      trendCharts: reportTimeArtifacts.trendCharts,
-      structuredReport,
-      prompt,
-      mockReport,
-      analysisReport: asRecord(latestSnapshot.qualityReport).analysisReport ?? asRecord(latestSnapshot.schemaJson).analysisReport ?? null
-    };
 
-    const briefing = await prisma.dailyBriefing.upsert({
-      where: {
-        workspaceId_briefingDate: {
-          workspaceId: session.workspace.id,
-          briefingDate: today
-        }
-      },
-      create: {
-        workspaceId: session.workspace.id,
-        briefingDate: today,
-        title: reportTitle,
-        summary,
-        confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
-        payloadJson
-      },
-      update: {
-        title: reportTitle,
-        summary,
-        confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
-        payloadJson
-      }
-    });
-
-    await prisma.insight.deleteMany({
-      where: {
-        briefingId: briefing.id
-      }
-    });
-
-    const structuredInsights = structuredReport.generatedInsights;
-    const insightItems = structuredInsights?.keyFindings?.length
-      ? structuredInsights.keyFindings.slice(0, 5).map((insight) => ({
-        title: insight.title,
-        description: compactText(`${insight.finding}。${insight.businessMeaning}`),
-        anomalyType: "structured_insight",
-        confidence: Math.round(insight.confidence * 100),
-        explanationJson: {
-          findingType: insight.findingType,
-          currentConclusion: insight.currentConclusion,
-          supportingEvidence: insight.supportingEvidence,
-          deeperAnalysisResult: insight.deeperAnalysisResult,
-          businessImplication: insight.businessImplication,
-          recommendedDecision: insight.recommendedDecision,
-          caveat: insight.caveat,
-          comparedGroups: insight.comparedGroups,
-          joinedTables: insight.joinedTables,
-          joinKey: insight.joinKey,
-          technicalDetails: insight.technicalDetails,
-          fullDescription: `${insight.finding}。${insight.businessMeaning}`
-        },
-        evidenceJson: {
-          evidenceMetrics: insight.evidenceMetrics,
-          evidenceValues: insight.evidenceValues,
-          evidenceObjects: insight.evidenceObjects,
-          nextBreakdown: insight.nextBreakdown ?? []
-        },
-        recommendation: structuredInsights.recommendedActions.find((action) =>
-          action.basedOn.some((metric) => insight.evidenceMetrics.includes(metric))
-        )
-      }))
-      : metricResults.filter((result) =>
-        result.status === "computed" &&
-        isGlobalBusinessMetricResult(result) &&
-        hasDisplayableMetricValue(result.value)
-      ).slice(0, 5).map((result) => ({
-        title: contextualMetricName(result.metricName, result.formula),
-        description: reportLocale === "zh"
-          ? `${contextualMetricName(result.metricName, result.formula)} 当前计算值为 ${formatValue(result.value)}`
-          : `${contextualMetricName(result.metricName, result.formula)} is currently ${formatValue(result.value)}`,
-        anomalyType: "metric_result",
-        confidence: 88,
-        evidenceJson: {
-          formula: result.formula,
-          value: result.value ?? null,
-          rows: result.rows ?? [],
-          computedAt: result.computedAt
-        },
-        recommendation: undefined
-      }));
-
-    for (const item of insightItems) {
-      await prisma.insight.create({
-        data: {
-          briefingId: briefing.id,
-          title: item.title,
-          description: item.description,
-          anomalyType: item.anomalyType,
-          anomalyTypeNormalized: item.anomalyType,
-          impactScore: 0.65,
-          confidence: item.confidence,
-          explanationJson: "explanationJson" in item ? item.explanationJson : undefined,
-          evidenceJson: item.evidenceJson,
-          recommendations: {
-            create: [{
-              title: compactText(item.recommendation?.title ?? (
-                reportLocale === "zh"
-                  ? `基于「${item.title}」形成系统判断`
-                  : `System judgment based on "${item.title}"`
-              ), 180),
-              executionPriority: item.recommendation?.priority === "high" ? "High" : item.recommendation?.priority === "low" ? "Low" : "Medium",
-              estimatedOutcome: compactText(item.recommendation?.expectedOutcome ?? (
-                reportLocale === "zh"
-                  ? "把结构化洞察转成可展示的经营判断和行动结论"
-                  : "Turn structured insights into business-facing conclusions and action decisions"
-              )),
-              workflowAction: item.recommendation?.action ?? "follow_up_analysis",
-              status: RecommendationStatus.PLANNED
-            }]
-          }
-        }
-      });
-    }
-
-    const reportUsage = await markReportGenerationSucceeded({
-      logId: generationLogId,
-      workspaceId: session.workspace.id,
-      reportId: briefing.id
-    });
-
-    return NextResponse.json({
-      ok: true,
-      briefing,
-      prompt,
-      mockReport,
-      metricResults,
-      metricResultGroups,
-      generatedAt: payloadJson.generatedAt,
-      computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
-      failedMetricCount: metricResults.filter((result) => result.status === "failed").length,
-      skippedMetricCount: metricResults.filter((result) => result.status === "skipped").length,
-      entitlement: {
-        accessType: reportUsage.log.accessType,
-        consumed: Boolean(reportUsage.consumed)
-      }
-    });
   } catch (error) {
     if (generationLogId && generationWorkspaceId) {
       await markReportGenerationFailed({

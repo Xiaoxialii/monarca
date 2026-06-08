@@ -1,0 +1,3 @@
+-- Historical migration restored for Prisma migration history consistency.
+-- DailyBriefing, Insight, and ActionRecommendation already exist in the
+-- current baseline migration and in the target database.

@@ -8,6 +8,12 @@ import {
   type DataSourceConnection,
   type MetricDefinition
 } from "@prisma/client";
+import {
+  filterRowsByPreviousReportDateRange,
+  filterRowsByReportDateRange,
+  findBusinessDateColumn,
+  type ResolvedReportDateRange
+} from "@/lib/report-date-range";
 import type { SchemaColumn, SchemaTable } from "@/lib/metric-validation";
 import { validationFromLineage } from "@/lib/metric-validation";
 import { storedSecret } from "@/lib/secret-crypto";
@@ -39,6 +45,16 @@ export type MetricResultValue = {
     sampleSize?: number | null;
     negativeCount?: number | null;
   }>;
+  currentValue?: number | string | null;
+  previousValue?: number | string | null;
+  absoluteChange?: number | null;
+  percentChange?: number | null;
+  direction?: "up" | "down" | "flat" | "unknown";
+  dateRangePreset?: string;
+  dateRangeStart?: string | null;
+  dateRangeEnd?: string | null;
+  dateField?: string | null;
+  hasTimeField?: boolean;
   sql?: string;
   error?: string;
   computedAt: string;
@@ -401,6 +417,38 @@ function percentileSql(tableSql: string, fieldSql: string, ratio: number) {
   return `SELECT AVG(value) AS metric_value FROM (${ordered}) ranked WHERE rn IN (FLOOR(${target}), CEIL(${target}))`;
 }
 
+function metricComparableValue(value: unknown): number | string | null {
+  return typeof value === "number" || typeof value === "string" ? value : null;
+}
+
+function comparisonValues(currentValue: unknown, previousValue: unknown) {
+  const safeCurrentValue = metricComparableValue(currentValue);
+  const safePreviousValue = metricComparableValue(previousValue);
+  const current = typeof currentValue === "number" ? currentValue : Number(currentValue);
+  const previous = typeof previousValue === "number" ? previousValue : Number(previousValue);
+
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+    return {
+      currentValue: safeCurrentValue,
+      previousValue: safePreviousValue,
+      absoluteChange: null,
+      percentChange: null,
+      direction: "unknown" as const
+    };
+  }
+
+  const absoluteChange = current - previous;
+  const percentChange = previous ? absoluteChange / Math.abs(previous) : null;
+
+  return {
+    currentValue: safeCurrentValue,
+    previousValue: safePreviousValue,
+    absoluteChange,
+    percentChange,
+    direction: percentChange == null || Math.abs(percentChange) < 0.01 ? "flat" as const : percentChange > 0 ? "up" as const : "down" as const
+  };
+}
+
 function contextForMetric(contexts: MetricResultContext[], metric: Pick<MetricDefinition, "formula">) {
   const references = uniqueRefs(metric.formula);
 
@@ -561,12 +609,26 @@ function translateFieldExpression(type: SupportedResultDatabase, tables: SchemaT
   return translated;
 }
 
-function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], metric: Pick<MetricDefinition, "formula">) {
+function buildMetricSql(
+  type: SupportedResultDatabase,
+  tables: SchemaTable[],
+  metric: Pick<MetricDefinition, "formula">,
+  dateRange?: ResolvedReportDateRange
+) {
   const formula = metric.formula.trim();
   const topShareMatch = /^TOP_N_SHARE\s*\((.+?)\s+BY\s+(.+?),\s*(\d+)\s*\)$/i.exec(formula);
   const byMatch = /^(.+?)\s+BY\s+(.+)$/i.exec(formula);
   const sourceTable = sourceTableForFormula(tables, formula);
   const tableSql = quoteIdentifier(type, tableLabel(sourceTable));
+  const dateColumn = findBusinessDateColumn(sourceTable.columns);
+  const dateWhereSql = dateRange?.currentStart && dateRange.currentEnd && dateColumn
+    ? `${quoteIdentifier(type, dateColumn.name)} >= '${dateRange.currentStart.toISOString()}' AND ${quoteIdentifier(type, dateColumn.name)} <= '${dateRange.currentEnd.toISOString()}'`
+    : "";
+  const previousDateWhereSql = dateRange?.previousStart && dateRange.previousEnd && dateColumn
+    ? `${quoteIdentifier(type, dateColumn.name)} >= '${dateRange.previousStart.toISOString()}' AND ${quoteIdentifier(type, dateColumn.name)} <= '${dateRange.previousEnd.toISOString()}'`
+    : "";
+  const whereClause = dateWhereSql ? ` WHERE ${dateWhereSql}` : "";
+  const previousWhereClause = previousDateWhereSql ? ` WHERE ${previousDateWhereSql}` : "";
 
   const meanMedianRatioMatch = /^SAFE_DIVIDE\s*\(\s*AVG\s*\((.*?)\)\s*,\s*MEDIAN\s*\((.*?)\)\s*\)$/i.exec(formula);
   if (meanMedianRatioMatch) {
@@ -575,7 +637,7 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
     const medianQuery = percentileSql(tableSql, medianFieldSql, 0.5);
 
     return {
-      sql: `SELECT (SELECT AVG(${avgFieldSql}) FROM ${tableSql}) / NULLIF((SELECT metric_value FROM (${medianQuery}) median_value), 0) AS metric_value`,
+      sql: `SELECT (SELECT AVG(${avgFieldSql}) FROM ${tableSql}${whereClause}) / NULLIF((SELECT metric_value FROM (${medianQuery}) median_value), 0) AS metric_value`,
       grouped: false
     };
   }
@@ -586,8 +648,11 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
     const limit = Math.max(1, Math.min(50, Number(topShareMatch[3])));
 
     return {
-      sql: `SELECT (SELECT SUM(metric_value) FROM (SELECT ${aggregateSql} AS metric_value FROM ${tableSql} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT ${limit}) ranked) / NULLIF((SELECT ${aggregateSql} FROM ${tableSql}), 0) AS metric_value`,
-      grouped: false
+      sql: `SELECT (SELECT SUM(metric_value) FROM (SELECT ${aggregateSql} AS metric_value FROM ${tableSql}${whereClause} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT ${limit}) ranked) / NULLIF((SELECT ${aggregateSql} FROM ${tableSql}${whereClause}), 0) AS metric_value`,
+      grouped: false,
+      previousSql: previousWhereClause ? `SELECT (SELECT SUM(metric_value) FROM (SELECT ${aggregateSql} AS metric_value FROM ${tableSql}${previousWhereClause} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT ${limit}) ranked) / NULLIF((SELECT ${aggregateSql} FROM ${tableSql}${previousWhereClause}), 0) AS metric_value` : undefined,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn)
     };
   }
 
@@ -596,7 +661,9 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
     const fieldSql = cleanNumericSqlExpression(type, tables, medianMatch[1].trim());
     return {
       sql: percentileSql(tableSql, fieldSql, 0.5),
-      grouped: false
+      grouped: false,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn)
     };
   }
 
@@ -612,7 +679,9 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
     const fieldSql = cleanNumericSqlExpression(type, tables, fieldExpression);
     return {
       sql: percentileSql(tableSql, fieldSql, ratio),
-      grouped: false
+      grouped: false,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn)
     };
   }
 
@@ -621,14 +690,19 @@ function buildMetricSql(type: SupportedResultDatabase, tables: SchemaTable[], me
     const dimensionSql = translateFieldExpression(type, tables, byMatch[2].trim());
 
     return {
-      sql: `SELECT ${dimensionSql} AS dimension_value, ${aggregateSql} AS metric_value FROM ${tableSql} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT 10`,
-      grouped: true
+      sql: `SELECT ${dimensionSql} AS dimension_value, ${aggregateSql} AS metric_value FROM ${tableSql}${whereClause} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT 10`,
+      grouped: true,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn)
     };
   }
 
   return {
-    sql: `SELECT ${translateExpression(type, tables, formula)} AS metric_value FROM ${tableSql}`,
-    grouped: false
+    sql: `SELECT ${translateExpression(type, tables, formula)} AS metric_value FROM ${tableSql}${whereClause}`,
+    previousSql: previousWhereClause ? `SELECT ${translateExpression(type, tables, formula)} AS metric_value FROM ${tableSql}${previousWhereClause}` : undefined,
+    grouped: false,
+    dateField: dateColumn?.name ?? null,
+    hasTimeField: Boolean(dateColumn)
   };
 }
 
@@ -1039,10 +1113,14 @@ function sentimentRateParts(formula: string) {
 async function computeCsvMetricResult(
   context: MetricResultContext,
   metric: MetricDefinition,
-  computedAt: string
+  computedAt: string,
+  dateRange?: ResolvedReportDateRange
 ): Promise<MetricResultValue> {
   const sourceTable = sourceTableForFormula(context.tables, metric.formula);
-  const rows = await rowsForCsvTable(context, sourceTable);
+  const allRows = await rowsForCsvTable(context, sourceTable);
+  const dateColumn = findBusinessDateColumn(sourceTable.columns);
+  const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
+  const previousRows = filterRowsByPreviousReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
   const byMatch = /^(.+?)\s+BY\s+(.+)$/i.exec(metric.formula.trim());
 
   if (/^TOP_N_SHARE\s*\(/i.test(metric.formula.trim())) {
@@ -1054,6 +1132,12 @@ async function computeCsvMetricResult(
       status: "computed",
       scope: metricScope(metric),
       value: aggregateRows(rows, context.tables, metric.formula),
+      ...comparisonValues(aggregateRows(rows, context.tables, metric.formula), aggregateRows(previousRows, context.tables, metric.formula)),
+      dateRangePreset: dateRange?.preset,
+      dateRangeStart: dateRange?.startDate ?? null,
+      dateRangeEnd: dateRange?.endDate ?? null,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn),
       computedAt
     };
   }
@@ -1102,6 +1186,9 @@ async function computeCsvMetricResult(
     };
   }
 
+  const value = aggregateRows(rows, context.tables, metric.formula);
+  const previousValue = aggregateRows(previousRows, context.tables, metric.formula);
+
   return {
     metricId: metric.id,
     metricName: metric.name,
@@ -1109,7 +1196,13 @@ async function computeCsvMetricResult(
     formula: metric.formula,
     status: "computed",
     scope: metricScope(metric),
-    value: aggregateRows(rows, context.tables, metric.formula),
+    value,
+    ...comparisonValues(value, previousValue),
+    dateRangePreset: dateRange?.preset,
+    dateRangeStart: dateRange?.startDate ?? null,
+    dateRangeEnd: dateRange?.endDate ?? null,
+    dateField: dateColumn?.name ?? null,
+    hasTimeField: Boolean(dateColumn),
     computedAt
   };
 }
@@ -1123,11 +1216,13 @@ function isMetricAllowed(metric: Pick<MetricDefinition, "status" | "lineageJson"
 export async function computeMetricResults({
   dataSource,
   metrics,
-  tables
+  tables,
+  dateRange
 }: {
   dataSource: DataSourceConnection;
   metrics: MetricDefinition[];
   tables: SchemaTable[];
+  dateRange?: ResolvedReportDateRange;
 }): Promise<MetricResultValue[]> {
   const config = configFromSource(dataSource);
   const computedAt = new Date().toISOString();
@@ -1163,8 +1258,11 @@ export async function computeMetricResults({
     }
 
     try {
-      const query = buildMetricSql(config.type, tables, metric);
+      const query = buildMetricSql(config.type, tables, metric, dateRange);
       const rows = await queryMetric(config, query.sql);
+      const previousRows = query.previousSql ? await queryMetric(config, query.previousSql) : [];
+      const value = query.grouped ? undefined : rows[0]?.metric_value as number | string | null;
+      const previousValue = query.grouped ? undefined : previousRows[0]?.metric_value as number | string | null;
 
       results.push({
         metricId: metric.id,
@@ -1174,7 +1272,13 @@ export async function computeMetricResults({
         status: "computed",
         scope: metricScope(metric, Boolean(query.grouped)),
         sql: query.sql,
-        value: query.grouped ? undefined : rows[0]?.metric_value as number | string | null,
+        value,
+        ...(!query.grouped ? comparisonValues(value, previousValue) : {}),
+        dateRangePreset: dateRange?.preset,
+        dateRangeStart: dateRange?.startDate ?? null,
+        dateRangeEnd: dateRange?.endDate ?? null,
+        dateField: query.dateField ?? null,
+        hasTimeField: Boolean(query.hasTimeField),
         rows: query.grouped
           ? rows.map((row) => ({
             dimension: String(row.dimension_value ?? ""),
@@ -1202,10 +1306,12 @@ export async function computeMetricResults({
 
 export async function computeMetricResultsForContexts({
   contexts,
-  metrics
+  metrics,
+  dateRange
 }: {
   contexts: MetricResultContext[];
   metrics: MetricDefinition[];
+  dateRange?: ResolvedReportDateRange;
 }): Promise<MetricResultValue[]> {
   const computedAt = new Date().toISOString();
   const results: MetricResultValue[] = [];
@@ -1246,11 +1352,12 @@ export async function computeMetricResultsForContexts({
         const [result] = await computeMetricResults({
           dataSource: context.dataSource,
           metrics: [metric],
-          tables: context.tables
+          tables: context.tables,
+          dateRange
         });
         results.push(result);
       } else if (context.dataSource.type === DataSourceType.CSV || context.dataSource.type === DataSourceType.EXCEL) {
-        results.push(await computeCsvMetricResult(context, metric, computedAt));
+        results.push(await computeCsvMetricResult(context, metric, computedAt, dateRange));
       } else {
         results.push({
           metricId: metric.id,

@@ -1,4 +1,9 @@
 import { type DataSourceConnection } from "@prisma/client";
+import {
+  filterRowsByReportDateRange,
+  findBusinessDateColumn,
+  type ResolvedReportDateRange
+} from "@/lib/report-date-range";
 import type { SchemaColumn, SchemaTable } from "@/lib/metric-validation";
 import type {
   AggregationResult,
@@ -912,20 +917,7 @@ function dateBucket(dateValue: unknown, bucket: "day" | "week" | "month" | "year
 }
 
 function buildTimeTrends(table: SchemaTable, businessType: ReportBusinessType, rows: Array<Record<string, unknown>>): TimeTrendResult[] {
-  const dateColumn = findColumn(table, [
-    "order_date",
-    "transaction_date",
-    "event_time",
-    "review_date",
-    "signup_date",
-    "churn_date",
-    "created_at",
-    "timestamp",
-    "date",
-    "updated_at",
-    "month",
-    "year"
-  ]);
+  const dateColumn = findBusinessDateColumn(table.columns);
   if (!dateColumn) return [];
 
   const dates = rows.flatMap((row) => {
@@ -996,23 +988,41 @@ function buildTimeTrends(table: SchemaTable, businessType: ReportBusinessType, r
 
 export async function buildAggregationResults({
   contexts,
-  metricResults
+  metricResults,
+  dateRange
 }: {
   contexts: AggregationContext[];
   metricResults: ReportMetricResultInput[];
+  dateRange?: ResolvedReportDateRange;
 }): Promise<AggregationResult[]> {
   const results: AggregationResult[] = [];
 
   for (const context of contexts) {
     for (const table of context.tables) {
-      const rows = sampleRowsForTable(context.schemaJson, table.name);
+      const allRows = sampleRowsForTable(context.schemaJson, table.name);
+      const dateColumn = findBusinessDateColumn(table.columns);
+      const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
       const warnings = [];
       const businessType = detectBusinessType(table, context.dataSource.name, metricResults);
 
-      if (rows.length === 0) {
+      if (allRows.length === 0) {
         warnings.push({
           code: "no_lightweight_rows",
           message: "当前数据源没有可用于轻量聚合的样本或解析数据，因此不会生成 Top/Bottom 或维度聚合"
+        });
+      }
+
+      if (allRows.length > 0 && dateRange?.preset !== "ALL" && !dateColumn) {
+        warnings.push({
+          code: "no_business_time_field",
+          message: "当前数据缺少时间字段，无法按时间范围筛选。系统正在显示全周期指标。"
+        });
+      }
+
+      if (allRows.length > 0 && dateRange?.preset !== "ALL" && dateColumn && rows.length === 0) {
+        warnings.push({
+          code: "empty_selected_date_range",
+          message: "所选时间范围内没有可用于计算的行，当前指标会显示为空或零值。"
         });
       }
 
@@ -1051,7 +1061,7 @@ export async function buildAggregationResults({
           ? context.dataSource.name
           : `${context.dataSource.name} / ${table.name}`,
         businessType,
-        rowCount: rowCountForTable(context.schemaJson, table.name),
+        rowCount: rows.length || rowCountForTable(context.schemaJson, table.name),
         groupBys,
         topRankings: [...groupRankings.top, ...rankings.top, ...metricRowRankings.top],
         bottomRankings: [...groupRankings.bottom, ...rankings.bottom, ...metricRowRankings.bottom],

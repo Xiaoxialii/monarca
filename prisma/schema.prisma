@@ -176,6 +176,7 @@ model Workspace {
   reportGenerationJobs ReportGenerationJob[]
   reportEntitlement ReportEntitlement?
   reportGenerationLogs ReportGenerationLog[]
+  reportMetricCaches ReportMetricCache[]
 }
 
 model WorkspaceMember {
@@ -404,6 +405,31 @@ model ReportGenerationLog {
 
   @@index([workspaceId, status, createdAt])
   @@index([reportId])
+}
+
+model ReportMetricCache {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSourceIds         Json?
+  metricIds             Json?
+  dateField             String?
+  dateRangePreset       String
+  startDate             DateTime?
+  endDate               DateTime?
+  filtersHash           String    @default("none")
+  cacheKey              String    @unique
+  payloadJson           Json
+  sourceSnapshotVersion Int?
+  refreshStatus         String    @default("fresh")
+  generatedAt           DateTime  @default(now())
+  staleAt               DateTime?
+  lastAccessedAt        DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([workspaceId, dateRangePreset, startDate, endDate])
+  @@index([workspaceId, refreshStatus, staleAt])
 }
 
 model Plan {

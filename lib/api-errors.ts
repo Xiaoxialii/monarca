@@ -61,6 +61,8 @@ export function databaseAuthErrorResponse() {
 }
 
 export function apiErrorResponse(error: unknown, fallbackMessage: string, status = 400) {
+  console.error(fallbackMessage, error);
+
   if (isDatabaseAuthError(error)) {
     return databaseAuthErrorResponse();
   }

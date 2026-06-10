@@ -5,7 +5,7 @@ import { fileExtension, inferTablesFromCsvText, tableNameFromFile } from "@/lib/
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
-import { getSupabaseObjectInfo, isWorkspaceSupabaseUploadPath, readSupabaseObjectText } from "@/lib/supabase-storage";
+import { isWorkspaceUploadKey, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -56,20 +56,26 @@ function uploadErrorMessage(error: unknown) {
     return message;
   }
 
-  if (message.includes("Supabase Storage is not configured")) {
-    return "Supabase Storage is not configured.";
+  if (message.includes("R2 storage is not configured")) {
+    return "R2 storage is not configured.";
   }
 
-  if (message.includes("Supabase Storage lookup failed")) {
+  if (
+    message.includes("NoSuchKey") ||
+    message.includes("NoSuchBucket") ||
+    message.includes("AccessDenied") ||
+    message.includes("SignatureDoesNotMatch") ||
+    message.includes("InvalidAccessKeyId")
+  ) {
     return message;
   }
 
   if (message.includes("Uploaded file was not found")) {
-    return "Uploaded file was not found in Supabase Storage. Please retry the upload.";
+    return "Uploaded file was not found in R2 Storage. Please retry the upload.";
   }
 
   if (message.includes("Uploaded file is empty or unavailable")) {
-    return "Uploaded file is empty or unavailable in Supabase Storage. Please retry the upload.";
+    return "Uploaded file is empty or unavailable in R2 Storage. Please retry the upload.";
   }
 
   return safeMessage ? `文件上传失败：${safeMessage}` : "File upload failed";
@@ -81,7 +87,7 @@ export async function POST(request: Request) {
     await requireCanConnectDataSource(session.workspace.id);
 
     const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
-    const path = stringValue(payload?.path);
+    const key = stringValue(payload?.key) || stringValue(payload?.path);
     const fileName = stringValue(payload?.fileName);
     const mimeType = stringValue(payload?.mimeType) || "application/octet-stream";
     const fileSize = toNumber(payload?.fileSize);
@@ -89,8 +95,8 @@ export async function POST(request: Request) {
     const isCsv = extension === "csv";
     const isExcel = ["xls", "xlsx"].includes(extension);
 
-    if (!path || !isWorkspaceSupabaseUploadPath(session.workspace.id, path)) {
-      return NextResponse.json({ ok: false, message: "Uploaded file path is invalid." }, { status: 400 });
+    if (!key || !isWorkspaceUploadKey(session.workspace.id, key)) {
+      return NextResponse.json({ ok: false, message: "Uploaded file key is invalid." }, { status: 400 });
     }
 
     if (!fileName) {
@@ -122,10 +128,8 @@ export async function POST(request: Request) {
       );
     }
 
-    await getSupabaseObjectInfo(path);
-
     const tables = isCsv
-      ? inferTablesFromCsvText(fileName, await readSupabaseObjectText(path))
+      ? inferTablesFromCsvText(fileName, await readR2ObjectText(key))
       : [{ name: tableNameFromFile(fileName), columns: [] }];
     const scannedAt = new Date().toISOString();
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
@@ -134,10 +138,10 @@ export async function POST(request: Request) {
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(tables);
     const storage = {
-      provider: "supabase-storage",
+      provider: "cloudflare-r2",
       bucket: stringValue(payload?.bucket),
-      path,
-      url: null
+      key,
+      url: stringValue(payload?.publicUrl) || null
     };
     const schemaPayload = {
       scannedAt,

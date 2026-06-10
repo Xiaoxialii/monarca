@@ -7,6 +7,22 @@ function createWorkspaceSlug(clerkUserId: string) {
   return `workspace-${clerkUserId.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase()}`;
 }
 
+function normalizeEmail(email?: string | null) {
+  const value = email?.trim().toLowerCase();
+
+  return value || null;
+}
+
+function createPlaceholderEmail(clerkUserId: string) {
+  const stableId = clerkUserId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+  return `clerk_${stableId}@no-email.local`;
+}
+
+function uniqueEmails(...emails: Array<string | null>) {
+  return Array.from(new Set(emails.filter((email): email is string => Boolean(email))));
+}
+
 export async function syncCurrentClerkUser(options: { fallbackEmail?: string } = {}) {
   const { userId } = await auth();
 
@@ -24,15 +40,14 @@ export async function syncClerkUserById(
   const client = await clerkClient();
   const clerkUser = await client.users.getUser(clerkUserId);
 
-  const email = clerkUser.emailAddresses.find(
-    (item) => item.id === clerkUser.primaryEmailAddressId
-  )?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress ?? options.fallbackEmail?.trim().toLowerCase();
+  const clerkEmail = normalizeEmail(
+    clerkUser.emailAddresses.find((item) => item.id === clerkUser.primaryEmailAddressId)
+      ?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress
+  );
+  const fallbackEmail = normalizeEmail(options.fallbackEmail);
+  const email = clerkEmail ?? fallbackEmail ?? createPlaceholderEmail(clerkUser.id);
 
-  if (!email) {
-    throw new Error("SIGNED_IN_USER_EMAIL_REQUIRED");
-  }
-
-  const name = clerkUser.fullName ?? clerkUser.username ?? email.split("@")[0] ?? "New user";
+  const name = clerkUser.fullName ?? clerkUser.username ?? clerkEmail?.split("@")[0] ?? "New user";
   const avatarUrl = clerkUser.imageUrl || null;
 
   const user = await prisma.user.upsert({
@@ -76,19 +91,22 @@ export async function syncClerkUserById(
     };
   }
 
-  const pendingInvite = await prisma.workspaceMember.findFirst({
-    where: {
-      invitedEmail: email,
-      status: WorkspaceMemberStatus.INVITED,
-      userId: null
-    },
-    include: {
-      workspace: true
-    },
-    orderBy: {
-      createdAt: "asc"
-    }
-  });
+  const inviteEmails = uniqueEmails(clerkEmail, fallbackEmail);
+  const pendingInvite = inviteEmails.length
+    ? await prisma.workspaceMember.findFirst({
+      where: {
+        invitedEmail: { in: inviteEmails },
+        status: WorkspaceMemberStatus.INVITED,
+        userId: null
+      },
+      include: {
+        workspace: true
+      },
+      orderBy: {
+        createdAt: "asc"
+      }
+    })
+    : null;
 
   if (pendingInvite) {
     const membership = await prisma.workspaceMember.update({

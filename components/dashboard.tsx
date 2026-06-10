@@ -5163,38 +5163,51 @@ function ConnectorPanel({
       message?: string;
       provider?: string;
       uploadUrl?: string;
+      key?: string;
       path?: string;
       token?: string;
       bucket?: string;
+      publicUrl?: string | null;
+      contentType?: string;
     } | null;
 
     if (!presignResponse.ok || !presignPayload?.ok || !presignPayload.uploadUrl || !presignPayload.path) {
       throw new Error(presignPayload?.message || (isZh ? "无法准备大文件上传" : "Failed to prepare large file upload"));
     }
 
-    const uploadFormData = new FormData();
-    uploadFormData.append("cacheControl", "3600");
-    uploadFormData.append("", file);
+    const uploadContentType = presignPayload.contentType || file.type || "application/octet-stream";
 
     const uploadResponse = await fetch(presignPayload.uploadUrl, {
       method: "PUT",
-      body: uploadFormData
+      headers: {
+        "Content-Type": uploadContentType
+      },
+      body: file
     });
-    const uploadPayload = await uploadResponse.json().catch(() => null) as {
+    const uploadText = await uploadResponse.text().catch(() => "");
+    const uploadPayload = uploadText
+      ? (() => {
+          try {
+            return JSON.parse(uploadText) as {
       Key?: string;
       path?: string;
       fullPath?: string;
       error?: string;
       message?: string;
-    } | null;
+            };
+          } catch {
+            return { message: uploadText };
+          }
+        })()
+      : null;
 
     if (!uploadResponse.ok) {
       throw new Error(uploadPayload?.message || uploadPayload?.error || (isZh
-        ? "大文件直传失败。请检查 Supabase Storage CORS 或 bucket 配置。"
-        : "Large file direct upload failed. Check Supabase Storage CORS or bucket settings."));
+        ? "大文件直传失败。请检查 Cloudflare R2 CORS、bucket 或凭证配置。"
+        : "Large file direct upload failed. Check Cloudflare R2 CORS, bucket, or credentials."));
     }
 
-    const uploadedPath = uploadPayload?.path ??
+    const uploadedKey = presignPayload.key ?? uploadPayload?.path ??
       (uploadPayload?.fullPath && presignPayload.bucket && uploadPayload.fullPath.startsWith(`${presignPayload.bucket}/`)
         ? uploadPayload.fullPath.slice(presignPayload.bucket.length + 1)
         : null) ??
@@ -5206,11 +5219,13 @@ function ConnectorPanel({
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        path: uploadedPath,
+        key: uploadedKey,
+        path: uploadedKey,
         bucket: presignPayload.bucket,
+        publicUrl: presignPayload.publicUrl,
         fileName: file.name,
         fileSize: file.size,
-        mimeType: file.type || "application/octet-stream"
+        mimeType: uploadContentType
       })
     });
   };

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
 import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
 import { fileExtension } from "@/lib/file-upload-schema";
-import { createSupabaseSignedUpload, isSupabaseStorageConfigured } from "@/lib/supabase-storage";
+import { createPresignedUploadUrl, isR2Configured } from "@/lib/r2-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -19,9 +19,9 @@ export async function POST(request: Request) {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     await requireCanConnectDataSource(session.workspace.id);
 
-    if (!isSupabaseStorageConfigured()) {
+    if (!isR2Configured()) {
       return NextResponse.json(
-        { ok: false, message: "Supabase Storage is not configured." },
+        { ok: false, message: "R2 storage is not configured." },
         { status: 500 }
       );
     }
@@ -60,18 +60,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const upload = await createSupabaseSignedUpload({
+    const upload = await createPresignedUploadUrl({
       workspaceId: session.workspace.id,
-      fileName
+      fileName,
+      contentType: stringValue(payload?.contentType) || "application/octet-stream"
     });
 
     return NextResponse.json({
       ok: true,
-      provider: "supabase",
-      uploadUrl: upload.signedUrl,
-      path: upload.path,
-      token: upload.token,
+      provider: "cloudflare-r2",
+      uploadUrl: upload.uploadUrl,
+      key: upload.key,
+      path: upload.key,
       bucket: upload.bucket,
+      publicUrl: upload.publicUrl,
+      contentType: upload.contentType,
       maxBytes: FILE_UPLOAD_MAX_BYTES
     });
   } catch (error) {

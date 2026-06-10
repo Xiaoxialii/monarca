@@ -35,6 +35,14 @@ test("7D range filters rows to the current period only", () => {
   assert.deepEqual(filtered.map((row) => row.id), ["current-a", "current-b"]);
 });
 
+test("TODAY range resolves to the current business day only", () => {
+  const range = resolveReportDateRange({ preset: "TODAY" }, new Date("2026-06-07T12:00:00.000Z"));
+
+  assert.equal(range.preset, "TODAY");
+  assert.equal(range.startDate, "2026-06-07");
+  assert.equal(range.endDate, "2026-06-07");
+});
+
 test("previous period uses the same duration immediately before current", () => {
   const range = resolveReportDateRange({ preset: "7D" }, new Date("2026-06-07T12:00:00.000Z"));
   const previous = filterRowsByPreviousReportDateRange(rows, "order_date", range);

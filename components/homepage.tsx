@@ -85,7 +85,7 @@ const homepageCopy = {
         { role: "Business Intelligence", text: "Explains movement, cohorts, and root causes" },
         { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
-      primaryCta: "Generate Your First Report",
+      primaryCta: "Generate Your First Report for Free",
       secondaryCta: "View Sample Workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
@@ -214,16 +214,22 @@ const homepageCopy = {
         },
         {
           name: "Professional",
-          subtitle: "Report automation + data analysis + decision support",
+          subtitle: "For teams that need expert-assisted setup and ongoing automated operating analysis",
           price: "$199",
           cadence: "/ month",
+          billingNote: "Annual service term, paid monthly",
           badge: "Recommended",
+          description:
+            "Data integration + expert-assisted metric system configuration + automated reports",
           features: [
-            "Auto-generate business analysis reports",
-            "Metric monitoring and anomaly alerts",
-            "Conversational data exploration with Why-layer reasoning",
-            "Causal analysis and core driver breakdown",
-            "Actionable decision recommendations"
+            "Annual service term, paid monthly",
+            "Connect databases, Excel, Google Sheets, and CSV files",
+            "Professional team assistance for data onboarding and integration",
+            "Core team metric system configured around business goals",
+            "Auto-generate daily, weekly, and monthly reports",
+            "Anomaly alerts, trend explanations, and AI action recommendations",
+            "Ongoing data updates and automatic report refresh",
+            "Metric definition checks to reduce misleading analysis"
           ],
           cta: "Start professional",
           href: "/checkout/professional"
@@ -416,18 +422,23 @@ const homepageCopy = {
         },
         {
           name: "专业版",
-          subtitle: "报告自动化 + 数据分析 + 决策辅助",
-          price: "¥1,999",
+          subtitle: "适合需要专业团队协助，持续自动化经营分析的团队",
+          price: "¥2,000",
           cadence: "/ 月",
+          billingNote: "年度套餐，按月支付",
           badge: "推荐",
+          description: "数据整合 + 专业团队定制指标体系 + 自动化报告",
           features: [
-            "自动生成业务分析报告",
-            "指标监控 & 异常提醒",
-            "对话式数据探索（Why 层）",
-            "因果分析 & 核心驱动拆解",
-            "可执行决策建议"
+            "年度服务周期，按月付款",
+            "连接数据库、Excel、Google Sheets、CSV",
+            "专业团队协助完成数据接入与整合",
+            "根据业务目标定制团队核心指标体系",
+            "自动生成日报、周报、月报",
+            "支持异常提醒、趋势解读与 AI 行动建议",
+            "支持持续数据更新和报告自动刷新",
+            "提供指标口径校验，减少错误分析结论"
           ],
-          cta: "选择专业版",
+          cta: "开通专业版",
           href: "/checkout/professional"
         },
         {
@@ -821,6 +832,11 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
               </div>
               <h3 className="text-xl font-semibold text-slate-950">{plan.name}</h3>
               <p className="mt-2 text-sm font-medium text-slate-500">{plan.subtitle}</p>
+              {"description" in plan && plan.description ? (
+                <p className="mt-3 rounded-2xl bg-white/70 p-3 text-sm leading-6 text-slate-700">
+                  {plan.description}
+                </p>
+              ) : null}
 
               <div className="mt-6 flex items-end gap-1">
                 <span className="text-4xl font-semibold tracking-normal text-slate-950">{plan.price}</span>
@@ -828,7 +844,6 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
                   <span className="pb-1 text-sm font-medium text-slate-500">{plan.cadence}</span>
                 ) : null}
               </div>
-
               <div className="mt-6 space-y-3">
                 {plan.features.map((feature) => (
                   <div key={feature} className="flex gap-3 text-sm leading-6 text-slate-600">

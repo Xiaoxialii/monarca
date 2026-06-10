@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ReportDateRangeInput, ResolvedReportDateRange } from "@/lib/report-date-range";
 
-export const cachedReportDateRangePresets = ["7D", "30D", "90D", "12M"] as const;
+export const cachedReportDateRangePresets = ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"] as const;
 
 export type ReportMetricCachePayload = Record<string, unknown> & {
   generatedAt?: string;
@@ -10,6 +10,8 @@ export type ReportMetricCachePayload = Record<string, unknown> & {
     preset?: string;
     startDate?: string | null;
     endDate?: string | null;
+    previousStartDate?: string | null;
+    previousEndDate?: string | null;
     dateField?: string | null;
     generatedAt?: string;
   };
@@ -26,8 +28,9 @@ type CacheIdentityInput = {
   metricIds?: string[];
   dataSourceIds?: string[];
   dateField?: string | null;
-  dateRange: Pick<ReportDateRangeInput, "preset" | "startDate" | "endDate">;
+  dateRange: Pick<ReportDateRangeInput, "preset" | "startDate" | "endDate" | "previousStartDate" | "previousEndDate">;
   filters?: unknown;
+  sourceSnapshotVersion?: number | null;
 };
 
 export function stableHash(value: unknown) {
@@ -69,7 +72,10 @@ export function reportMetricCacheKey(input: CacheIdentityInput) {
     dateRangePreset: input.dateRange.preset,
     startDate: input.dateRange.startDate ?? null,
     endDate: input.dateRange.endDate ?? null,
-    filters: input.filters ?? null
+    previousStartDate: input.dateRange.previousStartDate ?? null,
+    previousEndDate: input.dateRange.previousEndDate ?? null,
+    filters: input.filters ?? null,
+    sourceSnapshotVersion: input.sourceSnapshotVersion ?? null
   });
 }
 
@@ -111,7 +117,9 @@ export function cacheIdentityFromPayload({
     dateRange: {
       preset: dateRange.preset,
       startDate: dateRange.startDate,
-      endDate: dateRange.endDate
+      endDate: dateRange.endDate,
+      previousStartDate: dateRange.previousStart ? dateRange.previousStart.toISOString().slice(0, 10) : undefined,
+      previousEndDate: dateRange.previousEnd ? dateRange.previousEnd.toISOString().slice(0, 10) : undefined
     }
   };
 }
@@ -131,7 +139,8 @@ export async function getReportMetricCache(
       dateRangePreset: input.dateRange.preset,
       startDate: input.dateRange.startDate ? new Date(input.dateRange.startDate) : null,
       endDate: input.dateRange.endDate ? new Date(input.dateRange.endDate) : null,
-      filtersHash: stableHash(input.filters ?? null)
+      filtersHash: stableHash(input.filters ?? null),
+      sourceSnapshotVersion: input.sourceSnapshotVersion ?? null
     },
     orderBy: { generatedAt: "desc" }
   });

@@ -7,12 +7,13 @@ import { apiErrorResponse } from "@/lib/api-errors";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { getSupabaseObjectInfo, isWorkspaceSupabaseUploadPath, readSupabaseObjectText } from "@/lib/supabase-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 
 export const runtime = "nodejs";
 
-const MAX_DIRECT_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_FILE_NAME_LENGTH = 180;
 
 function stringValue(value: unknown) {
@@ -94,9 +95,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "File size is required." }, { status: 400 });
     }
 
-    if (fileSize > MAX_DIRECT_UPLOAD_BYTES) {
+    if (fileSize > FILE_UPLOAD_MAX_BYTES) {
       return NextResponse.json(
-        { ok: false, message: `File is too large. Maximum upload size is ${Math.floor(MAX_DIRECT_UPLOAD_BYTES / 1024 / 1024)}MB.` },
+        { ok: false, message: `File is too large. Maximum upload size is ${FILE_UPLOAD_MAX_MB}MB.` },
         { status: 413 }
       );
     }
@@ -128,6 +129,8 @@ export async function POST(request: Request) {
     };
 
     const result = await prisma.$transaction(async (tx) => {
+      await clearWorkspaceReportCaches(tx, session.workspace.id);
+
       const dataSource = await tx.dataSourceConnection.create({
         data: {
           workspaceId: session.workspace.id,

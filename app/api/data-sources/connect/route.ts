@@ -14,6 +14,7 @@ import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/uni
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { encryptSecret } from "@/lib/secret-crypto";
 import { apiErrorResponse } from "@/lib/api-errors";
+import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,8 @@ export async function POST(request: Request) {
     const analysisReport = generateUniversalDataAnalysisReport(tables);
 
     const result = await prisma.$transaction(async (tx) => {
+      await clearWorkspaceReportCaches(tx, session.workspace.id);
+
       const dataSource = await tx.dataSourceConnection.create({
         data: {
           workspaceId: session.workspace.id,

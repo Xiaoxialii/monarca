@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { ReportGenerationJobStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { computeMetricResultsForContexts, type MetricResultValue } from "@/lib/metric-results";
-import { normalizeReportDateRange, resolveReportDateRange } from "@/lib/report-date-range";
+import { type MetricResultValue } from "@/lib/metric-results";
+import { normalizeReportDateRange, resolveReportDateRange, type ReportDateRangeInput } from "@/lib/report-date-range";
 import { cacheIdentityFromPayload, upsertReportMetricCache } from "@/lib/report-metric-cache";
 import {
   markReportGenerationFailed,
@@ -17,7 +18,15 @@ import { contextualMetricName } from "@/lib/report-generation/metric-name-normal
 import { buildReportTimeArtifacts } from "@/lib/report-time-artifacts.mjs";
 import { buildReportPrompt } from "@/lib/report-generation/report-prompt-builder";
 import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
-import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
+import { buildReportDataAudit } from "@/lib/report-data-audit";
+import {
+  composeReport,
+  loadMetricSnapshots,
+  normalizeReportMode,
+  reportHistoryTitle,
+  saveMetricSnapshots,
+  type ReportMode
+} from "@/lib/report-composers";
 import {
   hasDisplayableMetricResult,
   hasDisplayableMetricValue,
@@ -32,6 +41,11 @@ import {
   validationFromLineage
 } from "@/lib/metric-validation";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { calculateVerifiedMetrics } from "@/lib/metrics/metric-calculator";
+import { reportMetricTimeWindow } from "@/lib/metrics/time-window-builder";
+import { validateMetricConsistency } from "@/lib/metrics/metric-consistency-validator";
+import { registryFromMetricDefinitions } from "@/lib/metrics/metric-registry";
+import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -45,6 +59,12 @@ function startOfToday() {
 
 function normalizeReportLocale(value: unknown): ReportLocale | null {
   return value === "zh" || value === "en" ? value : null;
+}
+
+function defaultDateRangeForReportMode(reportMode: ReportMode): ReportDateRangeInput {
+  if (reportMode === "daily_brief") return { preset: "ALL" };
+  if (reportMode === "weekly_report") return { preset: "ALL" };
+  return { preset: "ALL" };
 }
 
 function formatValue(value: unknown) {
@@ -169,6 +189,7 @@ async function runReportGenerationJob(input: {
   workspaceId: string;
   userId: string;
   reportLocale: ReportLocale;
+  reportMode: ReportMode;
   resolvedDateRange: ReturnType<typeof resolveReportDateRange>;
 }) {
   try {
@@ -220,64 +241,251 @@ async function runReportGenerationJob(input: {
 
     const latestSnapshot = snapshots[0];
     const tables = uniqueTables(contexts.flatMap((context) => context.tables));
-    const semanticLayer = buildSemanticLayer(tables.map((table) => ({
-      name: table.name,
-      schema: table.schema ?? undefined,
-      columns: table.columns.map((column) => ({
-        name: column.name,
-        type: column.type ?? "unknown",
-        nullable: column.nullable ?? true
-      }))
-    })));
-    const generatedMetricCount = await generateSemanticMetrics(prisma, {
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      semanticLayer
-    });
-
-    await prisma.schemaSnapshot.update({
-      where: { id: latestSnapshot.id },
-      data: {
-        schemaJson: {
-          ...asRecord(latestSnapshot.schemaJson),
-          semanticLayer
-        },
-        qualityReport: {
-          ...asRecord(latestSnapshot.qualityReport),
-          semanticFieldCount: semanticLayer.fields.length,
-          businessEntityCount: semanticLayer.entities.length,
-          generatedMetricCount
-        }
-      }
-    });
 
     await validateWorkspaceMetrics(prisma, {
       workspaceId: input.workspaceId,
       tables
     });
 
-    const metrics = await prisma.metricDefinition.findMany({
+    let metrics = await prisma.metricDefinition.findMany({
       where: { workspaceId: input.workspaceId, isActive: true },
       orderBy: { createdAt: "asc" }
     });
+    const hasRegistryMetrics = metrics.some((metric) => asRecord(metric.lineageJson).generatedFrom === "business_metric_registry");
+
+    if (!hasRegistryMetrics) {
+      await generateWorkspaceMetricsFromConnectedSources(prisma, {
+        workspaceId: input.workspaceId,
+        userId: input.userId
+      });
+      metrics = await prisma.metricDefinition.findMany({
+        where: { workspaceId: input.workspaceId, isActive: true },
+        orderBy: { createdAt: "asc" }
+      });
+    }
     const visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
     const executableMetrics = visibleMetrics.filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
       validationFromLineage(metric.lineageJson)?.validation_status === "valid"
     );
-    const metricResults = await computeMetricResultsForContexts({
+    const preReportDataAudit = await buildReportDataAudit({
+      contexts,
+      reportType: input.reportMode
+    });
+    const previousMetricSnapshots = await loadMetricSnapshots(prisma, input.workspaceId).catch(() => []);
+    const effectiveDateRange = reportMetricTimeWindow({
+      reportMode: input.reportMode,
+      requestedRange: {
+        preset: input.resolvedDateRange.preset,
+        startDate: input.resolvedDateRange.startDate,
+        endDate: input.resolvedDateRange.endDate,
+        previousStartDate: input.resolvedDateRange.previousStart ? input.resolvedDateRange.previousStart.toISOString().slice(0, 10) : undefined,
+        previousEndDate: input.resolvedDateRange.previousEnd ? input.resolvedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
+      },
+      latestDataDate: preReportDataAudit.latestDataDate
+    });
+
+    if (!preReportDataAudit.passed) {
+      const structuredReport = {
+        coreSummary: input.reportLocale === "zh" ? "当前报告未通过数据口径校验。" : "The report did not pass data-scope validation.",
+        generatedInsights: {
+          keyFindings: [],
+          businessRisks: [],
+          growthOpportunities: [],
+          recommendedActions: [],
+          dataLimitations: preReportDataAudit.failures.map((failure, index) => ({ id: `audit-${index}`, title: failure }))
+        }
+      };
+      const composedReport = composeReport({
+        workspaceId: input.workspaceId,
+        requestedReportMode: input.reportMode,
+        metricResults: [],
+        metricSnapshots: previousMetricSnapshots,
+        structuredReport,
+        reportDataAudit: preReportDataAudit,
+        aggregationResults: [],
+        trendMetrics: [],
+        trendCharts: [],
+        timeConfig: {
+          hasTimeField: Boolean(preReportDataAudit.dateField),
+          defaultTimeField: preReportDataAudit.dateField,
+          selectedRange: effectiveDateRange.preset,
+          startDate: effectiveDateRange.startDate ?? null,
+          endDate: effectiveDateRange.endDate ?? null
+        },
+        dateRange: {
+          preset: effectiveDateRange.preset,
+          startDate: effectiveDateRange.startDate ?? null,
+          endDate: effectiveDateRange.endDate ?? null,
+          previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
+          previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null
+        },
+        locale: input.reportLocale
+      });
+      const effectiveReportMode = String((composedReport as { reportMode?: string }).reportMode ?? input.reportMode) as ReportMode;
+      const reportTimeMode = String((composedReport as { reportTimeMode?: string }).reportTimeMode ?? "snapshot_report");
+      const reportTitle = reportHistoryTitle(effectiveReportMode, reportTimeMode, input.reportLocale);
+      const summary = input.reportLocale === "zh" ? "当前报告未通过数据口径校验。" : "The report did not pass data-scope validation.";
+      const selectedDateRange = {
+        preset: effectiveDateRange.preset,
+        startDate: effectiveDateRange.startDate ?? null,
+        endDate: effectiveDateRange.endDate ?? null,
+        previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
+        previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null,
+        dateField: preReportDataAudit.dateField,
+        generatedAt: new Date().toISOString()
+      };
+      const payloadJson = {
+        generatedFrom: "full_data_guardrail",
+        locale: input.reportLocale,
+        reportMode: effectiveReportMode,
+        requestedReportMode: input.reportMode,
+        reportTimeMode,
+        generatedAt: new Date().toISOString(),
+        dateRange: selectedDateRange,
+        dataSourceIds: dataSources.map((source) => source.id),
+        dataSourceName: dataSources.map((source) => source.name).join(input.reportLocale === "zh" ? "、" : ", "),
+        metricRegistryId: registryFromMetricDefinitions(executableMetrics),
+        fullSummary: summary,
+        metricResults: [],
+        verifiedMetrics: [],
+        metricResultGroups: groupMetricResultsByType([]),
+        aggregationResults: [],
+        reportDataAudit: preReportDataAudit,
+        timeConfig: {
+          hasTimeField: Boolean(preReportDataAudit.dateField),
+          defaultTimeField: preReportDataAudit.dateField,
+          selectedRange: effectiveDateRange.preset,
+          startDate: effectiveDateRange.startDate ?? null,
+          endDate: effectiveDateRange.endDate ?? null
+        },
+        trendMetrics: [],
+        trendCharts: [],
+        structuredReport,
+        composedReports: {
+          [effectiveReportMode]: composedReport
+        }
+      };
+      const cacheIdentity = cacheIdentityFromPayload({
+        workspaceId: input.workspaceId,
+        payload: payloadJson,
+        dateRange: effectiveDateRange
+      });
+
+      await upsertReportMetricCache(prisma, {
+        ...cacheIdentity,
+        payload: payloadJson,
+        sourceSnapshotVersion: latestSnapshot.version
+      });
+
+      const reportHistoryModel = (prisma as typeof prisma & {
+        reportHistory?: {
+          create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+        };
+      }).reportHistory;
+      const reportHistory = reportHistoryModel
+        ? await reportHistoryModel.create({
+            data: {
+              workspaceId: input.workspaceId,
+              reportMode: effectiveReportMode,
+              reportTimeMode,
+              title: reportTitle,
+              summaryJson: { summary, generatedAt: payloadJson.generatedAt, metricSnapshotCount: 0 },
+              contentJson: composedReport,
+              selectedDateRange,
+              generatedAt: new Date(payloadJson.generatedAt)
+            }
+          }).catch(() => null)
+        : null;
+      const briefing = await prisma.dailyBriefing.upsert({
+        where: {
+          workspaceId_briefingDate: {
+            workspaceId: input.workspaceId,
+            briefingDate: startOfToday()
+          }
+        },
+        create: {
+          workspaceId: input.workspaceId,
+          briefingDate: startOfToday(),
+          title: reportTitle,
+          summary,
+          confidence: 0,
+          payloadJson: payloadJson as never
+        },
+        update: {
+          title: reportTitle,
+          summary,
+          confidence: 0,
+          payloadJson: payloadJson as never
+        }
+      });
+
+      await markReportGenerationSucceeded({
+        logId: input.generationLogId,
+        workspaceId: input.workspaceId,
+        reportId: reportHistory?.id ?? briefing.id
+      });
+      await prisma.reportGenerationJob.update({
+        where: { id: input.jobId },
+        data: {
+          reportId: reportHistory?.id ?? briefing.id,
+          status: ReportGenerationJobStatus.COMPLETED,
+          completedAt: new Date(),
+          metadata: {
+            generatedAt: payloadJson.generatedAt,
+            reportMode: effectiveReportMode,
+            reportTimeMode,
+            validationStatus: "failed",
+            blockingIssues: preReportDataAudit.failures
+          }
+        }
+      });
+      return;
+    }
+    const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
+    const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
+      reportType: reportType as "daily" | "weekly" | "custom",
+      metricRegistryId: executableMetricRegistryId,
+      definitions: executableMetrics.map((metric) => {
+        const lineage = asRecord(metric.lineageJson);
+        return {
+          metricId: String(lineage.metricId ?? metric.name),
+          businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
+          formula: metric.formula,
+          requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
+        };
+      })
+    })));
+
+    if (!consistency.passed) {
+      throw new Error(consistency.failures[0] ?? "当前报告未通过指标一致性校验，日报、周报和月经营分析使用了不一致的指标口径。");
+    }
+
+    const { metricResults, metricRegistryId } = await calculateVerifiedMetrics({
       contexts,
       metrics: executableMetrics,
-      dateRange: input.resolvedDateRange
+      dateRange: effectiveDateRange
     });
     const displayableMetricResults = metricResults.filter((result) => hasDisplayableMetricResult(result));
     const metricResultGroups = groupMetricResultsByType(metricResults);
     const aggregationResults = await buildAggregationResults({
       contexts,
       metricResults,
-      dateRange: input.resolvedDateRange
+      dateRange: effectiveDateRange
     });
-    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, input.resolvedDateRange, input.reportLocale);
+    const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, effectiveDateRange, input.reportLocale);
+    const reportDataAudit = await buildReportDataAudit({
+      contexts,
+      reportType: input.reportMode,
+      metricResults: metricResults as unknown as Array<Record<string, unknown>>,
+      aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
+      trendMetrics: reportTimeArtifacts.trendMetrics as Array<Record<string, unknown>>
+    });
+    const effectiveTimeConfig = {
+      ...reportTimeArtifacts.timeConfig,
+      hasTimeField: reportTimeArtifacts.timeConfig.hasTimeField || Boolean(reportDataAudit.dateField),
+      defaultTimeField: reportTimeArtifacts.timeConfig.defaultTimeField ?? reportDataAudit.dateField ?? null
+    };
     const structuredReport = buildStructuredAiReport({
       dataSourceCount: dataSources.length,
       metricResults,
@@ -294,48 +502,119 @@ async function runReportGenerationJob(input: {
       aggregationResults,
       locale: input.reportLocale
     });
+    const composedReport = composeReport({
+      workspaceId: input.workspaceId,
+      requestedReportMode: input.reportMode,
+      metricResults,
+      metricSnapshots: previousMetricSnapshots,
+      structuredReport,
+      reportDataAudit,
+      aggregationResults,
+      trendMetrics: reportTimeArtifacts.trendMetrics,
+      trendCharts: reportTimeArtifacts.trendCharts,
+      timeConfig: effectiveTimeConfig,
+      dateRange: {
+        preset: effectiveDateRange.preset,
+        startDate: effectiveDateRange.startDate ?? null,
+        endDate: effectiveDateRange.endDate ?? null,
+        previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
+        previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null
+      },
+      locale: input.reportLocale
+    });
+    const metricSnapshotResult = await saveMetricSnapshots(prisma, {
+      workspaceId: input.workspaceId,
+      metricResults,
+      timeConfig: effectiveTimeConfig,
+      dateRange: {
+        preset: effectiveDateRange.preset,
+        startDate: effectiveDateRange.startDate ?? null,
+        endDate: effectiveDateRange.endDate ?? null,
+        previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
+        previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null
+      }
+    }).catch(() => ({ count: 0, snapshotDate: new Date() }));
+    const effectiveReportMode = String((composedReport as { reportMode?: string }).reportMode ?? input.reportMode) as ReportMode;
+    const reportTimeMode = String((composedReport as { reportTimeMode?: string }).reportTimeMode ?? "latest_complete_period_report");
     const prompt = buildReportPrompt(structuredReport);
     const mockReport = buildMockAiBrief(metricResults, input.reportLocale);
     const fullSummary = structuredReport.coreSummary || mockReport.summary || buildBriefSummary(metricResults, input.reportLocale);
     const summary = compactText(fullSummary);
     const today = startOfToday();
-    const reportTitle = input.reportLocale === "zh" ? "AI 数据分析报告" : "AI Data Analysis Report";
+    const reportTitle = reportHistoryTitle(effectiveReportMode, reportTimeMode, input.reportLocale);
+    const selectedDateRange = {
+      preset: effectiveDateRange.preset,
+      startDate: effectiveDateRange.startDate ?? null,
+      endDate: effectiveDateRange.endDate ?? null,
+      previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
+      previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null,
+      dateField: effectiveTimeConfig.defaultTimeField ?? null,
+      generatedAt: new Date().toISOString()
+    };
     const payloadJson = {
       generatedFrom: "async_ai_brief",
       locale: input.reportLocale,
+      reportMode: effectiveReportMode,
+      requestedReportMode: input.reportMode,
+      reportTimeMode,
+      metricRegistryId,
       generatedAt: new Date().toISOString(),
-      dateRange: {
-        preset: input.resolvedDateRange.preset,
-        startDate: input.resolvedDateRange.startDate ?? null,
-        endDate: input.resolvedDateRange.endDate ?? null,
-        dateField: reportTimeArtifacts.timeConfig.defaultTimeField ?? null,
-        generatedAt: new Date().toISOString()
-      },
+      dateRange: selectedDateRange,
       dataSourceIds: dataSources.map((source) => source.id),
       dataSourceName: dataSources.map((source) => source.name).join(input.reportLocale === "zh" ? "、" : ", "),
       fullSummary,
       metricResults,
+      verifiedMetrics: metricResults,
       metricResultGroups,
       aggregationResults,
-      timeConfig: reportTimeArtifacts.timeConfig,
+      reportDataAudit,
+      timeConfig: effectiveTimeConfig,
       trendMetrics: reportTimeArtifacts.trendMetrics,
       trendCharts: reportTimeArtifacts.trendCharts,
       structuredReport,
+      composedReports: {
+        [effectiveReportMode]: composedReport
+      },
+      metricSnapshot: metricSnapshotResult,
       prompt,
       mockReport,
       analysisReport: asRecord(latestSnapshot.qualityReport).analysisReport ?? asRecord(latestSnapshot.schemaJson).analysisReport ?? null
     };
     const cacheIdentity = cacheIdentityFromPayload({
-      workspaceId: input.workspaceId,
-      payload: payloadJson,
-      dateRange: input.resolvedDateRange
-    });
+        workspaceId: input.workspaceId,
+        payload: payloadJson,
+        dateRange: effectiveDateRange
+      });
 
     await upsertReportMetricCache(prisma, {
       ...cacheIdentity,
       payload: payloadJson,
       sourceSnapshotVersion: latestSnapshot.version
     });
+    const reportHistoryModel = (prisma as typeof prisma & {
+      reportHistory?: {
+        create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+      };
+    }).reportHistory;
+    const reportHistory = reportHistoryModel
+      ? await reportHistoryModel.create({
+          data: {
+            id: randomUUID(),
+            workspaceId: input.workspaceId,
+            reportMode: effectiveReportMode,
+            reportTimeMode,
+            title: reportTitle,
+            summaryJson: {
+              summary,
+              generatedAt: payloadJson.generatedAt,
+              metricSnapshotCount: metricSnapshotResult.count
+            },
+            contentJson: composedReport,
+            selectedDateRange,
+            generatedAt: new Date(payloadJson.generatedAt)
+          }
+        }).catch(() => null)
+      : null;
 
     const briefing = await prisma.dailyBriefing.upsert({
       where: {
@@ -350,31 +629,35 @@ async function runReportGenerationJob(input: {
         title: reportTitle,
         summary,
         confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
-        payloadJson
+        payloadJson: payloadJson as never
       },
       update: {
         title: reportTitle,
         summary,
         confidence: displayableMetricResults.some((result) => result.status === "computed") ? 88 : 50,
-        payloadJson
+        payloadJson: payloadJson as never
       }
     });
 
     await markReportGenerationSucceeded({
       logId: input.generationLogId,
       workspaceId: input.workspaceId,
-      reportId: briefing.id
+      reportId: reportHistory?.id ?? briefing.id
     });
 
     await prisma.reportGenerationJob.update({
       where: { id: input.jobId },
       data: {
-        reportId: briefing.id,
+        reportId: reportHistory?.id ?? briefing.id,
         status: ReportGenerationJobStatus.COMPLETED,
         completedAt: new Date(),
         metadata: {
           computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
-          generatedAt: payloadJson.generatedAt
+          generatedAt: payloadJson.generatedAt,
+          reportMode: effectiveReportMode,
+          reportTimeMode,
+          briefingId: briefing.id,
+          reportHistoryId: reportHistory?.id ?? null
         }
       }
     });
@@ -415,7 +698,10 @@ export async function POST(request: Request) {
 
     const requestedLocale = normalizeReportLocale(payloadRecord.locale);
     const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
-    const requestedDateRange = normalizeReportDateRange(payloadRecord.dateRange);
+    const reportMode = normalizeReportMode(payloadRecord.reportMode);
+    const requestedDateRange = payloadRecord.dateRange
+      ? normalizeReportDateRange(payloadRecord.dateRange)
+      : defaultDateRangeForReportMode(reportMode);
     const resolvedDateRange = resolveReportDateRange(requestedDateRange);
     if (requestedLocale && requestedLocale !== session.user.locale) {
       await prisma.user.update({
@@ -429,7 +715,7 @@ export async function POST(request: Request) {
       : request.headers.get("idempotency-key") ?? request.headers.get("x-idempotency-key") ?? crypto.randomUUID();
     const generationAccess = await startReportGeneration({
       workspaceId: session.workspace.id,
-      reportType: "full_report",
+      reportType: reportMode,
       idempotencyKey: requestId
     });
     generationLogId = generationAccess.log.id;
@@ -442,8 +728,11 @@ export async function POST(request: Request) {
           dateRange: {
             preset: resolvedDateRange.preset,
             startDate: resolvedDateRange.startDate ?? null,
-            endDate: resolvedDateRange.endDate ?? null
+            endDate: resolvedDateRange.endDate ?? null,
+            previousStartDate: resolvedDateRange.previousStart ? resolvedDateRange.previousStart.toISOString().slice(0, 10) : null,
+            previousEndDate: resolvedDateRange.previousEnd ? resolvedDateRange.previousEnd.toISOString().slice(0, 10) : null
           },
+          reportMode,
           locale: reportLocale
         }
       }
@@ -455,6 +744,7 @@ export async function POST(request: Request) {
       workspaceId: session.workspace.id,
       userId: session.user.id,
       reportLocale,
+      reportMode,
       resolvedDateRange
     });
 

@@ -177,6 +177,8 @@ model Workspace {
   reportEntitlement ReportEntitlement?
   reportGenerationLogs ReportGenerationLog[]
   reportMetricCaches ReportMetricCache[]
+  metricSnapshots   MetricSnapshot[]
+  reportHistory     ReportHistory[]
 }
 
 model WorkspaceMember {
@@ -430,6 +432,51 @@ model ReportMetricCache {
 
   @@index([workspaceId, dateRangePreset, startDate, endDate])
   @@index([workspaceId, refreshStatus, staleAt])
+}
+
+model MetricSnapshot {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metricId        String?
+  metricName      String
+  displayName     String?
+  value           Float?
+  valueJson       Json?
+  unit            String?
+  scope           String?
+  grain           String?
+  businessModule  String?
+  sourceDataset   String?
+  dateField       String?
+  snapshotDate    DateTime
+  dateRangePreset String?
+  startDate       DateTime?
+  endDate         DateTime?
+  calculatedAt    DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  @@index([workspaceId, metricName, snapshotDate])
+  @@index([workspaceId, snapshotDate])
+  @@index([workspaceId, dateRangePreset, startDate, endDate])
+}
+
+model ReportHistory {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  reportMode        String
+  reportTimeMode    String
+  title             String
+  summaryJson       Json?
+  contentJson       Json?
+  selectedDateRange Json?
+  status            String    @default("completed")
+  generatedAt       DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+
+  @@index([workspaceId, reportMode, generatedAt])
+  @@index([workspaceId, generatedAt])
 }
 
 model Plan {

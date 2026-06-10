@@ -84,7 +84,16 @@ function parseNumber(value: unknown) {
     return null;
   }
 
+  const raw = value.trim().toLowerCase();
+  if (!raw || ["nan", "null", "undefined", "n/a", "na", "none"].includes(raw)) {
+    return null;
+  }
+
   const cleaned = value.replace(/[$,%+,\s]/g, "");
+  if (!cleaned) {
+    return null;
+  }
+
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }

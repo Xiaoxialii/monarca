@@ -204,6 +204,7 @@ export type CandidateResult = {
   evidenceValues: Record<string, string | number | null>;
   metricEvidence?: string;
   comparisonEvidence?: string;
+  technicalCriteria?: string;
   comparison?: string;
   objects?: Array<Record<string, string | number | null>>;
   affectedObjects?: Array<Record<string, string | number | null>>;

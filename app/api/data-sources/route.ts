@@ -101,18 +101,22 @@ export async function GET() {
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
-        OR: [
-          { isActive: true },
-          { status: ConnectionStatus.CONNECTED }
-        ]
+        isActive: true,
+        status: ConnectionStatus.CONNECTED
       },
-      include: {
-        schemaSnapshots: {
-          orderBy: {
-            version: "desc"
-          },
-          take: 1
-        }
+      select: {
+        id: true,
+        name: true,
+        provider: true,
+        type: true,
+        status: true,
+        connectionMode: true,
+        authMethod: true,
+        config: true,
+        schemas: true,
+        connectedAt: true,
+        lastSyncAt: true,
+        createdAt: true
       },
       orderBy: {
         createdAt: "desc"
@@ -132,8 +136,8 @@ export async function GET() {
         config: publicConfig(source.config),
         schema: schemaSummary(
           source.schemas,
-          source.schemaSnapshots[0]?.schemaJson,
-          source.schemaSnapshots[0]?.qualityReport
+          null,
+          null
         ),
         connectedAt: source.connectedAt?.toISOString() ?? null,
         lastSyncAt: source.lastSyncAt?.toISOString() ?? null

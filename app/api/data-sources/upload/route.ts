@@ -9,11 +9,25 @@ import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-me
 import { storeUploadInR2 } from "@/lib/r2-storage";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { fileExtension, inferTablesFromUploadFile } from "@/lib/file-upload-schema";
+import { storeUploadLocally } from "@/lib/local-upload-storage";
+import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
+import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_BYTES = 9 * 1024 * 1024;
 const MAX_FILE_NAME_LENGTH = 180;
+
+function publicTables(tables: Array<{
+  name: string;
+  rowCount?: number;
+  columns: Array<{ name: string; type?: string; nullable?: boolean }>;
+}>) {
+  return tables.map((table) => ({
+    name: table.name,
+    rowCount: table.rowCount,
+    columns: table.columns
+  }));
+}
 
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
@@ -70,9 +84,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "File is empty" }, { status: 400 });
     }
 
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (file.size > FILE_UPLOAD_MAX_BYTES) {
       return NextResponse.json(
-        { ok: false, message: `File is too large. Maximum upload size is ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB.` },
+        { ok: false, message: `File is too large. Maximum upload size is ${FILE_UPLOAD_MAX_MB}MB.` },
         { status: 413 }
       );
     }
@@ -84,7 +98,7 @@ export async function POST(request: Request) {
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(tables);
-    const schemaPayload = {
+    const snapshotSchemaPayload = {
       scannedAt,
       fileName: file.name,
       fileSize: file.size,
@@ -92,8 +106,16 @@ export async function POST(request: Request) {
       semanticLayer,
       analysisReport
     };
+    const publicSchemaPayload = {
+      scannedAt,
+      fileName: file.name,
+      fileSize: file.size,
+      tables: publicTables(tables)
+    };
 
     const result = await prisma.$transaction(async (tx) => {
+      await clearWorkspaceReportCaches(tx, session.workspace.id);
+
       const dataSource = await tx.dataSourceConnection.create({
         data: {
           workspaceId: session.workspace.id,
@@ -110,7 +132,7 @@ export async function POST(request: Request) {
             mimeType: file.type || null,
             extension
           },
-          schemas: schemaPayload,
+          schemas: publicSchemaPayload,
           connectedAt: new Date(),
           lastSyncAt: new Date()
         }
@@ -136,7 +158,7 @@ export async function POST(request: Request) {
           status: ConnectionStatus.CONNECTED,
           schemaJson: {
             sourceId: dataSource.id,
-            ...schemaPayload
+            ...snapshotSchemaPayload
           },
           qualityReport: {
             tableCount: tables.length,
@@ -156,28 +178,22 @@ export async function POST(request: Request) {
     });
 
     const generatedMetricCount = semanticLayer.metrics.length;
-
-    void generateWorkspaceMetricsFromConnectedSources(prisma, {
-      workspaceId: session.workspace.id,
-      userId: session.user.id
-    }).catch((metricGenerationError) => {
-      console.error("Failed to generate metrics after upload", metricGenerationError);
-    });
     let storedFile: Awaited<ReturnType<typeof storeUploadInR2>> = null;
+    let localStoredFile: Awaited<ReturnType<typeof storeUploadLocally>> | null = null;
     let storageWarning: string | null = null;
 
     try {
-      storedFile = await storeUploadInR2({
+      localStoredFile = await storeUploadLocally({
         workspaceId: session.workspace.id,
         dataSourceId: result.dataSource.id,
         file
       });
-    } catch (storageError) {
+    } catch (localStorageError) {
       storageWarning = "Original file storage failed; schema import was saved.";
-      console.warn("Skipping original upload storage after schema import", storageError);
+      console.warn("Skipping local upload storage after schema import", localStorageError);
     }
 
-    if (storedFile) {
+    if (localStoredFile) {
       await prisma.dataSourceConnection.update({
         where: {
           id: result.dataSource.id
@@ -189,16 +205,58 @@ export async function POST(request: Request) {
             fileSize: file.size,
             mimeType: file.type || null,
             extension,
+            storedFilePath: localStoredFile.path,
             storage: {
-              provider: "cloudflare-r2",
-              bucket: storedFile.bucket,
-              key: storedFile.key,
-              url: storedFile.url
+              provider: localStoredFile.provider,
+              path: localStoredFile.path
             }
           }
         }
       });
     }
+
+    void (async () => {
+      try {
+        storedFile = await storeUploadInR2({
+          workspaceId: session.workspace.id,
+          dataSourceId: result.dataSource.id,
+          file
+        });
+      } catch (storageError) {
+        console.warn("Cloud upload storage failed; local upload storage is already saved", storageError);
+      }
+
+      if (storedFile) {
+        await prisma.dataSourceConnection.update({
+          where: {
+            id: result.dataSource.id
+          },
+          data: {
+            isActive: true,
+            config: {
+              fileName: file.name,
+              fileSize: file.size,
+              mimeType: file.type || null,
+              extension,
+              storedFilePath: localStoredFile?.path ?? null,
+              storage: {
+                provider: "cloudflare-r2",
+                bucket: storedFile.bucket,
+                key: storedFile.key,
+                url: storedFile.url
+              }
+            }
+          }
+        });
+      }
+
+      await generateWorkspaceMetricsFromConnectedSources(prisma, {
+        workspaceId: session.workspace.id,
+        userId: session.user.id
+      });
+    })().catch((backgroundError) => {
+      console.error("Failed to finish post-upload storage or metric generation", backgroundError);
+    });
 
     return NextResponse.json({
       ok: true,
@@ -214,22 +272,19 @@ export async function POST(request: Request) {
           fileName: file.name,
           fileSize: file.size,
           extension,
-          storage: storedFile
+          storage: localStoredFile
             ? {
-                provider: "cloudflare-r2",
-                bucket: storedFile.bucket,
-                key: storedFile.key,
-                url: storedFile.url
+                provider: localStoredFile.provider,
+                path: localStoredFile.path
               }
-            : null
+            : null,
+          hasStoredFile: Boolean(localStoredFile)
         },
         schema: {
           tableCount: tables.length,
           columnCount,
           scannedAt,
-          tables,
-          semanticLayer,
-          analysisReport
+          tables: publicTables(tables)
         },
         connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null

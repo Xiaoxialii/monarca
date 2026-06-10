@@ -13,6 +13,7 @@ dist/
 
 # private uploaded data
 .data/
+.data-source-uploads/
 
 # env
 .env

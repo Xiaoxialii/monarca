@@ -61,7 +61,38 @@ function scoreIndustry(input: MetricGenerationInput, industry: Industry) {
   };
 }
 
+function hasEcommerceOrderShape(input: MetricGenerationInput) {
+  const tokens = input.tables.flatMap(tableTokens);
+  const has = (value: string) => tokens.some((token) => token === normalizeMetricToken(value) || token.includes(normalizeMetricToken(value)));
+  const signals = [
+    "order_id",
+    "order_date",
+    "customer_id",
+    "product_id",
+    "quantity",
+    "unit_price",
+    "gross_sales",
+    "net_sales",
+    "total_paid",
+    "is_returned",
+    "fulfillment_days",
+    "customer_rating"
+  ];
+  const score = signals.filter(has).length;
+
+  return (has("order_id") && (has("net_sales") || has("total_paid") || has("quantity"))) || score >= 5;
+}
+
 export function detectIndustry(input: MetricGenerationInput): DetectedIndustry {
+  if (hasEcommerceOrderShape(input)) {
+    return {
+      primary: "ecommerce",
+      confidence: 0.96,
+      reasons: ["Matched ecommerce order fields: order_id, order_date, customer_id, product/category, quantity, sales, return, rating, or fulfillment fields"],
+      secondaryCandidates: []
+    };
+  }
+
   const scored = (Object.keys(industrySignals) as Industry[])
     .filter((industry) => industry !== "unknown")
     .map((industry) => scoreIndustry(input, industry))

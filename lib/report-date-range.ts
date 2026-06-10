@@ -1,11 +1,13 @@
 import type { SchemaColumn } from "@/lib/metric-validation";
 
-export type DateRangePreset = "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
+export type DateRangePreset = "DAILY" | "WEEKLY" | "TODAY" | "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
 
 export type ReportDateRangeInput = {
   preset: DateRangePreset;
   startDate?: string;
   endDate?: string;
+  previousStartDate?: string;
+  previousEndDate?: string;
 };
 
 export type ResolvedReportDateRange = {
@@ -19,6 +21,9 @@ export type ResolvedReportDateRange = {
 };
 
 const presetDays: Partial<Record<DateRangePreset, number>> = {
+  "DAILY": 1,
+  "WEEKLY": 7,
+  "TODAY": 1,
   "7D": 7,
   "30D": 30,
   "90D": 90,
@@ -27,13 +32,15 @@ const presetDays: Partial<Record<DateRangePreset, number>> = {
 
 const preferredBusinessTimeFields = [
   "order_date",
+  "created_at",
+  "paid_at",
   "transaction_date",
+  "payment_date",
+  "event_date",
   "event_time",
   "review_date",
   "signup_date",
-  "paid_at",
   "completed_at",
-  "created_at",
   "timestamp",
   "date",
   "updated_at"
@@ -64,22 +71,28 @@ function parseDate(value: unknown) {
 }
 
 function isoDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function normalizeReportDateRange(value: unknown): ReportDateRangeInput {
   const record = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-  const preset = record.preset === "7D" || record.preset === "30D" || record.preset === "90D" ||
+  const preset = record.preset === "DAILY" || record.preset === "WEEKLY" ||
+    record.preset === "TODAY" || record.preset === "7D" || record.preset === "30D" || record.preset === "90D" ||
     record.preset === "12M" || record.preset === "ALL" || record.preset === "CUSTOM"
     ? record.preset
-    : "30D";
+    : "ALL";
 
   return {
     preset,
     startDate: typeof record.startDate === "string" ? record.startDate : undefined,
-    endDate: typeof record.endDate === "string" ? record.endDate : undefined
+    endDate: typeof record.endDate === "string" ? record.endDate : undefined,
+    previousStartDate: typeof record.previousStartDate === "string" ? record.previousStartDate : undefined,
+    previousEndDate: typeof record.previousEndDate === "string" ? record.previousEndDate : undefined
   };
 }
 
@@ -87,7 +100,9 @@ export function dateRangeFromSearchParams(searchParams: URLSearchParams): Report
   return normalizeReportDateRange({
     preset: searchParams.get("dateRangePreset") ?? searchParams.get("preset") ?? undefined,
     startDate: searchParams.get("startDate") ?? undefined,
-    endDate: searchParams.get("endDate") ?? undefined
+    endDate: searchParams.get("endDate") ?? undefined,
+    previousStartDate: searchParams.get("previousStartDate") ?? undefined,
+    previousEndDate: searchParams.get("previousEndDate") ?? undefined
   });
 }
 
@@ -122,8 +137,12 @@ export function resolveReportDateRange(input: ReportDateRangeInput, now = new Da
   }
 
   const durationMs = currentEnd.getTime() - currentStart.getTime() + 1;
-  const previousEnd = new Date(currentStart.getTime() - 1);
-  const previousStart = new Date(previousEnd.getTime() - durationMs + 1);
+  const explicitPreviousStart = parseDate(input.previousStartDate);
+  const explicitPreviousEnd = parseDate(input.previousEndDate);
+  const previousEnd = explicitPreviousEnd ? new Date(explicitPreviousEnd) : new Date(currentStart.getTime() - 1);
+  const previousStart = explicitPreviousStart ? new Date(explicitPreviousStart) : new Date(previousEnd.getTime() - durationMs + 1);
+  previousStart.setHours(0, 0, 0, 0);
+  previousEnd.setHours(23, 59, 59, 999);
 
   return {
     preset,

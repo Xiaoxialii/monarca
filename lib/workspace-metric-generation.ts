@@ -1,6 +1,10 @@
 import { ConnectionStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
 import { validateWorkspaceMetrics } from "@/lib/metric-validation";
+import {
+  buildBusinessMetricRegistry,
+  upsertBusinessMetricRegistryDefinitions
+} from "@/lib/metrics/metric-registry";
 
 type MetricGenerationClient = PrismaClient | Prisma.TransactionClient;
 
@@ -138,11 +142,21 @@ export async function generateWorkspaceMetricsFromConnectedSources(
   }
 
   const semanticLayer = buildSemanticLayer(context.tables);
-  const generatedMetricCount = await generateSemanticMetrics(client, {
-    workspaceId,
-    userId,
+  const metricRegistry = buildBusinessMetricRegistry({
+    tables: context.tables,
     semanticLayer
   });
+  const generatedMetricCount = metricRegistry.definitions.length > 0
+    ? await upsertBusinessMetricRegistryDefinitions(client, {
+        workspaceId,
+        userId,
+        registry: metricRegistry
+      })
+    : await generateSemanticMetrics(client, {
+        workspaceId,
+        userId,
+        semanticLayer
+      });
   const validationResults = await validateWorkspaceMetrics(client, {
     workspaceId,
     tables: context.tables
@@ -155,13 +169,17 @@ export async function generateWorkspaceMetricsFromConnectedSources(
     data: {
       schemaJson: {
         ...asRecord(context.primarySnapshot.schemaJson),
-        semanticLayer
+        semanticLayer,
+        metricRegistry
       },
       qualityReport: {
         ...asRecord(context.primarySnapshot.qualityReport),
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
-        generatedMetricCount
+        generatedMetricCount,
+        metricRegistryId: metricRegistry.metricRegistryId,
+        detectedIndustry: metricRegistry.industry,
+        missingCoreMetrics: metricRegistry.missingCoreMetrics
       }
     }
   });
@@ -169,6 +187,7 @@ export async function generateWorkspaceMetricsFromConnectedSources(
   return {
     ...context,
     semanticLayer,
+    metricRegistry,
     generatedMetricCount,
     validationResults
   };

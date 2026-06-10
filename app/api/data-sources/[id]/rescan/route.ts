@@ -7,6 +7,7 @@ import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { storedSecret } from "@/lib/secret-crypto";
+import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 
 export const runtime = "nodejs";
 
@@ -80,6 +81,8 @@ export async function POST(
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
 
     const result = await prisma.$transaction(async (tx) => {
+      await clearWorkspaceReportCaches(tx, session.workspace.id);
+
       const latestSnapshot = await tx.schemaSnapshot.findFirst({
         where: {
           workspaceId: session.workspace.id

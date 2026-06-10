@@ -46,6 +46,7 @@ const paymentCopy = {
     noActivePlan: "No active plan",
     loadingPlan: "Loading current plan...",
     monthlyPlan: "Monthly service",
+    annualMonthlyPlan: "Annual plan, paid monthly",
     oneTimePlan: "One-time service",
     addonLabel: "Add-on service",
     secure: "Secure checkout",
@@ -92,8 +93,8 @@ const paymentCopy = {
       },
       professional: {
         cny: {
-          price: "¥1,999",
-          due: "¥1,999"
+          price: "¥2,000",
+          due: "¥2,000"
         },
         usd: {
           price: "$199",
@@ -139,19 +140,24 @@ const paymentCopy = {
       professional: {
         badge: "Recommended",
         name: "Professional",
-        subtitle: "Report automation + data analysis + decision support",
+        subtitle: "Expert-assisted setup for ongoing automated operating analysis",
         price: "$199",
         cadence: "/ month",
+        billingNote: "Annual service term, paid monthly",
         description:
-          "For teams ready to automate growth reporting and use AI to explain metric movement",
+          "Data integration + expert-assisted metric system configuration + automated reports. Includes basic data onboarding guidance, metric system design recommendations, and report template configuration for teams building an operating analytics system quickly.",
         due: "$199",
-        primary: "Confirm subscription",
+        primary: "Start professional",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
-          "Auto-generated business analysis reports",
-          "Metric monitoring and anomaly alerts",
-          "Conversational data exploration with Why-layer reasoning",
-          "Causal analysis and actionable recommendations"
+          "Annual service term, paid monthly",
+          "Connect databases, Excel, Google Sheets, and CSV files",
+          "Professional team assistance for data onboarding and integration",
+          "Core team metric system configured around business goals",
+          "Auto-generate daily, weekly, and monthly reports",
+          "Anomaly alerts, trend explanations, and AI action recommendations",
+          "Ongoing data updates and automatic report refresh",
+          "Metric definition checks to reduce misleading analysis"
         ]
       },
       enterprise: {
@@ -182,6 +188,7 @@ const paymentCopy = {
     noActivePlan: "暂无套餐",
     loadingPlan: "正在加载当前套餐...",
     monthlyPlan: "月服务",
+    annualMonthlyPlan: "年度套餐，按月支付",
     oneTimePlan: "一次服务",
     addonLabel: "附加服务",
     secure: "安全结算",
@@ -228,8 +235,8 @@ const paymentCopy = {
       },
       professional: {
         cny: {
-          price: "¥1,999",
-          due: "¥1,999"
+          price: "¥2,000",
+          due: "¥2,000"
         },
         usd: {
           price: "$199",
@@ -273,18 +280,23 @@ const paymentCopy = {
       professional: {
         badge: "推荐",
         name: "专业版",
-        subtitle: "报告自动化 + 数据分析 + 决策辅助",
-        price: "¥1,999",
+        subtitle: "适合需要专业团队协助，持续自动化经营分析的团队",
+        price: "¥2,000",
         cadence: "/ 月",
-        description: "适合希望自动生成增长报告，并用 AI 解释指标变化的团队",
-        due: "¥1,999",
-        primary: "确认订阅",
+        billingNote: "年度套餐，按月支付",
+        description: "数据整合 + 专业团队定制指标体系 + 自动化报告。专业版包含基础数据接入指导、指标体系设计建议和报告模板配置，适合希望快速搭建团队经营分析体系的中小企业。",
+        due: "¥2,000",
+        primary: "开通专业版",
         next: "结算后进入工作区，然后连接数据源",
         features: [
-          "自动生成业务分析报告",
-          "指标监控 & 异常提醒",
-          "对话式数据探索和 Why 层推理",
-          "因果分析和可执行决策建议"
+          "年度服务周期，按月付款",
+          "连接数据库、Excel、Google Sheets、CSV",
+          "专业团队协助完成数据接入与整合",
+          "根据业务目标定制团队核心指标体系",
+          "自动生成日报、周报、月报",
+          "支持异常提醒、趋势解读与 AI 行动建议",
+          "支持持续数据更新和报告自动刷新",
+          "提供指标口径校验，减少错误分析结论"
         ]
       },
       enterprise: {
@@ -391,6 +403,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
     : null;
   const selectedPrice = selectedCurrencyPrice?.price ?? selected.price;
   const selectedDue = selectedCurrencyPrice?.due ?? selected.due;
+  const selectedBillingNote = "billingNote" in selected ? selected.billingNote : "";
   const currentPlanName =
     entitlement?.planType === "MONTHLY"
       ? copy.monthlyPlan
@@ -618,6 +631,11 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                         </span>
                       ) : null}
                     </div>
+                    {planId === "professional" ? (
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        {locale === "zh" ? "年度套餐，按月付费" : "Annual plan, paid monthly"}
+                      </p>
+                    ) : null}
                   </button>
                 );
               })}
@@ -684,6 +702,9 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                 <span className="pb-1 text-sm font-medium text-slate-500">{selected.cadence}</span>
               ) : null}
             </div>
+            {selectedBillingNote ? (
+              <p className="mt-2 text-sm font-medium text-slate-500">{selectedBillingNote}</p>
+            ) : null}
             <p className="mt-5 max-w-xl text-sm leading-6 text-slate-600">{selected.description}</p>
 
             <div className="mt-8 space-y-3">

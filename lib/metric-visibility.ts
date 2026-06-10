@@ -218,10 +218,19 @@ export function isGlobalBusinessMetricResult(metric: {
 }
 
 export function isBusinessFacingMetricText(parts: Array<string | null | undefined>) {
+  const raw = parts.filter(Boolean).join(" ");
   const compact = compactMetricText(parts);
 
   if (!compact) {
     return true;
+  }
+
+  if (
+    /average\s*rating\s*share|averagerating\s*share/i.test(raw) ||
+    /^top_n_share_.*(rating|score)|.*(rating|score).*_share$/i.test(compact) ||
+    /top_n_share\s*\([^)]*(rating|score)[^)]*\)/i.test(raw)
+  ) {
+    return false;
   }
 
   if (internalMetricTokens.some((token) => compact.split("_").includes(token) || compact.includes(token))) {

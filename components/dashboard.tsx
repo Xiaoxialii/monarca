@@ -71,6 +71,7 @@ import {
   isValidTrendMetricName,
   isValidTrendSeries
 } from "@/lib/report-trend-guardrails.mjs";
+import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 
 const dashboardCopy = {
@@ -1636,7 +1637,7 @@ function Sidebar({
     .join("") || accountEmail?.[0]?.toUpperCase() || "U";
   const currentPlan =
     entitlement?.planType === "MONTHLY"
-      ? isZh ? "月付无限版" : "Monthly Unlimited"
+      ? isZh ? "专业版" : "Professional"
       : entitlement?.planType === "ONE_TIME"
         ? isZh ? "单次报告" : "One-time Report"
         : isZh ? "免费版" : "Free";
@@ -4280,7 +4281,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     value ? new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(value)) : "-";
   const planTypeLabel =
     entitlement?.planType === "MONTHLY"
-      ? isZh ? "月付套餐" : "Monthly subscription"
+      ? isZh ? "年度套餐，按月支付" : "Annual plan, paid monthly"
       : entitlement?.planType === "ONE_TIME"
         ? isZh ? "一次性付费" : "One-time payment"
         : isZh ? "免费" : "Free";
@@ -4291,7 +4292,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
   const stateMessage = !entitlement || entitlement.planType === "FREE"
     ? isZh ? "免费版只能查看 dashboard，请升级后连接数据并生成报告" : "Free: view dashboard only. Upgrade to connect data and generate reports."
     : entitlement.planType === "ONE_TIME" && (entitlement.remainingReportGenerations ?? 0) <= 0
-      ? isZh ? "单次报告已使用完，请再次购买或升级月付无限版" : "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited."
+      ? isZh ? "单次报告已使用完，请再次购买或升级专业版" : "You have used your one-time report generation. Buy another report or upgrade to Professional."
       : entitlement.planType === "MONTHLY" && entitlement.cancelAtPeriodEnd
         ? isZh ? `套餐仍可使用至 ${formatDate(entitlement.currentPeriodEnd)}` : `Your plan remains active until ${formatDate(entitlement.currentPeriodEnd)}.`
         : entitlement.status === "expired"
@@ -4308,11 +4309,11 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           tone: "outline"
         },
         {
-          name: "月付无限版",
-          price: "¥1,999 / 月",
-          description: "不限数据源连接，不限完整报告和简报生成",
+          name: "专业版",
+          price: "¥2,000 / 月",
+          description: "数据整合 + 专业团队定制指标体系 + 自动化报告",
           href: "/checkout/professional",
-          action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "升级套餐",
+          action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "开通专业版",
           tone: entitlement?.planType === "MONTHLY" ? "current" : "primary"
         },
         {
@@ -4334,11 +4335,11 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           tone: "outline"
         },
         {
-          name: "Monthly Unlimited",
+          name: "Professional",
           price: "$199 / mo",
-          description: "Unlimited data source connections and unlimited report generations",
+          description: "Data integration, expert-assisted metric configuration, and automated reports",
           href: "/checkout/professional",
-          action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Upgrade plan",
+          action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Start professional",
           tone: entitlement?.planType === "MONTHLY" ? "current" : "primary"
         },
         {
@@ -4440,7 +4441,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
             <Button asChild size="sm">
               <a href="/checkout/professional">
                 <CreditCard className="size-4" />
-                {entitlement?.planType === "MONTHLY" ? isZh ? "管理订阅" : "Manage subscription" : isZh ? "升级月付无限版" : "Upgrade to Monthly"}
+                {entitlement?.planType === "MONTHLY" ? isZh ? "管理订阅" : "Manage subscription" : isZh ? "开通专业版" : "Start Professional"}
               </a>
             </Button>
             <Button asChild variant="outline" size="sm">
@@ -4511,12 +4512,12 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
               ? [
                   ["免费版", "仅可查看 dashboard。升级后才能连接数据并生成报告。"],
                   ["单次报告", "不限数据源连接，包含 1 次完整报告生成；Daily、Weekly、AI Brief、Insights 和 Action Recommendations 属于同一次生成。"],
-                  ["月付无限版", "订阅有效期内不限数据源连接，不限完整报告和简报生成。"]
+                  ["专业版", "年度服务周期，按月付款；包含数据接入协助、指标体系配置和自动化报告。"]
                 ]
               : [
                   ["Free", "View dashboard only. Upgrade to connect data and generate reports."],
                   ["One-time Report", "Unlimited data source connections plus 1 complete report generation. Daily, Weekly, AI Brief, Insights, and Action Recommendations count as the same generation."],
-                  ["Monthly Unlimited", "Unlimited data source connections and unlimited report generations while the subscription is active."]
+                  ["Professional", "Annual service term, paid monthly, with expert-assisted data onboarding, metric configuration, and automated reports."]
                 ]).map(([plan, description]) => (
               <div key={plan} className="px-4 py-3">
                 <p className="text-sm font-medium">{plan}</p>
@@ -4530,7 +4531,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           <CardHeader className="border-b p-4">
             <CardTitle className="text-base">{isZh ? "套餐操作" : "Plan actions"}</CardTitle>
             <CardDescription className="mt-1">
-              {isZh ? "购买新的单次报告或切换到月付无限版" : "Buy another one-time report or switch to monthly unlimited"}
+              {isZh ? "购买新的单次报告或开通专业版" : "Buy another one-time report or start Professional"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 p-4">
@@ -4546,7 +4547,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
             <Button asChild className="w-full" size="sm">
               <a href="/checkout/professional">
                 <CreditCard className="size-4" />
-                {isZh ? "升级月付无限版" : "Upgrade to Monthly"}
+                {isZh ? "开通专业版" : "Start Professional"}
               </a>
             </Button>
             <Button asChild variant="outline" className="w-full" size="sm">
@@ -4718,62 +4719,6 @@ function ConnectedDataOverview({
           </div>
           </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function OnboardingFlow({
-  copy,
-  onDismiss
-}: {
-  copy: DashboardCopy;
-  onDismiss?: () => void;
-}) {
-  return (
-    <Card className="overflow-hidden border-emerald-100 bg-gradient-to-r from-white via-emerald-50/35 to-white shadow-sm">
-      <CardContent className="p-4">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h3 className="text-base font-semibold tracking-tight">{copy.onboarding.title}</h3>
-            {copy.onboarding.description ? (
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {copy.onboarding.description}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Badge variant="secondary">{copy.onboarding.badge}</Badge>
-            {onDismiss ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8 rounded-full text-muted-foreground hover:bg-white/80 hover:text-foreground"
-                aria-label={copy.onboarding.dismissLabel}
-                onClick={onDismiss}
-              >
-                <X className="size-4" />
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <div className="grid gap-2 md:grid-cols-4">
-          {copy.onboarding.steps.map((step, index) => (
-            <div key={step.title} className="relative rounded-lg border bg-white/85 p-3">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="grid size-7 shrink-0 place-items-center rounded-md bg-emerald-50 text-xs font-semibold text-emerald-800">
-                  {index + 1}
-                </div>
-                <p className="text-sm font-medium">{step.title}</p>
-              </div>
-              <p className="text-xs leading-5 text-muted-foreground">{step.text}</p>
-              {index < copy.onboarding.steps.length - 1 ? (
-                <ArrowRight className="absolute -right-3 top-6 hidden size-4 text-emerald-700/60 md:block" />
-              ) : null}
-            </div>
-          ))}
-        </div>
       </CardContent>
     </Card>
   );
@@ -5130,8 +5075,8 @@ function ConnectorPanel({
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL" ? "postgresql" : null;
   const defaultDatabasePort = "5432";
-  const directApiUploadMaxBytes = 9 * 1024 * 1024;
-  const largeUploadMaxBytes = 100 * 1024 * 1024;
+  const directApiUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
+  const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
   const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";
   const showWizard = connectionPage || wizardStarted;
@@ -5258,8 +5203,8 @@ function ConnectorPanel({
       setConnectionResult({
         ok: false,
         message: isZh
-          ? "文件过大。当前最大支持 100MB。"
-          : "File is too large. Maximum upload size is 100MB."
+          ? `文件过大。当前最大支持 ${FILE_UPLOAD_MAX_MB}MB。`
+          : `File is too large. Maximum upload size is ${FILE_UPLOAD_MAX_MB}MB.`
       });
       return;
     }
@@ -5847,13 +5792,15 @@ type ReportMetricEvidenceResult = {
   warning?: string;
 };
 
-type ReportTimeRange = "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
+type ReportTimeRange = "TODAY" | "7D" | "30D" | "90D" | "12M" | "ALL" | "CUSTOM";
 type MetricDirection = "higher_is_better" | "lower_is_better" | "neutral";
 
 type SelectedReportDateRange = {
   preset: ReportTimeRange;
   startDate?: string;
   endDate?: string;
+  previousStartDate?: string;
+  previousEndDate?: string;
 };
 
 type ReportTimeConfigViewData = {
@@ -5947,10 +5894,1550 @@ function reportGenerateButtonLabel(entitlement: ReportEntitlementViewData | null
   if (!entitlement) return fallback;
 
   if (!entitlement.firstFreeReportUsed && entitlement.accessType === "free_first_report") {
-    return locale === "zh" ? "免费生成报告" : "Generate free report";
+    return locale === "zh" ? "免费生成报告" : "Generate your first report for free";
   }
 
   return locale === "zh" ? "生成报告" : "Generate report";
+}
+
+type ReportModeView = "daily_brief" | "weekly_report" | "custom_report" | "history";
+
+function reportModeTabs(locale: Locale): Array<{ value: ReportModeView; label: string }> {
+  const isZh = locale === "zh";
+  return [
+    { value: "daily_brief", label: isZh ? "日报" : "Daily Brief" },
+    { value: "weekly_report", label: isZh ? "周报" : "Weekly Report" },
+    { value: "custom_report", label: isZh ? "月经营分析" : "Monthly Review" },
+    { value: "history", label: isZh ? "历史记录" : "History" }
+  ];
+}
+
+function reportModeDefaultDateRange(mode: Exclude<ReportModeView, "history">): SelectedReportDateRange {
+  if (mode === "daily_brief") return { preset: "ALL" };
+  if (mode === "weekly_report") return { preset: "ALL" };
+  return { preset: "ALL" };
+}
+
+function formatDateOnly(value?: string | Date | null) {
+  if (!value) return "-";
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function reportDateText(value: string) {
+  return value
+    .replace(/\b(\d{4}-\d{2}-\d{2})[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b/g, "$1")
+    .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+\d{1,2}:\d{2}:\d{2}(?:\s?[AP]M)?\b/gi, (_match, month, day, year) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+}
+
+type ReportListItem = {
+  id: string;
+  title: string;
+  summary: string;
+  targetObjects?: string[];
+  keyEvidence?: string;
+  businessJudgment?: string;
+  recommendedAction?: string;
+  caveat?: string;
+  details?: string;
+  currentValue?: number | string | null;
+  previousValue?: number | string | null;
+  percentChange?: number | null;
+  metricKind?: string;
+};
+
+type DailyDimensionComparisonRow = {
+  id: string;
+  name: string;
+  sampleSmall?: boolean;
+  todayOrders?: number | null;
+  yesterdayOrders?: number | null;
+  ordersChange?: number | null;
+  todayCustomers?: number | null;
+  yesterdayCustomers?: number | null;
+  customersChange?: number | null;
+  todayNetSales?: number | null;
+  yesterdayNetSales?: number | null;
+  netSalesChange?: number | null;
+  todayAov?: number | null;
+  yesterdayAov?: number | null;
+  aovChange?: number | null;
+  todayReturnRate?: number | null;
+  yesterdayReturnRate?: number | null;
+  returnRateChange?: number | null;
+  todayRating?: number | null;
+  yesterdayRating?: number | null;
+  ratingChange?: number | null;
+  todayFulfillmentDays?: number | null;
+  yesterdayFulfillmentDays?: number | null;
+  fulfillmentDaysChange?: number | null;
+  businessJudgment?: string;
+};
+
+type DailyDimensionComparisonTable = {
+  id: string;
+  type: "category" | "product" | "channel" | "market" | "segment";
+  label: string;
+  rows: DailyDimensionComparisonRow[];
+  summaries: string[];
+};
+
+function reportListItems(value: unknown, fallbackTitle: string, maxItems = 20): ReportListItem[] {
+  return Array.isArray(value)
+    ? value.slice(0, maxItems).map((item, index) => {
+        const record = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+        return {
+        id: String(record.id ?? `${fallbackTitle}-${index}`),
+        title: reportDateText(String(record.title ?? fallbackTitle)),
+        summary: reportDateText(String(record.summary ?? record.finding ?? record.action ?? record.recommendedAction ?? record.currentConclusion ?? "")),
+        targetObjects: Array.isArray(record.targetObjects) ? record.targetObjects.map((target) => reportDateText(String(target))) : [],
+        keyEvidence: typeof record.keyEvidence === "string" ? reportDateText(record.keyEvidence) : "",
+        businessJudgment: typeof record.businessJudgment === "string" ? reportDateText(record.businessJudgment) : "",
+        recommendedAction: typeof record.recommendedAction === "string" ? reportDateText(record.recommendedAction) : "",
+        caveat: typeof record.caveat === "string" ? reportDateText(record.caveat) : "",
+        details: typeof record.details === "string" ? reportDateText(record.details) : "",
+        currentValue: typeof record.currentValue === "number" || typeof record.currentValue === "string" ? record.currentValue : null,
+        previousValue: typeof record.previousValue === "number" || typeof record.previousValue === "string" ? record.previousValue : null,
+        percentChange: typeof record.percentChange === "number" ? record.percentChange : null,
+        metricKind: typeof record.metricKind === "string" ? record.metricKind : ""
+      };
+    })
+    : [];
+}
+
+function numberFromReportValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.replace(/[$,%+,\s]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function reportDimensionComparisons(value: unknown): DailyDimensionComparisonTable[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const record = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+    const type = String(record.type ?? "");
+    if (!["category", "product", "channel", "market", "segment"].includes(type)) return [];
+    const rows = Array.isArray(record.rows) ? record.rows.flatMap((row, rowIndex) => {
+      const rowRecord = row && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : {};
+      const name = reportDateText(String(rowRecord.name ?? ""));
+      if (!name) return [];
+      return [{
+        id: String(rowRecord.id ?? `${type}-${rowIndex}`),
+        name,
+        sampleSmall: rowRecord.sampleSmall === true,
+        todayOrders: numberFromReportValue(rowRecord.todayOrders),
+        yesterdayOrders: numberFromReportValue(rowRecord.yesterdayOrders),
+        ordersChange: numberFromReportValue(rowRecord.ordersChange),
+        todayCustomers: numberFromReportValue(rowRecord.todayCustomers),
+        yesterdayCustomers: numberFromReportValue(rowRecord.yesterdayCustomers),
+        customersChange: numberFromReportValue(rowRecord.customersChange),
+        todayNetSales: numberFromReportValue(rowRecord.todayNetSales),
+        yesterdayNetSales: numberFromReportValue(rowRecord.yesterdayNetSales),
+        netSalesChange: numberFromReportValue(rowRecord.netSalesChange),
+        todayAov: numberFromReportValue(rowRecord.todayAov),
+        yesterdayAov: numberFromReportValue(rowRecord.yesterdayAov),
+        aovChange: numberFromReportValue(rowRecord.aovChange),
+        todayReturnRate: numberFromReportValue(rowRecord.todayReturnRate),
+        yesterdayReturnRate: numberFromReportValue(rowRecord.yesterdayReturnRate),
+        returnRateChange: numberFromReportValue(rowRecord.returnRateChange),
+        todayRating: numberFromReportValue(rowRecord.todayRating),
+        yesterdayRating: numberFromReportValue(rowRecord.yesterdayRating),
+        ratingChange: numberFromReportValue(rowRecord.ratingChange),
+        todayFulfillmentDays: numberFromReportValue(rowRecord.todayFulfillmentDays),
+        yesterdayFulfillmentDays: numberFromReportValue(rowRecord.yesterdayFulfillmentDays),
+        fulfillmentDaysChange: numberFromReportValue(rowRecord.fulfillmentDaysChange),
+        businessJudgment: reportDateText(String(rowRecord.businessJudgment ?? ""))
+      }];
+    }) : [];
+    if (!rows.length) return [];
+    return [{
+      id: String(record.id ?? `dimension-${index}`),
+      type: type as DailyDimensionComparisonTable["type"],
+      label: reportDateText(String(record.label ?? type)),
+      rows,
+      summaries: Array.isArray(record.summaries) ? record.summaries.map((summary) => reportDateText(String(summary))).filter(Boolean).slice(0, 3) : []
+    }];
+  });
+}
+
+function demoReportContent(mode: ReportModeView, locale: Locale): Record<string, unknown> {
+  const isZh = locale === "zh";
+  const dailyKpis = [
+    { id: "demo-net-sales", title: isZh ? "净销售额" : "Net Sales", currentValue: 27118, previousValue: 28870, percentChange: -0.061, metricKind: "revenue" },
+    { id: "demo-orders", title: isZh ? "订单数" : "Orders", currentValue: 680, previousValue: 700, percentChange: -0.029, metricKind: "orders" },
+    { id: "demo-customers", title: isZh ? "客户数" : "Customers", currentValue: 656, previousValue: 662, percentChange: -0.009, metricKind: "customers" },
+    { id: "demo-aov", title: isZh ? "客单价" : "AOV", currentValue: 39.88, previousValue: 41.27, percentChange: -0.034, metricKind: "aov" },
+    { id: "demo-units", title: isZh ? "销售件数" : "Units Sold", currentValue: 1120, previousValue: 1180, percentChange: -0.05, metricKind: "units" },
+    { id: "demo-rating", title: isZh ? "平均客户评分" : "Average Rating", currentValue: 4.18, previousValue: 4.26, percentChange: -0.018, metricKind: "rating" },
+    { id: "demo-fulfillment", title: isZh ? "平均履约天数" : "Fulfillment Days", currentValue: 3.71, previousValue: 3.6, percentChange: 0.03, metricKind: "fulfillment_days" },
+    { id: "demo-return", title: isZh ? "退货率" : "Return Rate", currentValue: 0, previousValue: 0, percentChange: null, metricKind: "return_rate", caveat: isZh ? "近期订单退货可能存在业务滞后，需结合后续退货记录观察。" : "Returns may lag recent orders; watch later return records." }
+  ];
+  const dimensionComparisons = [
+    {
+      id: "demo-category",
+      type: "category",
+      label: isZh ? "品类" : "Category",
+      rows: [
+        { id: "food", name: "Food & Beverage", todayOrders: 144, yesterdayOrders: 128, ordersChange: 0.125, todayNetSales: 4056, yesterdayNetSales: 4008, netSalesChange: 0.012, todayAov: 28.17, yesterdayAov: 31.31, aovChange: -0.1, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.28, yesterdayRating: 4.25, ratingChange: 0.007, businessJudgment: isZh ? "订单增长但客单价下降，收入增长质量需要继续观察。" : "Orders grew while AOV fell, so revenue quality needs monitoring." },
+        { id: "beauty", name: "Beauty & Personal Care", todayOrders: 129, yesterdayOrders: 139, ordersChange: -0.072, todayNetSales: 3901, yesterdayNetSales: 4478, netSalesChange: -0.129, todayAov: 30.24, yesterdayAov: 32.22, aovChange: -0.061, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.27, yesterdayRating: 4.31, ratingChange: -0.009, businessJudgment: isZh ? "订单和客单价同步回落，是收入下降的主要拖累之一。" : "Orders and AOV both declined, making this a revenue drag." },
+        { id: "home", name: "Home & Kitchen", todayOrders: 122, yesterdayOrders: 121, ordersChange: 0.008, todayNetSales: 4407, yesterdayNetSales: 4451, netSalesChange: -0.01, todayAov: 36.12, yesterdayAov: 36.79, aovChange: -0.018, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.14, yesterdayRating: 4.2, ratingChange: -0.014, businessJudgment: isZh ? "订单基本稳定，但客单价和评分回落，需要看商品结构。" : "Orders were stable, but AOV and rating fell; inspect product mix." }
+      ],
+      summaries: [
+        isZh ? "Food & Beverage 今日订单最高，较昨日增长 12.5%。" : "Food & Beverage led orders and grew 12.5% versus yesterday.",
+        isZh ? "Beauty & Personal Care 净销售额回落，优先判断来自订单量还是客单价。" : "Beauty & Personal Care revenue fell; separate order and AOV effects."
+      ]
+    }
+  ];
+  const scaleMonthlyKpi = (item: Record<string, unknown>, days: number) => {
+    const kind = String(item.metricKind ?? "");
+    const shouldScale = kind === "revenue" || kind === "orders" || kind === "customers" || kind === "units";
+    return {
+      ...item,
+      currentValue: shouldScale && typeof item.currentValue === "number" ? item.currentValue * days : item.currentValue,
+      previousValue: shouldScale && typeof item.previousValue === "number" ? item.previousValue * days : item.previousValue
+    };
+  };
+
+  const dailyContent = {
+    isDemo: true,
+    reportMode: "daily_brief",
+    reportTitle: isZh ? "2026-06-09 Demo 电商经营日报" : "2026-06-09 Demo Ecommerce Daily Report",
+    latestDataDate: "2026-06-09",
+    latestDateNotice: isZh ? "Demo 示例" : "Demo",
+    dailySampleSize: 680,
+    totalRows: 82911,
+    fullDataValidated: true,
+    aiBrief: [
+      { id: "demo-brief-1", businessJudgment: isZh ? "今日净销售额较昨日下降 6.1%，主要由订单数和客单价共同拖累。" : "Net sales declined 6.1%, driven by lower orders and AOV." },
+      { id: "demo-brief-2", businessJudgment: isZh ? "平均客户评分下降且履约天数变长，需要观察体验指标。" : "Rating declined while fulfillment slowed, so experience quality needs monitoring." },
+      { id: "demo-brief-3", businessJudgment: isZh ? "Food & Beverage 订单增长，但客单价下降，适合进一步拆解商品结构。" : "Food & Beverage orders grew, but AOV fell; inspect product mix." }
+    ],
+    dailyKpis,
+    dimensionComparisons,
+    keyChanges: [
+      {
+        id: "demo-finding-revenue",
+        title: isZh ? "今日收入下滑，订单数和客单价共同拖累" : "Revenue declined from both orders and AOV",
+        caveat: "High",
+        keyEvidence: isZh ? "净销售额 27.1K vs 28.9K，-6.1%；订单数 680 vs 700，-2.9%；客单价 39.88 vs 41.27，-3.4%" : "Net sales 27.1K vs 28.9K, -6.1%; orders 680 vs 700, -2.9%; AOV 39.88 vs 41.27, -3.4%",
+        businessJudgment: isZh ? "收入下降不是单一因素造成，而是订单规模减少和单笔订单价值下降共同影响。" : "The decline came from both smaller order scale and lower basket value.",
+        recommendedAction: isZh ? "优先按品类、渠道和市场拆解订单数与客单价变化。" : "Break down order and AOV changes by category, channel, and market."
+      },
+      {
+        id: "demo-finding-experience",
+        title: isZh ? "评分下降且履约变慢，体验指标需要观察" : "Rating declined while fulfillment slowed",
+        caveat: "Medium",
+        keyEvidence: isZh ? "平均客户评分 4.18 vs 4.26，-1.8%；履约天数 3.71 vs 3.60，+3.0%" : "Average rating 4.18 vs 4.26, -1.8%; fulfillment days 3.71 vs 3.60, +3.0%",
+        businessJudgment: isZh ? "履约变慢可能影响客户体验和后续评分。" : "Slower fulfillment may affect customer experience and future ratings.",
+        recommendedAction: isZh ? "查看评分下降明显的品类和履约变慢的市场。" : "Inspect categories with rating declines and markets with slower fulfillment."
+      }
+    ],
+    dataCaveats: [
+      { id: "demo-caveat", title: isZh ? "Demo 示例数据" : "Demo data", summary: isZh ? "当前为固定演示数据，不代表你的真实业务。连接真实数据后会自动切换。" : "This is fixed demo data. Connect real data to switch to your own report." }
+    ]
+  };
+
+  if (mode === "weekly_report") {
+    return {
+      ...dailyContent,
+      reportMode: "weekly_report",
+      reportTitle: isZh ? "2026-06-03 至 2026-06-09 Demo 电商经营周报" : "2026-06-03 to 2026-06-09 Demo Ecommerce Weekly Report",
+      currentPeriodStart: "2026-06-03",
+      currentPeriodEnd: "2026-06-09",
+      previousPeriodStart: "2026-05-27",
+      previousPeriodEnd: "2026-06-02",
+      currentPeriodComplete: true,
+      weeklyKpis: dailyKpis.map((item) => ({ ...item, currentValue: typeof item.currentValue === "number" ? item.currentValue * 7 : item.currentValue, previousValue: typeof item.previousValue === "number" ? item.previousValue * 7 : item.previousValue })),
+      weeklyDimensionComparisons: dimensionComparisons,
+      keyFindings: dailyContent.keyChanges,
+      growthOpportunities: dailyContent.keyChanges.slice(0, 1),
+      nextWeekActions: dailyContent.keyChanges
+    };
+  }
+
+  if (mode === "custom_report") {
+    const monthlyKpis = dailyKpis.map((item) => scaleMonthlyKpi(item, 9));
+    const dailyAverageMetrics = [
+      {
+        id: "demo-daily-average-revenue",
+        title: isZh ? "日均净销售额" : "Average Daily Net Sales",
+        summary: isZh ? "本月日均 27.1K，上月同期日均 28.9K，环比 -6.1%。" : "This month average 27.1K; prior-month same-day average 28.9K; change -6.1%.",
+        keyEvidence: isZh ? "本月累计 244.1K / 9 天；上月同期 259.8K / 9 天。" : "This month total 244.1K / 9 days; prior-month same-day 259.8K / 9 days.",
+        businessJudgment: isZh ? "当前收入节奏低于上月同期，需要拆解订单和客单价来源。" : "Revenue pace is below the prior-month same-day period; separate order and AOV effects."
+      },
+      {
+        id: "demo-daily-average-orders",
+        title: isZh ? "日均订单数" : "Average Daily Orders",
+        summary: isZh ? "本月日均 680 单，上月同期日均 700 单，环比 -2.9%。" : "This month average 680 orders; prior-month same-day average 700; change -2.9%.",
+        keyEvidence: isZh ? "本月累计 6.1K 单；上月同期 6.3K 单。" : "This month total 6.1K orders; prior-month same-day 6.3K.",
+        businessJudgment: isZh ? "订单节奏小幅回落，需判断是流量、转化还是库存导致。" : "Order pace declined slightly; check traffic, conversion, or stock."
+      },
+      {
+        id: "demo-daily-average-customers",
+        title: isZh ? "日均客户数" : "Average Daily Customers",
+        summary: isZh ? "本月日均客户数 656，上月同期 662，环比 -0.9%。" : "This month average customers 656; prior-month same-day 662; change -0.9%.",
+        keyEvidence: isZh ? "客户规模基本稳定，但订单和客单价仍回落。" : "Customer scale is broadly stable while orders and AOV still declined.",
+        businessJudgment: isZh ? "更可能是购买频次或商品结构影响收入，而不是客户规模大幅流失。" : "Revenue pressure is more likely from purchase frequency or product mix than major customer loss."
+      },
+      {
+        id: "demo-daily-average-units",
+        title: isZh ? "日均销售件数" : "Average Daily Units",
+        summary: isZh ? "本月日均 1.1K 件，上月同期 1.2K 件，环比 -5.0%。" : "This month average 1.1K units; prior-month same-day 1.2K; change -5.0%.",
+        keyEvidence: isZh ? "销售件数下降幅度大于订单数，说明单笔购买件数可能减少。" : "Units fell more than orders, suggesting fewer items per order.",
+        businessJudgment: isZh ? "建议检查组合购买、加购商品和高频品类表现。" : "Review bundles, add-ons, and high-frequency categories."
+      }
+    ];
+    return {
+      ...dailyContent,
+      reportMode: "custom_report",
+      reportTitle: isZh ? "2026-06-01 至 2026-06-09 Demo 月经营分析" : "2026-06-01 to 2026-06-09 Demo Monthly Review",
+      currentMonthStart: "2026-06-01",
+      currentMonthEnd: "2026-06-09",
+      comparisonMonthStart: "2026-05-01",
+      comparisonMonthEnd: "2026-05-09",
+      selectedMonth: "2026-06",
+      comparisonType: "previous_month_same_day",
+      currentMonthComplete: false,
+      monthlyKpis,
+      monthlyDailyAverages: dailyAverageMetrics,
+      monthlyDimensionComparisons: dimensionComparisons,
+      monthlyTrends: dailyContent.keyChanges,
+      changeDrivers: dailyContent.keyChanges,
+      topMovers: dailyContent.keyChanges,
+      monthlyRisks: dailyContent.keyChanges.slice(1),
+      monthlyOpportunities: dailyContent.keyChanges.slice(0, 1),
+      nextMonthActions: dailyContent.keyChanges
+    };
+  }
+
+  if (mode === "history") {
+    return {
+      isDemo: true,
+      reportMode: "history",
+      reportHistory: [
+        {
+          id: "demo-history-daily-2026-06-09",
+          reportMode: "daily_brief",
+          reportTimeMode: "daily_business_report",
+          title: isZh ? "2026-06-09 Demo 电商经营日报" : "2026-06-09 Demo Ecommerce Daily Report",
+          status: isZh ? "Demo 示例" : "Demo",
+          generatedAt: "2026-06-09T09:00:00.000Z",
+          summaryJson: {
+            summary: isZh ? "净销售额较昨日下降 6.1%，订单数和客单价共同拖累。" : "Net sales declined 6.1%, driven by lower orders and AOV."
+          }
+        },
+        {
+          id: "demo-history-weekly-2026-06-09",
+          reportMode: "weekly_report",
+          reportTimeMode: "weekly_business_report",
+          title: isZh ? "2026-06-03 至 2026-06-09 Demo 电商经营周报" : "2026-06-03 to 2026-06-09 Demo Ecommerce Weekly Report",
+          status: isZh ? "Demo 示例" : "Demo",
+          generatedAt: "2026-06-09T09:10:00.000Z",
+          summaryJson: {
+            summary: isZh ? "最近 7 天对比前 7 天，重点关注收入节奏、品类结构和体验指标。" : "The latest 7 days focus on revenue pace, category mix, and experience metrics."
+          }
+        },
+        {
+          id: "demo-history-monthly-2026-06",
+          reportMode: "custom_report",
+          reportTimeMode: "monthly_business_review",
+          title: isZh ? "2026-06-01 至 2026-06-09 Demo 月经营分析" : "2026-06-01 to 2026-06-09 Demo Monthly Review",
+          status: isZh ? "Demo 示例" : "Demo",
+          generatedAt: "2026-06-09T09:20:00.000Z",
+          summaryJson: {
+            summary: isZh ? "本月尚未结束，优先用日均净销售额、日均订单和结构变化判断经营节奏。" : "The month is incomplete, so daily averages and mix changes are used to judge pace."
+          }
+        }
+      ]
+    };
+  }
+
+  return dailyContent;
+}
+
+function reportPercentText(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+}
+
+function weeklyKpiTone(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-slate-500";
+  if (value > 0) return "text-emerald-700";
+  if (value < 0) return "text-rose-700";
+  return "text-slate-600";
+}
+
+function dailyKpiTone(item: ReportListItem) {
+  const value = item.percentChange;
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-slate-500";
+  const lowerIsBetter = item.metricKind === "return_rate" || item.metricKind === "fulfillment_days";
+  const improved = lowerIsBetter ? value < 0 : value > 0;
+  if (Math.abs(value) < 0.0001) return "text-slate-600";
+  return improved ? "text-emerald-700" : "text-rose-700";
+}
+
+function dailyKpiChangeLabel(item: ReportListItem, locale: Locale, comparisonLabel?: string) {
+  if (item.metricKind === "fulfillment_days" && typeof item.percentChange === "number" && item.percentChange > 0) {
+    return locale === "zh" ? "变慢" : "slower";
+  }
+  if (item.metricKind === "fulfillment_days" && typeof item.percentChange === "number" && item.percentChange < 0) {
+    return locale === "zh" ? "变快" : "faster";
+  }
+  return comparisonLabel ?? (locale === "zh" ? "较昨日" : "vs yesterday");
+}
+
+function weeklyKpiValueText(value?: number | string | null) {
+  if (typeof value === "number") return formatReportMetricValue(value);
+  if (typeof value !== "string") return "-";
+  const number = Number(value);
+  return Number.isFinite(number) ? formatReportMetricValue(number) : value;
+}
+
+function evidenceMetricCards(evidence?: string) {
+  if (!evidence) return [];
+  return evidence.split(/[；;]/).flatMap((part, index) => {
+    const text = part.trim();
+    if (!text) return [];
+    const match = /^(.+?)\s+([^\s]+)\s+vs\s+([^，,]+)[，,]\s*([+-]?\d+(?:\.\d+)?%|昨日无可比数据|-)$/i.exec(text);
+    if (!match) return [];
+    return [{
+      id: `${text}-${index}`,
+      label: match[1].trim(),
+      current: match[2].trim(),
+      previous: match[3].trim(),
+      change: match[4].trim()
+    }];
+  });
+}
+
+function evidenceChangeTone(change: string) {
+  if (/^\+/.test(change)) return "text-emerald-700";
+  if (/^-/.test(change)) return "text-rose-700";
+  return "text-slate-500";
+}
+
+function priorityBadgeClass(priority?: string) {
+  if (/^high$/i.test(priority ?? "")) return "bg-rose-50 text-rose-700";
+  if (/^medium$/i.test(priority ?? "")) return "bg-amber-50 text-amber-700";
+  if (/^low$/i.test(priority ?? "")) return "bg-slate-100 text-slate-700";
+  return "bg-amber-50 text-amber-700";
+}
+
+function ReportComposerList({
+  title,
+  items,
+  emptyText,
+  className = "",
+  maxItems = 3
+}: {
+  title: string;
+  items: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    targetObjects?: string[];
+    keyEvidence?: string;
+    businessJudgment?: string;
+    recommendedAction?: string;
+    caveat?: string;
+    details?: string;
+  }>;
+  emptyText: string;
+  className?: string;
+  maxItems?: number;
+}) {
+  return (
+    <div className={`rounded-xl border bg-white p-4 shadow-sm ${className}`}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
+      </div>
+      {items.length ? (
+        <div className="mt-3 space-y-3">
+          {items.slice(0, maxItems).map((item) => (
+            <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                {item.caveat ? <Badge variant="secondary" className={cn("text-[11px]", priorityBadgeClass(item.caveat))}>{item.caveat}</Badge> : null}
+              </div>
+              {item.targetObjects?.length ? (
+                <p className="mt-2 text-xs font-medium text-slate-700">{item.targetObjects.join("、")}</p>
+              ) : null}
+              {item.summary ? <p className="mt-2 text-xs leading-5 text-slate-800">{item.summary}</p> : null}
+              {item.keyEvidence ? (
+                evidenceMetricCards(item.keyEvidence).length ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {evidenceMetricCards(item.keyEvidence).map((metric) => (
+                      <div key={metric.id} className="rounded-md border border-slate-100 bg-white p-2">
+                        <p className="text-[11px] font-medium text-muted-foreground">{metric.label}</p>
+                        <div className="mt-1 flex items-end justify-between gap-2">
+                          <p className="text-sm font-semibold tabular-nums text-slate-950">{metric.current}</p>
+                          <p className={cn("text-xs font-semibold tabular-nums", evidenceChangeTone(metric.change))}>{metric.change}</p>
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">昨日 {metric.previous}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">证据：{item.keyEvidence}</p>
+                )
+              ) : null}
+              {item.businessJudgment ? <p className="mt-2 text-xs leading-5 text-slate-700">业务判断：{item.businessJudgment}</p> : null}
+              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-emerald-800">建议动作：{item.recommendedAction}</p> : null}
+              {item.details ? (
+                <details className="mt-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium text-slate-700">查看详情</summary>
+                  <p className="mt-1 leading-5">{item.details}</p>
+                </details>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function WeeklyPeriodTile({
+  label,
+  value,
+  tone = "default"
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "accent";
+}) {
+  return (
+    <div className={cn(
+      "rounded-lg border px-3 py-2",
+      tone === "accent" ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-slate-50"
+    )}>
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 whitespace-nowrap text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+type WeeklyDecisionItem = {
+  id: string;
+  title: string;
+  badge: string;
+  tone: "risk" | "watch" | "opportunity" | "action";
+  objects: string[];
+  summary: string;
+  evidence: string[];
+  recommendation: string;
+  detail: string;
+  priority?: "P1" | "P2" | "P3";
+};
+
+function compactSentence(value: string | undefined | null, fallback: string, maxLength = 110) {
+  const text = reportDateText(value || fallback).replace(/\s+/g, " ").trim();
+  const first = text.split(/[。.!?；;]/).find(Boolean)?.trim() ?? text;
+  return first.length > maxLength ? `${first.slice(0, maxLength)}...` : first;
+}
+
+function businessOpportunityCopy(value: string | undefined | null, locale: Locale, fallback = "") {
+  const text = reportDateText(value || fallback).replace(/\s+/g, " ").trim();
+  if (!text || locale !== "zh") return text;
+
+  return text
+    .replace(/^qualityEvidence\s*:\s*/i, "评分证据：")
+    .replace(/^scaleEvidence\s*:\s*/i, "规模证据：")
+    .replace(/^count\s*:\s*/i, "候选数量：")
+    .replace(/\bAverageRating\b/gi, "评分")
+    .replace(/\baverageRating\b/g, "评分")
+    .replace(/\brecords\b/gi, "样本量")
+    .replace(/\bsample\s*count\b/gi, "样本量")
+    .replace(/\bfield\s*name\b/gi, "字段")
+    .replace(/\bmean\s*\/\s*median\s*ratio\b/gi, "平均值可能被少数高值拉高")
+    .replace(/\bmean\s*median\s*ratio\b/gi, "平均值可能被少数高值拉高")
+    .replace(/评分\s*(?:高于|>|>=)\s*P75/gi, "评分表现排在前 25%")
+    .replace(/评分\s*(?:低于|<|<=)\s*P25/gi, "评分处于后 25%")
+    .replace(/高于\s*P75/gi, "高于大多数对象")
+    .replace(/低于\s*P25/gi, "低于大多数对象")
+    .replace(/记录数量\s*(?:不高|较低|偏低)/g, "当前样本量还不大")
+    .replace(/样本数量\s*(?:不高|较低|偏低)/g, "当前样本量还不大")
+    .replace(/样本量\s*(?:不高|较低|偏低|低于或接近(?:中位数|median)|<=\s*(?:median|中位数))/gi, "当前样本量还不大")
+    .replace(/规模\s*(?:不高|较低|偏低|低于或接近(?:中位数|median)|<=\s*(?:median|中位数))/gi, "当前规模还较小")
+    .replace(/低于或接近\s*(?:median|中位数)/gi, "当前规模还较小")
+    .replace(/<=\s*(?:median|中位数)/gi, "当前规模还较小")
+    .replace(/\bpercentile\b/gi, "分位表现")
+    .replace(/\bmedian\b/gi, "多数对象的一般水平")
+    .replace(/P75/gi, "前 25%")
+    .replace(/P25/gi, "后 25%");
+}
+
+function compactEvidence(item: ReportListItem, fallback: string) {
+  const source = item.keyEvidence || item.details || item.summary || fallback;
+  return source.split(/[；;\n]/).map((part) => part.replace(/^证据[:：]\s*/, "").trim()).filter(Boolean).slice(0, 3);
+}
+
+function normalizeDecisionKey(value: string) {
+  return value.toLowerCase().replace(/[0-9.,%+\-\s]+/g, " ").replace(/[^a-z\u4e00-\u9fa5]+/g, " ").trim();
+}
+
+function rankOpportunities(items: ReportListItem[], locale: Locale): WeeklyDecisionItem[] {
+  const isZh = locale === "zh";
+  const seen = new Set<string>();
+  return items.flatMap((item, index) => {
+    const key = normalizeDecisionKey(`${item.title} ${item.targetObjects?.[0] ?? ""}`).slice(0, 48);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      id: `opportunity-${item.id || index}`,
+      title: compactSentence(businessOpportunityCopy(item.title, locale), isZh ? `机会 ${index + 1}` : `Opportunity ${index + 1}`, 28),
+      badge: index === 0 ? (isZh ? "高潜力" : "High potential") : (isZh ? "可验证" : "Testable"),
+      tone: "opportunity" as const,
+      objects: item.targetObjects ?? [],
+      summary: compactSentence(businessOpportunityCopy(item.businessJudgment || item.summary, locale), businessOpportunityCopy(item.title, locale)),
+      evidence: compactEvidence(item, item.title).map((evidence) => businessOpportunityCopy(evidence, locale)).slice(0, 2),
+      recommendation: compactSentence(businessOpportunityCopy(item.recommendedAction, locale), isZh ? "做小范围验证，观察放量后核心指标是否保持。" : "Run a small validation test and monitor whether metrics hold after scale-up.", 120),
+      detail: [item.keyEvidence, item.details].filter(Boolean).join("\n")
+    }];
+  }).slice(0, 4);
+}
+
+function rankActions(items: ReportListItem[], locale: Locale): WeeklyDecisionItem[] {
+  const isZh = locale === "zh";
+  const seen = new Set<string>();
+  return items.flatMap((item, index) => {
+    const actionText = item.recommendedAction || item.summary || item.title;
+    const key = normalizeDecisionKey(actionText).slice(0, 64);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const priority: "P1" | "P2" | "P3" = index === 0 ? "P1" : index === 1 ? "P2" : "P3";
+    const actionTitle = priority === "P1"
+      ? (isZh ? "拆解本周变化来源" : "Break down weekly movement drivers")
+      : priority === "P2"
+        ? (isZh ? "验证增长机会对象" : "Validate growth opportunity objects")
+        : (isZh ? "检查质量与体验风险" : "Check quality and experience risks");
+    return [{
+      id: `action-${item.id || index}`,
+      title: actionTitle,
+      badge: priority,
+      priority,
+      tone: "action" as const,
+      objects: item.targetObjects ?? [],
+      summary: compactSentence(item.businessJudgment || item.keyEvidence, isZh ? "将当前发现转化为可验证任务。" : "Turn this finding into a verifiable task.", 110),
+      evidence: compactEvidence(item, item.title).slice(0, 2),
+      recommendation: compactSentence(actionText, isZh ? "明确负责对象、产出和复盘口径。" : "Define owner, output, and review criteria.", 120),
+      detail: [item.keyEvidence, item.details, item.recommendedAction].filter(Boolean).join("\n")
+    }];
+  }).slice(0, 5);
+}
+
+function DecisionBadge({ item }: { item: WeeklyDecisionItem }) {
+  const className = item.tone === "risk"
+    ? "bg-orange-50 text-orange-700"
+    : item.tone === "watch"
+      ? "bg-amber-50 text-amber-700"
+      : item.tone === "opportunity"
+        ? "bg-emerald-50 text-emerald-700"
+        : item.priority === "P1"
+          ? "bg-blue-50 text-blue-700"
+          : item.priority === "P2"
+            ? "bg-orange-50 text-orange-700"
+            : "bg-slate-100 text-slate-700";
+  return <Badge variant="secondary" className={cn("rounded-md text-[11px]", className)}>{item.badge}</Badge>;
+}
+
+function EvidenceList({ evidence }: { evidence: string[] }) {
+  if (!evidence.length) return null;
+  return (
+    <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">
+      {evidence.slice(0, 2).map((line, index) => (
+        <li key={`${line}-${index}`} className="flex gap-2">
+          <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+          <span className="line-clamp-1">{line}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SummaryStatCard({
+  label,
+  headline,
+  description,
+  tone
+}: {
+  label: string;
+  headline: string;
+  description: string;
+  tone: "risk" | "opportunity" | "action";
+}) {
+  const toneClass = tone === "risk"
+    ? "border-orange-100 bg-orange-50/60"
+    : tone === "opportunity"
+      ? "border-emerald-100 bg-emerald-50/60"
+      : "border-blue-100 bg-blue-50/60";
+  return (
+    <div className={cn("rounded-2xl border p-4", toneClass)}>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      </div>
+      <p className="mt-2 line-clamp-1 text-sm font-semibold text-slate-950">{headline}</p>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function InsightDecisionCard({ item }: { item: WeeklyDecisionItem }) {
+  return (
+    <article className={cn(
+      "rounded-xl border bg-white p-3.5 transition hover:border-slate-300 hover:shadow-sm",
+      item.tone === "risk" ? "border-l-4 border-l-orange-300" : item.tone === "opportunity" ? "border-l-4 border-l-emerald-300" : ""
+    )}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h4 className="max-w-[460px] line-clamp-2 text-sm font-semibold leading-5 text-slate-950">{item.title}</h4>
+        <DecisionBadge item={item} />
+      </div>
+      {item.objects.length ? <p className="mt-2 line-clamp-1 text-xs font-medium text-slate-600">{item.objects.join("、")}</p> : null}
+      <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-700">{item.summary}</p>
+      <EvidenceList evidence={item.evidence} />
+      <p className="mt-2 line-clamp-2 text-xs leading-5 text-emerald-800">{item.recommendation}</p>
+      {item.detail ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-medium text-slate-700">查看详情</summary>
+          <p className="mt-2 whitespace-pre-line leading-5">{item.detail}</p>
+        </details>
+      ) : null}
+    </article>
+  );
+}
+
+function ActionChecklist({ items, title, emptyText }: { items: WeeklyDecisionItem[]; title: string; emptyText: string }) {
+  return (
+    <section className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
+      </div>
+      {items.length ? (
+        <div className="mt-3 divide-y divide-slate-100">
+          {items.map((item) => (
+            <article key={item.id} className="py-3 first:pt-0 last:pb-0">
+              <div className="flex items-start justify-between gap-3">
+                <h4 className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950">{item.title}</h4>
+                <DecisionBadge item={item} />
+              </div>
+              {item.objects.length ? <p className="mt-2 line-clamp-1 text-xs font-medium text-slate-600">{item.objects.join("、")}</p> : null}
+              <p className="mt-2 text-xs font-semibold text-slate-500">为什么做</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-700">{item.summary}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-500">预期产出</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-emerald-800">{item.recommendation}</p>
+              {item.detail ? (
+                <details className="mt-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium text-slate-700">查看详情</summary>
+                  <p className="mt-2 whitespace-pre-line leading-5">{item.detail}</p>
+                </details>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">{emptyText}</p>
+      )}
+    </section>
+  );
+}
+
+function WeeklyDecisionPanel({
+  opportunities,
+  actions,
+  locale
+}: {
+  opportunities: ReportListItem[];
+  actions: ReportListItem[];
+  locale: Locale;
+}) {
+  const isZh = locale === "zh";
+  const opportunityItems = rankOpportunities(opportunities, locale);
+  const actionItems = rankActions(actions, locale);
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <SummaryStatCard label={isZh ? "增长机会" : "Opportunities"} headline={opportunityItems[0]?.title ?? (isZh ? "暂无直接机会" : "No direct opportunity")} description={opportunityItems[0]?.evidence[0] ?? (isZh ? "当前没有可直接行动的增长机会。" : "No directly actionable opportunity yet.")} tone="opportunity" />
+        <SummaryStatCard label={isZh ? "下周行动" : "Next actions"} headline={actionItems[0]?.title ?? (isZh ? "暂无行动项" : "No action item")} description={actionItems[0]?.summary ?? (isZh ? "暂无下周行动。" : "No next action yet.")} tone="action" />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-12 xl:items-start">
+        <div className="space-y-4 xl:col-span-7">
+          <section className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-slate-950">{isZh ? "增长机会" : "Growth Opportunities"}</h3>
+            </div>
+            {opportunityItems.length ? <div className="grid gap-3 2xl:grid-cols-2">{opportunityItems.slice(0, 4).map((item) => <InsightDecisionCard key={item.id} item={item} />)}</div> : <p className="rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">{isZh ? "暂无增长机会。" : "No opportunities yet."}</p>}
+          </section>
+        </div>
+        <div className="xl:col-span-5">
+          <ActionChecklist items={actionItems.slice(0, 3)} title={isZh ? "下周行动" : "Next Week Actions"} emptyText={isZh ? "暂无下周行动。" : "No next actions yet."} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function valueFromContent(content: Record<string, unknown>, key: string) {
+  const value = content[key];
+  return typeof value === "number" || typeof value === "string" ? value : null;
+}
+
+function reportRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function DailyReportHeader({
+  content,
+  locale,
+  briefItems = []
+}: {
+  content: Record<string, unknown>;
+  locale: Locale;
+  briefItems?: ReportListItem[];
+}) {
+  const isZh = locale === "zh";
+  const latestDataDate = String(content.latestDataDate ?? "-");
+  const dailyRows = valueFromContent(content, "dailySampleSize") ?? "-";
+  const totalRows = valueFromContent(content, "totalRows") ?? "-";
+  const validated = content.fullDataValidated === true;
+
+  return (
+    <Card className="border bg-white shadow-sm">
+      <CardHeader className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle className="text-xl">{String(content.reportTitle ?? (isZh ? `${latestDataDate} 经营日报` : `${latestDataDate} Business Daily`))}</CardTitle>
+            <CardDescription className="mt-2 text-sm leading-6">
+              {isZh
+                ? `数据最新日期：${latestDataDate}｜今日订单：${formatReportMetricValue(dailyRows)}｜总记录数：${formatReportMetricValue(totalRows)}｜${validated ? "完整数据已校验" : "完整数据待确认"}`
+                : `Latest data date: ${latestDataDate} | Today's orders: ${formatReportMetricValue(dailyRows)} | Total rows: ${formatReportMetricValue(totalRows)} | ${validated ? "Full data validated" : "Full data pending"}`}
+            </CardDescription>
+          </div>
+          {content.latestDateNotice ? (
+            <Badge variant="secondary" className="w-fit">
+              {String(content.latestDateNotice)}
+            </Badge>
+          ) : null}
+        </div>
+        {briefItems.length ? (
+          <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+            <h3 className="text-sm font-semibold text-emerald-900">{isZh ? "核心摘要" : "Executive Summary"}</h3>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-900">
+              {briefItems.slice(0, 3).map((item) => (
+                <li key={item.id} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-700" />
+                  <span>{item.businessJudgment || item.summary || item.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </CardHeader>
+    </Card>
+  );
+}
+
+function DailyKpiBoard({
+  items,
+  locale,
+  title,
+  currentLabel,
+  previousLabel,
+  comparisonLabel
+}: {
+  items: ReportListItem[];
+  locale: Locale;
+  title?: string;
+  currentLabel?: string;
+  previousLabel?: string;
+  comparisonLabel?: string;
+}) {
+  const isZh = locale === "zh";
+  const currentText = currentLabel ?? (isZh ? "今日" : "Today");
+  const previousText = previousLabel ?? (isZh ? "昨日" : "Yesterday");
+  return (
+    <section className="rounded-xl border bg-white p-4 shadow-sm">
+      <h3 className="text-sm font-semibold text-slate-950">{title ?? (isZh ? "KPI 看板" : "KPI Board")}</h3>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {items.slice(0, 8).map((item) => (
+          <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+            <p className="text-xs font-medium text-muted-foreground">{item.title}</p>
+            <div className="mt-2 flex items-end justify-between gap-2">
+              <p className="break-words text-xl font-semibold tabular-nums text-slate-950">{weeklyKpiValueText(item.currentValue)}</p>
+              <div className="text-right">
+                <p className={cn("text-sm font-semibold tabular-nums", dailyKpiTone(item))}>{reportPercentText(item.percentChange)}</p>
+                <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">{dailyKpiChangeLabel(item, locale, comparisonLabel)}</p>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>{currentText} {weeklyKpiValueText(item.currentValue)}</span>
+              <span>{previousText} {weeklyKpiValueText(item.previousValue)}</span>
+            </div>
+            {item.caveat ? (
+              item.caveat.length > 18 ? (
+                <p className="mt-2 rounded-md bg-white/80 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">{item.caveat}</p>
+              ) : (
+                <Badge variant="secondary" className="mt-2 text-[11px]">{item.caveat}</Badge>
+              )
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type DimensionSortKey = "orders" | "netSales" | "ordersChange" | "netSalesChange" | "aovChange" | "returnRateChange" | "ratingChange";
+
+function dimensionSortValue(row: DailyDimensionComparisonRow, key: DimensionSortKey) {
+  if (key === "orders") return row.todayOrders;
+  if (key === "netSales") return row.todayNetSales;
+  if (key === "ordersChange") return row.ordersChange;
+  if (key === "netSalesChange") return row.netSalesChange;
+  if (key === "aovChange") return row.aovChange;
+  if (key === "returnRateChange") return row.returnRateChange;
+  return row.ratingChange;
+}
+
+function dimensionCellValue(value?: number | null, format: "number" | "money" | "percent" | "rating" | "days" = "number") {
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (format === "percent") return reportPercentText(value);
+  if (format === "rating") return value.toFixed(2);
+  if (format === "days") return value.toFixed(2);
+  return weeklyKpiValueText(value);
+}
+
+function dimensionChangeValue(value?: number | null) {
+  return value == null || !Number.isFinite(value) ? "昨日无数据" : reportPercentText(value);
+}
+
+function dimensionRowIsGrowing(row: DailyDimensionComparisonRow) {
+  if (typeof row.netSalesChange === "number" && Number.isFinite(row.netSalesChange)) return row.netSalesChange > 0;
+  if (typeof row.ordersChange === "number" && Number.isFinite(row.ordersChange)) return row.ordersChange > 0;
+  return false;
+}
+
+function DailyDimensionComparisonPanel({
+  tables,
+  fallbackItems,
+  locale,
+  title,
+  subtitle,
+  currentLabel,
+  previousLabel
+}: {
+  tables: DailyDimensionComparisonTable[];
+  fallbackItems: ReportListItem[];
+  locale: Locale;
+  title?: string;
+  subtitle?: string;
+  currentLabel?: string;
+  previousLabel?: string;
+}) {
+  const isZh = locale === "zh";
+  const currentText = currentLabel ?? (isZh ? "今日" : "Today");
+  const previousText = previousLabel ?? (isZh ? "昨日" : "Yesterday");
+  const tabOrder: DailyDimensionComparisonTable["type"][] = ["category", "product", "channel", "market", "segment"];
+  const [activeType, setActiveType] = useState<DailyDimensionComparisonTable["type"]>(tables[0]?.type ?? "category");
+  const [sortKey, setSortKey] = useState<DimensionSortKey>("orders");
+  const activeTable = tables.find((table) => table.type === activeType) ?? tables[0] ?? null;
+  const sortedRows = [...(activeTable?.rows ?? [])]
+    .sort((left, right) => Number(dimensionSortValue(right, sortKey) ?? -Infinity) - Number(dimensionSortValue(left, sortKey) ?? -Infinity))
+    .slice(0, 5);
+  const tabLabels: Record<DailyDimensionComparisonTable["type"], string> = {
+    category: isZh ? "品类" : "Category",
+    product: isZh ? "商品" : "Product",
+    channel: isZh ? "渠道" : "Channel",
+    market: isZh ? "市场" : "Market",
+    segment: isZh ? "客户分层" : "Segment"
+  };
+  const sortOptions: Array<{ value: DimensionSortKey; label: string }> = [
+    { value: "orders", label: isZh ? "按今日订单数" : "Today orders" },
+    { value: "netSales", label: isZh ? "按今日净销售额" : "Today net sales" },
+    { value: "ordersChange", label: isZh ? "按订单变化" : "Order change" },
+    { value: "netSalesChange", label: isZh ? "按销售额变化" : "Sales change" },
+    { value: "aovChange", label: isZh ? "按客单价变化" : "AOV change" },
+    { value: "returnRateChange", label: isZh ? "按退货率变化" : "Return change" },
+    { value: "ratingChange", label: isZh ? "按评分变化" : "Rating change" }
+  ];
+
+  if (!tables.length) {
+    const visibleItems = fallbackItems.slice(0, 5);
+    return (
+      <section className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="border-b px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-950">{title ?? (isZh ? "二级指标对比" : "Dimension Comparison")}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {subtitle ?? (isZh ? "按品类、商品、渠道、市场和客户分层拆解今日表现，并对比昨日变化。" : "Breaks down today's performance by category, product, channel, market, and segment, compared with yesterday.")}
+          </p>
+        </div>
+        {visibleItems.length ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {visibleItems.map((item) => {
+              const evidence = [item.keyEvidence, item.businessJudgment, item.recommendedAction].filter(Boolean) as string[];
+              return (
+                <article key={item.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+                  <h4 className="text-sm font-semibold leading-5 text-slate-950">{item.title}</h4>
+                  {item.targetObjects?.length ? <p className="mt-2 line-clamp-1 text-xs font-medium text-slate-600">{item.targetObjects.join("、")}</p> : null}
+                  {item.summary ? <p className="mt-3 text-sm leading-6 text-slate-700">{item.summary}</p> : null}
+                  <EvidenceList evidence={evidence} />
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">
+            {isZh ? "当前报告暂无可展示的二级维度对比。" : "No dimension comparison is available for this report yet."}
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">{title ?? (isZh ? "二级指标对比" : "Dimension Comparison")}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {subtitle ?? (isZh ? "按品类、商品、渠道、市场和客户分层拆解今日表现，并对比昨日变化。" : "Breaks down today's performance by category, product, channel, market, and segment, compared with yesterday.")}
+          </p>
+        </div>
+        <select
+          value={sortKey}
+          onChange={(event) => setSortKey(event.target.value as DimensionSortKey)}
+          className="h-9 rounded-md border bg-white px-3 text-xs font-medium text-slate-700"
+        >
+          {sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {tabOrder.map((type) => {
+          const enabled = tables.some((table) => table.type === type);
+          return (
+            <button
+              key={type}
+              type="button"
+              disabled={!enabled}
+              onClick={() => setActiveType(type)}
+              className={cn(
+                "rounded-md border px-3 py-1.5 text-xs font-medium transition",
+                activeTable?.type === type ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                !enabled && "cursor-not-allowed opacity-40"
+              )}
+            >
+              {tabLabels[type]}
+            </button>
+          );
+        })}
+      </div>
+      {activeTable ? (
+        <>
+          <div className="mt-4 grid gap-3">
+            {sortedRows.map((row) => {
+              const tiles = [
+                activeTable.type === "segment"
+                  ? { label: isZh ? `${currentText}客户` : `${currentText} Customers`, value: dimensionCellValue(row.todayCustomers), change: dimensionChangeValue(row.customersChange), tone: weeklyKpiTone(row.customersChange) }
+                  : null,
+                { label: isZh ? `${currentText}订单` : `${currentText} Orders`, value: dimensionCellValue(row.todayOrders), change: dimensionChangeValue(row.ordersChange), tone: weeklyKpiTone(row.ordersChange) },
+                { label: isZh ? `${currentText}净销售额` : `${currentText} Net Sales`, value: dimensionCellValue(row.todayNetSales, "money"), change: dimensionChangeValue(row.netSalesChange), tone: weeklyKpiTone(row.netSalesChange) },
+                { label: isZh ? `${currentText}客单价` : `${currentText} AOV`, value: dimensionCellValue(row.todayAov), change: dimensionChangeValue(row.aovChange), tone: weeklyKpiTone(row.aovChange) },
+                { label: isZh ? `${currentText}平均评分` : `${currentText} Rating`, value: dimensionCellValue(row.todayRating, "rating"), change: dimensionChangeValue(row.ratingChange), tone: weeklyKpiTone(row.ratingChange) }
+              ].filter(Boolean) as Array<{ label: string; value: string; change: string; tone: string }>;
+
+              return (
+                <article
+                  key={row.id}
+                  className={cn(
+                    "rounded-lg border p-3 transition-colors",
+                    dimensionRowIsGrowing(row) ? "border-emerald-100 bg-emerald-50/70" : "border-slate-100 bg-slate-50/60"
+                  )}
+                >
+                  <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,0.7fr)] xl:items-start">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {activeTable.type === "product" ? (isZh ? "商品 / SKU" : "Product / SKU") : activeTable.label}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <h4 className="break-words text-sm font-semibold text-slate-950">{row.name}</h4>
+                        {row.sampleSmall ? <Badge variant="secondary" className="text-[11px]">{isZh ? "样本较少" : "Small sample"}</Badge> : null}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
+                      {tiles.map((tile) => (
+                        <div key={tile.label} className="rounded-md border border-white/70 bg-white/80 px-3 py-2">
+                          <p className="text-[11px] font-medium text-muted-foreground">{tile.label}</p>
+                          <div className="mt-1 flex items-end justify-between gap-2">
+                            <span className="text-sm font-semibold tabular-nums text-slate-950">{tile.value}</span>
+                            <span className={cn("text-xs font-semibold tabular-nums", tile.tone)}>{tile.change}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-md bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">
+                      <p className="font-medium text-slate-950">{isZh ? "业务判断" : "Judgment"}</p>
+                      <p className="mt-1">{row.businessJudgment}</p>
+                    </div>
+                  </div>
+
+                  <details className="mt-3 rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer select-none font-medium text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+                      {isZh ? `查看${previousText}值与更多口径` : `View ${previousText} values and details`}
+                    </summary>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {activeTable.type === "segment" ? <span>{isZh ? `${previousText}客户数` : `${previousText} customers`}：{dimensionCellValue(row.yesterdayCustomers)}（{dimensionChangeValue(row.customersChange)}）</span> : null}
+                      <span>{isZh ? `${previousText}订单` : `${previousText} orders`}：{dimensionCellValue(row.yesterdayOrders)}</span>
+                      <span>{isZh ? `${previousText}净销售额` : `${previousText} net sales`}：{dimensionCellValue(row.yesterdayNetSales, "money")}</span>
+                      <span>{isZh ? `${previousText}客单价` : `${previousText} AOV`}：{dimensionCellValue(row.yesterdayAov)}</span>
+                      <span>{isZh ? "退货率" : "Return rate"}：{dimensionCellValue(row.todayReturnRate, "percent")} / {dimensionCellValue(row.yesterdayReturnRate, "percent")}（{dimensionChangeValue(row.returnRateChange)}）</span>
+                      <span>{isZh ? "评分变化" : "Rating change"}：{dimensionCellValue(row.yesterdayRating, "rating")} → {dimensionCellValue(row.todayRating, "rating")}（{dimensionChangeValue(row.ratingChange)}）</span>
+                      {activeTable.type === "market" ? <span>{isZh ? "履约天数" : "Fulfillment days"}：{dimensionCellValue(row.yesterdayFulfillmentDays, "days")} → {dimensionCellValue(row.todayFulfillmentDays, "days")}（{dimensionChangeValue(row.fulfillmentDaysChange)}）</span> : null}
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+          {activeTable.summaries.length ? (
+            <ul className="mt-4 space-y-2 border-t pt-3 text-sm leading-6 text-slate-700">
+              {activeTable.summaries.map((summary, index) => (
+                <li key={`${summary}-${index}`} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
+                  <span>{summary}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">
+          {isZh ? "当前报告暂无可展示的二级维度对比。" : "No dimension comparison is available for this report yet."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DailyFindings({ items, locale }: { items: ReportListItem[]; locale: Locale }) {
+  const isZh = locale === "zh";
+  return (
+    <ReportComposerList
+      title={isZh ? "关键发现" : "Key Findings"}
+      items={items.slice(0, 5)}
+      emptyText={isZh ? "暂无足够证据生成关键发现。" : "No key findings with enough evidence yet."}
+      maxItems={5}
+    />
+  );
+}
+
+function DailyDataNotes({ items, locale }: { items: ReportListItem[]; locale: Locale }) {
+  const isZh = locale === "zh";
+  return (
+    <details className="rounded-xl border bg-white p-4 text-sm shadow-sm">
+      <summary className="cursor-pointer font-semibold text-slate-950">{isZh ? "数据口径提醒" : "Data Notes"}</summary>
+      <div className="mt-3">
+        <ReportComposerList title="" items={items.slice(0, 3)} emptyText={isZh ? "暂无数据口径提醒。" : "No data notes."} maxItems={3} className="border-0 bg-transparent p-0 shadow-none" />
+      </div>
+    </details>
+  );
+}
+
+function DailyValidationFailedView({ content, locale }: { content: Record<string, unknown>; locale: Locale }) {
+  const isZh = locale === "zh";
+  const audit = reportRecord(content.reportDataAudit);
+  const guardrail = reportRecord(audit.fullDataGuardrail);
+  const rowsUsed = audit.rowsUsedForMetrics ?? guardrail.rowsUsedForMetrics ?? guardrail.rowsUsed ?? audit.totalRows ?? "-";
+  const expectedRows = audit.expectedFullRows ?? "-";
+  const issues = reportListItems(content.dataCaveats ?? content.keyChanges, "Validation");
+
+  return (
+    <div className="space-y-3">
+      <Card className="border border-rose-100 bg-white shadow-sm">
+        <CardHeader>
+          <CardTitle>{isZh ? "当前未通过完整数据校验" : "Full Data Validation Failed"}</CardTitle>
+          <CardDescription>
+            {isZh
+              ? `当前数据来源：${String(audit.analysisSource ?? "-")}｜使用行数：${String(rowsUsed)}｜预期完整行数：${String(expectedRows)}｜最新业务日期：${String(audit.latestDataDate ?? "无法确认")}`
+              : `Source: ${String(audit.analysisSource ?? "-")} | Rows used: ${String(rowsUsed)} | Expected rows: ${String(expectedRows)} | Latest business date: ${String(audit.latestDataDate ?? "unknown")}`}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+      <ReportComposerList title={isZh ? "失败原因与修复动作" : "Failure Reasons and Fixes"} items={issues} emptyText={isZh ? "暂无失败原因。" : "No failure reason available."} maxItems={6} />
+    </div>
+  );
+}
+
+function DailyBusinessReportView({ content, locale }: { content: Record<string, unknown>; locale: Locale }) {
+  const briefItems = reportListItems(content.aiBrief, "Brief").slice(0, 3);
+  const kpis = reportListItems(content.dailyKpis, "KPI", 8);
+  const dimensionComparisons = [
+    ...reportListItems(content.categoryPerformance, "Category"),
+    ...reportListItems(content.productPerformance, "Product"),
+    ...reportListItems(content.channelPerformance, "Channel"),
+    ...reportListItems(content.marketPerformance, "Market"),
+    ...reportListItems(content.segmentPerformance, "Segment")
+  ];
+  const dimensionComparisonTables = reportDimensionComparisons(content.dimensionComparisons);
+  const findings = [
+    ...reportListItems(content.keyChanges, "Finding"),
+    ...reportListItems(content.categoryPerformance, "Category"),
+    ...reportListItems(content.productPerformance, "Product"),
+    ...reportListItems(content.channelPerformance, "Channel"),
+    ...reportListItems(content.marketPerformance, "Market"),
+    ...reportListItems(content.segmentPerformance, "Segment")
+  ];
+
+  return (
+    <div className="space-y-3">
+      <DailyReportHeader content={content} locale={locale} briefItems={briefItems} />
+      <DailyKpiBoard items={kpis} locale={locale} />
+      <DailyDimensionComparisonPanel tables={dimensionComparisonTables} fallbackItems={dimensionComparisons} locale={locale} />
+      <DailyFindings items={findings} locale={locale} />
+      <DailyDataNotes items={reportListItems(content.dataCaveats, "Caveat")} locale={locale} />
+    </div>
+  );
+}
+
+function ReportModeSummaryPanel({
+  mode,
+  content,
+  locale
+}: {
+  mode: "daily_brief" | "weekly_report" | "custom_report" | "snapshot_report";
+  content: Record<string, unknown> | null | undefined;
+  locale: Locale;
+}) {
+  const isZh = locale === "zh";
+  const effectiveMode = content?.reportMode === "snapshot_report" || content?.reportTimeMode === "snapshot_report"
+    ? "snapshot_report"
+    : mode;
+  if (!content) {
+    return (
+      <Card className="border bg-white shadow-sm">
+        <CardContent className="p-5 text-sm text-muted-foreground">
+          {isZh ? "暂无该类型报告。生成后会显示在这里。" : "No report of this type yet. Generate one to view it here."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (effectiveMode === "weekly_report") {
+    const weeklyKpiItems = reportListItems(content.weeklyKpis ?? content.weeklyKpiChanges, "KPI");
+    const keyFindingItems = reportListItems(content.keyFindings ?? content.weeklyKpiChanges, "Finding");
+    const dimensionComparisonTables = reportDimensionComparisons(content.weeklyDimensionComparisons ?? content.dimensionComparisons);
+    const opportunityItems = reportListItems(content.growthOpportunities, "Opportunity");
+    const actionItems = reportListItems(content.nextWeekActions, "Action");
+    const currentPeriod = `${String(content.currentPeriodStart ?? content.weekStart ?? "-")} 至 ${String(content.currentPeriodEnd ?? content.weekEnd ?? "-")}`;
+    const previousPeriod = `${String(content.previousPeriodStart ?? content.comparisonWeekStart ?? "-")} 至 ${String(content.previousPeriodEnd ?? content.comparisonWeekEnd ?? "-")}`;
+    const currentComplete = content.currentPeriodComplete === true;
+    const currentOrders = weeklyKpiItems.find((item) => item.metricKind === "orders")?.currentValue;
+    return (
+      <div className="space-y-3">
+        <Card className="border bg-white shadow-sm">
+          <CardHeader className="p-4">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="text-base">
+                    {String(content.reportTitle ?? (isZh ? `${currentPeriod} 电商经营周报` : `${currentPeriod} Ecommerce Weekly Report`))}
+                  </CardTitle>
+                  <Badge variant="secondary" className={currentComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                    {currentComplete ? (isZh ? "当前周期完整" : "Complete period") : (isZh ? "当前周期不足 7 天" : "Partial period")}
+                  </Badge>
+                </div>
+                <CardDescription className="mt-2 max-w-5xl text-sm leading-6">
+                  {isZh
+                    ? `数据最新日期：${String(content.latestDataDate ?? "-")}｜当前周期：${currentPeriod}｜对比周期：${previousPeriod}｜当前周期订单数：${weeklyKpiValueText(currentOrders)}｜总记录数：${weeklyKpiValueText(content.totalRows as number | string | null)}｜${content.fullDataValidated ? "完整数据已校验" : "完整数据未校验"}`
+                    : `Latest data date: ${String(content.latestDataDate ?? "-")} | Current period: ${currentPeriod} | Comparison period: ${previousPeriod} | Current-period orders: ${weeklyKpiValueText(currentOrders)} | Total rows: ${weeklyKpiValueText(content.totalRows as number | string | null)} | ${content.fullDataValidated ? "full data validated" : "full data not validated"}`}
+                </CardDescription>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <WeeklyPeriodTile label={isZh ? "最近 7 天" : "Latest 7 days"} value={currentPeriod} tone="accent" />
+                <WeeklyPeriodTile label={isZh ? "前 7 天" : "Previous 7 days"} value={previousPeriod} />
+                <WeeklyPeriodTile label={isZh ? "数据最新日期" : "Latest data date"} value={String(content.latestDataDate ?? "-")} />
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+        {content.weeklyKpiSummary ? (
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 shadow-sm">
+            <p className="mb-1 text-xs font-semibold text-emerald-800">{isZh ? "核心摘要" : "Executive Summary"}</p>
+            <p className="text-sm leading-6 text-slate-800">
+              {String(content.weeklyKpiSummary)}
+            </p>
+          </div>
+        ) : null}
+        <DailyKpiBoard
+          items={weeklyKpiItems}
+          locale={locale}
+          title={isZh ? "KPI 看板" : "KPI Board"}
+          currentLabel={isZh ? "最近 7 天" : "Latest 7 days"}
+          previousLabel={isZh ? "前 7 天" : "Previous 7 days"}
+          comparisonLabel={isZh ? "较前 7 天" : "vs previous 7 days"}
+        />
+        <DailyDimensionComparisonPanel
+          tables={dimensionComparisonTables}
+          fallbackItems={[]}
+          locale={locale}
+          title={isZh ? "二级指标对比" : "Dimension Comparison"}
+          subtitle={isZh ? "按品类、商品、渠道、市场和客户分层拆解最近 7 天表现，并对比前 7 天变化。" : "Breaks down the latest 7 days by category, product, channel, market, and segment, compared with the previous 7 days."}
+          currentLabel={isZh ? "最近 7 天" : "Latest 7 days"}
+          previousLabel={isZh ? "前 7 天" : "Previous 7 days"}
+        />
+        <ReportComposerList
+          title={isZh ? "关键发现" : "Key Findings"}
+          items={keyFindingItems}
+          emptyText={isZh ? "暂无足够证据生成周报关键发现。" : "No weekly key findings with enough evidence yet."}
+          maxItems={5}
+        />
+        <WeeklyDecisionPanel opportunities={opportunityItems} actions={actionItems} locale={locale} />
+        <DailyDataNotes items={reportListItems(content.dataCaveats, "Caveat")} locale={locale} />
+      </div>
+    );
+  }
+
+  if (effectiveMode === "custom_report" && Array.isArray(content.monthlyKpis)) {
+    const monthlyKpiItems = reportListItems(content.monthlyKpis, "KPI");
+    const dimensionComparisonTables = reportDimensionComparisons(content.monthlyDimensionComparisons);
+    const keyFindingItems = reportListItems(content.keyFindings, "Finding");
+    const dailyAverageItems = reportListItems(content.monthlyDailyAverages, "DailyAverage");
+    const trendItems = reportListItems(content.monthlyTrends, "Trend");
+    const driverItems = reportListItems(content.changeDrivers, "Driver");
+    const moverItems = reportListItems(content.topMovers, "Mover");
+    const riskItems = reportListItems(content.monthlyRisks, "Risk");
+    const opportunityItems = reportListItems(content.monthlyOpportunities, "Opportunity");
+    const actionItems = reportListItems(content.nextMonthActions, "Action");
+    const currentPeriod = `${String(content.currentMonthStart ?? "-")} 至 ${String(content.currentMonthEnd ?? "-")}`;
+    const previousPeriod = `${String(content.comparisonMonthStart ?? "-")} 至 ${String(content.comparisonMonthEnd ?? "-")}`;
+    const isComplete = content.currentMonthComplete === true;
+    const currentOrders = monthlyKpiItems.find((item) => item.metricKind === "orders")?.currentValue;
+
+    return (
+      <div className="space-y-3">
+        <Card className="border bg-white shadow-sm">
+          <CardHeader className="p-4">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="text-base">{String(content.reportTitle ?? (isZh ? "月经营分析" : "Monthly Business Review"))}</CardTitle>
+                  <Badge variant="secondary" className={isComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                    {isComplete ? (isZh ? "当前月份完整" : "Complete month") : (isZh ? "本月尚未结束" : "Month to date")}
+                  </Badge>
+                </div>
+                <CardDescription className="mt-2 max-w-5xl text-sm leading-6">
+                  {isZh
+                    ? "按月汇总经营表现，分析收入、订单、客户、品类、渠道、市场和客户分层变化，辅助制定下月经营策略。"
+                    : "Monthly operating review across revenue, orders, customers, category, channel, market, and segment changes."}
+                </CardDescription>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">
+                    <span>{isZh ? "选择月份" : "Select month"}</span>
+                    <input
+                      type="month"
+                      readOnly
+                      value={String(content.selectedMonth ?? "")}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">
+                    <span>{isZh ? "对比方式" : "Comparison type"}</span>
+                    <select
+                      value="previous_month"
+                      disabled
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 disabled:opacity-100"
+                    >
+                      <option value="previous_month">{isZh ? "环比上月" : "Previous month"}</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <WeeklyPeriodTile label={isZh ? "数据最新日期" : "Latest data date"} value={String(content.latestDataDate ?? "-")} />
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-4">
+              <WeeklyPeriodTile label={isZh ? "本月周期" : "Current month"} value={currentPeriod} tone="accent" />
+              <WeeklyPeriodTile label={isZh ? "对比周期" : "Comparison month"} value={previousPeriod} />
+              <WeeklyPeriodTile label={isZh ? "本月订单数" : "Current orders"} value={weeklyKpiValueText(currentOrders)} />
+              <WeeklyPeriodTile label={isZh ? "完整数据" : "Full data"} value={content.fullDataValidated ? (isZh ? "已校验" : "Validated") : (isZh ? "未校验" : "Not validated")} />
+            </div>
+          </CardHeader>
+        </Card>
+        {!isComplete ? (
+          <div className="rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-sm leading-6 text-amber-900">
+            {isZh
+              ? "当前月份尚未结束，本报告展示的是月内累计表现。与完整上月对比时，建议同时查看日均指标，避免直接用累计值误判。"
+              : "The current month is not complete. This report shows month-to-date performance; compare daily averages when reading against a complete prior month."}
+          </div>
+        ) : null}
+        <ReportComposerList
+          title={isZh ? "核心摘要" : "Executive Summary"}
+          items={keyFindingItems}
+          emptyText={isZh ? "暂无月度核心摘要。" : "No monthly summary yet."}
+          maxItems={3}
+        />
+        <DailyKpiBoard
+          items={monthlyKpiItems}
+          locale={locale}
+          title={isZh ? "KPI 看板" : "KPI Board"}
+          currentLabel={isZh ? "本月累计" : "This month"}
+          previousLabel={isZh ? "上月同期" : "Prior-month same days"}
+          comparisonLabel={isZh ? "较上月同期" : "vs prior-month same days"}
+        />
+        {!isComplete ? (
+          <ReportComposerList
+            title={isZh ? "日均节奏" : "Average Daily Pace"}
+            items={dailyAverageItems}
+            emptyText={isZh ? "暂无可计算的日均指标。" : "No daily-average metrics available yet."}
+            maxItems={4}
+          />
+        ) : null}
+        <ReportComposerList
+          title={isZh ? "月内趋势" : "Monthly Trend"}
+          items={trendItems}
+          emptyText={isZh ? "当前月份可用趋势点不足。" : "Not enough monthly trend points yet."}
+          maxItems={5}
+        />
+        <ReportComposerList
+          title={isZh ? "月度变化来源" : "Monthly Change Drivers"}
+          items={driverItems}
+          emptyText={isZh ? "暂无足够证据拆解月度变化来源。" : "No monthly driver evidence yet."}
+          maxItems={6}
+        />
+        <DailyDimensionComparisonPanel
+          tables={dimensionComparisonTables}
+          fallbackItems={[]}
+          locale={locale}
+          title={isZh ? "二级指标拆解" : "Dimension Breakdown"}
+          subtitle={isZh ? "按品类、商品、渠道、市场和客户分层拆解本月表现，并对比上月同期变化。" : "Breaks down this month by category, product, channel, market, and segment, compared with prior-month same days."}
+          currentLabel={isZh ? "本月" : "This month"}
+          previousLabel={isZh ? "上月同期" : "Prior-month same days"}
+        />
+        <ReportComposerList
+          title={isZh ? "Top 拉动 / Top 拖累" : "Top Pulls / Drags"}
+          items={moverItems}
+          emptyText={isZh ? "暂无可比较的拉动或拖累对象。" : "No comparable pull or drag objects yet."}
+          maxItems={6}
+        />
+        <div className="grid gap-3 xl:grid-cols-2">
+          <ReportComposerList
+            title={isZh ? "月度风险" : "Monthly Risks"}
+            items={riskItems}
+            emptyText={isZh ? "暂无趋势性月度风险。" : "No monthly trend risks yet."}
+            maxItems={5}
+          />
+          <ReportComposerList
+            title={isZh ? "月度增长机会" : "Monthly Growth Opportunities"}
+            items={opportunityItems}
+            emptyText={isZh ? "暂无下月可执行增长机会。" : "No actionable next-month opportunities yet."}
+            maxItems={5}
+          />
+        </div>
+        <ReportComposerList
+          title={isZh ? "下月行动计划" : "Next Month Action Plan"}
+          items={actionItems}
+          emptyText={isZh ? "暂无下月行动计划。" : "No next-month action plan yet."}
+          maxItems={5}
+        />
+        <DailyDataNotes items={reportListItems(content.dataCaveats, "Caveat")} locale={locale} />
+      </div>
+    );
+  }
+
+  if (mode === "daily_brief" && content.validationStatus === "failed") {
+    return <DailyValidationFailedView content={content} locale={locale} />;
+  }
+
+  if (mode === "daily_brief" && (Array.isArray(content.aiBrief) || Array.isArray(content.dailyKpis))) {
+    return <DailyBusinessReportView content={content} locale={locale} />;
+  }
+
+  return (
+    <div className="space-y-3">
+      <Card className="border bg-white shadow-sm">
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>{effectiveMode === "snapshot_report" ? (isZh ? "当前数据快照" : "Snapshot Report") : (isZh ? "今日 / 最新概览" : "Today / Latest Overview")}</CardTitle>
+            {content.latestDataDate ? <Badge variant="secondary">{String(content.latestDataDate)}</Badge> : null}
+          </div>
+          <CardDescription>{String(content.todayOverview ?? content.overview ?? "")}</CardDescription>
+        </CardHeader>
+      </Card>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <ReportComposerList title={effectiveMode === "snapshot_report" ? (isZh ? "关键发现" : "Key Findings") : (isZh ? "关键变化" : "Key Changes")} items={reportListItems(content.keyChanges ?? content.keyFindings, "Change")} emptyText={effectiveMode === "snapshot_report" ? (isZh ? "当前没有足够证据生成高置信发现。" : "There is not enough evidence for high-confidence findings.") : (isZh ? "当前没有足够证据生成关键变化。" : "No key changes with enough evidence yet.")} />
+        <ReportComposerList title={effectiveMode === "snapshot_report" ? (isZh ? "当前风险" : "Current Risks") : (isZh ? "今日风险" : "Risks")} items={reportListItems(content.risks, "Risk")} emptyText={isZh ? "当前没有足够证据生成高置信风险。" : "There is not enough evidence for high-confidence risks."} />
+        <ReportComposerList title={effectiveMode === "snapshot_report" ? (isZh ? "当前机会" : "Current Opportunities") : (isZh ? "今日机会" : "Opportunities")} items={reportListItems(content.opportunities, "Opportunity")} emptyText={isZh ? "当前没有可直接行动的增长机会。" : "There are no directly actionable growth opportunities yet."} />
+        <ReportComposerList title={effectiveMode === "snapshot_report" ? (isZh ? "建议行动" : "Recommended Actions") : (isZh ? "今日优先行动" : "Priority Actions")} items={reportListItems(content.priorityActions, "Action")} emptyText={isZh ? "补充时间字段后，可生成日报、周报和趋势变化。" : "Add a time field to generate daily, weekly, and trend changes."} />
+      </div>
+      <ReportComposerList title={isZh ? "数据提醒" : "Data Caveats"} items={reportListItems(content.dataCaveats, "Caveat")} emptyText={isZh ? "暂无数据提醒。" : "No data caveats yet."} />
+    </div>
+  );
+}
+
+function ReportHistoryPanel({
+  history,
+  locale
+}: {
+  history: Array<{
+    id: string;
+    reportMode: string;
+    reportTimeMode: string;
+    title: string;
+    status: string;
+    generatedAt: string;
+    summaryJson?: Record<string, unknown> | null;
+  }>;
+  locale: Locale;
+}) {
+  const isZh = locale === "zh";
+  if (!history.length) {
+    return (
+      <Card className="border bg-white shadow-sm">
+        <CardContent className="p-5 text-sm text-muted-foreground">
+          {isZh ? "暂无历史报告。" : "No report history yet."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {history.map((item) => (
+        <div key={item.id} className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">{item.title}</h3>
+              <Badge variant="secondary">{item.status}</Badge>
+              <Badge variant="secondary">{item.reportTimeMode}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{formatReportDate(item.generatedAt)}</p>
+            {item.summaryJson?.summary ? (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{String(item.summaryJson.summary)}</p>
+            ) : null}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm">{isZh ? "查看" : "View"}</Button>
+            <Button variant="outline" size="sm">{isZh ? "导出" : "Export"}</Button>
+            <Button variant="outline" size="sm">{isZh ? "删除" : "Delete"}</Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ReportsPage({
@@ -5982,12 +7469,20 @@ function ReportsPage({
         trendMetrics?: ReportTrendMetricViewData[];
         trendCharts?: ReportTrendChartViewData[];
         structuredReport?: StructuredReportViewData;
+        composedReports?: Record<string, Record<string, unknown>>;
       } | null;
     } | null;
+    reportHistory?: Array<{
+      id: string;
+      reportMode: string;
+      reportTimeMode: string;
+      title: string;
+      status: string;
+      generatedAt: string;
+      summaryJson?: Record<string, unknown> | null;
+    }>;
   };
-  const onboardingStorageKey = "monarca-hide-report-onboarding-flow-v2";
   const setupStateStorageKey = "monarca-report-setup-state-v1";
-  const [showOnboardingFlow, setShowOnboardingFlow] = useState(true);
   const [cachedSetupState, setCachedSetupState] = useState(() => {
     if (typeof window === "undefined") {
       return { hasConnectedData: false, hasReport: false };
@@ -6010,45 +7505,51 @@ function ReportsPage({
   });
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportGenerationMessage, setReportGenerationMessage] = useState<string | null>(null);
+  const [isDemoBannerDismissed, setIsDemoBannerDismissed] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(() => reportsPageDataCache as ReportData | null);
+  const [reportDataByMode, setReportDataByMode] = useState<Partial<Record<ReportModeView, ReportData>>>(() =>
+    reportsPageDataCache ? { custom_report: reportsPageDataCache as ReportData } : {}
+  );
   const [isLoadingReport, setIsLoadingReport] = useState(() => !reportsPageDataCache);
+  const [activeReportMode, setActiveReportMode] = useState<ReportModeView>("daily_brief");
   const isReportsZh = copy.reports.pageTitle === "分析报告";
+  const activeReportData = activeReportMode === "history"
+    ? (reportDataByMode.history ?? reportDataByMode.custom_report ?? reportData)
+    : (reportDataByMode[activeReportMode] ?? (activeReportMode === "custom_report" ? reportData : null));
 
-  useEffect(() => {
-    setShowOnboardingFlow(window.localStorage.getItem(onboardingStorageKey) !== "true");
-  }, []);
-
-  const loadReportData = useCallback(async () => {
+  const loadReportData = useCallback(async (mode: ReportModeView = activeReportMode) => {
     setIsLoadingReport(true);
 
     try {
-      const response = await fetch("/api/dashboard/reports", {
+      const modeDateRange = mode === "history" ? reportModeDefaultDateRange("custom_report") : reportModeDefaultDateRange(mode);
+      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(modeDateRange)}&reportMode=${mode}`, {
         cache: "no-store"
       });
       const payload = await response.json().catch(() => null) as ReportData | null;
 
       if (response.ok) {
-        reportsPageDataCache = payload;
-        setReportData(payload);
+        setReportDataByMode((current) => ({ ...current, [mode]: payload ?? undefined }));
+        if (mode === "custom_report") {
+          reportsPageDataCache = payload;
+          setReportData(payload);
+        } else if (payload?.reportEntitlement) {
+          setReportData((current) => current ?? payload);
+        }
       }
       return payload;
     } finally {
       setIsLoadingReport(false);
     }
-  }, []);
+  }, [activeReportMode]);
 
   useEffect(() => {
-    void loadReportData();
-  }, [loadReportData]);
+    void loadReportData(activeReportMode);
+  }, [activeReportMode, loadReportData]);
 
-  const dismissOnboardingFlow = () => {
-    window.localStorage.setItem(onboardingStorageKey, "true");
-    setShowOnboardingFlow(false);
-  };
-
-  const generateReport = useCallback(async () => {
+  const generateReport = useCallback(async (reportMode: Exclude<ReportModeView, "history"> = "custom_report") => {
     setIsGeneratingReport(true);
     setReportGenerationMessage(null);
+    const modeDateRange = reportModeDefaultDateRange(reportMode);
 
     try {
       const response = await fetch("/api/dashboard/reports/generate", {
@@ -6058,6 +7559,8 @@ function ReportsPage({
         },
         body: JSON.stringify({
           locale,
+          reportMode,
+          dateRange: modeDateRange,
           userRequested: true,
           idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
         })
@@ -6083,7 +7586,7 @@ function ReportsPage({
 
         for (let attempt = 0; attempt < 30; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
-          const latest = await loadReportData();
+          const latest = await loadReportData(reportMode);
           const generatedAt = latest?.briefing?.payloadJson?.generatedAt ?? latest?.briefing?.createdAt;
           const hasMetrics = latest?.briefing?.payloadJson?.metricResults?.some((result) => result.status === "computed");
 
@@ -6109,7 +7612,7 @@ function ReportsPage({
           ? `已计算 ${payload.computedMetricCount ?? 0} 个指标，报告已更新 · 上次更新时间：${formatReportDate(payload.generatedAt)}`
           : `Computed ${payload.computedMetricCount ?? 0} metrics. Report updated · Last updated: ${formatReportDate(payload.generatedAt)}`
       );
-      await loadReportData();
+      await loadReportData(reportMode);
       window.dispatchEvent(new Event("monarca-report-updated"));
     } catch (error) {
       const fallback = isReportsZh ? "报告生成失败" : "Failed to generate report";
@@ -6120,16 +7623,26 @@ function ReportsPage({
   }, [isReportsZh, loadReportData, locale]);
 
   const lastReportUpdatedAt =
-    reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
-  const reportEntitlement = reportData?.reportEntitlement;
+    activeReportData?.briefing?.payloadJson?.generatedAt ?? activeReportData?.briefing?.createdAt ?? reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
+  const reportEntitlement = activeReportData?.reportEntitlement ?? reportData?.reportEntitlement;
   const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
-  const briefing = reportData?.briefing ?? null;
+  const briefing = activeReportData?.briefing ?? null;
   const reportMetricResults = briefing?.payloadJson?.metricResults ?? [];
+  const composedReports = briefing?.payloadJson?.composedReports ?? {};
+  const dailyBriefReport = composedReports.daily_brief ?? null;
+  const weeklyReport = composedReports.weekly_report ?? null;
+  const reportHistory = activeReportData?.reportHistory ?? reportData?.reportHistory ?? [];
   const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
   const hasReportContent = Boolean(briefing) || hasReportMetrics;
+  const hasAnyReportContent = Boolean(reportData?.briefing) ||
+    Object.values(reportDataByMode).some((data) => Boolean(data?.briefing));
+  const isWaitingForActiveModeData = !hasReportContent && (isLoadingReport || hasAnyReportContent);
   const isLoadingReportsWorkspaceState = isLoadingReport || isLoadingConnectedSources;
-  const shouldShowOnboarding =
-    !isLoadingReportsWorkspaceState && showOnboardingFlow && !hasConnectedDatabase && !hasReportContent;
+  const showDemoReport = !hasReportMetrics;
+  const demoMode = activeReportMode;
+  const demoContent = demoReportContent(demoMode, locale);
+  const reportPageTitle = copy.reports.pageTitle;
+  const shouldShowOnboarding = false;
   const displayedHasConnectedData = hasConnectedDatabase || cachedSetupState.hasConnectedData || isLoadingConnectedSources;
   const displayedHasReport = hasReportMetrics || cachedSetupState.hasReport;
   const shouldShowSetupProgress =
@@ -6157,7 +7670,7 @@ function ReportsPage({
             {copy.reports.pageBadge}
           </Badge>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {copy.reports.pageTitle}
+            {reportPageTitle}
           </h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {copy.reports.pageSubtitle}
@@ -6177,7 +7690,12 @@ function ReportsPage({
           ) : null}
           <div className="flex w-full flex-nowrap items-center gap-2 xl:w-auto">
             {reportEntitlement?.canGenerateReport !== false ? (
-              <Button size="sm" onClick={generateReport} disabled={isGeneratingReport} className="whitespace-nowrap">
+              <Button
+                size="sm"
+                onClick={() => generateReport(activeReportMode === "history" ? "custom_report" : activeReportMode)}
+                disabled={isGeneratingReport}
+                className="whitespace-nowrap"
+              >
                 <RefreshCw className={cn(isGeneratingReport && "animate-spin")} />
                 {isGeneratingReport
                   ? copy.reports.generatingAction
@@ -6204,14 +7722,10 @@ function ReportsPage({
           </div>
         </div>
       </div>
-      {reportGenerationMessage ? (
+      {reportGenerationMessage && hasReportMetrics ? (
         <div className="rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
           {reportGenerationMessage}
         </div>
-      ) : null}
-
-      {shouldShowOnboarding ? (
-        <OnboardingFlow copy={copy} onDismiss={dismissOnboardingFlow} />
       ) : null}
 
       {shouldShowSetupProgress ? (
@@ -6221,27 +7735,100 @@ function ReportsPage({
           hasReport={displayedHasReport}
         />
       ) : null}
+
       {!isLoadingReportsWorkspaceState && !displayedHasConnectedData && !displayedHasReport && !shouldShowOnboarding ? (
         <ReportDatabaseCta copy={copy} hasConnectedDatabase={hasConnectedDatabase} />
       ) : null}
+
+      {!shouldShowOnboarding ? (
+        <div className="sticky top-0 z-40 -mx-4 bg-slate-50/95 px-4 py-2 backdrop-blur lg:-mx-6 lg:px-6">
+          <div className="flex flex-wrap gap-2 rounded-xl border bg-white p-2 shadow-sm">
+            {reportModeTabs(locale).map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setActiveReportMode(tab.value)}
+                className={cn(
+                  "rounded-lg px-3 py-2 text-sm font-medium transition",
+                  activeReportMode === tab.value
+                    ? "bg-slate-950 text-white"
+                    : "text-muted-foreground hover:bg-secondary"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        {hasReportMetrics && briefing ? (
+        {showDemoReport ? (
+          <div className="space-y-3">
+            {!isDemoBannerDismissed ? (
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-sm leading-6 text-emerald-900 shadow-sm">
+                <p>
+                  <span className="font-semibold">{isReportsZh ? "Demo 示例" : "Demo"}</span>
+                  <span className="ml-2">
+                    {isReportsZh
+                      ? "当前展示固定演示报告，不需要等待生成；连接并校验真实数据后会自动切换为真实报告。"
+                      : "Showing a fixed demo report without waiting for generation. Real reports appear after validated data is connected."}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  aria-label={isReportsZh ? "关闭 Demo 提示" : "Dismiss demo notice"}
+                  onClick={() => setIsDemoBannerDismissed(true)}
+                  className="mt-0.5 rounded-md p-1 text-emerald-800 transition hover:bg-emerald-100 hover:text-emerald-950"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ) : null}
+            {demoMode === "history" ? (
+              <ReportHistoryPanel
+                history={(demoContent.reportHistory as NonNullable<ReportData["reportHistory"]>) ?? []}
+                locale={isReportsZh ? "zh" : "en"}
+              />
+            ) : (
+              <ReportModeSummaryPanel
+                mode={demoMode}
+                content={demoContent}
+                locale={isReportsZh ? "zh" : "en"}
+              />
+            )}
+          </div>
+        ) : hasReportMetrics && briefing ? (
           <>
-            <ReportGeneratedPanel
-              briefing={briefing}
-              metricResults={reportMetricResults}
-              locale={isReportsZh ? "zh" : "en"}
-            />
+            {activeReportMode === "daily_brief" ? (
+              <ReportModeSummaryPanel mode="daily_brief" content={dailyBriefReport} locale={isReportsZh ? "zh" : "en"} />
+            ) : activeReportMode === "weekly_report" ? (
+              <ReportModeSummaryPanel mode="weekly_report" content={weeklyReport} locale={isReportsZh ? "zh" : "en"} />
+            ) : activeReportMode === "history" ? (
+              <ReportHistoryPanel history={reportHistory} locale={isReportsZh ? "zh" : "en"} />
+            ) : activeReportMode === "custom_report" ? (
+              <ReportModeSummaryPanel mode="custom_report" content={composedReports.custom_report ?? briefing.payloadJson} locale={isReportsZh ? "zh" : "en"} />
+            ) : (
+              <ReportGeneratedPanel
+                briefing={briefing}
+                metricResults={reportMetricResults}
+                locale={isReportsZh ? "zh" : "en"}
+              />
+            )}
           </>
+        ) : isWaitingForActiveModeData ? (
+          <Card className="border bg-white shadow-sm">
+            <CardContent className="p-5 text-sm text-muted-foreground">
+              {isReportsZh ? "正在加载当前报告..." : "Loading the current report..."}
+            </CardContent>
+          </Card>
         ) : isLoadingReport ? (
           <Card className="border bg-white shadow-sm">
             <CardContent className="p-5 text-sm text-muted-foreground">
               {copy.reports.generatingAction}
             </CardContent>
           </Card>
-        ) : (
-          <ReportEmptyPreview copy={copy} />
-        )}
+        ) : null}
       </div>
     </section>
   );
@@ -6544,8 +8131,7 @@ function objectMetricDisplay(result: ReportMetricEvidenceResult, locale: Locale 
 
 function formatReportDate(value?: string) {
   if (!value) return "-";
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString() : value;
+  return formatDateOnly(value);
 }
 
 const nonBusinessMetricTokens = [
@@ -7735,15 +9321,16 @@ function buildTrendCharts(results: ReportMetricEvidenceResult[], locale: Locale 
 }
 
 const reportTimeRangeOptions: Array<{ value: ReportTimeRange; label: string }> = [
+  { value: "TODAY", label: "Today" },
   { value: "7D", label: "7D" },
   { value: "30D", label: "30D" },
-  { value: "90D", label: "90D" },
   { value: "12M", label: "12M" },
   { value: "ALL", label: "All" },
   { value: "CUSTOM", label: "Custom" }
 ];
 
 const reportTimeRangeDays: Partial<Record<ReportTimeRange, number>> = {
+  "TODAY": 1,
   "7D": 7,
   "30D": 30,
   "90D": 90,
@@ -7752,6 +9339,7 @@ const reportTimeRangeDays: Partial<Record<ReportTimeRange, number>> = {
 
 function reportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
   if (locale !== "zh") return reportTimeRangeOptions.find((option) => option.value === range)?.label ?? range;
+  if (range === "TODAY") return "今天";
   if (range === "ALL") return "全部";
   if (range === "CUSTOM") return "自定义";
   return range;
@@ -7764,6 +9352,7 @@ function comparisonCurrentRangeLabel(range: ReportTimeRange, locale: Locale) {
     return `Last ${range === "12M" ? "12 months" : `${reportTimeRangeDays[range] ?? 30} days`}`;
   }
 
+  if (range === "TODAY") return "今天";
   if (range === "7D") return "近 7 天";
   if (range === "30D") return "近 30 天";
   if (range === "90D") return "近 90 天";
@@ -7779,6 +9368,7 @@ function comparisonPreviousRangeLabel(range: ReportTimeRange, locale: Locale) {
     return `previous ${reportTimeRangeDays[range] ?? 30} days`;
   }
 
+  if (range === "TODAY") return "前 1 天";
   if (range === "7D") return "前 7 天";
   if (range === "30D") return "前 30 天";
   if (range === "90D") return "前 90 天";
@@ -7789,7 +9379,7 @@ function comparisonPreviousRangeLabel(range: ReportTimeRange, locale: Locale) {
 function formatComparisonDate(value?: string | null) {
   if (!value) return null;
   const date = parseReportTrendDate(value);
-  return date ? date.toISOString().slice(0, 10) : value.slice(0, 10);
+  return date ? formatDateOnly(date) : value.slice(0, 10);
 }
 
 function addDays(date: Date, days: number) {
@@ -7799,7 +9389,7 @@ function addDays(date: Date, days: number) {
 }
 
 function isoDateOnly(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return formatDateOnly(date);
 }
 
 function previousRangeFromCurrent(currentStart?: string | null, currentEnd?: string | null) {
@@ -7990,6 +9580,8 @@ function reportDateRangeQuery(range: SelectedReportDateRange) {
 
   if (range.startDate) params.set("startDate", range.startDate);
   if (range.endDate) params.set("endDate", range.endDate);
+  if (range.previousStartDate) params.set("previousStartDate", range.previousStartDate);
+  if (range.previousEndDate) params.set("previousEndDate", range.previousEndDate);
 
   return params.toString();
 }
@@ -10192,7 +11784,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     businessRisksDescription: isZh
       ? "基于阈值、趋势、分布、Top Share 或对象级聚合"
       : "Based on thresholds, trends, distributions, top share, or object-level aggregations",
-    riskSummary: isZh ? "优先展示有具体对象和证据的风险；样本集中会标记为样本结构风险。" : "Only risks with concrete objects and evidence are highlighted; sample concentration is labeled separately.",
+    riskSummary: isZh ? "优先展示有具体对象和证据的业务风险；样本集中仅作为口径提醒，不进入风险模块。" : "Only business risks with concrete objects and evidence are highlighted; sample concentration is treated as a data caveat, not a risk module item.",
     noBusinessRisks: isZh
       ? "当前没有足够的对比、阈值或对象级证据生成业务风险"
       : "There is not enough comparison, threshold, or object-level evidence to generate business risks.",
@@ -10396,6 +11988,23 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
 
     return normalized;
   };
+  const opportunityBusinessText = (value: string | undefined | null, fallback = "") =>
+    businessOpportunityCopy(localeDynamicText(value, fallback), locale, fallback);
+  const opportunityTechnicalCriterion = (item: GeneratedOpportunityViewData) => {
+    const raw = [
+      item.comparisonEvidence,
+      item.comparison,
+      item.metricEvidence
+    ].find((part) => /P75|P25|median|percentile|AverageRating|records|sample count|field name/i.test(String(part ?? "")));
+
+    if (!raw) return "";
+
+    return String(raw)
+      .replace(/,\s*/g, "；")
+      .replace(/，\s*/g, "；")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
   const localeObjectSummary = (rows?: Array<Record<string, string | number | null>>) => {
     const labels = businessObjectRows(rows)
       .slice(0, 3)
@@ -10444,6 +12053,8 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       )
       .slice(0, 2)
       .map(([key, value]) => `${key}: ${String(value)}`);
+  const compactBusinessEvidenceValues = (values?: Record<string, string | number | null>) =>
+    compactEvidenceValues(values).map((value) => businessOpportunityCopy(value, locale));
   const riskBadgeLabel = (item: GeneratedRiskViewData) => {
     const type = item.riskType ?? item.type;
 
@@ -10528,12 +12139,13 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const rawObjects = item.targetObjects ?? item.objects ?? [];
     const visibleObjects = businessObjectRows(rawObjects, { excludeTinySamples: true });
     const objectSummary = localeObjectSummary(visibleObjects);
-    const title = earlyBusinessText(item.title, isZh ? "增长机会" : "Growth opportunity");
-    const metricEvidenceText = localeDynamicText(item.metricEvidence);
-    const comparisonText = localeDynamicText(item.comparisonEvidence ?? item.comparison);
-    const meaningText = earlyBusinessText(item.businessMeaning, "");
-    const decisionText = earlyBusinessText(item.recommendedAction, "");
-    const caveatText = earlyBusinessText(item.caveat, "");
+    const title = opportunityBusinessText(earlyBusinessText(item.title, isZh ? "增长机会" : "Growth opportunity"), isZh ? "增长机会" : "Growth opportunity");
+    const metricEvidenceText = opportunityBusinessText(item.metricEvidence);
+    const comparisonText = opportunityBusinessText(item.comparisonEvidence ?? item.comparison);
+    const meaningText = opportunityBusinessText(earlyBusinessText(item.businessMeaning, ""));
+    const decisionText = opportunityBusinessText(earlyBusinessText(item.recommendedAction, ""));
+    const caveatText = opportunityBusinessText(earlyBusinessText(item.caveat, ""));
+    const technicalCriterion = opportunityTechnicalCriterion(item);
     const targetObjects = visibleObjects
       .slice(0, 5)
       .map((row, index) => evidenceObjectLabel(row, index))
@@ -10541,7 +12153,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
     const keyEvidence = [
       metricEvidenceText,
       comparisonText,
-      ...compactEvidenceValues(item.evidenceValues)
+      ...compactBusinessEvidenceValues(item.evidenceValues)
     ].filter(Boolean).slice(0, 2);
     const businessJudgment = firstSentence(meaningText, isZh
       ? "当前对象具备进一步验证的增长潜力"
@@ -10556,6 +12168,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
       meaningText ? `${meaningText}${isZh ? "。" : "."}` : "",
       decisionText ? `${isZh ? "测试动作：" : "Test action: "}${decisionText}` : "",
       caveatText ? `${isZh ? "口径提醒：" : "Caveat: "}${caveatText}` : "",
+      technicalCriterion ? `${isZh ? "技术口径：" : "Technical definition: "}${technicalCriterion}` : "",
       item.confidenceReason ? `${isZh ? "置信依据：" : "Confidence: "}${item.confidenceReason}` : ""
     ]);
 
@@ -11584,7 +13197,7 @@ function StructuredReportView({ report, locale }: { report: StructuredReportView
                     {item.caveatBadge ? <Badge variant="secondary" className="border bg-white text-[11px]">{item.caveatBadge}</Badge> : null}
                     {item.details ? (
                       <details className="text-xs text-slate-600">
-                        <summary className="cursor-pointer font-medium text-slate-700">{text.viewDetails}</summary>
+                        <summary className="cursor-pointer font-medium text-slate-700">{isZh ? "查看口径" : "View definitions"}</summary>
                         <p className="mt-2 rounded-lg bg-slate-50 p-2 leading-5">{item.details}</p>
                       </details>
                     ) : null}
@@ -12063,124 +13676,6 @@ function ReportDatabaseCta({
   );
 }
 
-function ReportEmptyPreview({ copy }: { copy: DashboardCopy }) {
-  const visibleMonitoringItems = copy.reports.monitoringExamples;
-
-  return (
-    <Card className="h-full overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50/35 to-white shadow-sm">
-      <CardContent className="h-full p-4">
-        <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(310px,0.82fr)] xl:items-stretch">
-          <div className="flex h-full min-w-0 flex-col rounded-2xl border bg-white/88 p-5 shadow-sm [container-type:inline-size] sm:p-6">
-            <Badge className="mb-5 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
-              {copy.reports.emptyBriefingBadge}
-            </Badge>
-            <p className="text-sm font-medium text-muted-foreground">{copy.reports.emptyReportTitle}</p>
-            <h2 className="mt-3 max-w-full text-[clamp(1.85rem,4.4cqw,2.85rem)] font-semibold leading-[1.08] tracking-normal text-slate-950 @[560px]:whitespace-nowrap">
-              {copy.reports.emptyBriefingMetric}
-            </h2>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {copy.reports.emptyBriefingTimeComparisons.map(([label, value], index) => {
-                const isPositive = value.startsWith("+");
-
-                return (
-                  <div
-                    key={label}
-                    className={cn(
-                      "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
-                      index === 0
-                        ? "border-rose-200 bg-rose-50 text-rose-800"
-                        : "border-slate-200 bg-white text-muted-foreground"
-                    )}
-                  >
-                    <span>{label}</span>
-                    <span className={isPositive ? "text-emerald-700" : "text-rose-700"}>{value}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
-              {copy.reports.emptyReportDescription}
-            </p>
-
-            <div className="mt-5 flex flex-1 flex-col">
-              <div className="grid gap-2.5 md:grid-cols-3">
-                {copy.reports.emptyBriefingSections.map(([title, ...items]) => (
-                  <div key={title} className="h-full rounded-xl border bg-secondary/15 p-3">
-                    <p className="text-sm font-semibold">{title}</p>
-                    <div className="mt-2 space-y-1.5">
-                      {items.map((item) => (
-                        <div key={item} className="flex gap-2 text-xs leading-5 text-muted-foreground">
-                          <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2 md:mt-auto md:pt-4">
-                {copy.reports.emptyBriefingActions.map((action, index) => (
-                  <Button key={action} variant={index === 0 ? "default" : "outline"} size="sm">
-                    {action}
-                    <ArrowRight />
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="h-full rounded-2xl border bg-white/70 p-3">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex items-center gap-2">
-                <BrainCircuit className="size-4 text-emerald-700" />
-                <p className="text-sm font-semibold">{copy.reports.monitoringTitle}</p>
-              </div>
-            </div>
-
-            <div className="grid gap-2.5">
-              {visibleMonitoringItems.map((example, index) => (
-                <div
-                  key={example.title}
-                  className={cn(
-                    "rounded-xl border bg-white/82 p-2.5 transition hover:border-emerald-200 hover:bg-emerald-50/45",
-                    index === 0 && "border-emerald-200 bg-emerald-50/70"
-                  )}
-                >
-                  <div className="flex gap-2.5">
-                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-xs font-semibold text-emerald-800">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold">{example.title}</h3>
-                        <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                          {example.metric}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{example.summary}</p>
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {example.signals.map((signal) => (
-                          <span
-                            key={signal}
-                            className="rounded-full border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                          >
-                            {signal}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ReportPage({ locale }: { locale: Locale }) {
   const isZh = locale === "zh";
   type LegacyReportData = {
@@ -12201,7 +13696,7 @@ function ReportPage({ locale }: { locale: Locale }) {
   const [isLoadingReportEvidence, setIsLoadingReportEvidence] = useState(() => !reportsPageDataCache);
   const [isUpdatingMetrics, setIsUpdatingMetrics] = useState(false);
   const [metricsUpdateMessage, setMetricsUpdateMessage] = useState<string | null>(null);
-  const [selectedDateRange, setSelectedDateRange] = useState<SelectedReportDateRange>({ preset: "30D" });
+  const [selectedDateRange, setSelectedDateRange] = useState<SelectedReportDateRange>({ preset: "ALL" });
 
   const loadReportEvidence = useCallback(async (dateRange: SelectedReportDateRange = selectedDateRange) => {
     setIsLoadingReportEvidence(true);
@@ -12299,39 +13794,6 @@ function ReportPage({ locale }: { locale: Locale }) {
     }
   }, [isZh, loadReportEvidence, locale, selectedDateRange]);
 
-  const trendDataBase = [
-    { period: "05-01", revenue: 126, arr: 412, cac: 43, retention: 89, activation: 48, conversion: 12.8 },
-    { period: "05-04", revenue: 124, arr: 410, cac: 44, retention: 88, activation: 47, conversion: 12.4 },
-    { period: "05-08", revenue: 120, arr: 406, cac: 46, retention: 87, activation: 46, conversion: 12.1 },
-    { period: "05-12", revenue: 114, arr: 398, cac: 49, retention: 84, activation: 45, conversion: 11.6 },
-    { period: "05-16", revenue: 118, arr: 401, cac: 47, retention: 85, activation: 46, conversion: 11.9 },
-    { period: "05-20", revenue: 121, arr: 405, cac: 45, retention: 86, activation: 46, conversion: 12.2 },
-    { period: "05-24", revenue: 119, arr: 404, cac: 46, retention: 85, activation: 45, conversion: 12.0 },
-    { period: "05-28", revenue: 122, arr: 407, cac: 45, retention: 86, activation: 46, conversion: 12.3 },
-    { period: "06-01", revenue: 125, arr: 411, cac: 44, retention: 87, activation: 47, conversion: 12.5 },
-    { period: "06-04", revenue: 123, arr: 409, cac: 45, retention: 86, activation: 46, conversion: 12.2 },
-    { period: "06-08", revenue: 117, arr: 402, cac: 48, retention: 84, activation: 45, conversion: 11.8 },
-    { period: "06-12", revenue: 115, arr: 400, cac: 49, retention: 83, activation: 44, conversion: 11.5 }
-  ];
-
-  const trendData = trendDataBase.slice(-9);
-
-  const annotations = [
-    {
-      date: isZh ? "5 月 12 日" : "May 12",
-      text: isZh ? "AI 标注关键指标变化和可能原因" : "AI annotates metric movement and possible causes"
-    },
-    {
-      date: isZh ? "6 月 8 日" : "Jun 8",
-      text: isZh ? "AI 标注维度差异和数据质量信号" : "AI annotates dimension variance and data quality signals"
-    }
-  ];
-
-  const aiInsights = [
-    isZh ? "连接数据后，AI 会总结最近发现和异常提醒" : "After data is connected, AI summarizes recent findings and alerts",
-    isZh ? "建议动作会基于指标定义和证据链生成" : "Recommended actions are generated from metric definitions and evidence",
-    isZh ? "趋势解释会结合历史基线、维度变化和数据新鲜度" : "Trend explanations combine baselines, dimensions, and freshness"
-  ];
   const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
   const latestGeneratedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
   const latestTimeConfig = reportData?.briefing?.payloadJson?.timeConfig;
@@ -12339,6 +13801,7 @@ function ReportPage({ locale }: { locale: Locale }) {
   const latestTrendCharts = reportData?.briefing?.payloadJson?.trendCharts ?? [];
   const latestStructuredReport = reportData?.briefing?.payloadJson?.structuredReport ?? null;
   const hasRealReportMetrics = latestMetricResults.some((result) => result.status === "computed");
+  const reportDemoContent = demoReportContent("daily_brief", locale);
   const reportEntitlement = reportData?.reportEntitlement;
   const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
 
@@ -12382,156 +13845,32 @@ function ReportPage({ locale }: { locale: Locale }) {
         </div>
       </div>
 
-      <ReportMetricEvidencePanel
-        metricResults={latestMetricResults}
-        generatedAt={latestGeneratedAt}
-        timeConfig={latestTimeConfig}
-        trendMetrics={latestTrendMetrics}
-        trendCharts={latestTrendCharts}
-        structuredReport={latestStructuredReport}
-        selectedRange={selectedDateRange.preset}
-        onRangeChange={handleReportRangeChange}
-        locale={locale}
-        isLoading={isLoadingReportEvidence}
-      />
-
-      {!hasRealReportMetrics && !isLoadingReportEvidence ? (
-      <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="grid gap-4 xl:min-h-0">
-          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">{isZh ? "收入趋势" : "Revenue trend"}</CardTitle>
-              <CardDescription>
-                {isZh
-                  ? "AI 在图表上自动标注异常、可能原因和指标关联"
-                  : "AI annotations highlight anomalies, likely causes, and metric relationships"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData}>
-                    <defs>
-                      <linearGradient id="reportRevenueMain" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="5%" stopColor="#059669" stopOpacity={0.24} />
-                        <stop offset="95%" stopColor="#059669" stopOpacity={0.03} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                    <YAxis hide />
-                    <Tooltip />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="#047857"
-                      strokeWidth={2.5}
-                      fill="url(#reportRevenueMain)"
-                    />
-                    <Line type="monotone" dataKey="cac" stroke="#0f172a" strokeWidth={1.8} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {annotations.map((item) => (
-                  <div key={item.date} className="rounded-xl border bg-emerald-50/45 p-3">
-                    <p className="text-xs font-semibold text-emerald-800">{item.date}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">{isZh ? "用户与留存" : "Users and retention"}</CardTitle>
-                <CardDescription>DAU / WAU / MAU · Cohort · Activation</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-lg border bg-secondary/30 p-2">
-                    <p className="text-[11px] text-muted-foreground">DAU</p>
-                    <p className="text-sm font-semibold">12.4k</p>
-                  </div>
-                  <div className="rounded-lg border bg-secondary/30 p-2">
-                    <p className="text-[11px] text-muted-foreground">WAU</p>
-                    <p className="text-sm font-semibold">51.8k</p>
-                  </div>
-                  <div className="rounded-lg border bg-secondary/30 p-2">
-                    <p className="text-[11px] text-muted-foreground">MAU</p>
-                    <p className="text-sm font-semibold">198k</p>
-                  </div>
-                </div>
-                <div className="h-36">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendData}>
-                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                      <YAxis hide />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="retention" stroke="#0f766e" strokeWidth={2} fill="rgba(20,184,166,0.12)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">{isZh ? "获客与转化" : "Acquisition and conversion"}</CardTitle>
-                <CardDescription>CAC · Conversion · Funnel · Channel</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="h-36">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={trendData.slice(-6)}>
-                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                      <YAxis hide />
-                      <Tooltip />
-                      <Bar dataKey="cac" fill="#047857" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="rounded-xl border bg-secondary/20 p-3">
-                  <p className="text-xs font-semibold">{isZh ? "AI 数据标注" : "AI data annotation"}</p>
-                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    <li>{isZh ? "不同用户群体的转化差异" : "Conversion variance across user segments"}</li>
-                    <li>{isZh ? "投入效率和渠道表现变化" : "Acquisition efficiency and channel performance changes"}</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
+      {hasRealReportMetrics || isLoadingReportEvidence ? (
+        <ReportMetricEvidencePanel
+          metricResults={latestMetricResults}
+          generatedAt={latestGeneratedAt}
+          timeConfig={latestTimeConfig}
+          trendMetrics={latestTrendMetrics}
+          trendCharts={latestTrendCharts}
+          structuredReport={latestStructuredReport}
+          selectedRange={selectedDateRange.preset}
+          onRangeChange={handleReportRangeChange}
+          locale={locale}
+          isLoading={isLoadingReportEvidence}
+        />
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-sm leading-6 text-emerald-900 shadow-sm">
+            <span className="font-semibold">{isZh ? "Demo 示例" : "Demo"}</span>
+            <span className="ml-2">
+              {isZh
+                ? "当前报表页展示固定电商演示数据；连接并校验真实数据后会自动切换为真实报表。"
+                : "This report page shows fixed ecommerce demo data; validated real data will replace it automatically."}
+            </span>
           </div>
+          <ReportModeSummaryPanel mode="daily_brief" content={reportDemoContent} locale={locale} />
         </div>
-
-        <Card className="h-fit border-slate-200/70 bg-white/92 shadow-sm xl:sticky xl:top-[76px]">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">{isZh ? "AI Insights" : "AI Insights"}</CardTitle>
-            <CardDescription>{isZh ? "最近发现、异常提醒与后续建议" : "Recent findings, alerts, and next analysis steps"}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            {aiInsights.map((insight, index) => (
-              <div
-                key={insight}
-                className={cn(
-                  "rounded-xl border p-3 text-sm leading-6",
-                  index === 0 ? "border-emerald-200 bg-emerald-50/60" : "bg-white"
-                )}
-              >
-                {insight}
-              </div>
-            ))}
-            <Button variant="outline" className="mt-1 w-full justify-between">
-              {isZh ? "建议继续分析" : "Suggested follow-up analysis"}
-              <ArrowRight />
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-      ) : null}
+      )}
     </section>
   );
 }
@@ -12582,6 +13921,9 @@ export function Dashboard({
 
   const removeConnectedSource = (sourceId: string) => {
     const previousSources = connectedSources;
+    const failureMessage = copy.connectors.title === "连接数据源"
+      ? "删除数据源失败，请确认当前账号有 Owner / Admin 权限后重试"
+      : "Failed to remove data source. Confirm your account has Owner / Admin access and try again.";
 
     setConnectedSources((current) => {
       const next = current.filter((source) => source.id !== sourceId);
@@ -12591,14 +13933,21 @@ export function Dashboard({
 
     void fetch(`/api/data-sources/${sourceId}`, {
       method: "DELETE"
-    }).then((response) => {
-      if (!response.ok) {
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.ok) {
         connectedSourcesCache = previousSources;
         setConnectedSources(previousSources);
+        window.alert(payload?.message || failureMessage);
+        return;
       }
+
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
     }).catch(() => {
       connectedSourcesCache = previousSources;
       setConnectedSources(previousSources);
+      window.alert(failureMessage);
     });
   };
 

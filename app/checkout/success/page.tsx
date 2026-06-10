@@ -21,7 +21,7 @@ const successCopy = {
     plans: {
       trial: "One-time trial",
       "database-setup": "Database setup",
-      professional: "Professional plan"
+      professional: "Professional · $199/month · annual plan, paid monthly"
     }
   },
   zh: {
@@ -37,7 +37,7 @@ const successCopy = {
     plans: {
       trial: "单次体验",
       "database-setup": "数据库搭建",
-      professional: "专业版套餐"
+      professional: "专业版 · ¥2,000/月 · 年度套餐，按月支付"
     }
   }
 };

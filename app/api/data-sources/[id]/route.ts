@@ -27,17 +27,22 @@ export async function DELETE(
       return NextResponse.json({ ok: false, message: "Data source not found" }, { status: 404 });
     }
 
-    await prisma.dataSourceConnection.update({
+    const removedDataSource = await prisma.dataSourceConnection.update({
       where: {
         id: dataSource.id
       },
       data: {
         isActive: false,
         status: ConnectionStatus.DISCONNECTED
+      },
+      select: {
+        id: true,
+        isActive: true,
+        status: true
       }
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, dataSource: removedDataSource });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
 

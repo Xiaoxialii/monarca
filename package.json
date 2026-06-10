@@ -13,7 +13,11 @@
     "test:report-entitlements": "node --test tests/report-entitlements.test.mjs",
     "test:report-summary": "node --test tests/zh-report-summary.test.mjs",
     "test:trend-guardrails": "node --test tests/report-trend-guardrails.test.mjs",
-    "test:report-time-artifacts": "node --test tests/report-time-artifacts.test.mjs"
+    "test:report-time-artifacts": "node --test tests/report-time-artifacts.test.mjs",
+    "test:report-composers": "node --test tests/report-composers.test.mjs",
+    "test:upload-limits": "node --test tests/upload-limits.test.mjs",
+    "test:data-source-delete": "node --test tests/data-source-delete.test.mjs",
+    "test:csv-full-file-metrics": "node --test tests/csv-full-file-metrics.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",

@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { Client as PostgresClient } from "pg";
 import {
   ConnectionStatus,
@@ -14,6 +12,7 @@ import {
   findBusinessDateColumn,
   type ResolvedReportDateRange
 } from "@/lib/report-date-range";
+import { readCsvRowsFromStorageConfig } from "@/lib/csv-upload-rows";
 import type { SchemaColumn, SchemaTable } from "@/lib/metric-validation";
 import { validationFromLineage } from "@/lib/metric-validation";
 import { storedSecret } from "@/lib/secret-crypto";
@@ -42,6 +41,9 @@ export type MetricResultValue = {
   rows?: Array<{
     dimension: string;
     value: number | string | null;
+    previousValue?: number | string | null;
+    absoluteChange?: number | null;
+    percentChange?: number | null;
     sampleSize?: number | null;
     negativeCount?: number | null;
   }>;
@@ -486,8 +488,12 @@ function canComputeContext(context: MetricResultContext) {
     return true;
   }
 
+  const config = asRecord(context.dataSource.config);
+  const storage = asRecord(config.storage);
+
   return getSchemaTables(context.schemaJson).some((table) => Array.isArray(table.sampleRows)) ||
-    typeof asRecord(context.dataSource.config).storedFilePath === "string";
+    typeof config.storedFilePath === "string" ||
+    (storage.provider === "cloudflare-r2" && typeof storage.key === "string");
 }
 
 function translateExpression(type: SupportedResultDatabase, tables: SchemaTable[], formula: string): string {
@@ -706,15 +712,21 @@ function buildMetricSql(
 
     return {
       sql: `SELECT ${dimensionSql} AS dimension_value, ${aggregateSql} AS metric_value FROM ${tableSql}${whereClause} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT 10`,
+      previousSql: previousWhereClause ? `SELECT ${dimensionSql} AS dimension_value, ${aggregateSql} AS metric_value FROM ${tableSql}${previousWhereClause} GROUP BY ${dimensionSql} ORDER BY metric_value DESC LIMIT 50` : undefined,
       grouped: true,
       dateField: dateColumn?.name ?? null,
       hasTimeField: Boolean(dateColumn)
     };
   }
 
+  const avgMatch = /^AVG\s*\((.*)\)$/i.exec(formula);
+  const sampleSizeSql = avgMatch
+    ? `, COUNT(${cleanNumericSqlExpression(type, tables, avgMatch[1].trim())}) AS sample_size`
+    : "";
+
   return {
-    sql: `SELECT ${translateExpression(type, tables, formula)} AS metric_value FROM ${tableSql}${whereClause}`,
-    previousSql: previousWhereClause ? `SELECT ${translateExpression(type, tables, formula)} AS metric_value FROM ${tableSql}${previousWhereClause}` : undefined,
+    sql: `SELECT ${translateExpression(type, tables, formula)} AS metric_value${sampleSizeSql} FROM ${tableSql}${whereClause}`,
+    previousSql: previousWhereClause ? `SELECT ${translateExpression(type, tables, formula)} AS metric_value${sampleSizeSql} FROM ${tableSql}${previousWhereClause}` : undefined,
     grouped: false,
     dateField: dateColumn?.name ?? null,
     hasTimeField: Boolean(dateColumn)
@@ -748,73 +760,27 @@ function getSchemaTables(schemaJson: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
-function splitCsvLine(line: string) {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    const nextCharacter = line[index + 1];
-
-    if (character === "\"" && nextCharacter === "\"") {
-      current += "\"";
-      index += 1;
-      continue;
-    }
-
-    if (character === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (character === "," && !inQuotes) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += character;
-  }
-
-  values.push(current.trim());
-  return values;
-}
-
-async function readCsvRows(filePath: string) {
-  const resolved = path.resolve(filePath);
-  const workspaceRoot = path.resolve(process.cwd());
-
-  if (!resolved.startsWith(workspaceRoot)) {
-    throw new Error("CSV file path is outside the workspace");
-  }
-
-  const text = await readFile(resolved, "utf8");
-  const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  const headers = lines[0] ? splitCsvLine(lines[0]).filter(Boolean) : [];
-
-  return lines.slice(1).map((line) => {
-    const values = splitCsvLine(line);
-    return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
-  });
-}
-
 async function rowsForCsvTable(context: MetricResultContext, table: SchemaTable) {
   const schemaTable = getSchemaTables(context.schemaJson).find((candidate) =>
     normalize(String(candidate.name ?? "")) === normalize(table.name)
   );
+  const config = asRecord(context.dataSource.config);
   const sampleRows = Array.isArray(schemaTable?.sampleRows)
     ? schemaTable.sampleRows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)))
     : [];
 
-  if (sampleRows.length > 0) {
-    return sampleRows;
+  try {
+    const storedRows = await readCsvRowsFromStorageConfig(config);
+
+    if (storedRows?.length) {
+      return storedRows;
+    }
+  } catch (storageError) {
+    console.warn("Falling back to schema sample rows for CSV metric execution", storageError);
   }
 
-  const storedFilePath = asRecord(context.dataSource.config).storedFilePath;
-
-  if (typeof storedFilePath === "string" && storedFilePath) {
-    return readCsvRows(storedFilePath);
+  if (sampleRows.length > 0) {
+    return sampleRows;
   }
 
   throw new Error("No CSV rows are available for metric execution");
@@ -829,7 +795,16 @@ function parseNumber(value: unknown) {
     return null;
   }
 
+  const raw = value.trim().toLowerCase();
+  if (!raw || ["nan", "null", "undefined", "n/a", "na", "none"].includes(raw)) {
+    return null;
+  }
+
   const cleaned = value.replace(/[$,%+,\s]/g, "");
+  if (!cleaned) {
+    return null;
+  }
+
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -1112,6 +1087,16 @@ function aggregateRows(rows: Array<Record<string, unknown>>, tables: SchemaTable
   return null;
 }
 
+function aggregateSampleSize(rows: Array<Record<string, unknown>>, tables: SchemaTable[], formula: string): number | null {
+  const avgMatch = /^AVG\s*\((.*)\)$/i.exec(formula.trim());
+  if (!avgMatch) return null;
+  const reference = uniqueRefs(avgMatch[1])[0];
+  const table = reference ? findTable(tables, reference.table) : null;
+  const column = table && reference ? findColumn(table, reference.field) : null;
+  if (!reference || !table || !column) return null;
+  return rows.filter((row) => !isBlankishValue(rowFieldValue(row, column))).length;
+}
+
 function sentimentRateParts(formula: string) {
   const match = /^SAFE_DIVIDE\s*\(\s*(COUNT_IF\s*\(.+?\))\s*,\s*(COUNT_NON_EMPTY\s*\(.+?\))\s*\)$/i.exec(formula.trim());
 
@@ -1167,10 +1152,15 @@ async function computeCsvMetricResult(
     }
 
     const groups = new Map<string, Array<Record<string, unknown>>>();
+    const previousGroups = new Map<string, Array<Record<string, unknown>>>();
 
     for (const row of rows) {
       const key = String(rowFieldValue(row, column) ?? "");
       groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    for (const row of previousRows) {
+      const key = String(rowFieldValue(row, column) ?? "");
+      previousGroups.set(key, [...(previousGroups.get(key) ?? []), row]);
     }
 
     const rateParts = sentimentRateParts(byMatch[1].trim());
@@ -1183,26 +1173,39 @@ async function computeCsvMetricResult(
       status: "computed",
       scope: metricScope(metric, true),
       rows: Array.from(groups.entries())
-        .map(([dimension, groupRows]) => ({
-          dimension,
-          value: aggregateRows(groupRows, context.tables, byMatch[1].trim()),
-          ...(rateParts
-            ? {
-                sampleSize: Number(aggregateRows(groupRows, context.tables, rateParts.denominator)) || 0,
-                negativeCount: /negative/i.test(rateParts.numerator)
-                  ? Number(aggregateRows(groupRows, context.tables, rateParts.numerator)) || 0
-                  : undefined
-              }
-            : {})
-        }))
+        .map(([dimension, groupRows]) => {
+          const value = aggregateRows(groupRows, context.tables, byMatch[1].trim());
+          const previousValue = previousGroups.has(dimension)
+            ? aggregateRows(previousGroups.get(dimension) ?? [], context.tables, byMatch[1].trim())
+            : null;
+          return {
+            dimension,
+            value,
+            ...comparisonValues(value, previousValue),
+            ...(rateParts
+              ? {
+                  sampleSize: Number(aggregateRows(groupRows, context.tables, rateParts.denominator)) || 0,
+                  negativeCount: /negative/i.test(rateParts.numerator)
+                    ? Number(aggregateRows(groupRows, context.tables, rateParts.numerator)) || 0
+                    : undefined
+                }
+              : {})
+          };
+        })
         .sort((left, right) => Number(right.value ?? 0) - Number(left.value ?? 0))
         .slice(0, 10),
+      dateRangePreset: dateRange?.preset,
+      dateRangeStart: dateRange?.startDate ?? null,
+      dateRangeEnd: dateRange?.endDate ?? null,
+      dateField: dateColumn?.name ?? null,
+      hasTimeField: Boolean(dateColumn),
       computedAt
     };
   }
 
   const value = aggregateRows(rows, context.tables, metric.formula);
   const previousValue = aggregateRows(previousRows, context.tables, metric.formula);
+  const sampleSize = aggregateSampleSize(rows, context.tables, metric.formula);
 
   return {
     metricId: metric.id,
@@ -1212,6 +1215,7 @@ async function computeCsvMetricResult(
     status: "computed",
     scope: metricScope(metric),
     value,
+    sampleSize: sampleSize ?? undefined,
     ...comparisonValues(value, previousValue),
     dateRangePreset: dateRange?.preset,
     dateRangeStart: dateRange?.startDate ?? null,
@@ -1278,6 +1282,13 @@ export async function computeMetricResults({
       const previousRows = query.previousSql ? await queryMetric(config, query.previousSql) : [];
       const value = query.grouped ? undefined : rows[0]?.metric_value as number | string | null;
       const previousValue = query.grouped ? undefined : previousRows[0]?.metric_value as number | string | null;
+      const sampleSize = !query.grouped && /^AVG\s*\(/i.test(metric.formula.trim()) && typeof value !== "undefined"
+        ? Number(rows[0]?.sample_size ?? rows[0]?.sampleSize)
+        : null;
+      const previousByDimension = new Map(previousRows.map((row) => [
+        String(row.dimension_value ?? ""),
+        row.metric_value as number | string | null
+      ]));
 
       results.push({
         metricId: metric.id,
@@ -1288,6 +1299,7 @@ export async function computeMetricResults({
         scope: metricScope(metric, Boolean(query.grouped)),
         sql: query.sql,
         value,
+        sampleSize: Number.isFinite(sampleSize) ? sampleSize : undefined,
         ...(!query.grouped ? comparisonValues(value, previousValue) : {}),
         dateRangePreset: dateRange?.preset,
         dateRangeStart: dateRange?.startDate ?? null,
@@ -1297,7 +1309,8 @@ export async function computeMetricResults({
         rows: query.grouped
           ? rows.map((row) => ({
             dimension: String(row.dimension_value ?? ""),
-            value: row.metric_value as number | string | null
+            value: row.metric_value as number | string | null,
+            ...comparisonValues(row.metric_value as number | string | null, previousByDimension.get(String(row.dimension_value ?? "")) ?? null)
           }))
           : undefined,
         computedAt

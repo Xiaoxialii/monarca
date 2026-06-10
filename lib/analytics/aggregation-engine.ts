@@ -20,6 +20,7 @@ import {
   canUseRecordsAsDerivedTrendMetric,
   selectTrendMetricCandidates
 } from "@/lib/report-trend-guardrails.mjs";
+import { readCsvRowsFromStorageConfig } from "@/lib/csv-upload-rows";
 
 export type AggregationContext = {
   dataSource: Pick<DataSourceConnection, "id" | "name" | "type" | "config">;
@@ -54,6 +55,25 @@ function sampleRowsForTable(schemaJson: unknown, tableName: string) {
   return rows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)));
 }
 
+async function storedRowsForContext(context: AggregationContext) {
+  const config = asRecord(context.dataSource.config);
+  return readCsvRowsFromStorageConfig(config);
+}
+
+async function rowsForAggregationTable(context: AggregationContext, tableName: string) {
+  try {
+    const storedRows = await storedRowsForContext(context);
+
+    if (storedRows?.length) {
+      return storedRows;
+    }
+  } catch (storageError) {
+    console.warn("Falling back to schema sample rows for aggregation", storageError);
+  }
+
+  return sampleRowsForTable(context.schemaJson, tableName);
+}
+
 function rowCountForTable(schemaJson: unknown, tableName: string) {
   const table = schemaTables(schemaJson).find((item) => normalize(String(item.name ?? "")) === normalize(tableName));
   const rowCount = Number(table?.rowCount);
@@ -72,7 +92,10 @@ function rowValue(row: Record<string, unknown>, fieldName: string) {
 function parseNumber(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
+  if (!raw || ["nan", "null", "undefined", "n/a", "na", "none"].includes(raw)) return null;
   const cleaned = value.replace(/[$,%+,\s]/g, "").replace(/[^\d.-]/g, "");
+  if (!cleaned) return null;
   const parsed = Number(cleaned);
 
   return Number.isFinite(parsed) ? parsed : null;
@@ -329,6 +352,10 @@ function rankingsFromMetricRows(tableName: string, metricResults: ReportMetricRe
 function detectBusinessType(table: SchemaTable, dataSourceName: string, metricResults: ReportMetricResultInput[]): ReportBusinessType {
   const columnText = table.columns.map((column) => column.name).join(" ");
   const text = `${dataSourceName} ${table.name} ${columnText} ${metricResults.map((metric) => `${metric.metricName} ${metric.formula}`).join(" ")}`;
+  const ecommerceSignals = ["order_id", "order_date", "customer_id", "product_id", "sku", "quantity", "unit_price", "gross_sales", "net_sales", "total_paid", "is_returned", "fulfillment_days", "customer_rating"];
+  const ecommerceSignalCount = ecommerceSignals.filter((signal) => includesAny(text, [signal])).length;
+
+  if (ecommerceSignalCount >= 4 || (includesAny(text, ["order_id"]) && includesAny(text, ["net_sales", "total_paid", "quantity"]))) return "ecommerce";
 
   if (includesAny(text, ["sentiment", "translated_review", "review", "subjectivity"])) return "reviews";
   if (includesAny(text, ["app", "installs", "content_rating", "android", "category", "rating"])) return "app_market";
@@ -604,12 +631,12 @@ function buildRankings(table: SchemaTable, businessType: ReportBusinessType, row
         },
         objects: highVolumeLowQuality,
         affectedObjects: highVolumeLowQuality,
-        comparison: `${topNames(highVolumeLowQuality, "dimension")} 规模高于 P75，评分低于整体平均或质量阈值`,
+        comparison: `${topNames(highVolumeLowQuality, "dimension")} 规模高于大多数对象，但评分低于整体平均或质量阈值`,
         businessMeaning: "部分对象规模较高但质量指标偏弱，可能影响用户信任或后续转化",
         businessImpact: "高规模对象一旦质量偏低，会放大用户体验问题并拖累整体表现",
         recommendedAction: `优先排查 ${topNames(highVolumeLowQuality, "dimension")} 的评论、版本和类别差异`,
         confidence: 0.84,
-        confidenceReason: "该风险来自 high_volume_low_quality ranking：规模高于 P75 且质量低于整体平均或阈值"
+        confidenceReason: "该风险来自 high_volume_low_quality ranking：规模较高且质量低于整体平均或阈值"
       });
     }
   }
@@ -715,12 +742,12 @@ function buildRankings(table: SchemaTable, businessType: ReportBusinessType, row
         metricField: "averageRating",
         comparisonMetric: rankingMetric,
         rows: highQualityLowScale,
-        summary: `${topNames(highQualityLowScale, "dimension")} 评分高但规模仍低于中位数`,
+        summary: `${topNames(highQualityLowScale, "dimension")} 评分较高但当前规模还较小`,
         confidence: 0.8
       }));
       output.opportunity.push({
         id: `${normalize(table.name)}-high-quality-low-scale`,
-        title: "高质量低规模对象适合进入增长候选池",
+        title: "高评分小规模对象可作为小范围增长测试候选",
         type: "high_quality_low_scale",
         priority: "medium",
         evidenceMetrics: ["averageRating", rankingMetric],
@@ -730,11 +757,12 @@ function buildRankings(table: SchemaTable, businessType: ReportBusinessType, row
         },
         objects: highQualityLowScale,
         targetObjects: highQualityLowScale,
-        comparison: `${topNames(highQualityLowScale, "dimension")} 评分高于 4.5，规模低于中位数或 P25`,
-        businessMeaning: "满意度较高但规模不足，可能存在分发、曝光或渠道增长机会",
-        recommendedAction: `优先对 ${topNames(highQualityLowScale, "dimension")} 做曝光、渠道或 ASO 测试`,
+        comparison: `${topNames(highQualityLowScale, "dimension")} 评分高于大多数对象，但当前规模还较小`,
+        technicalCriteria: `averageRating >= 4.5；${rankingMetric} <= median 或 P25`,
+        businessMeaning: "该对象已有较好的用户评价，但规模尚未充分放大，可以先用低风险测试验证增长潜力。",
+        recommendedAction: `优先对 ${topNames(highQualityLowScale, "dimension")} 做小范围曝光、推荐位或投放测试，观察规模提升后评分是否保持稳定。`,
         confidence: 0.8,
-        confidenceReason: "该机会来自 high_quality_low_volume ranking：质量高于阈值且规模低于中位数"
+        confidenceReason: "该机会来自 high_quality_low_volume ranking：评分达到高质量阈值且当前规模较小"
       });
     }
   }
@@ -885,12 +913,12 @@ function candidatesFromGroupBys(tableName: string, groupBys: GroupByResult[]) {
           },
           objects: highQualityLowScale,
           targetObjects: highQualityLowScale,
-          metricEvidence: `${topObjects} 的${qualityMetric.pluralLabel}高于 P75，且${scaleMetric.pluralLabel}不高`,
-          comparison: `${topObjects} 的 ${readableMetricName(qualityKey)} 高于 P75，但 ${readableMetricName(scaleKey)} 低于或接近中位数`,
-          comparisonEvidence: `${qualityMetric.pluralLabel} >= P75，${scaleMetric.pluralLabel} <= median`,
-          businessMeaning: `${topObjects} 在当前${dimension.pluralLabel}中质量表现较好但规模还不高，适合作为低风险增长验证对象。`,
-          recommendedAction: `对 ${topObjects} 做小规模曝光、渠道或投放测试，并观察规模提升后${qualityMetric.pluralLabel}是否保持。`,
-          caveat: "该机会需要继续确认样本量是否足够，以及增长后质量是否保持稳定。",
+          metricEvidence: `${topObjects} 的${qualityMetric.pluralLabel}高于大多数${dimension.pluralLabel}，但当前样本量还不大`,
+          comparison: `${topObjects} 的${qualityMetric.pluralLabel}表现排在前 25%，但当前规模还较小`,
+          technicalCriteria: `${qualityKey} > P75；${scaleKey} <= median`,
+          businessMeaning: `${topObjects} 已有较好的用户评价，但规模尚未充分放大，可以先用低风险测试验证增长潜力。`,
+          recommendedAction: `对 ${topObjects} 小范围增加曝光或投放，观察订单量提升后${qualityMetric.pluralLabel}是否保持稳定。`,
+          caveat: "当前样本量还不大，适合先做小范围曝光、推荐位或投放测试。",
           confidence: 0.76,
           confidenceReason: "该机会来自 groupBy 的质量和规模交叉判断"
         });
@@ -1000,7 +1028,7 @@ export async function buildAggregationResults({
 
   for (const context of contexts) {
     for (const table of context.tables) {
-      const allRows = sampleRowsForTable(context.schemaJson, table.name);
+      const allRows = await rowsForAggregationTable(context, table.name);
       const dateColumn = findBusinessDateColumn(table.columns);
       const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
       const warnings = [];

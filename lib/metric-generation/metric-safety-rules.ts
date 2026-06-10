@@ -95,6 +95,9 @@ export function safeDivide(numerator: string, denominator: string) {
 }
 
 export const directRevenueFields = [
+  "net_sales",
+  "total_paid",
+  "gross_sales",
   "revenue",
   "net_revenue",
   "gross_revenue",

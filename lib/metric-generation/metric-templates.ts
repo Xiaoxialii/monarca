@@ -515,7 +515,13 @@ function ecommerceMetrics(table: MetricInputTable): TemplateResult {
   const customer = findColumn(table, ["customer_id", "user_id", "client_id"]);
   const price = findNumericColumn(table, ["price", "unit_price"]);
   const quantity = findNumericColumn(table, ["quantity", "units"]);
+  const grossSales = findNumericColumn(table, ["gross_sales"]);
+  const netSales = findNumericColumn(table, ["net_sales"]);
+  const totalPaid = findNumericColumn(table, ["total_paid", "paid_amount"]);
   const revenue = directRevenueColumn(table);
+  const returned = findColumn(table, ["is_returned", "return_status", "refund_status"]);
+  const rating = findNumericColumn(table, ["customer_rating", "rating", "review_score"]);
+  const fulfillmentDays = findNumericColumn(table, ["fulfillment_days", "delivery_days", "shipping_days"]);
   const product = findColumn(table, ["product_id", "product", "sku", "item"]);
   const category = findColumn(table, ["category", "product_category"]);
 
@@ -550,7 +556,7 @@ function ecommerceMetrics(table: MetricInputTable): TemplateResult {
   }));
 
   addIfDefined(metrics, revenue && makeMetric(table, {
-    name: "Revenue",
+    name: revenue === netSales ? "Net Sales" : revenue === totalPaid ? "Total Paid" : revenue === grossSales ? "Gross Sales" : "Revenue",
     category: "Revenue",
     description: "Recognized revenue based on explicit paid or transaction amount",
     formula: `SUM(${qualifiedField(table, revenue)})`,
@@ -562,6 +568,66 @@ function ecommerceMetrics(table: MetricInputTable): TemplateResult {
     confidence: 0.91,
     riskLevel: "low",
     validationRules: ["revenue field must be an explicit paid or transaction amount"]
+  }));
+
+  addIfDefined(metrics, grossSales && grossSales !== revenue && makeMetric(table, {
+    name: "Gross Sales",
+    category: "Revenue",
+    description: "Total gross sales before returns, discounts, or adjustments when provided by the source data",
+    formula: `SUM(${qualifiedField(table, grossSales)})`,
+    requiredFields: [grossSales],
+    grain: "order",
+    aggregation: "sum",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.9,
+    riskLevel: "low",
+    validationRules: ["gross_sales must be an explicit source field"]
+  }));
+
+  addIfDefined(metrics, netSales && netSales !== revenue && makeMetric(table, {
+    name: "Net Sales",
+    category: "Revenue",
+    description: "Net sales from the explicit net_sales field; preferred primary revenue KPI for ecommerce orders",
+    formula: `SUM(${qualifiedField(table, netSales)})`,
+    requiredFields: [netSales],
+    grain: "order",
+    aggregation: "sum",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.94,
+    riskLevel: "low",
+    validationRules: ["net_sales must be an explicit source field"]
+  }));
+
+  addIfDefined(metrics, totalPaid && totalPaid !== revenue && makeMetric(table, {
+    name: "Total Paid",
+    category: "Revenue",
+    description: "Total paid amount from customers",
+    formula: `SUM(${qualifiedField(table, totalPaid)})`,
+    requiredFields: [totalPaid],
+    grain: "order",
+    aggregation: "sum",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.92,
+    riskLevel: "low",
+    validationRules: ["total_paid or paid_amount must be an explicit source field"]
+  }));
+
+  addIfDefined(metrics, order && (netSales ?? revenue) && makeMetric(table, {
+    name: "AOV",
+    category: "Revenue",
+    description: "Average order value calculated as Net Sales divided by distinct orders",
+    formula: safeDivide(`SUM(${qualifiedField(table, netSales ?? revenue!)})`, `COUNT_DISTINCT(${qualifiedField(table, order)})`),
+    requiredFields: [netSales ?? revenue!, order],
+    grain: "order",
+    aggregation: "derived",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.9,
+    riskLevel: "low",
+    validationRules: ["AOV must use net sales when available and distinct order count"]
   }));
 
   addIfDefined(metrics, !revenue && price && quantity && makeMetric(table, {
@@ -593,8 +659,67 @@ function ecommerceMetrics(table: MetricInputTable): TemplateResult {
   }
 
   if (quantity) {
+    metrics.push(makeMetric(table, {
+      name: "Units Sold",
+      category: "Sales",
+      description: "Total units sold from quantity",
+      formula: `SUM(${qualifiedField(table, quantity)})`,
+      requiredFields: [quantity],
+      grain: "order",
+      aggregation: "sum",
+      metricType: "core_metric",
+      businessType: "ecommerce",
+      confidence: 0.9,
+      riskLevel: "low",
+      validationRules: ["quantity must be numeric"]
+    }));
     metrics.push(...numericDistributionMetrics(table, quantity, "Quantity", "Sales", "ecommerce"));
   }
+
+  addIfDefined(metrics, order && returned && makeMetric(table, {
+    name: "Return Rate",
+    category: "Operations",
+    description: "Returned orders divided by distinct orders",
+    formula: safeDivide(`COUNT_IF(${qualifiedField(table, returned)} = ${String(returned.type).toLowerCase() === "boolean" || /^is_/i.test(returned.name) ? "true" : "'returned'"})`, `COUNT_DISTINCT(${qualifiedField(table, order)})`),
+    requiredFields: [returned, order],
+    grain: "order",
+    aggregation: "ratio",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.84,
+    riskLevel: "medium",
+    validationRules: ["return status must identify returned or refunded orders"]
+  }));
+
+  addIfDefined(metrics, rating && makeMetric(table, {
+    name: "Average Rating",
+    category: "Customer Experience",
+    description: "Average customer rating, excluding blank values",
+    formula: `AVG(${qualifiedField(table, rating)})`,
+    requiredFields: [rating],
+    grain: "order",
+    aggregation: "avg",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.86,
+    riskLevel: "low",
+    validationRules: ["rating must be numeric and used only for customer experience analysis"]
+  }));
+
+  addIfDefined(metrics, fulfillmentDays && makeMetric(table, {
+    name: "Fulfillment Days",
+    category: "Operations",
+    description: "Average fulfillment days, excluding blank values",
+    formula: `AVG(${qualifiedField(table, fulfillmentDays)})`,
+    requiredFields: [fulfillmentDays],
+    grain: "order",
+    aggregation: "avg",
+    metricType: "core_metric",
+    businessType: "ecommerce",
+    confidence: 0.86,
+    riskLevel: "low",
+    validationRules: ["fulfillment_days must be numeric"]
+  }));
 
   if (product && valueField) {
     metrics.push(...topShareMetrics(table, product, valueField, revenue ? "Revenue" : "Price", "Revenue"));

@@ -11,9 +11,11 @@ const {
 } = jiti("./lib/report-metric-cache.ts");
 
 test("common report ranges are cacheable", () => {
-  assert.deepEqual([...cachedReportDateRangePresets], ["7D", "30D", "90D", "12M"]);
+  assert.deepEqual([...cachedReportDateRangePresets], ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"]);
+  assert.equal(isCacheableReportRange({ preset: "DAILY" }), true);
+  assert.equal(isCacheableReportRange({ preset: "WEEKLY" }), true);
   assert.equal(isCacheableReportRange({ preset: "90D" }), true);
-  assert.equal(isCacheableReportRange({ preset: "CUSTOM" }), false);
+  assert.equal(isCacheableReportRange({ preset: "CUSTOM" }), true);
 });
 
 test("cache key includes workspace, metric, date field, range and filters", () => {
@@ -30,6 +32,7 @@ test("cache key includes workspace, metric, date field, range and filters", () =
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, metricIds: ["orders"] }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dateField: "created_at" }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dateRange: { ...base.dateRange, preset: "90D" } }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dateRange: { ...base.dateRange, previousStartDate: "2026-05-01", previousEndDate: "2026-05-31" } }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, filters: { channel: "web" } }));
 });
 

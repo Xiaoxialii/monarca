@@ -5123,6 +5123,14 @@ function ConnectorPanel({
         : "The database is unavailable. Check the PostgreSQL / Neon connection string before continuing.";
     }
 
+    if (message.includes("Please choose a plan to connect data sources")) {
+      return isZh ? "请先升级套餐后再连接数据源。" : message;
+    }
+
+    if (message.includes("Please choose a plan to generate reports")) {
+      return isZh ? "请先升级套餐后再生成报告。" : message;
+    }
+
     return message;
   };
   const resetConnectionResult = () => {

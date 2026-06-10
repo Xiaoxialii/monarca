@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
+import {
+  BillingEntitlementError,
+  billingEntitlementMessage,
+  billingLocaleFromRequest,
+  requireCanConnectDataSource
+} from "@/lib/billing/entitlements";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import {
   normalizeDatabaseType,
@@ -167,7 +172,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: error.code,
-          message: error.message,
+          message: billingEntitlementMessage(error, billingLocaleFromRequest(request)),
           upgradeUrl: "/settings/billing",
           oneTimeUrl: "/settings/billing"
         },

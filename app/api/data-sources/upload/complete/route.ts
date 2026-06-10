@@ -1,6 +1,11 @@
 import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
+import {
+  BillingEntitlementError,
+  billingEntitlementMessage,
+  billingLocaleFromRequest,
+  requireCanConnectDataSource
+} from "@/lib/billing/entitlements";
 import { fileExtension, inferTablesFromCsvText, tableNameFromFile } from "@/lib/file-upload-schema";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
@@ -274,7 +279,12 @@ export async function POST(request: Request) {
 
     if (error instanceof BillingEntitlementError) {
       return NextResponse.json(
-        { ok: false, code: error.code, message: error.message, upgradeUrl: "/settings/billing" },
+        {
+          ok: false,
+          code: error.code,
+          message: billingEntitlementMessage(error, billingLocaleFromRequest(request)),
+          upgradeUrl: "/settings/billing"
+        },
         { status: error.status }
       );
     }

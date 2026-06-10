@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
-import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
+import {
+  BillingEntitlementError,
+  billingEntitlementMessage,
+  billingLocaleFromRequest,
+  requireCanConnectDataSource
+} from "@/lib/billing/entitlements";
 import { fileExtension } from "@/lib/file-upload-schema";
 import { createPresignedUploadUrl, isR2Configured } from "@/lib/r2-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
@@ -83,7 +88,12 @@ export async function POST(request: Request) {
 
     if (error instanceof BillingEntitlementError) {
       return NextResponse.json(
-        { ok: false, code: error.code, message: error.message, upgradeUrl: "/settings/billing" },
+        {
+          ok: false,
+          code: error.code,
+          message: billingEntitlementMessage(error, billingLocaleFromRequest(request)),
+          upgradeUrl: "/settings/billing"
+        },
         { status: error.status }
       );
     }

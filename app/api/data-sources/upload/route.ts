@@ -1,7 +1,12 @@
 import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { BillingEntitlementError, requireCanConnectDataSource } from "@/lib/billing/entitlements";
+import {
+  BillingEntitlementError,
+  billingEntitlementMessage,
+  billingLocaleFromRequest,
+  requireCanConnectDataSource
+} from "@/lib/billing/entitlements";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
@@ -331,7 +336,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: error.code,
-          message: error.message,
+          message: billingEntitlementMessage(error, billingLocaleFromRequest(request)),
           upgradeUrl: "/settings/billing",
           oneTimeUrl: "/settings/billing"
         },

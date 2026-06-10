@@ -41,6 +41,36 @@ export class BillingEntitlementError extends Error {
   }
 }
 
+export function billingEntitlementMessage(
+  error: BillingEntitlementError,
+  locale: "zh" | "en" = "en"
+) {
+  const messages: Record<BillingEntitlementErrorCode, Record<"zh" | "en", string>> = {
+    PLAN_REQUIRED: {
+      zh: "请先升级套餐后再连接数据源。",
+      en: "Please choose a plan to connect data sources."
+    },
+    REPORT_LIMIT_REACHED: {
+      zh: "你的单次报告生成次数已用完，请购买报告或升级套餐。",
+      en: "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited."
+    },
+    SUBSCRIPTION_EXPIRED: {
+      zh: "你的套餐当前不可用，请先更新或升级套餐。",
+      en: "Your subscription is not active."
+    },
+    PAYMENT_REQUIRED: {
+      zh: "请先升级套餐后再生成报告。",
+      en: "Please choose a plan to generate reports."
+    }
+  };
+
+  return messages[error.code]?.[locale] ?? error.message;
+}
+
+export function billingLocaleFromRequest(request: Request): "zh" | "en" {
+  return request.headers.get("accept-language")?.toLowerCase().includes("zh") ? "zh" : "en";
+}
+
 function statusToApi(status: SubscriptionStatus): BillingAccessStatus {
   const map: Record<SubscriptionStatus, BillingAccessStatus> = {
     FREE: "free",
@@ -149,7 +179,7 @@ export async function getBillingAccessState(workspaceId: string): Promise<Billin
     subscription.planType === PlanType.ONE_TIME &&
     subscription.status === SubscriptionStatus.ACTIVE
   );
-  const canConnectDataSource = hasMonthlyAccess || hasOneTimePurchase;
+  const canConnectDataSource = hasMonthlyAccess || hasOneTimePurchase || reportEntitlement.reason === "FIRST_FREE_REPORT_AVAILABLE";
   const canGenerateReport = reportEntitlement.canGenerateReport;
   const planType: BillingAccessPlanType = hasMonthlyAccess
     ? "MONTHLY"

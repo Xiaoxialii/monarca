@@ -5097,7 +5097,7 @@ function ConnectorPanel({
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL" ? "postgresql" : null;
   const defaultDatabasePort = "5432";
-  const directApiUploadMaxBytes = 4 * 1024 * 1024;
+  const directApiUploadMaxBytes = 512 * 1024;
   const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
   const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";

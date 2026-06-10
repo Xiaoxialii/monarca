@@ -31,6 +31,26 @@ function toNumber(value: unknown) {
 
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  const safeMessage = message.replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[DATABASE_URL]");
+
+  if (
+    message.includes("DATABASE_URL must be a PostgreSQL connection string") ||
+    message.includes("Can't reach database server") ||
+    message.includes("pool timeout") ||
+    message.includes("failed to retrieve a connection") ||
+    message.includes("Timed out fetching a new connection")
+  ) {
+    return "数据库暂时无法连接，请检查 PostgreSQL / Neon 连接地址后再上传文件";
+  }
+
+  if (
+    message.includes("does not exist") ||
+    message.includes("Unknown argument") ||
+    message.includes("Invalid `") ||
+    message.includes("migration")
+  ) {
+    return `生产数据库结构可能未更新，请先执行 Prisma migration。原始错误：${safeMessage || "database schema error"}`;
+  }
 
   if (message.includes("too large") || message.includes("too many") || message.includes("Unsupported")) {
     return message;
@@ -52,7 +72,7 @@ function uploadErrorMessage(error: unknown) {
     return "Uploaded file is empty or unavailable in Supabase Storage. Please retry the upload.";
   }
 
-  return "File upload failed";
+  return safeMessage ? `文件上传失败：${safeMessage}` : "File upload failed";
 }
 
 export async function POST(request: Request) {

@@ -15,16 +15,18 @@ import {
   Languages,
   LineChart,
   ListChecks,
+  Menu,
   MoveRight,
   Search,
   Sparkles,
   Target,
   TrendingUp,
+  X,
   Zap
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -477,10 +479,10 @@ const homepageCopy = {
 
 type HomeCopy = (typeof homepageCopy)[CopyLocale];
 
-function Logo({ label }: { label: string }) {
+function Logo({ label, className }: { label: string; className?: string }) {
   return (
     <Link href="/" className="flex items-center" aria-label={label}>
-      <BrandLogo label={label} className="h-12" />
+      <BrandLogo label={label} className={cn("h-12", className)} />
     </Link>
   );
 }
@@ -522,6 +524,85 @@ function TeamRoster({ copy }: { copy: HomeCopy["hero"] }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function HeroWorkflowMobile({ copy }: { copy: HomeCopy["hero"] }) {
+  const mobileTextByRole: Record<string, string> = {
+    "Data Engineer": "Connect, clean, and sync data",
+    "Analytics Engineer": "Standardize metric logic",
+    "BI Engineer": "Generate reports and dashboards",
+    "Business Intelligence": "Explain root causes",
+    "Growth Operations": "Recommend next actions",
+    数据工程师: "连接、清洗和同步数据",
+    分析工程师: "统一指标口径",
+    商业智能工程师: "生成报告和看板",
+    经营洞察: "解释变化原因",
+    增长运营: "输出行动建议"
+  };
+
+  return (
+    <div className="mt-6 rounded-[24px] border border-emerald-100/80 bg-white/78 p-4 shadow-[0_14px_42px_rgba(6,78,59,0.06)] backdrop-blur">
+      <p className="text-[15px] font-semibold leading-6 text-emerald-900">{copy.teamLabel}</p>
+      <div className="mt-3 grid gap-2">
+        {copy.team.map((member, index) => {
+          const Icon = teamRoleIcons[index];
+
+          return (
+            <div
+              key={member.role}
+              className="flex min-h-16 items-center gap-3 rounded-2xl border border-slate-200/75 bg-slate-50/85 px-3 py-2.5"
+            >
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+                <Icon className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-5 text-slate-950">{member.role}</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  {mobileTextByRole[member.role] ?? member.text}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HeroPreviewCardMobile({ copy }: { copy: HomeCopy["visual"] }) {
+  const causes = copy.causes.slice(0, 3);
+
+  return (
+    <div className="mt-6 w-full rounded-[24px] border border-emerald-100/90 bg-gradient-to-br from-emerald-50 via-white to-lime-50 p-5 shadow-[0_14px_40px_rgba(6,78,59,0.08)]">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">{copy.monitor}</p>
+          <h3 className="mt-2 text-xl font-semibold leading-tight text-slate-950">{copy.drop}</h3>
+        </div>
+        <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-600">
+          -12.4%
+        </span>
+      </div>
+      <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/82 p-4">
+        <div className="flex items-center gap-2">
+          <Sparkles className="size-4 text-emerald-700" />
+          <p className="text-sm font-semibold text-slate-900">
+            {copy.preview}，{copy.rootCauses}
+          </p>
+        </div>
+        <div className="mt-3 space-y-2">
+          {causes.map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-slate-600">{label}</span>
+              <span className={cn("font-semibold", value.startsWith("-") || value.startsWith("+") ? "text-rose-600" : "text-slate-950")}>
+                {value}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -608,6 +689,79 @@ function HeroVisualization({ copy }: { copy: HomeCopy["visual"] }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MobileNavDrawer({
+  copy,
+  isAuthenticated,
+  isOpen,
+  onClose
+}: {
+  copy: HomeCopy;
+  isAuthenticated: boolean;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  if (!isOpen) {
+    return null;
+  }
+
+  const ctaHref = isAuthenticated ? "/dashboard" : "/sign-up";
+
+  return (
+    <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-950/35"
+        aria-label="Close menu"
+        onClick={onClose}
+      />
+      <aside className="absolute inset-y-0 right-0 flex w-[min(86vw,340px)] flex-col bg-white p-5 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <Logo label={copy.logo} className="h-10" />
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-10 place-items-center rounded-full border border-slate-200 text-slate-600"
+            aria-label="Close menu"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mt-6 space-y-1">
+          {copy.nav.map((item) => (
+            <a
+              key={item.label}
+              href={item.href}
+              onClick={onClose}
+              className="flex items-center justify-between rounded-2xl px-3 py-3 text-base font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              {item.label}
+              <ArrowRight className="size-4" />
+            </a>
+          ))}
+          {!isAuthenticated ? (
+            <Link
+              href="/sign-in"
+              onClick={onClose}
+              className="flex items-center justify-between rounded-2xl px-3 py-3 text-base font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              {copy.auth.login}
+              <ArrowRight className="size-4" />
+            </Link>
+          ) : null}
+        </div>
+        <div className="mt-auto border-t border-slate-100 pt-4">
+          <Button asChild className="h-12 w-full rounded-full bg-slate-950 text-white hover:bg-slate-800">
+            <Link href={ctaHref} onClick={onClose}>
+              {copy.auth.getStarted}
+              <ArrowRight />
+            </Link>
+          </Button>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -940,10 +1094,12 @@ function Integrations({ copy }: { copy: HomeCopy["integrations"] }) {
 
 export function Homepage() {
   const [locale, setLocale] = useLocale("en");
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const copy = homepageCopy[getCopyLocale(locale)];
   const router = useRouter();
   const { isLoaded, isSignedIn } = useUser();
   const isAuthenticated = isLoaded && isSignedIn;
+  const isZh = getCopyLocale(locale) === "zh";
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
@@ -957,9 +1113,9 @@ export function Homepage() {
       className="min-h-screen overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f1faf5_46%,#ffffff_100%)] text-slate-950"
     >
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
-        <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <Logo label={copy.logo} />
-          <div className="hidden items-center gap-7 md:flex">
+        <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-8">
+          <Logo label={copy.logo} className="h-10 sm:h-12" />
+          <div className="hidden items-center gap-7 lg:flex">
             {copy.nav.map((item) => (
               <a key={item.label} href={item.href} className="text-sm font-medium text-slate-500 transition hover:text-slate-950">
                 {item.label}
@@ -967,7 +1123,7 @@ export function Homepage() {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+            <label className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 sm:gap-2 sm:px-3">
               <Languages className="size-4" />
               <span className="sr-only">{copy.langLabel}</span>
               <select
@@ -984,40 +1140,68 @@ export function Homepage() {
             </select>
             </label>
             {isAuthenticated ? (
-              <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
+              <Button asChild className="hidden rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800 lg:inline-flex">
                 <Link href="/dashboard">{copy.auth.getStarted}</Link>
               </Button>
             ) : (
               <>
-                <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 sm:inline-flex">
+                <Button asChild variant="ghost" className="hidden rounded-full text-slate-600 lg:inline-flex">
                   <Link href="/sign-in">{copy.auth.login}</Link>
                 </Button>
-                <Button asChild className="rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800">
+                <Button asChild className="hidden rounded-full bg-slate-950 px-4 text-white hover:bg-slate-800 lg:inline-flex">
                   <Link href="/sign-up">{copy.auth.getStarted}</Link>
                 </Button>
               </>
             )}
+            <button
+              type="button"
+              onClick={() => setIsMobileNavOpen(true)}
+              className="grid size-10 place-items-center rounded-full border border-slate-200 text-slate-700 lg:hidden"
+              aria-label="Open menu"
+            >
+              <Menu className="size-5" />
+            </button>
           </div>
         </nav>
       </header>
+      <MobileNavDrawer
+        copy={copy}
+        isAuthenticated={isAuthenticated}
+        isOpen={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
+      />
 
-      <section className="relative mx-auto grid max-w-7xl gap-10 px-5 pb-8 pt-16 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center lg:pb-10 lg:pt-20">
-        <div className="absolute left-0 right-0 top-0 -z-0 h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent" />
+      <section className="relative mx-auto grid max-w-7xl gap-8 px-4 pb-8 pt-9 sm:px-6 sm:pt-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-center lg:gap-10 lg:px-8 lg:pb-10 lg:pt-20">
+        <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
         <div className="relative z-10">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-sm font-medium text-emerald-950">
+          <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-6">
             <Zap className="size-4" />
             {copy.hero.eyebrow}
           </div>
-          <h1 className="max-w-3xl whitespace-nowrap text-[2.65rem] font-semibold leading-tight tracking-normal text-slate-950 sm:text-6xl lg:text-7xl">
-            {copy.hero.headline}
+          <h1 className="max-w-3xl text-[2.55rem] font-semibold leading-[1.1] tracking-normal text-slate-950 sm:text-6xl lg:whitespace-nowrap lg:text-7xl lg:leading-tight">
+            {isZh ? (
+              <>
+                <span className="block sm:inline lg:inline">你的 AI</span>
+                <span className="block sm:inline lg:inline"> 商业分析团队</span>
+              </>
+            ) : (
+              copy.hero.headline
+            )}
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            {copy.hero.subheadline}
+          <p className="mt-5 max-w-2xl text-base leading-[1.6] text-slate-600 lg:mt-6 lg:text-lg lg:leading-8">
+            <span className="lg:hidden">
+              {isZh
+                ? "连接业务数据，自动生成经营报告，发现异常并给出增长建议。"
+                : "Connect business data, generate reports, detect anomalies, and get growth recommendations."}
+            </span>
+            <span className="hidden lg:inline">{copy.hero.subheadline}</span>
           </p>
-          <TeamRoster copy={copy.hero} />
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <div className="hidden lg:block">
+            <TeamRoster copy={copy.hero} />
+          </div>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row lg:mt-8">
             <Show when="signed-out">
-              <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
+              <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800 sm:w-auto lg:h-11">
                 <Link href="/sign-up">
                   {copy.hero.primaryCta}
                   <ArrowRight />
@@ -1025,28 +1209,32 @@ export function Homepage() {
               </Button>
             </Show>
             <Show when="signed-in">
-              <Button asChild className="h-11 rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800">
+              <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800 sm:w-auto lg:h-11">
                 <Link href="/dashboard">
                   {copy.hero.primaryCta}
                   <ArrowRight />
                 </Link>
               </Button>
             </Show>
-            <Button asChild variant="outline" className="h-11 rounded-full border-slate-200 bg-white/70 px-5">
+            <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 sm:w-auto lg:h-11">
               <Link href="/dashboard">
                 <Search />
                 {copy.hero.secondaryCta}
               </Link>
             </Button>
           </div>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+          <div className="mt-6 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-6 lg:flex">
             {copy.hero.trust.map((item) => (
               <TrustItem key={item}>{item}</TrustItem>
             ))}
           </div>
+          <div className="lg:hidden">
+            <HeroWorkflowMobile copy={copy.hero} />
+            <HeroPreviewCardMobile copy={copy.visual} />
+          </div>
         </div>
 
-        <div className="relative z-10">
+        <div className="relative z-10 hidden lg:block">
           <HeroVisualization copy={copy.visual} />
         </div>
 

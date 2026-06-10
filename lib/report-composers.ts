@@ -1645,25 +1645,40 @@ function dailyKeyFindings(input: {
   }
 
   const categoryTable = input.dimensionComparisons.find((table) => table.type === "category");
+  const productTable = input.dimensionComparisons.find((table) => table.type === "product");
+  const channelTable = input.dimensionComparisons.find((table) => table.type === "channel");
+  const marketTable = input.dimensionComparisons.find((table) => table.type === "market");
   const categoryRows = categoryTable?.rows ?? [];
+  const productRows = productTable?.rows ?? [];
+  const channelRows = channelTable?.rows ?? [];
+  const marketRows = marketTable?.rows ?? [];
   const topCategories = categoryRows.slice(0, 3);
-  if (topCategories.length) {
+  if (topCategories.length || productRows.length || channelRows.length || marketRows.length) {
     const lowAovHighOrders = categoryRows.find((row) => (row.todayOrders ?? 0) >= 100 && row.todayAov != null && row.todayAov < 35);
     const lowRating = [...categoryRows].filter((row) => row.todayRating != null).sort((left, right) => Number(left.todayRating) - Number(right.todayRating))[0];
+    const topProduct = [...productRows].sort((left, right) => Number(right.todayOrders ?? 0) - Number(left.todayOrders ?? 0))[0];
+    const channelDrag = [...channelRows].sort((left, right) => Number(left.netSalesChange ?? 0) - Number(right.netSalesChange ?? 0))[0];
+    const marketRisk = [...marketRows].sort((left, right) => Number(right.fulfillmentDaysChange ?? 0) - Number(left.fulfillmentDaysChange ?? 0))[0];
+    const dimensionEvidence = [
+      topCategories.length ? topCategories.map((row) => `${row.name}：订单 ${formatMetricNumber(row.todayOrders)} vs ${formatMetricNumber(row.yesterdayOrders)}，净销售额 ${formatMetricNumber(row.todayNetSales)} vs ${formatMetricNumber(row.yesterdayNetSales)}，客单价 ${formatMetricNumber(row.todayAov)} vs ${formatMetricNumber(row.yesterdayAov)}，评分 ${formatMetricNumber(row.todayRating)}`).join("；") : "",
+      topProduct ? `${isZh ? "商品" : "Product"} ${topProduct.name}：订单 ${formatMetricNumber(topProduct.todayOrders)}，净销售额 ${formatMetricNumber(topProduct.todayNetSales)}，评分 ${formatMetricNumber(topProduct.todayRating)}` : "",
+      channelDrag ? `${isZh ? "渠道" : "Channel"} ${channelDrag.name}：净销售额变化 ${formatPercent(channelDrag.netSalesChange) ?? "-"}` : "",
+      marketRisk ? `${isZh ? "市场" : "Market"} ${marketRisk.name}：履约变化 ${formatPercent(marketRisk.fulfillmentDaysChange) ?? "-"}` : ""
+    ].filter(Boolean).join("；");
     findings.push({
-      id: "daily-finding-category-structure",
+      id: "daily-finding-dimension-source",
       caveat: lowAovHighOrders || lowRating ? "Medium" : "Low",
       title: lowAovHighOrders
         ? (isZh ? `${lowAovHighOrders.name} 订单量高但客单价偏低` : `${lowAovHighOrders.name} has high order volume but lower AOV`)
-        : (isZh ? `${topCategories[0].name} 是今日订单主力，但仍需看收入质量` : `${topCategories[0].name} leads orders today, but revenue quality needs review`),
-      summary: isZh ? "品类结构能解释收入变化来自订单规模、客单价还是体验差异。" : "Category mix explains whether movement came from volume, AOV, or experience differences.",
-      keyEvidence: topCategories.map((row) => `${row.name}：订单 ${formatMetricNumber(row.todayOrders)} vs ${formatMetricNumber(row.yesterdayOrders)}，净销售额 ${formatMetricNumber(row.todayNetSales)} vs ${formatMetricNumber(row.yesterdayNetSales)}，客单价 ${formatMetricNumber(row.todayAov)} vs ${formatMetricNumber(row.yesterdayAov)}，评分 ${formatMetricNumber(row.todayRating)}`).join("；"),
+        : (isZh ? "二级维度显示今日变化来源集中在品类、商品、渠道和市场结构" : "Secondary dimensions show today's movement across category, product, channel, and market structure"),
+      summary: isZh ? "二级指标能解释收入变化来自订单规模、客单价、商品结构、渠道质量还是市场履约差异。" : "Secondary metrics explain whether revenue movement came from order scale, AOV, product mix, channel quality, or market fulfillment.",
+      keyEvidence: dimensionEvidence,
       businessJudgment: lowAovHighOrders
         ? (isZh ? "该品类贡献订单规模，但单笔订单价值偏低，适合用组合包、加购或满减提升订单价值。" : "This category brings order scale but lower value per order; bundles, add-ons, or threshold offers may lift AOV.")
         : lowRating
           ? (isZh ? `${lowRating.name} 评分在主力品类中偏低，需要结合评论和退货记录判断是否拖累体验。` : `${lowRating.name} has lower rating among key categories; inspect reviews and returns.`)
-          : (isZh ? "主力品类决定今日订单规模，需要继续比较净销售额、客单价和评分。" : "Key categories drive order scale; continue comparing net sales, AOV, and rating."),
-      recommendedAction: isZh ? "对主力品类分别拆解商品、渠道和市场，优先定位高订单低客单价、评分偏低或净销售额回落的组合。" : "Break key categories down by product, channel, and market; prioritize high-order low-AOV, low-rating, or declining-sales combinations."
+          : (isZh ? "需要把主力品类继续拆到商品、渠道和市场，判断变化是由结构切换还是单个对象异常造成。" : "Key categories should be broken down into product, channel, and market to separate mix shift from object-level issues."),
+      recommendedAction: isZh ? "优先查看净销售额下滑渠道、履约变慢市场和高订单商品，定位可放大对象与需修正风险。" : "Prioritize declining-sales channels, slower-fulfillment markets, and high-order products to locate scalable objects and risks."
     });
   }
 

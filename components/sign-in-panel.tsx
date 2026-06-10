@@ -213,6 +213,7 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
 function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
   const { isLoaded, signIn } = useSignIn();
   const [error, setError] = useState("");
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   function getErrorMessage(errorValue: unknown) {
     if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
@@ -224,9 +225,10 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
   }
 
   async function startGoogleSignIn() {
-    if (!isLoaded) return;
+    if (!isLoaded || isRedirecting) return;
 
     setError("");
+    setIsRedirecting(true);
 
     try {
       await signIn.authenticateWithRedirect({
@@ -236,12 +238,20 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
       });
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
+      setIsRedirecting(false);
     }
   }
 
   return (
     <div className="space-y-2">
-      <Button type="button" variant="outline" onClick={() => void startGoogleSignIn()} disabled={!isLoaded} className="h-14 w-full rounded-md border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => void startGoogleSignIn()}
+        disabled={!isLoaded || isRedirecting}
+        aria-busy={isRedirecting}
+        className="h-14 w-full cursor-pointer select-none rounded-md border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
+      >
         <span className="text-xl font-semibold text-[#4285f4]">G</span>
         {copy.continueWithGoogle}
       </Button>

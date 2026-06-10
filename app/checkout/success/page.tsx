@@ -21,7 +21,7 @@ const successCopy = {
     plans: {
       trial: "One-time trial",
       "database-setup": "Database setup",
-      professional: "Professional · $199/month · annual plan, paid monthly"
+      professional: "Professional · $600/month · annual plan, paid monthly"
     }
   },
   zh: {

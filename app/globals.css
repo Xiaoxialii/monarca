@@ -71,3 +71,268 @@ body > script[data-nextjs-dev-overlay],
 [data-nextjs-toast] {
   display: none !important;
 }
+
+.dashboard-density {
+  --dashboard-page-gap: 0.75rem;
+  --dashboard-card-padding: 0.875rem;
+  --dashboard-control-height: 2rem;
+  --dashboard-text-xs: 0.6875rem;
+  --dashboard-text-sm: 0.78125rem;
+  --dashboard-text-base: 0.875rem;
+  --dashboard-text-lg: 1rem;
+  --dashboard-text-xl: 1.125rem;
+  --dashboard-text-2xl: 1.375rem;
+  --dashboard-kpi-value: clamp(1.65rem, 2.1vw, 2rem);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.dashboard-density .max-w-\[1500px\] {
+  max-width: 1440px;
+}
+
+.dashboard-density main {
+  gap: var(--dashboard-page-gap);
+}
+
+.dashboard-density .gap-1\.5 {
+  gap: 0.3rem;
+}
+
+.dashboard-density .gap-2 {
+  gap: 0.4rem;
+}
+
+.dashboard-density .gap-3 {
+  gap: 0.625rem;
+}
+
+.dashboard-density .gap-4 {
+  gap: 0.75rem;
+}
+
+.dashboard-density .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.4rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.4rem * var(--tw-space-y-reverse));
+}
+
+.dashboard-density .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.625rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.625rem * var(--tw-space-y-reverse));
+}
+
+.dashboard-density .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.75rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.75rem * var(--tw-space-y-reverse));
+}
+
+.dashboard-density .p-6 {
+  padding: 1.125rem;
+}
+
+.dashboard-density .p-5 {
+  padding: 1rem;
+}
+
+.dashboard-density .p-4 {
+  padding: var(--dashboard-card-padding);
+}
+
+.dashboard-density .p-3 {
+  padding: 0.625rem;
+}
+
+.dashboard-density .px-6 {
+  padding-left: 1.125rem;
+  padding-right: 1.125rem;
+}
+
+.dashboard-density .px-4 {
+  padding-left: 0.875rem;
+  padding-right: 0.875rem;
+}
+
+.dashboard-density .px-3 {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+.dashboard-density .py-5 {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.dashboard-density .py-4 {
+  padding-top: 0.875rem;
+  padding-bottom: 0.875rem;
+}
+
+.dashboard-density .py-3 {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
+
+.dashboard-density .py-2 {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.dashboard-density .text-xs,
+.dashboard-density .text-\[11px\] {
+  font-size: var(--dashboard-text-xs);
+  line-height: 1.35;
+}
+
+.dashboard-density .text-sm {
+  font-size: var(--dashboard-text-sm);
+  line-height: 1.45;
+}
+
+.dashboard-density .text-base {
+  font-size: var(--dashboard-text-base);
+  line-height: 1.45;
+}
+
+.dashboard-density .text-lg {
+  font-size: var(--dashboard-text-lg);
+  line-height: 1.35;
+}
+
+.dashboard-density .text-xl {
+  font-size: var(--dashboard-text-xl);
+  line-height: 1.3;
+}
+
+.dashboard-density .text-2xl,
+.dashboard-density .sm\:text-2xl {
+  font-size: var(--dashboard-text-2xl);
+  line-height: 1.25;
+}
+
+.dashboard-density .text-3xl {
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+
+.dashboard-density .text-4xl {
+  font-size: 1.9rem;
+  line-height: 1.15;
+}
+
+.dashboard-density .leading-7 {
+  line-height: 1.55;
+}
+
+.dashboard-density .leading-6 {
+  line-height: 1.45;
+}
+
+.dashboard-density .leading-5 {
+  line-height: 1.38;
+}
+
+.dashboard-density button,
+.dashboard-density input,
+.dashboard-density select,
+.dashboard-density textarea {
+  font-size: var(--dashboard-text-sm);
+}
+
+.dashboard-density button.h-14,
+.dashboard-density input.h-14 {
+  height: 2.75rem;
+}
+
+.dashboard-density button.h-12,
+.dashboard-density input.h-12 {
+  height: 2.35rem;
+}
+
+.dashboard-density button.h-10,
+.dashboard-density input.h-10,
+.dashboard-density select.h-10 {
+  height: 2.15rem;
+}
+
+.dashboard-density button.h-9,
+.dashboard-density input.h-9,
+.dashboard-density select.h-9 {
+  height: var(--dashboard-control-height);
+}
+
+.dashboard-density button.h-8 {
+  height: 1.8rem;
+}
+
+.dashboard-density .rounded-2xl {
+  border-radius: 0.75rem;
+}
+
+.dashboard-density .rounded-xl {
+  border-radius: 0.625rem;
+}
+
+.dashboard-density .rounded-lg {
+  border-radius: 0.5rem;
+}
+
+.dashboard-density [class*="shadow"] {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.035), 0 5px 18px rgba(16, 24, 40, 0.055);
+}
+
+.dashboard-density aside {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.dashboard-density aside nav {
+  gap: 0.125rem;
+}
+
+.dashboard-density aside a.h-9 {
+  height: 2rem;
+}
+
+.dashboard-density header,
+.dashboard-density [class*="sticky"] {
+  font-size: var(--dashboard-text-sm);
+}
+
+.dashboard-density .grid.min-h-full {
+  gap: var(--dashboard-page-gap);
+}
+
+.dashboard-density section.rounded-xl,
+.dashboard-density article.rounded-lg,
+.dashboard-density article.rounded-xl {
+  scroll-margin-top: 4rem;
+}
+
+.dashboard-density .tabular-nums.text-3xl,
+.dashboard-density .tabular-nums.text-4xl,
+.dashboard-density .text-3xl.tabular-nums,
+.dashboard-density .text-4xl.tabular-nums,
+.dashboard-density [class*="KPI"] .text-4xl {
+  font-size: var(--dashboard-kpi-value);
+  line-height: 1.1;
+}
+
+.dashboard-density [id="reports"] .grid,
+.dashboard-density [id="report"] .grid {
+  row-gap: 0.75rem;
+}
+
+.dashboard-density table th,
+.dashboard-density table td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+  font-size: var(--dashboard-text-sm);
+  line-height: 1.35;
+}
+
+.dashboard-density .recharts-wrapper text {
+  font-size: 11px;
+}

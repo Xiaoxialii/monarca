@@ -168,6 +168,6 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ ok: false, message: "Failed to call ChatGPT" }, { status: 500 });
+    return NextResponse.json({ ok: false, message: "升级套餐" }, { status: 500 });
   }
 }

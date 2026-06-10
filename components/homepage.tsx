@@ -215,7 +215,7 @@ const homepageCopy = {
         {
           name: "Professional",
           subtitle: "For teams that need expert-assisted setup and ongoing automated operating analysis",
-          price: "$199",
+          price: "$600",
           cadence: "/ month",
           billingNote: "Annual service term, paid monthly",
           badge: "Recommended",
@@ -223,7 +223,7 @@ const homepageCopy = {
             "Data integration + expert-assisted metric system configuration + automated reports",
           features: [
             "Annual service term, paid monthly",
-            "Connect databases, Excel, Google Sheets, and CSV files",
+            "Connect databases, Excel, SQL, and CSV files",
             "Professional team assistance for data onboarding and integration",
             "Core team metric system configured around business goals",
             "Auto-generate daily, weekly, and monthly reports",
@@ -430,7 +430,7 @@ const homepageCopy = {
           description: "数据整合 + 专业团队定制指标体系 + 自动化报告",
           features: [
             "年度服务周期，按月付款",
-            "连接数据库、Excel、Google Sheets、CSV",
+            "连接数据库、Excel、SQL、CSV",
             "专业团队协助完成数据接入与整合",
             "根据业务目标定制团队核心指标体系",
             "自动生成日报、周报、月报",

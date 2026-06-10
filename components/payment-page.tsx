@@ -97,8 +97,8 @@ const paymentCopy = {
           due: "¥2,000"
         },
         usd: {
-          price: "$199",
-          due: "$199"
+          price: "$600",
+          due: "$600"
         }
       }
     },
@@ -141,17 +141,17 @@ const paymentCopy = {
         badge: "Recommended",
         name: "Professional",
         subtitle: "Expert-assisted setup for ongoing automated operating analysis",
-        price: "$199",
+        price: "$600",
         cadence: "/ month",
         billingNote: "Annual service term, paid monthly",
         description:
           "Data integration + expert-assisted metric system configuration + automated reports. Includes basic data onboarding guidance, metric system design recommendations, and report template configuration for teams building an operating analytics system quickly.",
-        due: "$199",
+        due: "$600",
         primary: "Start professional",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
           "Annual service term, paid monthly",
-          "Connect databases, Excel, Google Sheets, and CSV files",
+          "Connect databases, Excel, SQL, and CSV files",
           "Professional team assistance for data onboarding and integration",
           "Core team metric system configured around business goals",
           "Auto-generate daily, weekly, and monthly reports",
@@ -239,8 +239,8 @@ const paymentCopy = {
           due: "¥2,000"
         },
         usd: {
-          price: "$199",
-          due: "$199"
+          price: "$600",
+          due: "$600"
         }
       }
     },
@@ -290,7 +290,7 @@ const paymentCopy = {
         next: "结算后进入工作区，然后连接数据源",
         features: [
           "年度服务周期，按月付款",
-          "连接数据库、Excel、Google Sheets、CSV",
+          "连接数据库、Excel、SQL、CSV",
           "专业团队协助完成数据接入与整合",
           "根据业务目标定制团队核心指标体系",
           "自动生成日报、周报、月报",

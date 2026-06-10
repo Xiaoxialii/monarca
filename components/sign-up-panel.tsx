@@ -204,6 +204,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
   const [sentTo, setSentTo] = useState("");
   const [step, setStep] = useState<"identifier" | "code">("identifier");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleRedirecting, setIsGoogleRedirecting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -299,9 +300,10 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
   }
 
   async function startGoogleSignUp() {
-    if (!isLoaded) return;
+    if (!isLoaded || isGoogleRedirecting) return;
 
     setError("");
+    setIsGoogleRedirecting(true);
 
     try {
       await signUp.authenticateWithRedirect({
@@ -311,6 +313,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
       });
     } catch (caughtError) {
       setError(getErrorMessage(caughtError) || copy.googleUnavailable);
+      setIsGoogleRedirecting(false);
     }
   }
 
@@ -454,7 +457,14 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
             void createPasswordAccount();
           }}
         >
-          <Button type="button" variant="outline" onClick={() => void startGoogleSignUp()} disabled={!isLoaded} className="h-12 w-full rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none hover:bg-slate-50">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void startGoogleSignUp()}
+            disabled={!isLoaded || isGoogleRedirecting}
+            aria-busy={isGoogleRedirecting}
+            className="h-12 w-full cursor-pointer select-none rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
+          >
             <span className="text-xl font-semibold text-[#4285f4]">G</span>
             {copy.continueWithGoogle}
           </Button>

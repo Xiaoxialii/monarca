@@ -33,7 +33,7 @@ import {
   Copy,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -1572,11 +1572,11 @@ function navLabel(copy: DashboardCopy, href: string) {
   );
 }
 
-const billingEntitlementStorageKey = "monarca-sidebar-billing-entitlement-v1";
+const billingEntitlementStorageKey = "monarca-sidebar-billing-entitlement-v2";
 
-function cachedSidebarEntitlement() {
-  if (sidebarEntitlementCache) {
-    return sidebarEntitlementCache;
+function cachedSidebarEntitlement(userId?: string | null) {
+  if (sidebarEntitlementCache && (!userId || sidebarEntitlementCache.userId === userId)) {
+    return sidebarEntitlementCache.entitlement;
   }
 
   if (typeof window === "undefined") {
@@ -1585,29 +1585,33 @@ function cachedSidebarEntitlement() {
 
   try {
     const cached = window.localStorage.getItem(billingEntitlementStorageKey);
-    const parsed = cached ? JSON.parse(cached) as BillingEntitlementSummary : null;
-    sidebarEntitlementCache = parsed;
-    return parsed;
+    const parsed = cached ? JSON.parse(cached) as { userId?: string | null; entitlement?: BillingEntitlementSummary | null } : null;
+    if (!parsed?.entitlement || (userId && parsed.userId !== userId)) {
+      return null;
+    }
+
+    sidebarEntitlementCache = { userId: parsed.userId ?? null, entitlement: parsed.entitlement };
+    return parsed.entitlement;
   } catch {
     return null;
   }
 }
 
-function setSidebarEntitlementCache(entitlement: BillingEntitlementSummary | null) {
-  sidebarEntitlementCache = entitlement;
+function setSidebarEntitlementCache(entitlement: BillingEntitlementSummary | null, userId?: string | null) {
+  sidebarEntitlementCache = entitlement ? { userId: userId ?? null, entitlement } : null;
 
   if (typeof window === "undefined") {
     return;
   }
 
   if (entitlement) {
-    window.localStorage.setItem(billingEntitlementStorageKey, JSON.stringify(entitlement));
+    window.localStorage.setItem(billingEntitlementStorageKey, JSON.stringify({ userId: userId ?? null, entitlement }));
   } else {
     window.localStorage.removeItem(billingEntitlementStorageKey);
   }
 }
 
-let sidebarEntitlementCache: BillingEntitlementSummary | null = null;
+let sidebarEntitlementCache: { userId: string | null; entitlement: BillingEntitlementSummary } | null = null;
 let connectedSourcesCache: ConnectedSourceRow[] | null = null;
 let reportsPageDataCache: unknown = null;
 
@@ -1624,8 +1628,8 @@ function Sidebar({
 }) {
   const { isLoaded, isSignedIn, user } = useUser();
   const isZh = copy.sidebar.brand === "蝴蝶效应";
-  const [entitlement, setEntitlement] = useState<BillingEntitlementSummary | null>(() => cachedSidebarEntitlement());
-  const [isLoadingEntitlement, setIsLoadingEntitlement] = useState(() => !cachedSidebarEntitlement());
+  const [entitlement, setEntitlement] = useState<BillingEntitlementSummary | null>(() => null);
+  const [isLoadingEntitlement, setIsLoadingEntitlement] = useState(true);
   const accountName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? "";
   const accountEmail = user?.primaryEmailAddress?.emailAddress;
   const accountImageUrl = user?.imageUrl;
@@ -1658,15 +1662,24 @@ function Sidebar({
     }
 
     let isCancelled = false;
+    const userScopedCachedEntitlement = cachedSidebarEntitlement(user?.id);
+    if (userScopedCachedEntitlement) {
+      setEntitlement(userScopedCachedEntitlement);
+      setIsLoadingEntitlement(false);
+    } else {
+      setEntitlement(null);
+      setIsLoadingEntitlement(true);
+    }
 
     async function loadEntitlement(force = false) {
-      if (!force && cachedSidebarEntitlement()) {
-        setEntitlement(cachedSidebarEntitlement());
+      const cached = cachedSidebarEntitlement(user?.id);
+      if (!force && cached) {
+        setEntitlement(cached);
         setIsLoadingEntitlement(false);
         return;
       }
 
-      if (!cachedSidebarEntitlement()) {
+      if (!cached) {
         setIsLoadingEntitlement(true);
       }
 
@@ -1676,7 +1689,7 @@ function Sidebar({
 
         if (!isCancelled && payload?.ok) {
           const nextEntitlement = payload.entitlement as BillingEntitlementSummary;
-          setSidebarEntitlementCache(nextEntitlement);
+          setSidebarEntitlementCache(nextEntitlement, user?.id);
           setEntitlement(nextEntitlement);
         }
       } finally {
@@ -1697,7 +1710,7 @@ function Sidebar({
       isCancelled = true;
       window.removeEventListener("monarca-billing-entitlement-updated", refreshEntitlement);
     };
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, user?.id]);
 
   const renderNavItem = (item: DashboardCopy["navItems"][number]) => {
     const isActive = item.target === activeTarget;
@@ -4336,7 +4349,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         },
         {
           name: "Professional",
-          price: "$199 / mo",
+          price: "$600 / mo",
           description: "Data integration, expert-assisted metric configuration, and automated reports",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Start professional",
@@ -4913,7 +4926,16 @@ function ChatPanel({
         }
       ]);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : isZh ? "AI 分析失败" : "AI analysis failed");
+      const rawMessage = error instanceof Error ? error.message : "";
+      const upgradeMessage = isZh ? "请先升级套餐" : "Please upgrade your plan first";
+      const fallbackMessage = isZh ? "AI 分析失败" : "AI analysis failed";
+      setErrorMessage(
+        isZh
+          ? upgradeMessage
+          : /upgrade|billing|entitlement|ChatGPT|OpenAI|Failed/i.test(rawMessage)
+            ? upgradeMessage
+            : rawMessage || fallbackMessage
+      );
       setMessages((current) => current.filter((message) => message !== nextMessages[nextMessages.length - 1]));
       setInputValue(content);
     } finally {
@@ -6097,6 +6119,62 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
         isZh ? "Food & Beverage 今日订单最高，较昨日增长 12.5%。" : "Food & Beverage led orders and grew 12.5% versus yesterday.",
         isZh ? "Beauty & Personal Care 净销售额回落，优先判断来自订单量还是客单价。" : "Beauty & Personal Care revenue fell; separate order and AOV effects."
       ]
+    },
+    {
+      id: "demo-product",
+      type: "product",
+      label: isZh ? "商品" : "Product",
+      rows: [
+        { id: "p05001", name: "P05001", todayOrders: 42, yesterdayOrders: 36, ordersChange: 0.167, todayNetSales: 2580, yesterdayNetSales: 2260, netSalesChange: 0.142, todayAov: 61.43, yesterdayAov: 62.78, aovChange: -0.022, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.45, yesterdayRating: 4.39, ratingChange: 0.014, businessJudgment: isZh ? "订单增长且评分稳定，可作为低风险曝光测试对象。" : "Orders grew with stable ratings, making it a low-risk exposure test candidate." },
+        { id: "p03118", name: "P03118", todayOrders: 35, yesterdayOrders: 41, ordersChange: -0.146, todayNetSales: 1490, yesterdayNetSales: 1840, netSalesChange: -0.19, todayAov: 42.57, yesterdayAov: 44.88, aovChange: -0.051, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.08, yesterdayRating: 4.22, ratingChange: -0.033, businessJudgment: isZh ? "订单、收入和评分同步回落，需要检查商品页、库存或评价变化。" : "Orders, revenue, and rating all declined; inspect product page, stock, or review changes." },
+        { id: "p08742", name: "P08742", todayOrders: 29, yesterdayOrders: 24, ordersChange: 0.208, todayNetSales: 970, yesterdayNetSales: 820, netSalesChange: 0.183, todayAov: 33.45, yesterdayAov: 34.17, aovChange: -0.021, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.31, yesterdayRating: 4.26, ratingChange: 0.012, sampleSmall: true, businessJudgment: isZh ? "订单增长但样本较少，适合继续观察，不直接下强结论。" : "Orders grew on a small sample; continue observing before drawing a strong conclusion." }
+      ],
+      summaries: [
+        isZh ? "P05001 订单和收入同步增长，适合作为曝光测试候选。" : "P05001 grew in both orders and revenue, making it an exposure test candidate.",
+        isZh ? "P03118 多项指标回落，建议优先查看库存、页面和评价记录。" : "P03118 declined across several metrics; review stock, page, and reviews."
+      ]
+    },
+    {
+      id: "demo-channel",
+      type: "channel",
+      label: isZh ? "渠道" : "Channel",
+      rows: [
+        { id: "online", name: "Online Store", todayOrders: 286, yesterdayOrders: 274, ordersChange: 0.044, todayNetSales: 11980, yesterdayNetSales: 11640, netSalesChange: 0.029, todayAov: 41.89, yesterdayAov: 42.48, aovChange: -0.014, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.23, yesterdayRating: 4.25, ratingChange: -0.005, businessJudgment: isZh ? "渠道订单增长但客单价略降，需关注低价商品占比。" : "Orders grew while AOV softened; watch low-price product mix." },
+        { id: "marketplace", name: "Marketplace", todayOrders: 228, yesterdayOrders: 252, ordersChange: -0.095, todayNetSales: 8610, yesterdayNetSales: 10120, netSalesChange: -0.149, todayAov: 37.76, yesterdayAov: 40.16, aovChange: -0.06, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.16, yesterdayRating: 4.24, ratingChange: -0.019, businessJudgment: isZh ? "订单和客单价同步回落，是今日收入下降的重要渠道拖累。" : "Orders and AOV both fell, making this a key channel drag." },
+        { id: "social", name: "Social Commerce", todayOrders: 166, yesterdayOrders: 174, ordersChange: -0.046, todayNetSales: 6528, yesterdayNetSales: 7110, netSalesChange: -0.082, todayAov: 39.33, yesterdayAov: 40.86, aovChange: -0.037, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.14, yesterdayRating: 4.28, ratingChange: -0.033, businessJudgment: isZh ? "收入回落伴随评分下降，需要排查投放商品和履约体验。" : "Revenue fell with rating decline; inspect promoted products and fulfillment experience." }
+      ],
+      summaries: [
+        isZh ? "Online Store 仍是最稳渠道，但客单价略有压力。" : "Online Store remains the steadiest channel, though AOV is under pressure.",
+        isZh ? "Marketplace 今日拖累明显，优先拆解流量、转化和商品结构。" : "Marketplace is the largest drag; split traffic, conversion, and product mix."
+      ]
+    },
+    {
+      id: "demo-market",
+      type: "market",
+      label: isZh ? "市场" : "Market",
+      rows: [
+        { id: "us", name: "United States", todayOrders: 218, yesterdayOrders: 210, ordersChange: 0.038, todayNetSales: 9560, yesterdayNetSales: 9120, netSalesChange: 0.048, todayAov: 43.85, yesterdayAov: 43.43, aovChange: 0.01, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.29, yesterdayRating: 4.27, ratingChange: 0.005, todayFulfillmentDays: 3.42, yesterdayFulfillmentDays: 3.38, fulfillmentDaysChange: 0.012, businessJudgment: isZh ? "订单和收入同步增长，且客单价稳定，是今日表现较好的市场。" : "Orders and revenue grew with stable AOV, making this a stronger market today." },
+        { id: "de", name: "Germany", todayOrders: 146, yesterdayOrders: 158, ordersChange: -0.076, todayNetSales: 5860, yesterdayNetSales: 6720, netSalesChange: -0.128, todayAov: 40.14, yesterdayAov: 42.53, aovChange: -0.056, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.11, yesterdayRating: 4.25, ratingChange: -0.033, todayFulfillmentDays: 4.12, yesterdayFulfillmentDays: 3.78, fulfillmentDaysChange: 0.09, businessJudgment: isZh ? "履约变慢且评分下降，可能影响市场体验和后续转化。" : "Fulfillment slowed and rating declined, which may affect experience and conversion." },
+        { id: "jp", name: "Japan", todayOrders: 118, yesterdayOrders: 126, ordersChange: -0.063, todayNetSales: 4930, yesterdayNetSales: 5200, netSalesChange: -0.052, todayAov: 41.78, yesterdayAov: 41.27, aovChange: 0.012, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.2, yesterdayRating: 4.22, ratingChange: -0.005, todayFulfillmentDays: 3.64, yesterdayFulfillmentDays: 3.55, fulfillmentDaysChange: 0.025, businessJudgment: isZh ? "订单回落但客单价稳定，优先看流量或转化变化。" : "Orders declined while AOV stayed stable; inspect traffic or conversion." }
+      ],
+      summaries: [
+        isZh ? "United States 收入和订单同步增长，是今日较优市场。" : "United States grew in both revenue and orders.",
+        isZh ? "Germany 履约变慢且评分下降，需要优先排查体验。" : "Germany has slower fulfillment and lower rating; prioritize experience checks."
+      ]
+    },
+    {
+      id: "demo-segment",
+      type: "segment",
+      label: isZh ? "客户分层" : "Customer Segment",
+      rows: [
+        { id: "new", name: "New", todayCustomers: 310, yesterdayCustomers: 318, customersChange: -0.025, todayOrders: 322, yesterdayOrders: 332, ordersChange: -0.03, todayNetSales: 11340, yesterdayNetSales: 12280, netSalesChange: -0.077, todayAov: 35.22, yesterdayAov: 36.99, aovChange: -0.048, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.13, yesterdayRating: 4.22, ratingChange: -0.021, businessJudgment: isZh ? "新客规模和客单价回落，需要判断新增质量和首单商品结构。" : "New customer scale and AOV declined; inspect acquisition quality and first-order mix." },
+        { id: "returning", name: "Returning", todayCustomers: 237, yesterdayCustomers: 240, customersChange: -0.013, todayOrders: 258, yesterdayOrders: 262, ordersChange: -0.015, todayNetSales: 11260, yesterdayNetSales: 11340, netSalesChange: -0.007, todayAov: 43.64, yesterdayAov: 43.28, aovChange: 0.008, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.24, yesterdayRating: 4.28, ratingChange: -0.009, businessJudgment: isZh ? "老客表现基本稳定，是今日收入的稳定来源。" : "Returning customers were broadly stable and supported revenue." },
+        { id: "vip", name: "VIP", todayCustomers: 54, yesterdayCustomers: 50, customersChange: 0.08, todayOrders: 62, yesterdayOrders: 58, ordersChange: 0.069, todayNetSales: 3590, yesterdayNetSales: 3310, netSalesChange: 0.085, todayAov: 57.9, yesterdayAov: 57.07, aovChange: 0.015, todayReturnRate: 0, yesterdayReturnRate: 0, returnRateChange: null, todayRating: 4.36, yesterdayRating: 4.34, ratingChange: 0.005, businessJudgment: isZh ? "VIP 客户规模和收入增长，适合观察是否可加强复购运营。" : "VIP customers and revenue grew; consider stronger retention plays." }
+      ],
+      summaries: [
+        isZh ? "New 用户规模最高，但客单价和评分下滑，需要判断新增质量。" : "New users are largest, but AOV and rating fell; assess acquisition quality.",
+        isZh ? "VIP 表现较好，可作为下阶段复购运营对象。" : "VIP performed well and can support next-stage retention actions."
+      ]
     }
   ];
   const scaleMonthlyKpi = (item: Record<string, unknown>, days: number) => {
@@ -6141,6 +6219,20 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
         keyEvidence: isZh ? "平均客户评分 4.18 vs 4.26，-1.8%；履约天数 3.71 vs 3.60，+3.0%" : "Average rating 4.18 vs 4.26, -1.8%; fulfillment days 3.71 vs 3.60, +3.0%",
         businessJudgment: isZh ? "履约变慢可能影响客户体验和后续评分。" : "Slower fulfillment may affect customer experience and future ratings.",
         recommendedAction: isZh ? "查看评分下降明显的品类和履约变慢的市场。" : "Inspect categories with rating declines and markets with slower fulfillment."
+      },
+      {
+        id: "demo-finding-dimension-source",
+        title: isZh ? "二级维度显示变化来源集中在渠道、品类和市场体验" : "Secondary dimensions show change sources across channel, category, and market experience",
+        caveat: "Medium",
+        keyEvidence: isZh
+          ? "Food & Beverage 订单 144，较昨日 +12.5%，但客单价 -10.0%；Marketplace 净销售额 -14.9%；Germany 履约天数 +9.0%、评分 -3.3%；VIP 净销售额 +8.5%。"
+          : "Food & Beverage orders 144, +12.5% vs yesterday, but AOV -10.0%; Marketplace net sales -14.9%; Germany fulfillment days +9.0% and rating -3.3%; VIP net sales +8.5%.",
+        businessJudgment: isZh
+          ? "收入变化不是单一 KPI 问题，渠道拖累、品类客单价下降和市场履约变慢同时存在，VIP 客群则提供了正向线索。"
+          : "The revenue movement is not a single-KPI issue: channel drag, lower category AOV, and slower market fulfillment coexist, while VIP customers provide a positive signal.",
+        recommendedAction: isZh
+          ? "优先拆解 Marketplace 的商品结构、Food & Beverage 的低客单价订单，以及 Germany 的履约明细；同时观察 VIP 是否适合下阶段复购运营。"
+          : "Prioritize Marketplace product mix, low-AOV Food & Beverage orders, and Germany fulfillment details; also test whether VIP customers can support retention actions."
       }
     ],
     dataCaveats: [
@@ -6421,11 +6513,11 @@ function WeeklyPeriodTile({
 }) {
   return (
     <div className={cn(
-      "rounded-lg border px-3 py-2",
+      "min-w-0 overflow-hidden rounded-lg border px-3 py-2",
       tone === "accent" ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-slate-50"
     )}>
-      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 whitespace-nowrap text-sm font-semibold text-slate-950">{value}</p>
+      <p className="truncate text-[10px] font-medium leading-4 text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-[clamp(10px,0.72vw,11px)] font-medium leading-4 text-slate-950">{value}</p>
     </div>
   );
 }
@@ -6772,24 +6864,36 @@ function DailyKpiBoard({
       <h3 className="text-sm font-semibold text-slate-950">{title ?? (isZh ? "KPI 看板" : "KPI Board")}</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {items.slice(0, 8).map((item) => (
-          <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-3">
-            <p className="text-xs font-medium text-muted-foreground">{item.title}</p>
-            <div className="mt-2 flex items-end justify-between gap-2">
-              <p className="break-words text-xl font-semibold tabular-nums text-slate-950">{weeklyKpiValueText(item.currentValue)}</p>
-              <div className="text-right">
-                <p className={cn("text-sm font-semibold tabular-nums", dailyKpiTone(item))}>{reportPercentText(item.percentChange)}</p>
-                <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">{dailyKpiChangeLabel(item, locale, comparisonLabel)}</p>
+          <div
+            key={item.id}
+            className="group relative overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition hover:border-slate-300 hover:shadow-sm"
+          >
+            <div className="absolute inset-x-0 top-0 h-0.5 bg-slate-900/5" />
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <p className="min-w-0 truncate text-[11px] font-semibold text-slate-600">{item.title}</p>
+              <div className="shrink-0 text-right">
+                <p className={cn("text-[12px] font-semibold tabular-nums leading-none", dailyKpiTone(item))}>{reportPercentText(item.percentChange)}</p>
+                <p className="mt-1 text-[9px] font-medium text-muted-foreground">{dailyKpiChangeLabel(item, locale, comparisonLabel)}</p>
               </div>
             </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-              <span>{currentText} {weeklyKpiValueText(item.currentValue)}</span>
-              <span>{previousText} {weeklyKpiValueText(item.previousValue)}</span>
+            <p className="mt-4 break-words text-[clamp(16px,1.55vw,20px)] font-semibold leading-none tracking-tight text-slate-950 tabular-nums">
+              {weeklyKpiValueText(item.currentValue)}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg bg-white/80 px-2 py-1">
+                <p className="font-medium text-muted-foreground">{currentText}</p>
+                <p className="mt-0.5 truncate font-semibold text-slate-800 tabular-nums">{weeklyKpiValueText(item.currentValue)}</p>
+              </div>
+              <div className="rounded-lg bg-white/80 px-2 py-1 text-right">
+                <p className="font-medium text-muted-foreground">{previousText}</p>
+                <p className="mt-0.5 truncate font-semibold text-slate-800 tabular-nums">{weeklyKpiValueText(item.previousValue)}</p>
+              </div>
             </div>
             {item.caveat ? (
               item.caveat.length > 18 ? (
-                <p className="mt-2 rounded-md bg-white/80 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">{item.caveat}</p>
+                <p className="mt-2 rounded-lg bg-amber-50/70 px-2 py-1.5 text-[10px] leading-4 text-amber-800">{item.caveat}</p>
               ) : (
-                <Badge variant="secondary" className="mt-2 text-[11px]">{item.caveat}</Badge>
+                <Badge variant="secondary" className="mt-2 text-[10px]">{item.caveat}</Badge>
               )
             ) : null}
           </div>
@@ -6829,6 +6933,18 @@ function dimensionRowIsGrowing(row: DailyDimensionComparisonRow) {
   return false;
 }
 
+function tabLabelsForDimensionType(type: DailyDimensionComparisonTable["type"], isZh: boolean) {
+  const labels: Record<DailyDimensionComparisonTable["type"], string> = {
+    category: isZh ? "品类" : "Category",
+    product: isZh ? "商品" : "Product",
+    channel: isZh ? "渠道" : "Channel",
+    market: isZh ? "市场" : "Market",
+    segment: isZh ? "客户分层" : "Segment"
+  };
+
+  return labels[type];
+}
+
 function DailyDimensionComparisonPanel({
   tables,
   fallbackItems,
@@ -6852,7 +6968,13 @@ function DailyDimensionComparisonPanel({
   const tabOrder: DailyDimensionComparisonTable["type"][] = ["category", "product", "channel", "market", "segment"];
   const [activeType, setActiveType] = useState<DailyDimensionComparisonTable["type"]>(tables[0]?.type ?? "category");
   const [sortKey, setSortKey] = useState<DimensionSortKey>("orders");
-  const activeTable = tables.find((table) => table.type === activeType) ?? tables[0] ?? null;
+  const activeTable = tables.find((table) => table.type === activeType) ?? {
+    id: `empty-${activeType}`,
+    type: activeType,
+    label: tabLabelsForDimensionType(activeType, isZh),
+    rows: [],
+    summaries: []
+  };
   const sortedRows = [...(activeTable?.rows ?? [])]
     .sort((left, right) => Number(dimensionSortValue(right, sortKey) ?? -Infinity) - Number(dimensionSortValue(left, sortKey) ?? -Infinity))
     .slice(0, 5);
@@ -6925,17 +7047,14 @@ function DailyDimensionComparisonPanel({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {tabOrder.map((type) => {
-          const enabled = tables.some((table) => table.type === type);
           return (
             <button
               key={type}
               type="button"
-              disabled={!enabled}
               onClick={() => setActiveType(type)}
               className={cn(
                 "rounded-md border px-3 py-1.5 text-xs font-medium transition",
-                activeTable?.type === type ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                !enabled && "cursor-not-allowed opacity-40"
+                activeTable?.type === type ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               )}
             >
               {tabLabels[type]}
@@ -6946,7 +7065,7 @@ function DailyDimensionComparisonPanel({
       {activeTable ? (
         <>
           <div className="mt-4 grid gap-3">
-            {sortedRows.map((row) => {
+            {sortedRows.length ? sortedRows.map((row) => {
               const tiles = [
                 activeTable.type === "segment"
                   ? { label: isZh ? `${currentText}客户` : `${currentText} Customers`, value: dimensionCellValue(row.todayCustomers), change: dimensionChangeValue(row.customersChange), tone: weeklyKpiTone(row.customersChange) }
@@ -6965,7 +7084,7 @@ function DailyDimensionComparisonPanel({
                     dimensionRowIsGrowing(row) ? "border-emerald-100 bg-emerald-50/70" : "border-slate-100 bg-slate-50/60"
                   )}
                 >
-                  <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,0.7fr)] xl:items-start">
+                  <div className="grid gap-3 2xl:grid-cols-[220px_minmax(0,1fr)_minmax(260px,0.7fr)] 2xl:items-start">
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-muted-foreground">
                         {activeTable.type === "product" ? (isZh ? "商品 / SKU" : "Product / SKU") : activeTable.label}
@@ -6976,13 +7095,13 @@ function DailyDimensionComparisonPanel({
                       </div>
                     </div>
 
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
+                    <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                       {tiles.map((tile) => (
-                        <div key={tile.label} className="rounded-md border border-white/70 bg-white/80 px-3 py-2">
-                          <p className="text-[11px] font-medium text-muted-foreground">{tile.label}</p>
-                          <div className="mt-1 flex items-end justify-between gap-2">
-                            <span className="text-sm font-semibold tabular-nums text-slate-950">{tile.value}</span>
-                            <span className={cn("text-xs font-semibold tabular-nums", tile.tone)}>{tile.change}</span>
+                        <div key={tile.label} className="min-w-0 rounded-md border border-white/70 bg-white/80 px-3 py-2">
+                          <p className="break-words text-[clamp(11px,1vw,12px)] font-medium leading-4 text-muted-foreground">{tile.label}</p>
+                          <div className="mt-1 flex min-w-0 flex-wrap items-end justify-between gap-x-2 gap-y-1">
+                            <span className="break-words text-[clamp(14px,1.5vw,18px)] font-semibold leading-6 tabular-nums text-slate-950">{tile.value}</span>
+                            <span className={cn("break-words text-[clamp(11px,1.1vw,13px)] font-semibold leading-5 tabular-nums", tile.tone)}>{tile.change}</span>
                           </div>
                         </div>
                       ))}
@@ -7010,7 +7129,11 @@ function DailyDimensionComparisonPanel({
                   </details>
                 </article>
               );
-            })}
+            }) : (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground">
+                {isZh ? `当前暂无${tabLabels[activeTable.type]}维度的对比数据。` : `No ${tabLabels[activeTable.type]} comparison data is available yet.`}
+              </p>
+            )}
           </div>
           {activeTable.summaries.length ? (
             <ul className="mt-4 space-y-2 border-t pt-3 text-sm leading-6 text-slate-700">
@@ -7149,10 +7272,10 @@ function ReportModeSummaryPanel({
       <div className="space-y-3">
         <Card className="border bg-white shadow-sm">
           <CardHeader className="p-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-              <div>
+            <div className="grid min-w-0 gap-3">
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle className="text-base">
+                  <CardTitle className="min-w-0 break-words text-base leading-6">
                     {String(content.reportTitle ?? (isZh ? `${currentPeriod} 电商经营周报` : `${currentPeriod} Ecommerce Weekly Report`))}
                   </CardTitle>
                   <Badge variant="secondary" className={currentComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
@@ -7165,7 +7288,7 @@ function ReportModeSummaryPanel({
                     : `Latest data date: ${String(content.latestDataDate ?? "-")} | Current period: ${currentPeriod} | Comparison period: ${previousPeriod} | Current-period orders: ${weeklyKpiValueText(currentOrders)} | Total rows: ${weeklyKpiValueText(content.totalRows as number | string | null)} | ${content.fullDataValidated ? "full data validated" : "full data not validated"}`}
                 </CardDescription>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid min-w-0 gap-2 sm:grid-cols-3">
                 <WeeklyPeriodTile label={isZh ? "最近 7 天" : "Latest 7 days"} value={currentPeriod} tone="accent" />
                 <WeeklyPeriodTile label={isZh ? "前 7 天" : "Previous 7 days"} value={previousPeriod} />
                 <WeeklyPeriodTile label={isZh ? "数据最新日期" : "Latest data date"} value={String(content.latestDataDate ?? "-")} />
@@ -7663,7 +7786,7 @@ function ReportsPage({
   }, [hasConnectedDatabase, hasReportMetrics, isLoadingReportsWorkspaceState]);
 
   return (
-    <section id="reports" className="flex min-h-full flex-col gap-3 scroll-mt-20">
+    <section id="reports" className="dashboard-density flex min-h-full min-w-0 max-w-full flex-col gap-3 overflow-hidden scroll-mt-20">
       <div className="flex flex-col gap-4 px-1 pb-1 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-3xl">
           <Badge className="mb-2 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
@@ -7771,8 +7894,8 @@ function ReportsPage({
                   <span className="font-semibold">{isReportsZh ? "Demo 示例" : "Demo"}</span>
                   <span className="ml-2">
                     {isReportsZh
-                      ? "当前展示固定演示报告，不需要等待生成；连接并校验真实数据后会自动切换为真实报告。"
-                      : "Showing a fixed demo report without waiting for generation. Real reports appear after validated data is connected."}
+                      ? "当前展示演示报告，连接并校验真实数据后会自动切换为真实报告。"
+                      : "Showing a demo report. Validated real data will replace it automatically."}
                   </span>
                 </p>
                 <button
@@ -10772,11 +10895,15 @@ function ReportMetricEvidencePanel({
                   result.currentStartDate ?? result.dateRangeStart ?? timeConfig?.startDate,
                   result.currentEndDate ?? result.dateRangeEnd ?? timeConfig?.endDate
                 );
+                const fallbackChangePercent = comparisonPercentFromValues(
+                  result.currentValue ?? result.value ?? trendMetric?.currentValue,
+                  result.previousValue ?? trendMetric?.previousValue
+                );
                 const comparison = buildMetricComparisonDisplay({
                   range: selectedRange,
                   locale,
                   hasTimeField: Boolean(hasTimeField && result.hasTimeField !== false),
-                  changePercent: result.changePercent ?? result.percentChange ?? trendMetric?.changePercent ?? trendMetric?.percentChange,
+                  changePercent: result.changePercent ?? result.percentChange ?? trendMetric?.changePercent ?? trendMetric?.percentChange ?? fallbackChangePercent,
                   currentStartDate: result.currentStartDate ?? result.dateRangeStart ?? trendMetric?.currentStartDate ?? timeConfig?.startDate,
                   currentEndDate: result.currentEndDate ?? result.dateRangeEnd ?? trendMetric?.currentEndDate ?? timeConfig?.endDate,
                   previousStartDate: result.previousStartDate ?? trendMetric?.previousStartDate ?? fallbackPreviousRange.previousStartDate,
@@ -11066,6 +11193,26 @@ function reportResultNumber(result: { value?: number | string | null }) {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function numericReportMetricValue(value: number | string | null | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function comparisonPercentFromValues(current: number | string | null | undefined, previous: number | string | null | undefined) {
+  const currentNumber = numericReportMetricValue(current);
+  const previousNumber = numericReportMetricValue(previous);
+
+  if (currentNumber == null || previousNumber == null || previousNumber === 0) {
+    return null;
+  }
+
+  return (currentNumber - previousNumber) / Math.abs(previousNumber);
 }
 
 function reportResultDisplay(result: { metricName: string; value?: number | string | null }) {
@@ -13676,6 +13823,665 @@ function ReportDatabaseCta({
   );
 }
 
+// Kept temporarily for comparison while the report page demo uses the metric evidence panel.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function ReportSystemDemoPanel({ locale }: { locale: Locale }) {
+  const isZh = locale === "zh";
+  const monitoringItems = isZh
+    ? [
+        {
+          index: "01",
+          title: "经营指标变化",
+          badge: "指标",
+          summary: "识别核心经营、财务和绩效指标中的异常波动",
+          tags: ["核心 KPI", "历史基线", "波动幅度"]
+        },
+        {
+          index: "02",
+          title: "客户与用户变化",
+          badge: "人群",
+          summary: "解释不同分群、cohort、使用行为和复购行为的变化",
+          tags: ["用户分群", "cohort", "行为路径"]
+        },
+        {
+          index: "03",
+          title: "渠道与区域表现",
+          badge: "市场",
+          summary: "对比区域、渠道、门店、团队或业务单元的基线变化",
+          tags: ["区域", "渠道", "业务单元"]
+        },
+        {
+          index: "04",
+          title: "流程转化",
+          badge: "流程",
+          summary: "定位用户、订单、线索或任务在关键业务流程中的流失位置",
+          tags: ["流程步骤", "完成率", "流失点"]
+        }
+      ]
+    : [
+        {
+          index: "01",
+          title: "Business metric changes",
+          badge: "Metrics",
+          summary: "Detect unusual movement in core operating and financial metrics.",
+          tags: ["Core KPI", "Baseline", "Variance"]
+        },
+        {
+          index: "02",
+          title: "Customer and user changes",
+          badge: "Audience",
+          summary: "Explain changes across segments, cohorts, behavior, and repeat purchase.",
+          tags: ["Segments", "Cohort", "Path"]
+        },
+        {
+          index: "03",
+          title: "Channel and market performance",
+          badge: "Market",
+          summary: "Compare baseline shifts across regions, channels, stores, teams, or business units.",
+          tags: ["Region", "Channel", "Unit"]
+        },
+        {
+          index: "04",
+          title: "Process conversion",
+          badge: "Flow",
+          summary: "Locate where users, orders, leads, or tasks drop in key business processes.",
+          tags: ["Steps", "Completion", "Drop-off"]
+        }
+      ];
+  const setupCards = isZh
+    ? [
+        { title: "分析前准备", items: ["连接业务数据", "确认指标定义"] },
+        { title: "AI 将生成", items: ["趋势检查", "证据链"] },
+        { title: "下一步", items: ["生成第一份报告", "检查指标逻辑"] }
+      ]
+    : [
+        { title: "Before analysis", items: ["Connect business data", "Confirm metric definitions"] },
+        { title: "AI will generate", items: ["Trend checks", "Evidence chains"] },
+        { title: "Next steps", items: ["Generate first report", "Review metric logic"] }
+      ];
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+      <Card className="border bg-white shadow-sm">
+        <CardContent className="flex min-h-[460px] flex-col p-5">
+          <Badge className="w-fit border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+            {isZh ? "AI briefing 预览" : "AI briefing preview"}
+          </Badge>
+          <p className="mt-6 text-sm font-medium text-muted-foreground">
+            {isZh ? "今日经营简报" : "Today's business briefing"}
+          </p>
+          <h3 className="mt-3 text-[clamp(28px,4vw,44px)] font-semibold leading-tight tracking-normal text-slate-950">
+            {isZh ? "准备生成第一份经营简报" : "Ready to generate your first briefing"}
+          </h3>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {(isZh
+              ? [["数据源", "待确认"], ["Schema", "待生成"], ["指标", "待确认"], ["报告", "未生成"]]
+              : [["Data source", "Pending"], ["Schema", "Pending"], ["Metrics", "Pending"], ["Report", "Not generated"]]
+            ).map(([label, value]) => (
+              <Badge key={label} variant="secondary" className="rounded-full border bg-white px-3 py-1.5 text-xs">
+                {label}<span className="ml-1 font-semibold text-rose-700">{value}</span>
+              </Badge>
+            ))}
+          </div>
+          <p className="mt-6 max-w-3xl text-sm leading-6 text-muted-foreground">
+            {isZh
+              ? "AI 简报预览，连接业务数据后会展示真实数值和证据链。"
+              : "Preview of the AI briefing. Real values and evidence chains appear after connecting business data."}
+          </p>
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            {setupCards.map((card) => (
+              <div key={card.title} className="rounded-xl border bg-slate-50/60 p-3">
+                <p className="text-sm font-semibold text-slate-950">{card.title}</p>
+                <ul className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
+                  {card.items.map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-700" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="mt-auto flex flex-wrap gap-2 pt-8">
+            <Button asChild>
+              <a href="/dashboard/import-data">
+                {isZh ? "展开证据链" : "Expand evidence chain"}
+                <ArrowRight />
+              </a>
+            </Button>
+            <Button asChild variant="outline">
+              <a href="/dashboard/reports">{isZh ? "查看趋势" : "View trend"} <ArrowRight /></a>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <Card className="border bg-white shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BrainCircuit className="size-5 text-emerald-700" />
+            {isZh ? "AI 监控范围" : "AI monitoring scope"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {monitoringItems.map((item) => (
+            <div key={item.index} className="rounded-xl border border-slate-200 bg-white p-3 first:border-emerald-200 first:bg-emerald-50/50">
+              <div className="flex items-start gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-xs font-semibold text-emerald-800">
+                  {item.index}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                    <Badge variant="secondary" className="text-[11px]">{item.badge}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.summary}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {item.tags.map((tag) => (
+                      <span key={tag} className="rounded-full border bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function buildDemoReportMetricEvidence(locale: Locale, selectedRange: ReportTimeRange): {
+  generatedAt: string;
+  timeConfig: ReportTimeConfigViewData;
+  metricResults: ReportMetricEvidenceResult[];
+  trendMetrics: ReportTrendMetricViewData[];
+  trendCharts: ReportTrendChartViewData[];
+} {
+  const isZh = locale === "zh";
+  const generatedAt = "2026-06-09T23:59:00.000Z";
+  const rangeStart = "2026-01-01";
+  const rangeEnd = "2026-06-09";
+  const trendSeries = {
+    netSales: [
+      { date: "2026-06-03", value: 29480 },
+      { date: "2026-06-04", value: 31240 },
+      { date: "2026-06-05", value: 30390 },
+      { date: "2026-06-06", value: 31960 },
+      { date: "2026-06-07", value: 30580 },
+      { date: "2026-06-08", value: 28900 },
+      { date: "2026-06-09", value: 27120 }
+    ],
+    orders: [
+      { date: "2026-06-03", value: 735 },
+      { date: "2026-06-04", value: 760 },
+      { date: "2026-06-05", value: 742 },
+      { date: "2026-06-06", value: 778 },
+      { date: "2026-06-07", value: 751 },
+      { date: "2026-06-08", value: 700 },
+      { date: "2026-06-09", value: 680 }
+    ],
+    rating: [
+      { date: "2026-06-03", value: 4.24 },
+      { date: "2026-06-04", value: 4.22 },
+      { date: "2026-06-05", value: 4.27 },
+      { date: "2026-06-06", value: 4.21 },
+      { date: "2026-06-07", value: 4.25 },
+      { date: "2026-06-08", value: 4.26 },
+      { date: "2026-06-09", value: 4.18 }
+    ]
+  };
+  const scopeByRange: Record<ReportTimeRange, {
+    start: string;
+    end: string;
+    previousStart: string | null;
+    previousEnd: string | null;
+    netSales: number;
+    previousNetSales: number | null;
+    orders: number;
+    previousOrders: number | null;
+    customers: number;
+    previousCustomers: number | null;
+    aov: number;
+    previousAov: number | null;
+    totalPaid: number;
+    rating: number;
+    previousRating: number | null;
+  }> = {
+    TODAY: {
+      start: "2026-06-09",
+      end: "2026-06-09",
+      previousStart: "2026-06-08",
+      previousEnd: "2026-06-08",
+      netSales: 27120,
+      previousNetSales: 28900,
+      orders: 680,
+      previousOrders: 700,
+      customers: 656,
+      previousCustomers: 662,
+      aov: 39.88,
+      previousAov: 41.27,
+      totalPaid: 33680,
+      rating: 4.18,
+      previousRating: 4.26
+    },
+    "7D": {
+      start: "2026-06-03",
+      end: "2026-06-09",
+      previousStart: "2026-05-27",
+      previousEnd: "2026-06-02",
+      netSales: 211670,
+      previousNetSales: 224800,
+      orders: 5146,
+      previousOrders: 5290,
+      customers: 4820,
+      previousCustomers: 4920,
+      aov: 41.13,
+      previousAov: 42.50,
+      totalPaid: 262470,
+      rating: 4.23,
+      previousRating: 4.27
+    },
+    "30D": {
+      start: "2026-05-11",
+      end: "2026-06-09",
+      previousStart: "2026-04-11",
+      previousEnd: "2026-05-10",
+      netSales: 642900,
+      previousNetSales: 671400,
+      orders: 15520,
+      previousOrders: 15880,
+      customers: 11240,
+      previousCustomers: 11380,
+      aov: 41.42,
+      previousAov: 42.28,
+      totalPaid: 797200,
+      rating: 4.05,
+      previousRating: 4.08
+    },
+    "90D": {
+      start: "2026-03-12",
+      end: "2026-06-09",
+      previousStart: "2025-12-12",
+      previousEnd: "2026-03-11",
+      netSales: 1908400,
+      previousNetSales: 1835200,
+      orders: 46120,
+      previousOrders: 44480,
+      customers: 16950,
+      previousCustomers: 16420,
+      aov: 41.38,
+      previousAov: 41.26,
+      totalPaid: 2366700,
+      rating: 4.04,
+      previousRating: 4.02
+    },
+    "12M": {
+      start: "2026-01-01",
+      end: "2026-06-09",
+      previousStart: null,
+      previousEnd: null,
+      netSales: 3428884.38,
+      previousNetSales: null,
+      orders: 82911,
+      previousOrders: null,
+      customers: 17900,
+      previousCustomers: null,
+      aov: 41.36,
+      previousAov: null,
+      totalPaid: 4252736.92,
+      rating: 4.04,
+      previousRating: null
+    },
+    ALL: {
+      start: rangeStart,
+      end: rangeEnd,
+      previousStart: null,
+      previousEnd: null,
+      netSales: 3428884.38,
+      previousNetSales: null,
+      orders: 82911,
+      previousOrders: null,
+      customers: 17900,
+      previousCustomers: null,
+      aov: 41.36,
+      previousAov: null,
+      totalPaid: 4252736.92,
+      rating: 4.04,
+      previousRating: null
+    },
+    CUSTOM: {
+      start: rangeStart,
+      end: rangeEnd,
+      previousStart: null,
+      previousEnd: null,
+      netSales: 3428884.38,
+      previousNetSales: null,
+      orders: 82911,
+      previousOrders: null,
+      customers: 17900,
+      previousCustomers: null,
+      aov: 41.36,
+      previousAov: null,
+      totalPaid: 4252736.92,
+      rating: 4.04,
+      previousRating: null
+    }
+  };
+  const scope = scopeByRange[selectedRange] ?? scopeByRange.ALL;
+  const change = (current: number, previous: number | null) => previous ? (current - previous) / Math.abs(previous) : null;
+  const direction = (current: number, previous: number | null): "up" | "down" | "flat" | "unknown" => {
+    if (previous == null) return "unknown";
+    if (Math.abs(current - previous) < 0.0001) return "flat";
+    return current > previous ? "up" : "down";
+  };
+  const baseMetric = (metric: Omit<ReportMetricEvidenceResult, "status" | "computedAt" | "dateRangePreset" | "dateRangeStart" | "dateRangeEnd" | "dateField" | "hasTimeField" | "sourceDataset" | "businessType" | "validationStatus">): ReportMetricEvidenceResult => ({
+    ...metric,
+    status: "computed",
+    computedAt: generatedAt,
+    dateRangePreset: selectedRange,
+    dateRangeStart: scope.start,
+    dateRangeEnd: scope.end,
+    dateField: "order_date",
+    hasTimeField: true,
+    sourceDataset: isZh ? "Demo 电商订单数据" : "Demo ecommerce orders",
+    businessType: "ecommerce",
+    validationStatus: "passed"
+  });
+
+  const metricResults: ReportMetricEvidenceResult[] = [
+    baseMetric({
+      metricId: "demo_net_sales",
+      metricName: "net_sales",
+      displayName: isZh ? "净销售额" : "Net Sales",
+      metricCategory: "Revenue",
+      formula: "SUM(net_sales)",
+      value: scope.netSales,
+      currentValue: scope.netSales,
+      previousValue: scope.previousNetSales,
+      percentChange: change(scope.netSales, scope.previousNetSales),
+      changePercent: change(scope.netSales, scope.previousNetSales),
+      changeDirection: direction(scope.netSales, scope.previousNetSales),
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      unit: "currency",
+      priority: 1,
+      isCoreMetric: true
+    }),
+    baseMetric({
+      metricId: "demo_orders",
+      metricName: "orders",
+      displayName: isZh ? "订单数" : "Orders",
+      metricCategory: "Orders",
+      formula: "COUNT DISTINCT order_id",
+      value: scope.orders,
+      currentValue: scope.orders,
+      previousValue: scope.previousOrders,
+      percentChange: change(scope.orders, scope.previousOrders),
+      changePercent: change(scope.orders, scope.previousOrders),
+      changeDirection: direction(scope.orders, scope.previousOrders),
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      priority: 2,
+      isCoreMetric: true
+    }),
+    baseMetric({
+      metricId: "demo_customers",
+      metricName: "customers",
+      displayName: isZh ? "客户数" : "Customers",
+      metricCategory: "Customers",
+      formula: "COUNT DISTINCT customer_id",
+      value: scope.customers,
+      currentValue: scope.customers,
+      previousValue: scope.previousCustomers,
+      percentChange: change(scope.customers, scope.previousCustomers),
+      changePercent: change(scope.customers, scope.previousCustomers),
+      changeDirection: direction(scope.customers, scope.previousCustomers),
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      priority: 3,
+      isCoreMetric: true
+    }),
+    baseMetric({
+      metricId: "demo_aov",
+      metricName: "average_order_value",
+      displayName: isZh ? "客单价" : "AOV",
+      metricCategory: "Revenue",
+      formula: "SUM(net_sales) / COUNT DISTINCT order_id",
+      value: scope.aov,
+      currentValue: scope.aov,
+      previousValue: scope.previousAov,
+      percentChange: change(scope.aov, scope.previousAov),
+      changePercent: change(scope.aov, scope.previousAov),
+      changeDirection: direction(scope.aov, scope.previousAov),
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      unit: "currency",
+      priority: 4,
+      isCoreMetric: true
+    }),
+    baseMetric({
+      metricId: "demo_total_paid",
+      metricName: "total_paid",
+      displayName: isZh ? "实付金额" : "Total Paid",
+      metricCategory: "Revenue",
+      formula: "SUM(total_paid)",
+      value: scope.totalPaid,
+      currentValue: scope.totalPaid,
+      unit: "currency",
+      priority: 5,
+      isCoreMetric: true
+    }),
+    baseMetric({
+      metricId: "demo_average_rating",
+      metricName: "average_rating",
+      displayName: isZh ? "平均客户评分" : "Average Rating",
+      metricCategory: "Quality",
+      formula: "AVG(customer_rating) IGNORE NULLS",
+      value: scope.rating,
+      currentValue: scope.rating,
+      previousValue: scope.previousRating,
+      percentChange: change(scope.rating, scope.previousRating),
+      changePercent: change(scope.rating, scope.previousRating),
+      changeDirection: direction(scope.rating, scope.previousRating),
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      metricDirection: "higher_is_better",
+      priority: 8,
+      isCoreMetric: true,
+      sampleSize: 77382
+    }),
+    baseMetric({
+      metricId: "demo_category_orders",
+      metricName: "category_orders_by_category",
+      displayName: isZh ? "品类订单数" : "Category Orders",
+      metricCategory: "Category Performance",
+      formula: "COUNT DISTINCT order_id BY category",
+      scope: "group",
+      value: 16620,
+      priority: 20,
+      rows: [
+        { dimension: "Food & Beverage", value: 16620, sampleSize: 16620 },
+        { dimension: "Beauty & Personal Care", value: 16420, sampleSize: 16420 },
+        { dimension: "Home & Kitchen", value: 14776, sampleSize: 14776 },
+        { dimension: "Electronics", value: 13720, sampleSize: 13720 },
+        { dimension: "Fashion Accessories", value: 12840, sampleSize: 12840 }
+      ]
+    }),
+    baseMetric({
+      metricId: "demo_category_net_sales",
+      metricName: "category_net_sales_by_category",
+      displayName: isZh ? "品类净销售额" : "Category Net Sales",
+      metricCategory: "Category Performance",
+      formula: "SUM(net_sales) BY category",
+      scope: "group",
+      value: 724300,
+      priority: 21,
+      rows: [
+        { dimension: "Electronics", value: 724300, sampleSize: 13720 },
+        { dimension: "Home & Kitchen", value: 535900, sampleSize: 14776 },
+        { dimension: "Fashion Accessories", value: 508200, sampleSize: 12840 },
+        { dimension: "Food & Beverage", value: 468500, sampleSize: 16620 },
+        { dimension: "Beauty & Personal Care", value: 496800, sampleSize: 16420 }
+      ]
+    }),
+    baseMetric({
+      metricId: "demo_channel_net_sales",
+      metricName: "channel_net_sales_by_sales_channel",
+      displayName: isZh ? "渠道净销售额" : "Channel Net Sales",
+      metricCategory: "Channel Performance",
+      formula: "SUM(net_sales) BY sales_channel",
+      scope: "group",
+      value: 1128400,
+      priority: 22,
+      rows: [
+        { dimension: "Marketplace", value: 1128400, sampleSize: 27120 },
+        { dimension: "Website", value: 1036500, sampleSize: 24980 },
+        { dimension: "Mobile App", value: 782600, sampleSize: 18850 },
+        { dimension: "Retail Partner", value: 481384, sampleSize: 11961 }
+      ]
+    }),
+    baseMetric({
+      metricId: "demo_country_net_sales",
+      metricName: "country_net_sales_by_country",
+      displayName: isZh ? "市场净销售额" : "Country Net Sales",
+      metricCategory: "Market Performance",
+      formula: "SUM(net_sales) BY country",
+      scope: "group",
+      value: 829600,
+      priority: 23,
+      rows: [
+        { dimension: "United States", value: 829600, sampleSize: 19880 },
+        { dimension: "Germany", value: 681300, sampleSize: 16240 },
+        { dimension: "United Kingdom", value: 603500, sampleSize: 14520 },
+        { dimension: "Canada", value: 528200, sampleSize: 12860 },
+        { dimension: "Australia", value: 444900, sampleSize: 10370 }
+      ]
+    }),
+    baseMetric({
+      metricId: "demo_segment_customers",
+      metricName: "segment_customers_by_customer_segment",
+      displayName: isZh ? "客户分层客户数" : "Segment Customers",
+      metricCategory: "Customer Segments",
+      formula: "COUNT DISTINCT customer_id BY customer_segment",
+      scope: "group",
+      value: 9200,
+      priority: 24,
+      rows: [
+        { dimension: "New", value: 9200, sampleSize: 9200 },
+        { dimension: "Returning", value: 6200, sampleSize: 6200 },
+        { dimension: "At Risk", value: 1800, sampleSize: 1800 },
+        { dimension: "VIP", value: 700, sampleSize: 700 }
+      ]
+    })
+  ];
+
+  const trendMetrics: ReportTrendMetricViewData[] = [
+    {
+      metricName: "net_sales",
+      businessModule: isZh ? "收入与销售" : "Revenue & Sales",
+      dateField: "order_date",
+      granularity: "day",
+      currentValue: scope.netSales,
+      previousValue: scope.previousNetSales,
+      absoluteChange: scope.previousNetSales == null ? null : scope.netSales - scope.previousNetSales,
+      percentChange: change(scope.netSales, scope.previousNetSales),
+      changePercent: change(scope.netSales, scope.previousNetSales),
+      changeDirection: direction(scope.netSales, scope.previousNetSales),
+      metricDirection: "higher_is_better",
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      timeSeries: trendSeries.netSales
+    },
+    {
+      metricName: "orders",
+      businessModule: isZh ? "订单规模" : "Orders",
+      dateField: "order_date",
+      granularity: "day",
+      currentValue: scope.orders,
+      previousValue: scope.previousOrders,
+      absoluteChange: scope.previousOrders == null ? null : scope.orders - scope.previousOrders,
+      percentChange: change(scope.orders, scope.previousOrders),
+      changePercent: change(scope.orders, scope.previousOrders),
+      changeDirection: direction(scope.orders, scope.previousOrders),
+      metricDirection: "higher_is_better",
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      timeSeries: trendSeries.orders
+    },
+    {
+      metricName: "average_rating",
+      businessModule: isZh ? "评分与质量" : "Ratings & Quality",
+      dateField: "order_date",
+      granularity: "day",
+      currentValue: scope.rating,
+      previousValue: scope.previousRating,
+      absoluteChange: scope.previousRating == null ? null : scope.rating - scope.previousRating,
+      percentChange: change(scope.rating, scope.previousRating),
+      changePercent: change(scope.rating, scope.previousRating),
+      changeDirection: direction(scope.rating, scope.previousRating),
+      metricDirection: "higher_is_better",
+      currentStartDate: scope.start,
+      currentEndDate: scope.end,
+      previousStartDate: scope.previousStart,
+      previousEndDate: scope.previousEnd,
+      timeSeries: trendSeries.rating
+    }
+  ];
+
+  return {
+    generatedAt,
+    timeConfig: {
+      hasTimeField: true,
+      defaultTimeField: "order_date",
+      availableTimeFields: ["order_date"],
+      selectedRange,
+      granularity: "day",
+      dateRangePreset: selectedRange,
+      startDate: scope.start,
+      endDate: scope.end
+    },
+    metricResults,
+    trendMetrics,
+    trendCharts: [
+      {
+        title: isZh ? "近 7 天净销售额趋势" : "Net sales trend, last 7 days",
+        chartType: "line_chart",
+        xAxis: "order_date",
+        yAxis: isZh ? "净销售额" : "Net Sales",
+        series: trendSeries.netSales,
+        description: isZh ? "展示 Demo 电商订单数据中最近 7 天净销售额变化。" : "Shows the last 7 days of net sales in the demo ecommerce dataset.",
+        insightHint: isZh ? "6 月 9 日净销售额较前一日回落，需要拆解订单数和客单价。" : "Net sales declined on June 9; inspect orders and AOV."
+      },
+      {
+        title: isZh ? "近 7 天订单趋势" : "Orders trend, last 7 days",
+        chartType: "bar_chart",
+        xAxis: "order_date",
+        yAxis: isZh ? "订单数" : "Orders",
+        series: trendSeries.orders,
+        description: isZh ? "展示 Demo 电商订单数据中最近 7 天订单规模。" : "Shows the last 7 days of order volume in the demo ecommerce dataset.",
+        insightHint: isZh ? "订单数从 6 月 8 日的 700 单降至 6 月 9 日的 680 单。" : "Orders declined from 700 to 680."
+      }
+    ]
+  };
+}
+
 function ReportPage({ locale }: { locale: Locale }) {
   const isZh = locale === "zh";
   type LegacyReportData = {
@@ -13801,12 +14607,22 @@ function ReportPage({ locale }: { locale: Locale }) {
   const latestTrendCharts = reportData?.briefing?.payloadJson?.trendCharts ?? [];
   const latestStructuredReport = reportData?.briefing?.payloadJson?.structuredReport ?? null;
   const hasRealReportMetrics = latestMetricResults.some((result) => result.status === "computed");
-  const reportDemoContent = demoReportContent("daily_brief", locale);
+  const demoMetricEvidence = useMemo(() => buildDemoReportMetricEvidence(locale, selectedDateRange.preset), [locale, selectedDateRange.preset]);
+  const hasComparableReportMetrics = latestMetricResults.some((result) =>
+    result.status === "computed" &&
+    selectedDateRange.preset !== "ALL" &&
+    (
+      typeof result.changePercent === "number" ||
+      typeof result.percentChange === "number" ||
+      result.previousValue != null
+    )
+  );
+  const shouldShowRealReportMetrics = hasRealReportMetrics && (selectedDateRange.preset === "ALL" || hasComparableReportMetrics);
   const reportEntitlement = reportData?.reportEntitlement;
   const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
 
   return (
-    <section id="report" className="flex flex-col gap-4 scroll-mt-20 xl:h-full">
+    <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
       <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{isZh ? "报表" : "Reports"}</h2>
@@ -13845,7 +14661,7 @@ function ReportPage({ locale }: { locale: Locale }) {
         </div>
       </div>
 
-      {hasRealReportMetrics || isLoadingReportEvidence ? (
+      {shouldShowRealReportMetrics || isLoadingReportEvidence ? (
         <ReportMetricEvidencePanel
           metricResults={latestMetricResults}
           generatedAt={latestGeneratedAt}
@@ -13864,11 +14680,22 @@ function ReportPage({ locale }: { locale: Locale }) {
             <span className="font-semibold">{isZh ? "Demo 示例" : "Demo"}</span>
             <span className="ml-2">
               {isZh
-                ? "当前报表页展示固定电商演示数据；连接并校验真实数据后会自动切换为真实报表。"
-                : "This report page shows fixed ecommerce demo data; validated real data will replace it automatically."}
+                ? "当前展示演示报告，连接并校验真实数据后会自动切换为真实报告。"
+                : "Showing a demo report. Validated real data will replace it automatically."}
             </span>
           </div>
-          <ReportModeSummaryPanel mode="daily_brief" content={reportDemoContent} locale={locale} />
+          <ReportMetricEvidencePanel
+            metricResults={demoMetricEvidence.metricResults}
+            generatedAt={demoMetricEvidence.generatedAt}
+            timeConfig={demoMetricEvidence.timeConfig}
+            trendMetrics={demoMetricEvidence.trendMetrics}
+            trendCharts={demoMetricEvidence.trendCharts}
+            structuredReport={null}
+            selectedRange={selectedDateRange.preset}
+            onRangeChange={handleReportRangeChange}
+            locale={locale}
+            isLoading={false}
+          />
         </div>
       )}
     </section>
@@ -14005,8 +14832,8 @@ export function Dashboard({
                 ? isChatCollapsed
                   ? "xl:grid-cols-[minmax(0,1fr)_76px]"
                   : isReportsView
-                    ? "xl:grid-cols-[minmax(0,1fr)_360px]"
-                    : "xl:grid-cols-[minmax(0,1fr)_400px]"
+                    ? "xl:grid-cols-[minmax(0,1fr)_324px]"
+                    : "xl:grid-cols-[minmax(0,1fr)_360px]"
                 : "xl:grid-cols-1"
             )}
           >

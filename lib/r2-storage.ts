@@ -6,14 +6,14 @@ type StoredUpload = {
   bucket: string;
   endpoint: string;
   key: string;
-  url: string | null;
 };
 
 function r2Config() {
-  const endpoint = process.env.R2_ENDPOINT;
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const endpoint = process.env.R2_ENDPOINT || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : null);
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucket = process.env.R2_BUCKET;
+  const bucket = process.env.R2_BUCKET_NAME;
 
   if (!endpoint || !accessKeyId || !secretAccessKey || !bucket) {
     return null;
@@ -23,8 +23,7 @@ function r2Config() {
     endpoint,
     accessKeyId,
     secretAccessKey,
-    bucket,
-    publicBaseUrl: process.env.R2_PUBLIC_BASE_URL
+    bucket
   };
 }
 
@@ -88,7 +87,6 @@ export async function createPresignedUploadUrl(params: {
     bucket: config.bucket,
     key,
     uploadUrl: await getSignedUrl(r2Client(config), command, { expiresIn: 15 * 60 }),
-    publicUrl: config.publicBaseUrl ? `${config.publicBaseUrl.replace(/\/$/, "")}/${key}` : null,
     contentType
   };
 }
@@ -165,7 +163,6 @@ export async function storeUploadInR2(params: {
   return {
     bucket: config.bucket,
     endpoint: config.endpoint,
-    key,
-    url: config.publicBaseUrl ? `${config.publicBaseUrl.replace(/\/$/, "")}/${key}` : null
+    key
   };
 }

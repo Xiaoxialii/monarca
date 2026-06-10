@@ -88,14 +88,22 @@ export async function readCsvRowsFromStorageConfig(config: Record<string, unknow
   }
 
   const storage = asRecord(config.storage);
+  const storageProvider = typeof config.storageProvider === "string" ? config.storageProvider : null;
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
 
-  if (storage.provider === "cloudflare-r2" && typeof storage.key === "string" && storage.key) {
-    const cacheKey = `r2:${storage.key}`;
+  if ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && objectKey) {
+    const cacheKey = `r2:${objectKey}`;
     const cached = csvRowsCache.get(cacheKey);
 
     if (cached) return cached;
 
-    const rowsPromise = readR2ObjectText(storage.key).then(csvRowsFromText);
+    const rowsPromise = readR2ObjectText(objectKey).then(csvRowsFromText);
     while (csvRowsCache.size >= maxCachedCsvFiles) {
       const oldestKey = csvRowsCache.keys().next().value;
       if (!oldestKey) break;

@@ -140,8 +140,7 @@ export async function POST(request: Request) {
     const storage = {
       provider: "cloudflare-r2",
       bucket: stringValue(payload?.bucket),
-      key,
-      url: stringValue(payload?.publicUrl) || null
+      key
     };
     const schemaPayload = {
       scannedAt,
@@ -170,6 +169,10 @@ export async function POST(request: Request) {
             fileSize,
             mimeType,
             extension,
+            storageProvider: "r2",
+            storageBucket: storage.bucket,
+            storagePath: key,
+            objectKey: key,
             storage
           },
           schemas: schemaPayload,

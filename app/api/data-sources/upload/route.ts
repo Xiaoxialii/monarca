@@ -254,11 +254,14 @@ export async function POST(request: Request) {
               mimeType: file.type || null,
               extension,
               storedFilePath: localStoredFile?.path ?? null,
+              storageProvider: "r2",
+              storageBucket: storedFile.bucket,
+              storagePath: storedFile.key,
+              objectKey: storedFile.key,
               storage: {
                 provider: "cloudflare-r2",
                 bucket: storedFile.bucket,
-                key: storedFile.key,
-                url: storedFile.url
+                key: storedFile.key
               }
             }
           }

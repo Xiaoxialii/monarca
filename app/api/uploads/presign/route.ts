@@ -73,7 +73,6 @@ export async function POST(request: Request) {
       key: upload.key,
       path: upload.key,
       bucket: upload.bucket,
-      publicUrl: upload.publicUrl,
       contentType: upload.contentType,
       maxBytes: FILE_UPLOAD_MAX_BYTES
     });

@@ -490,10 +490,18 @@ function canComputeContext(context: MetricResultContext) {
 
   const config = asRecord(context.dataSource.config);
   const storage = asRecord(config.storage);
+  const storageProvider = typeof config.storageProvider === "string" ? config.storageProvider : null;
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
 
   return getSchemaTables(context.schemaJson).some((table) => Array.isArray(table.sampleRows)) ||
     typeof config.storedFilePath === "string" ||
-    (storage.provider === "cloudflare-r2" && typeof storage.key === "string");
+    ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && Boolean(objectKey));
 }
 
 function translateExpression(type: SupportedResultDatabase, tables: SchemaTable[], formula: string): string {

@@ -135,7 +135,7 @@ async function createCheckoutSession(request: Request, payload: CheckoutPayload)
     return {
       ok: false as const,
       status: 400,
-      message: "当前套餐暂未接入在线付款，请选择单次体验、数据库搭建或专业版。"
+      message: "当前套餐暂未接入在线付款，请选择数据库搭建或专业版。"
     };
   }
 

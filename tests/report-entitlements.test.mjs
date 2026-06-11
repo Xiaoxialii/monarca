@@ -19,11 +19,6 @@ function freeWorkspace(overrides = {}) {
 function markSucceeded(entitlement, accessType) {
   const next = { ...entitlement };
 
-  if (accessType === "free_first_report") {
-    next.firstFreeReportUsed = true;
-    next.firstFreeReportUsedAt = now;
-  }
-
   if (accessType === "one_time_purchase") {
     next.oneTimeReportAvailable = false;
     next.oneTimeReportUsedAt = now;
@@ -36,43 +31,27 @@ function markFailed(entitlement) {
   return { ...entitlement };
 }
 
-test("new workspace starts with first free report unused", () => {
+test("new workspace has no free report allowance", () => {
   const entitlement = freeWorkspace();
 
   assert.equal(entitlement.firstFreeReportUsed, false);
 });
 
-test("free user can generate the first report", () => {
+test("free user cannot generate reports", () => {
   const access = evaluateReportGenerationAccess(freeWorkspace(), now);
-
-  assert.equal(access.allowed, true);
-  assert.equal(access.reason, "FIRST_FREE_REPORT_AVAILABLE");
-  assert.equal(access.accessType, "free_first_report");
-});
-
-test("successful first report marks firstFreeReportUsed", () => {
-  const access = evaluateReportGenerationAccess(freeWorkspace(), now);
-  const entitlement = markSucceeded(freeWorkspace(), access.accessType);
-
-  assert.equal(entitlement.firstFreeReportUsed, true);
-  assert.ok(entitlement.firstFreeReportUsedAt instanceof Date);
-});
-
-test("free report blocks another generation after success", () => {
-  const entitlement = markSucceeded(freeWorkspace(), "free_first_report");
-  const access = evaluateReportGenerationAccess(entitlement, now);
 
   assert.equal(access.allowed, false);
-  assert.equal(access.reason, "FREE_REPORT_USED");
+  assert.equal(access.reason, "NO_ACCESS");
+  assert.equal(access.accessType, undefined);
 });
 
-test("failed report does not mark firstFreeReportUsed", () => {
+test("failed report does not grant free generation", () => {
   const entitlement = markFailed(freeWorkspace());
   const access = evaluateReportGenerationAccess(entitlement, now);
 
   assert.equal(entitlement.firstFreeReportUsed, false);
-  assert.equal(access.allowed, true);
-  assert.equal(access.accessType, "free_first_report");
+  assert.equal(access.allowed, false);
+  assert.equal(access.reason, "NO_ACCESS");
 });
 
 test("one-time report can generate once and is consumed on success", () => {
@@ -118,13 +97,13 @@ test("expired subscription does not allow unlimited generation", () => {
 });
 
 test("same idempotency key does not consume twice", () => {
-  const entitlement = freeWorkspace();
+  const entitlement = freeWorkspace({ oneTimeReportAvailable: true });
   const access = evaluateReportGenerationAccess(entitlement, now);
   const once = markSucceeded(entitlement, access.accessType);
   const twice = markSucceeded(once, access.accessType);
 
-  assert.equal(once.firstFreeReportUsed, true);
-  assert.equal(twice.firstFreeReportUsed, true);
+  assert.equal(once.oneTimeReportAvailable, false);
+  assert.equal(twice.oneTimeReportAvailable, false);
 });
 
 test("no access maps to NO_REPORT_ACCESS API semantics", () => {

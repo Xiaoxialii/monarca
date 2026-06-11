@@ -1,5 +1,5 @@
-import { PaymentPage } from "@/components/payment-page";
+import { redirect } from "next/navigation";
 
 export default function TrialCheckoutPage() {
-  return <PaymentPage plan="trial" />;
+  redirect("/checkout/professional");
 }

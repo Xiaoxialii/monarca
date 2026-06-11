@@ -19,7 +19,6 @@ const successCopy = {
     confirmed: "Plan access is active. You can connect data and generate reports now.",
     confirmFailed: "Payment succeeded, but plan access was not activated automatically. Please refresh or contact support.",
     plans: {
-      trial: "One-time trial",
       "database-setup": "Database setup",
       professional: "Professional · $600/month · annual plan, paid monthly"
     }
@@ -35,7 +34,6 @@ const successCopy = {
     confirmed: "套餐权限已开通，现在可以连接数据并生成报告。",
     confirmFailed: "付款已成功，但套餐权限未自动开通。请刷新页面或联系支持。",
     plans: {
-      trial: "单次体验",
       "database-setup": "数据库搭建",
       professional: "专业版 · ¥2,000/月 · 年度套餐，按月支付"
     }
@@ -45,7 +43,7 @@ const successCopy = {
 type PaidPlan = keyof typeof successCopy.en.plans;
 
 function isPaidPlan(plan: string | null): plan is PaidPlan {
-  return plan === "trial" || plan === "database-setup" || plan === "professional";
+  return plan === "database-setup" || plan === "professional";
 }
 
 function CheckoutSuccessContent() {

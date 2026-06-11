@@ -2,12 +2,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { evaluateReportGenerationAccess } from "@/lib/report-entitlement-rules.mjs";
 
-export type ReportAccessType = "free_first_report" | "one_time_purchase" | "subscription";
+export type ReportAccessType = "one_time_purchase" | "subscription";
 export type ReportAccessReason =
-  | "FIRST_FREE_REPORT_AVAILABLE"
   | "ONE_TIME_REPORT_AVAILABLE"
   | "SUBSCRIPTION_ACTIVE"
-  | "FREE_REPORT_USED"
   | "SUBSCRIPTION_EXPIRED"
   | "NO_ACCESS";
 
@@ -26,7 +24,7 @@ export class ReportAccessError extends Error {
   status = 402;
   upgradeRequired = true;
 
-  constructor(message = "Your free report has already been used. Upgrade or purchase a report to generate another one.") {
+  constructor(message = "Please choose a plan to generate reports.") {
     super(message);
     this.name = "ReportAccessError";
   }
@@ -185,16 +183,6 @@ export async function markReportGenerationSucceeded(input: {
         errorMessage: null
       }
     });
-
-    if (log.accessType === "free_first_report") {
-      await tx.reportEntitlement.update({
-        where: { workspaceId: input.workspaceId },
-        data: {
-          firstFreeReportUsed: true,
-          firstFreeReportUsedAt: now
-        }
-      });
-    }
 
     if (log.accessType === "one_time_purchase") {
       await tx.reportEntitlement.update({

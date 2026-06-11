@@ -51,8 +51,8 @@ export function billingEntitlementMessage(
       en: "Please choose a plan to connect data sources."
     },
     REPORT_LIMIT_REACHED: {
-      zh: "你的单次报告生成次数已用完，请购买报告或升级套餐。",
-      en: "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited."
+      zh: "当前套餐不可继续生成报告，请升级套餐。",
+      en: "Your current plan cannot generate more reports. Please upgrade your plan."
     },
     SUBSCRIPTION_EXPIRED: {
       zh: "你的套餐当前不可用，请先更新或升级套餐。",
@@ -179,7 +179,7 @@ export async function getBillingAccessState(workspaceId: string): Promise<Billin
     subscription.planType === PlanType.ONE_TIME &&
     subscription.status === SubscriptionStatus.ACTIVE
   );
-  const canConnectDataSource = hasMonthlyAccess || hasOneTimePurchase || reportEntitlement.reason === "FIRST_FREE_REPORT_AVAILABLE";
+  const canConnectDataSource = hasMonthlyAccess || hasOneTimePurchase;
   const canGenerateReport = reportEntitlement.canGenerateReport;
   const planType: BillingAccessPlanType = hasMonthlyAccess
     ? "MONTHLY"
@@ -189,14 +189,14 @@ export async function getBillingAccessState(workspaceId: string): Promise<Billin
   const status = subscription ? statusToApi(subscription.status) : "free";
   const upgradeRequiredReason = canGenerateReport
     ? null
-    : reportEntitlement.reason === "FREE_REPORT_USED" || planType === "ONE_TIME"
+    : planType === "ONE_TIME"
       ? "ONE_TIME_REPORT_USED"
       : reportEntitlement.reason === "SUBSCRIPTION_EXPIRED" || status === "past_due" || status === "unpaid" || status === "expired"
         ? "SUBSCRIPTION_INACTIVE"
         : "PLAN_REQUIRED";
   const remainingReportGenerations = reportEntitlement.monthlyUnlimited && reportEntitlement.subscriptionStatus === "active"
     ? null
-    : reportEntitlement.oneTimeReportAvailable || !reportEntitlement.firstFreeReportUsed
+    : reportEntitlement.oneTimeReportAvailable
       ? 1
       : 0;
 
@@ -242,7 +242,7 @@ export async function requireCanGenerateReport(workspaceId: string) {
     if (state.planType === "ONE_TIME") {
       throw new BillingEntitlementError(
         "REPORT_LIMIT_REACHED",
-        "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited."
+        "Your current plan cannot generate more reports. Please upgrade your plan."
       );
     }
 
@@ -313,7 +313,7 @@ export async function consumeReportGeneration(workspaceId: string, reportId: str
 
     throw new BillingEntitlementError(
       "REPORT_LIMIT_REACHED",
-      "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited."
+      "Your current plan cannot generate more reports. Please upgrade your plan."
     );
   }, {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable

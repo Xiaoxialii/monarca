@@ -9,8 +9,7 @@ import {
   Database,
   Loader2,
   Lock,
-  ShieldCheck,
-  Sparkles
+  ShieldCheck
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,18 +22,16 @@ import { Input } from "@/components/ui/input";
 import { getCopyLocale, getHtmlLang, useLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
-export type PaymentPlan = "trial" | "database-setup" | "professional" | "enterprise";
+export type PaymentPlan = "database-setup" | "professional" | "enterprise";
 type CheckoutCurrency = "cny" | "usd";
 
 const planIcons = {
-  trial: Sparkles,
   "database-setup": Database,
   professional: BrainCircuit,
   enterprise: ShieldCheck
 } as const;
 
-const mainPlanIds = ["trial", "professional", "enterprise"] as const satisfies readonly PaymentPlan[];
-const addonPlanIds = ["database-setup"] as const satisfies readonly PaymentPlan[];
+const mainPlanIds = ["professional", "enterprise", "database-setup"] as const satisfies readonly PaymentPlan[];
 
 const paymentCopy = {
   en: {
@@ -47,7 +44,6 @@ const paymentCopy = {
     loadingPlan: "Loading current plan...",
     monthlyPlan: "Monthly service",
     annualMonthlyPlan: "Annual plan, paid monthly",
-    oneTimePlan: "One-time service",
     addonLabel: "Add-on service",
     secure: "Secure checkout",
     formTitle: "Checkout details",
@@ -81,16 +77,6 @@ const paymentCopy = {
       usd: "USD"
     },
     stripePrices: {
-      trial: {
-        cny: {
-          price: "¥99",
-          due: "¥99"
-        },
-        usd: {
-          price: "$20",
-          due: "$20"
-        }
-      },
       professional: {
         cny: {
           price: "¥2,000",
@@ -103,23 +89,6 @@ const paymentCopy = {
       }
     },
     plans: {
-      trial: {
-        badge: "One-time",
-        name: "One-time Experience",
-        subtitle: "Try one AI growth analysis session",
-        price: "$20",
-        cadence: "",
-        description:
-          "For teams that want to experience the AI growth analysis workflow before subscribing",
-        due: "$20",
-        primary: "Start experience",
-        next: "After checkout, your workspace opens with a guided setup flow",
-        features: [
-          "One guided growth analysis experience",
-          "Sample metrics and report workflow",
-          "Data source and schema setup recommendation"
-        ]
-      },
       "database-setup": {
         badge: "Consulting",
         name: "Database Setup",
@@ -140,24 +109,26 @@ const paymentCopy = {
       professional: {
         badge: "Recommended",
         name: "Professional",
-        subtitle: "Expert-assisted setup for ongoing automated operating analysis",
+        subtitle: "Ongoing automated operating analysis with dedicated analyst support",
         price: "$600",
         cadence: "/ month",
-        billingNote: "Annual service term, paid monthly",
+        billingNote: "Annual service term, monthly payment supported",
         description:
-          "Data integration + expert-assisted metric system configuration + automated reports. Includes basic data onboarding guidance, metric system design recommendations, and report template configuration for teams building an operating analytics system quickly.",
+          "Data onboarding + metric system configuration + dedicated analyst support + automated operating reports.",
         due: "$600",
         primary: "Start professional",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
-          "Annual service term, paid monthly",
           "Connect databases, Excel, SQL, and CSV files",
-          "Professional team assistance for data onboarding and integration",
+          "Dedicated analyst support to clarify goals, data structure, and analysis needs",
+          "One data onboarding and basic data cleanup setup",
           "Core team metric system configured around business goals",
-          "Auto-generate daily, weekly, and monthly reports",
+          "Report structure setup for daily, weekly, and monthly operating analysis",
+          "Auto-generate daily, weekly, and monthly operating reports",
           "Anomaly alerts, trend explanations, and AI action recommendations",
           "Ongoing data updates and automatic report refresh",
-          "Metric definition checks to reduce misleading analysis"
+          "Metric definition checks to reduce misleading analysis",
+          "Built for sales, operations, growth, ecommerce, and management teams"
         ]
       },
       enterprise: {
@@ -189,7 +160,6 @@ const paymentCopy = {
     loadingPlan: "正在加载当前套餐...",
     monthlyPlan: "月服务",
     annualMonthlyPlan: "年度套餐，按月支付",
-    oneTimePlan: "一次服务",
     addonLabel: "附加服务",
     secure: "安全结算",
     formTitle: "付费信息",
@@ -223,16 +193,6 @@ const paymentCopy = {
       usd: "美元"
     },
     stripePrices: {
-      trial: {
-        cny: {
-          price: "¥99",
-          due: "¥99"
-        },
-        usd: {
-          price: "$20",
-          due: "$20"
-        }
-      },
       professional: {
         cny: {
           price: "¥2,000",
@@ -245,22 +205,6 @@ const paymentCopy = {
       }
     },
     plans: {
-      trial: {
-        badge: "单次体验",
-        name: "单次体验",
-        subtitle: "体验一次 AI 增长分析流程",
-        price: "¥99",
-        cadence: "",
-        description: "适合在订阅前，先体验一次 AI 增长分析工作流的团队",
-        due: "¥99",
-        primary: "开始体验",
-        next: "结算后进入工作区，并开启引导式演示流程",
-        features: [
-          "一次引导式增长分析体验",
-          "示例指标和报告生成流程",
-          "数据源与 Schema 搭建建议"
-        ]
-      },
       "database-setup": {
         badge: "咨询定价",
         name: "数据库搭建",
@@ -280,23 +224,25 @@ const paymentCopy = {
       professional: {
         badge: "推荐",
         name: "专业版",
-        subtitle: "适合需要专业团队协助，持续自动化经营分析的团队",
+        subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
         price: "¥2,000",
-        cadence: "/ 月",
-        billingNote: "年度套餐，按月支付",
-        description: "数据整合 + 专业团队定制指标体系 + 自动化报告。专业版包含基础数据接入指导、指标体系设计建议和报告模板配置，适合希望快速搭建团队经营分析体系的中小企业。",
+        cadence: "/ 月起",
+        billingNote: "年度服务周期，支持按月支付",
+        description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
         due: "¥2,000",
         primary: "开通专业版",
         next: "结算后进入工作区，然后连接数据源",
         features: [
-          "年度服务周期，按月付款",
-          "连接数据库、Excel、SQL、CSV",
-          "专业团队协助完成数据接入与整合",
-          "根据业务目标定制团队核心指标体系",
-          "自动生成日报、周报、月报",
+          "支持连接数据库、Excel、SQL、CSV",
+          "配备专属分析师，协助梳理业务目标、数据结构和分析需求",
+          "包含一次数据接入与基础数据整理",
+          "根据业务目标配置团队核心指标体系",
+          "协助定义日报、周报、月经营分析的报告结构",
+          "自动生成日报、周报、月经营分析",
           "支持异常提醒、趋势解读与 AI 行动建议",
-          "支持持续数据更新和报告自动刷新",
-          "提供指标口径校验，减少错误分析结论"
+          "支持数据持续更新与报告自动刷新",
+          "提供指标口径校验，减少错误分析结论",
+          "适合销售、运营、增长、电商和管理团队使用"
         ]
       },
       enterprise: {
@@ -396,7 +342,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
     getCopyLocale(locale) === "zh" ? "返回" : "Back";
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
-  const hasCurrencyPrice = selectedPlan === "trial" || selectedPlan === "professional";
+  const hasCurrencyPrice = selectedPlan === "professional";
   const usesStripe = selectedPlan !== "enterprise";
   const selectedCurrencyPrice = hasCurrencyPrice
     ? copy.stripePrices[selectedPlan][checkoutCurrency]
@@ -407,15 +353,11 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const currentPlanName =
     entitlement?.planType === "MONTHLY"
       ? copy.monthlyPlan
-      : entitlement?.planType === "ONE_TIME"
-        ? copy.oneTimePlan
-        : copy.noActivePlan;
+      : copy.noActivePlan;
   const currentPlanTypeLabel =
     entitlement?.planType === "MONTHLY"
       ? copy.monthlyPlan
-      : entitlement?.planType === "ONE_TIME"
-        ? copy.oneTimePlan
-        : null;
+      : null;
 
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -587,8 +529,8 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                 const PlanIcon = planIcons[planId];
                 const isSelected = selectedPlan === planId;
                 const planPrice =
-                  planId === "trial" || planId === "professional"
-                    ? copy.stripePrices[planId][checkoutCurrency].price
+                  planId === "professional"
+                    ? copy.stripePrices.professional[checkoutCurrency].price
                     : planCopy.price;
 
                 return (
@@ -633,46 +575,9 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                     </div>
                     {planId === "professional" ? (
                       <p className="mt-1 text-xs font-medium text-slate-500">
-                        {locale === "zh" ? "年度套餐，按月付费" : "Annual plan, paid monthly"}
+                        {locale === "zh" ? "年度服务周期，支持按月支付" : "Annual service term, monthly payment supported"}
                       </p>
                     ) : null}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-3">
-              {addonPlanIds.map((planId) => {
-                const planCopy = copy.plans[planId];
-                const PlanIcon = planIcons[planId];
-                const isSelected = selectedPlan === planId;
-
-                return (
-                  <button
-                    key={planId}
-                    type="button"
-                    onClick={() => setSelectedPlan(planId)}
-                    className={cn(
-                      "flex w-full flex-col gap-3 rounded-2xl border bg-slate-50/70 p-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40 sm:flex-row sm:items-center sm:justify-between",
-                      isSelected &&
-                        "border-emerald-400 bg-emerald-50/70 shadow-[0_14px_50px_rgba(4,120,87,0.1)]"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="grid size-10 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
-                        <PlanIcon className="size-5" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold text-emerald-700">{copy.addonLabel}</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-950">
-                          {planCopy.name}
-                        </p>
-                        <p className="text-sm text-slate-500">{planCopy.subtitle}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg font-semibold text-slate-950">{planCopy.price}</span>
-                      <ArrowRight className="size-4 text-slate-500" />
-                    </div>
                   </button>
                 );
               })}

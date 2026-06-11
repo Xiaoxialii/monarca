@@ -47,7 +47,6 @@ export const defaultPlans = [
 ] as const;
 
 export const checkoutPlanToPlanCode: Record<string, string> = {
-  trial: "starter-one-time",
   "database-setup": "starter-one-time",
   professional: "pro-monthly"
 };

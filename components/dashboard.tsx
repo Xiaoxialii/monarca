@@ -1642,9 +1642,7 @@ function Sidebar({
   const currentPlan =
     entitlement?.planType === "MONTHLY"
       ? isZh ? "专业版" : "Professional"
-      : entitlement?.planType === "ONE_TIME"
-        ? isZh ? "单次报告" : "One-time Report"
-        : isZh ? "免费版" : "Free";
+      : isZh ? "免费版" : "Free";
   const planActionLabel = entitlement?.planType === "FREE" || !entitlement
     ? copy.sidebar.subscribe
     : isZh ? "套餐" : "Plan";
@@ -4287,26 +4285,20 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
   const currentPlan =
     entitlement?.planType === "MONTHLY"
       ? isZh ? "月付无限版" : "Monthly Unlimited"
-      : entitlement?.planType === "ONE_TIME"
-        ? isZh ? "单次报告" : "One-time Report"
-        : isZh ? "免费版" : "Free";
+      : isZh ? "免费版" : "Free";
   const formatDate = (value: string | null) =>
     value ? new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(value)) : "-";
   const planTypeLabel =
     entitlement?.planType === "MONTHLY"
       ? isZh ? "年度套餐，按月支付" : "Annual plan, paid monthly"
-      : entitlement?.planType === "ONE_TIME"
-        ? isZh ? "一次性付费" : "One-time payment"
-        : isZh ? "免费" : "Free";
+      : isZh ? "免费" : "Free";
   const statusLabel = entitlement?.status ?? "free";
   const usageLabel = entitlement?.isUnlimitedReports
     ? isZh ? "无限" : "Unlimited"
     : String(entitlement?.remainingReportGenerations ?? 0);
   const stateMessage = !entitlement || entitlement.planType === "FREE"
     ? isZh ? "免费版只能查看 dashboard，请升级后连接数据并生成报告" : "Free: view dashboard only. Upgrade to connect data and generate reports."
-    : entitlement.planType === "ONE_TIME" && (entitlement.remainingReportGenerations ?? 0) <= 0
-      ? isZh ? "单次报告已使用完，请再次购买或升级专业版" : "You have used your one-time report generation. Buy another report or upgrade to Professional."
-      : entitlement.planType === "MONTHLY" && entitlement.cancelAtPeriodEnd
+    : entitlement.planType === "MONTHLY" && entitlement.cancelAtPeriodEnd
         ? isZh ? `套餐仍可使用至 ${formatDate(entitlement.currentPeriodEnd)}` : `Your plan remains active until ${formatDate(entitlement.currentPeriodEnd)}.`
         : entitlement.status === "expired"
           ? isZh ? "订阅已过期，请重新开通" : "Subscription expired. Please reactivate"
@@ -4314,17 +4306,9 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
   const planCards = isZh
     ? [
         {
-          name: "单次报告",
-          price: "¥99",
-          description: "不限数据源连接，包含 1 次完整报告生成",
-          href: "/checkout/trial",
-          action: "再次购买",
-          tone: "outline"
-        },
-        {
           name: "专业版",
-          price: "¥2,000 / 月",
-          description: "数据整合 + 专业团队定制指标体系 + 自动化报告",
+          price: "¥2,000 / 月起",
+          description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "开通专业版",
           tone: entitlement?.planType === "MONTHLY" ? "current" : "primary"
@@ -4339,14 +4323,6 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         }
       ]
     : [
-        {
-          name: "One-time Report",
-          price: "$20",
-          description: "Unlimited data source connections plus 1 complete report generation",
-          href: "/checkout/trial",
-          action: "Buy again",
-          tone: "outline"
-        },
         {
           name: "Professional",
           price: "$600 / mo",
@@ -4369,7 +4345,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         ["当前套餐", currentPlan],
         ["套餐类型", planTypeLabel],
         ["数据源连接", entitlement?.canConnectDataSource ? "允许，不限数量" : "需要升级"],
-        ["报告生成", entitlement?.canGenerateReport ? usageLabel : "需要升级或再次购买"],
+        ["报告生成", entitlement?.canGenerateReport ? usageLabel : "需要升级"],
         ["有效期", formatDate(entitlement?.currentPeriodEnd ?? null)],
         ["订阅状态", statusLabel]
       ]
@@ -4377,7 +4353,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         ["Current plan", currentPlan],
         ["Plan type", planTypeLabel],
         ["Data source connections", entitlement?.canConnectDataSource ? "Allowed, unlimited" : "Upgrade required"],
-        ["Report generations", entitlement?.canGenerateReport ? usageLabel : "Upgrade or buy again"],
+        ["Report generations", entitlement?.canGenerateReport ? usageLabel : "Upgrade required"],
         ["Valid until", formatDate(entitlement?.currentPeriodEnd ?? null)],
         ["Subscription status", statusLabel]
       ];
@@ -4457,12 +4433,6 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
                 {entitlement?.planType === "MONTHLY" ? isZh ? "管理订阅" : "Manage subscription" : isZh ? "开通专业版" : "Start Professional"}
               </a>
             </Button>
-            <Button asChild variant="outline" size="sm">
-              <a href="/checkout/trial">
-                {isZh ? "购买单次报告" : "Buy another report"}
-                <ArrowRight className="size-4" />
-              </a>
-            </Button>
             {canCancelSubscription ? (
               <Button
                 type="button"
@@ -4524,12 +4494,10 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
             {(isZh
               ? [
                   ["免费版", "仅可查看 dashboard。升级后才能连接数据并生成报告。"],
-                  ["单次报告", "不限数据源连接，包含 1 次完整报告生成；Daily、Weekly、AI Brief、Insights 和 Action Recommendations 属于同一次生成。"],
                   ["专业版", "年度服务周期，按月付款；包含数据接入协助、指标体系配置和自动化报告。"]
                 ]
               : [
                   ["Free", "View dashboard only. Upgrade to connect data and generate reports."],
-                  ["One-time Report", "Unlimited data source connections plus 1 complete report generation. Daily, Weekly, AI Brief, Insights, and Action Recommendations count as the same generation."],
                   ["Professional", "Annual service term, paid monthly, with expert-assisted data onboarding, metric configuration, and automated reports."]
                 ]).map(([plan, description]) => (
               <div key={plan} className="px-4 py-3">
@@ -4544,7 +4512,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           <CardHeader className="border-b p-4">
             <CardTitle className="text-base">{isZh ? "套餐操作" : "Plan actions"}</CardTitle>
             <CardDescription className="mt-1">
-              {isZh ? "购买新的单次报告或开通专业版" : "Buy another one-time report or start Professional"}
+              {isZh ? "开通专业版以连接数据并生成报告" : "Start Professional to connect data and generate reports"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 p-4">
@@ -4562,9 +4530,6 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
                 <CreditCard className="size-4" />
                 {isZh ? "开通专业版" : "Start Professional"}
               </a>
-            </Button>
-            <Button asChild variant="outline" className="w-full" size="sm">
-              <a href="/checkout/trial">{isZh ? "购买单次报告" : "Buy another report"}</a>
             </Button>
           </CardContent>
         </Card>
@@ -5900,14 +5865,12 @@ type ReportEntitlementViewData = {
   currentPeriodEnd?: string | null;
   canGenerateReport: boolean;
   reason?:
-    | "FIRST_FREE_REPORT_AVAILABLE"
     | "ONE_TIME_REPORT_AVAILABLE"
     | "SUBSCRIPTION_ACTIVE"
-    | "FREE_REPORT_USED"
     | "SUBSCRIPTION_EXPIRED"
     | "NO_ACCESS"
     | null;
-  accessType?: "free_first_report" | "one_time_purchase" | "subscription" | null;
+  accessType?: "one_time_purchase" | "subscription" | null;
   upgradeRequired: boolean;
 };
 
@@ -5926,21 +5889,11 @@ function reportEntitlementMessage(entitlement: ReportEntitlementViewData | null 
     return isZh ? "你有 1 次已购买的报告生成机会" : "You have 1 purchased report generation available";
   }
 
-  if (!entitlement.firstFreeReportUsed) {
-    return isZh ? "你可以免费生成第一份 AI 数据分析报告" : "You can generate your first AI data analysis report for free";
-  }
-
-  return isZh ? "免费报告已使用。升级后可继续生成新报告。" : "Your free report has been used. Upgrade to generate new reports.";
+  return isZh ? "请选择套餐后生成新报告。" : "Please choose a plan to generate new reports.";
 }
 
 function reportGenerateButtonLabel(entitlement: ReportEntitlementViewData | null | undefined, locale: Locale, fallback: string) {
-  if (!entitlement) return fallback;
-
-  if (!entitlement.firstFreeReportUsed && entitlement.accessType === "free_first_report") {
-    return locale === "zh" ? "免费生成报告" : "Generate your first report for free";
-  }
-
-  return locale === "zh" ? "生成报告" : "Generate report";
+  return entitlement ? (locale === "zh" ? "生成报告" : "Generate report") : fallback;
 }
 
 type ReportModeView = "daily_brief" | "weekly_report" | "custom_report" | "history";
@@ -7846,14 +7799,9 @@ function ReportsPage({
                   : reportGenerateButtonLabel(reportEntitlement, locale, copy.reports.generateAction)}
               </Button>
             ) : (
-              <>
-                <Button asChild size="sm" className="whitespace-nowrap">
-                  <a href="/checkout/professional">{isReportsZh ? "升级套餐" : "Upgrade plan"}</a>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="whitespace-nowrap">
-                  <a href="/checkout/trial">{isReportsZh ? "购买一次报告" : "Buy one report"}</a>
-                </Button>
-              </>
+              <Button asChild size="sm" className="whitespace-nowrap">
+                <a href="/checkout/professional">{isReportsZh ? "升级套餐" : "Upgrade plan"}</a>
+              </Button>
             )}
             <Button variant="outline" size="sm" className="whitespace-nowrap">
               <Download />
@@ -8020,8 +7968,8 @@ function reportGenerationErrorMessage(
       zh: "所选套餐不可用。"
     },
     REPORT_LIMIT_REACHED: {
-      en: "You have used your one-time report generation. Buy another report or upgrade to monthly unlimited.",
-      zh: "单次报告生成次数已用完，请再次购买或升级月付无限版。"
+      en: "Please upgrade your plan to continue generating reports.",
+      zh: "请升级套餐后继续生成报告。"
     },
     SUBSCRIPTION_EXPIRED: {
       en: "Your subscription has expired or the payment failed. Please reactivate your plan.",
@@ -8036,8 +7984,8 @@ function reportGenerationErrorMessage(
       zh: "请选择套餐后再生成报告。"
     },
     NO_REPORT_ACCESS: {
-      en: "Your free report has already been used. Upgrade or purchase a report to generate another one.",
-      zh: "免费报告已使用。请升级套餐或购买一次报告后继续生成。"
+      en: "Please choose a plan to generate reports.",
+      zh: "请选择套餐后再生成报告。"
     }
   };
   const localized = payload?.code ? entitlementMessages[payload.code]?.[isZh ? "zh" : "en"] : undefined;
@@ -14670,14 +14618,9 @@ function ReportPage({ locale }: { locale: Locale }) {
                 : reportGenerateButtonLabel(reportEntitlement, locale, isZh ? "更新指标" : "Update metrics")}
             </Button>
           ) : (
-            <>
-              <Button asChild type="button">
-                <a href="/checkout/professional">{isZh ? "升级套餐" : "Upgrade plan"}</a>
-              </Button>
-              <Button asChild type="button" variant="outline">
-                <a href="/checkout/trial">{isZh ? "购买一次报告" : "Buy one report"}</a>
-              </Button>
-            </>
+            <Button asChild type="button">
+              <a href="/checkout/professional">{isZh ? "升级套餐" : "Upgrade plan"}</a>
+            </Button>
           )}
         </div>
       </div>

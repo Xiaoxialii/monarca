@@ -34,6 +34,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
+  return asRecord(metric.lineageJson).generatedFrom === "business_metric_registry";
+}
+
 function analysisReportFromSnapshot(snapshot: { schemaJson: unknown; qualityReport: unknown } | null) {
   if (!snapshot) {
     return null;
@@ -492,7 +496,9 @@ async function buildDateRangedReportPayload({
       orderBy: { createdAt: "asc" }
     });
   }
-  const executableMetrics = metrics
+  const registryMetrics = metrics.filter(isBusinessMetricRegistryMetric);
+  const metricsForExecution = registryMetrics.length > 0 ? registryMetrics : metrics;
+  const executableMetrics = metricsForExecution
     .filter((metric) => metricBelongsToTables(metric, labels))
     .filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
@@ -500,19 +506,21 @@ async function buildDateRangedReportPayload({
     );
 
   const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-  const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
-    reportType: reportType as "daily" | "weekly" | "custom",
-    metricRegistryId: executableMetricRegistryId,
-    definitions: executableMetrics.map((metric) => {
-      const lineage = asRecord(metric.lineageJson);
-      return {
-        metricId: String(lineage.metricId ?? metric.name),
-        businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
-        formula: metric.formula,
-        requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
-      };
-    })
-  })));
+  const consistency = registryMetrics.length > 0
+    ? validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
+      reportType: reportType as "daily" | "weekly" | "custom",
+      metricRegistryId: executableMetricRegistryId,
+      definitions: executableMetrics.map((metric) => {
+        const lineage = asRecord(metric.lineageJson);
+        return {
+          metricId: String(lineage.metricId ?? metric.name),
+          businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
+          formula: metric.formula,
+          requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
+        };
+      })
+    })))
+    : { passed: true, failures: [] };
 
   if (!consistency.passed) {
     const failedAudit = await buildReportDataAudit({

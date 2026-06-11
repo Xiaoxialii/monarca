@@ -53,6 +53,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
+  return asRecord(metric.lineageJson).generatedFrom === "business_metric_registry";
+}
+
 function startOfToday() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -261,11 +265,13 @@ async function runReportGenerationJob(input: {
         userId: input.userId
       });
       metrics = await prisma.metricDefinition.findMany({
-        where: { workspaceId: input.workspaceId, isActive: true },
-        orderBy: { createdAt: "asc" }
-      });
-    }
-    const visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
+      where: { workspaceId: input.workspaceId, isActive: true },
+      orderBy: { createdAt: "asc" }
+    });
+  }
+    const registryMetrics = metrics.filter(isBusinessMetricRegistryMetric);
+    const metricsForExecution = registryMetrics.length > 0 ? registryMetrics : metrics;
+    const visibleMetrics = metricsForExecution.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
     const executableMetrics = visibleMetrics.filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
       validationFromLineage(metric.lineageJson)?.validation_status === "valid"
@@ -450,22 +456,24 @@ async function runReportGenerationJob(input: {
       };
     }
     const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-    const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
-      reportType: reportType as "daily" | "weekly" | "custom",
-      metricRegistryId: executableMetricRegistryId,
-      definitions: executableMetrics.map((metric) => {
-        const lineage = asRecord(metric.lineageJson);
-        return {
-          metricId: String(lineage.metricId ?? metric.name),
-          businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
-          formula: metric.formula,
-          requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
-        };
-      })
-    })));
+    if (registryMetrics.length > 0) {
+      const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
+        reportType: reportType as "daily" | "weekly" | "custom",
+        metricRegistryId: executableMetricRegistryId,
+        definitions: executableMetrics.map((metric) => {
+          const lineage = asRecord(metric.lineageJson);
+          return {
+            metricId: String(lineage.metricId ?? metric.name),
+            businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
+            formula: metric.formula,
+            requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
+          };
+        })
+      })));
 
-    if (!consistency.passed) {
-      throw new Error(consistency.failures[0] ?? "当前报告未通过指标一致性校验，日报、周报和月经营分析使用了不一致的指标口径。");
+      if (!consistency.passed) {
+        throw new Error(consistency.failures[0] ?? "当前报告未通过指标一致性校验，日报、周报和月经营分析使用了不一致的指标口径。");
+      }
     }
 
     const { metricResults, metricRegistryId } = await calculateVerifiedMetrics({

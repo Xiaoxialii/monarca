@@ -770,11 +770,11 @@ function OperatingLayer({ copy }: { copy: HomeCopy["system"] }) {
   const icons = [Activity, GitBranch, Target];
 
   return (
-    <section className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
-      <div className="rounded-[32px] border border-slate-200/80 bg-white/76 p-6 shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:p-8">
+    <section className="mx-auto max-w-7xl px-4 py-10 sm:px-8">
+      <div className="min-w-0 overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/76 p-5 shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:rounded-[32px] sm:p-8">
         <div className="mb-6">
           <p className="text-sm font-medium text-emerald-700">{copy.eyebrow}</p>
-          <h2 className="mt-2 whitespace-nowrap text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
+          <h2 className="mt-2 max-w-full break-words text-[2rem] font-semibold leading-tight tracking-normal text-slate-950 sm:text-4xl lg:whitespace-nowrap">
             {copy.title}
           </h2>
         </div>

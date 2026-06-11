@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ReportGenerationJobStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -46,6 +46,8 @@ import { reportMetricTimeWindow } from "@/lib/metrics/time-window-builder";
 import { validateMetricConsistency } from "@/lib/metrics/metric-consistency-validator";
 import { registryFromMetricDefinitions } from "@/lib/metrics/metric-registry";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+
+export const maxDuration = 60;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -440,7 +442,12 @@ async function runReportGenerationJob(input: {
           }
         }
       });
-      return;
+      return {
+        ok: true,
+        computedMetricCount: 0,
+        generatedAt: payloadJson.generatedAt,
+        reportId: reportHistory?.id ?? briefing.id
+      };
     }
     const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
     const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
@@ -661,6 +668,12 @@ async function runReportGenerationJob(input: {
         }
       }
     });
+    return {
+      ok: true,
+      computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
+      generatedAt: payloadJson.generatedAt,
+      reportId: reportHistory?.id ?? briefing.id
+    };
   } catch (error) {
     await markReportGenerationFailed({
       logId: input.generationLogId,
@@ -675,6 +688,10 @@ async function runReportGenerationJob(input: {
         errorMessage: error instanceof Error ? error.message : "Failed to generate report."
       }
     }).catch(() => null);
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Failed to generate report."
+    };
   }
 }
 
@@ -738,14 +755,16 @@ export async function POST(request: Request) {
       }
     });
 
-    void runReportGenerationJob({
-      jobId: generationJob.id,
-      generationLogId: generationAccess.log.id,
-      workspaceId: session.workspace.id,
-      userId: session.user.id,
-      reportLocale,
-      reportMode,
-      resolvedDateRange
+    after(async () => {
+      await runReportGenerationJob({
+        jobId: generationJob.id,
+        generationLogId: generationAccess.log.id,
+        workspaceId: session.workspace.id,
+        userId: session.user.id,
+        reportLocale,
+        reportMode,
+        resolvedDateRange
+      });
     });
 
     return NextResponse.json(

@@ -30,6 +30,17 @@ function publicConfig(configValue: unknown) {
     return null;
   }
 
+  const storage = asRecord(config.storage);
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage?.key === "string" && storage.key
+        ? storage.key
+        : null;
+  const hasStoredFile = (typeof config.storedFilePath === "string" && Boolean(config.storedFilePath)) ||
+    ((config.storageProvider === "r2" || storage?.provider === "cloudflare-r2") && Boolean(objectKey));
+
   return {
     type: typeof config.type === "string" ? config.type : null,
     host: typeof config.host === "string" ? config.host : null,
@@ -39,7 +50,7 @@ function publicConfig(configValue: unknown) {
     fileName: typeof config.fileName === "string" ? config.fileName : null,
     fileSize: toNumber(config.fileSize),
     extension: typeof config.extension === "string" ? config.extension : null,
-    hasStoredFile: typeof config.storedFilePath === "string" && Boolean(config.storedFilePath)
+    hasStoredFile
   };
 }
 

@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ReportGenerationJobStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -755,27 +755,40 @@ export async function POST(request: Request) {
       }
     });
 
-    after(async () => {
-      await runReportGenerationJob({
-        jobId: generationJob.id,
-        generationLogId: generationAccess.log.id,
-        workspaceId: session.workspace.id,
-        userId: session.user.id,
-        reportLocale,
-        reportMode,
-        resolvedDateRange
-      });
+    const generationResult = await runReportGenerationJob({
+      jobId: generationJob.id,
+      generationLogId: generationAccess.log.id,
+      workspaceId: session.workspace.id,
+      userId: session.user.id,
+      reportLocale,
+      reportMode,
+      resolvedDateRange
     });
+
+    if (!generationResult.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          async: false,
+          jobId: generationJob.id,
+          status: "failed",
+          message: generationResult.message ?? (reportLocale === "zh" ? "报告生成失败。" : "Failed to generate report.")
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       {
         ok: true,
-        async: true,
+        async: false,
         jobId: generationJob.id,
-        status: "queued",
-        message: reportLocale === "zh" ? "报告生成已开始，完成后会自动刷新。" : "Report generation has started and will refresh when complete."
-      },
-      { status: 202 }
+        status: "completed",
+        computedMetricCount: generationResult.computedMetricCount ?? 0,
+        generatedAt: generationResult.generatedAt,
+        reportId: generationResult.reportId,
+        message: reportLocale === "zh" ? "报告已生成。" : "Report generated."
+      }
     );
 
   } catch (error) {

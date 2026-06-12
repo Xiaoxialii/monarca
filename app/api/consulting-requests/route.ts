@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 const MAX_MESSAGE_LENGTH = 2000;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function text(value: unknown, maxLength = 500) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -39,18 +38,12 @@ export async function POST(request: Request) {
 
   const record = payload as Record<string, unknown>;
   const name = text(record.name, 200);
-  const email = text(record.email, 320).toLowerCase();
+  const contact = text(record.email, 320);
+  const email = contact.includes("@") ? contact.toLowerCase() : contact;
 
   if (!name || !email) {
     return NextResponse.json(
-      { success: false, message: "Name and email are required." },
-      { status: 400 }
-    );
-  }
-
-  if (!EMAIL_PATTERN.test(email)) {
-    return NextResponse.json(
-      { success: false, message: "Please provide a valid email address." },
+      { success: false, message: "Name and contact are required." },
       { status: 400 }
     );
   }

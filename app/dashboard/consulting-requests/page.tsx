@@ -74,7 +74,7 @@ export default async function ConsultingRequestsPage() {
             <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  {["提交时间", "姓名", "邮箱", "公司 / 团队名称", "角色", "数据来源", "想解决的问题", "补充说明", "状态"].map((header) => (
+                  {["提交时间", "姓名", "邮箱 / 微信", "公司 / 团队名称", "角色", "数据来源", "想解决的问题", "补充说明", "状态"].map((header) => (
                     <th key={header} className="border-b border-slate-200 px-4 py-3">{header}</th>
                   ))}
                 </tr>

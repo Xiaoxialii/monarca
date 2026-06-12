@@ -37,6 +37,7 @@ const consultingCopy: Record<CopyLocale, {
   formText: string;
   name: string;
   email: string;
+  emailPlaceholder: string;
   company: string;
   role: string;
   dataSources: string;
@@ -78,7 +79,8 @@ const consultingCopy: Record<CopyLocale, {
     formTitle: "Submit request",
     formText: "Leave your contact information and we’ll follow up to discuss your business, data, and reporting needs.",
     name: "Name",
-    email: "Email",
+    email: "Email / WeChat",
+    emailPlaceholder: "name@example.com or WeChat ID",
     company: "Company / team",
     role: "Role",
     dataSources: "Main data sources",
@@ -130,7 +132,8 @@ const consultingCopy: Record<CopyLocale, {
     formTitle: "提交预约申请",
     formText: "留下你的联系方式，我们会尽快与你沟通业务、数据和报告需求。",
     name: "姓名",
-    email: "邮箱",
+    email: "邮箱 / 微信",
+    emailPlaceholder: "邮箱或微信号",
     company: "公司 / 团队名称",
     role: "角色",
     dataSources: "团队目前主要数据来源",
@@ -150,7 +153,7 @@ const consultingCopy: Record<CopyLocale, {
     ],
     submit: "提交预约申请",
     submitting: "提交中...",
-    success: "我们已收到你的预约申请，会尽快与你联系，了解你的业务、数据和报告需求。",
+    success: "我们已收到你的预约申请，会在24小时内与你联系，了解你的业务、数据和报告需求。",
     submitAnother: "继续提交",
     error: "预约申请提交失败，请稍后重试。",
     trustTitle: "不是普通 AI 总结，而是基于业务数据的经营分析",
@@ -312,7 +315,7 @@ export function ConsultingPage() {
                   </label>
                   <label className="grid gap-2">
                     <FieldLabel label={copy.email} />
-                    <Input name="email" required type="email" placeholder="name@example.com" />
+                    <Input name="email" required type="text" placeholder={copy.emailPlaceholder} />
                   </label>
                 </div>
 

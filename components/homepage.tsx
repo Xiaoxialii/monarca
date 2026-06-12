@@ -1122,14 +1122,14 @@ export function Homepage() {
         onClose={() => setIsMobileNavOpen(false)}
       />
 
-      <section className="relative mx-auto grid max-w-7xl gap-7 px-4 pb-8 pt-9 sm:px-6 sm:pt-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-center lg:gap-8 lg:px-8 lg:pb-8 lg:pt-14">
+      <section className="relative mx-auto grid max-w-7xl gap-7 px-4 pb-8 pt-9 sm:px-6 sm:pt-12 lg:grid-cols-[0.98fr_1.02fr] lg:items-start lg:gap-10 lg:px-8 lg:pb-10 lg:pt-20">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
         <div className="relative z-10">
           <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-5 lg:text-xs">
             <Zap className="size-3.5 sm:size-4" />
             {copy.hero.eyebrow}
           </div>
-          <h1 className="max-w-3xl text-[2.35rem] font-semibold leading-[1.1] tracking-normal text-slate-950 sm:text-5xl lg:whitespace-nowrap lg:text-6xl lg:leading-tight">
+          <h1 className="max-w-3xl text-[2.35rem] font-semibold leading-[1.1] tracking-normal text-slate-950 sm:text-5xl lg:whitespace-nowrap lg:text-[3.25rem] lg:leading-[1.08]">
             {isZh ? (
               <>
                 <span className="block sm:inline lg:inline">你的 AI</span>
@@ -1185,7 +1185,7 @@ export function Homepage() {
           </div>
         </div>
 
-        <div className="relative z-10 hidden lg:block">
+        <div className="relative z-10 hidden pt-8 lg:flex lg:justify-end">
           <HeroVisualization copy={copy.visual} />
         </div>
 

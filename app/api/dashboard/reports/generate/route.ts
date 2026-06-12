@@ -527,7 +527,7 @@ async function runReportGenerationJob(input: {
       aggregationResults,
       trendMetrics: reportTimeArtifacts.trendMetrics,
       trendCharts: reportTimeArtifacts.trendCharts,
-      timeConfig: effectiveTimeConfig,
+      timeConfig: reportTimeArtifacts.timeConfig,
       dateRange: {
         preset: effectiveDateRange.preset,
         startDate: effectiveDateRange.startDate ?? null,

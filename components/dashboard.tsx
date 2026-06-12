@@ -5062,7 +5062,7 @@ function ConnectorPanel({
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL" ? "postgresql" : null;
   const defaultDatabasePort = "5432";
-  const directApiUploadMaxBytes = 4 * 1024 * 1024;
+  const directApiUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
   const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
   const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";
@@ -5903,7 +5903,7 @@ function reportModeTabs(locale: Locale): Array<{ value: ReportModeView; label: s
   return [
     { value: "daily_brief", label: isZh ? "日报" : "Daily Brief" },
     { value: "weekly_report", label: isZh ? "周报" : "Weekly Report" },
-    { value: "custom_report", label: isZh ? "月经营分析" : "Monthly Review" },
+    { value: "custom_report", label: isZh ? "自定义报告" : "Custom Report" },
     { value: "history", label: isZh ? "历史记录" : "History" }
   ];
 }
@@ -6459,7 +6459,7 @@ function ReportComposerList({
                 )
               ) : null}
               {item.businessJudgment ? <p className="mt-2 text-xs leading-5 text-slate-700">业务判断：{item.businessJudgment}</p> : null}
-              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-emerald-800">建议动作：{item.recommendedAction}</p> : null}
+              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-emerald-800">建议决策：{item.recommendedAction}</p> : null}
               {item.details ? (
                 <details className="mt-2 text-xs text-muted-foreground">
                   <summary className="cursor-pointer font-medium text-slate-700">查看详情</summary>

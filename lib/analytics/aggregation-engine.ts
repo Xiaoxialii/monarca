@@ -896,7 +896,6 @@ function candidatesFromGroupBys(tableName: string, groupBys: GroupByResult[]) {
       if (highQualityLowScale.length) {
         const dimension = businessDimensionLanguage(groupBy.dimension, "zh");
         const qualityMetric = businessMetricLanguage({ metricField: qualityKey, locale: "zh" });
-        const scaleMetric = businessMetricLanguage({ metricField: scaleKey, locale: "zh" });
         const topObjects = topRowsObjectText(highQualityLowScale, 3);
 
         opportunities.push({

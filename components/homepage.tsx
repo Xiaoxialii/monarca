@@ -17,10 +17,13 @@ import {
   ListChecks,
   Menu,
   MoveRight,
+  Rocket,
   Search,
+  ShoppingBag,
   Sparkles,
   Target,
   TrendingUp,
+  UsersRound,
   X,
   Zap
 } from "lucide-react";
@@ -57,6 +60,7 @@ const featureMeta = [
 
 const teamRoleIcons = [Database, GitBranch, BarChart3, Search, Target];
 const pricingIcons = [Sparkles, BrainCircuit, Database];
+const useCaseIcons = [ShoppingBag, Rocket, UsersRound];
 
 const homepageCopy = {
   en: {
@@ -68,7 +72,8 @@ const homepageCopy = {
       { label: "Investigations", href: "#investigations" },
       { label: "Alerts", href: "#alerts" },
       { label: "Reports", href: "#reports" },
-      { label: "Pricing", href: "#pricing" }
+      { label: "Pricing", href: "#pricing" },
+      { label: "Consulting", href: "/consulting" }
     ],
     auth: {
       login: "Log in",
@@ -87,7 +92,7 @@ const homepageCopy = {
         { role: "Business Intelligence", text: "Explains movement, cohorts, and root causes" },
         { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
-      primaryCta: "Start Professional",
+      primaryCta: "Book a 30-min Business Consultation",
       secondaryCta: "View Sample Workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
@@ -135,6 +140,43 @@ const homepageCopy = {
         }
       ]
     },
+    useCases: {
+      title: "How different teams use Monarca AI",
+      subtitle:
+        "From scattered data to actionable operating judgment, adapted to the everyday analysis workflows of different business teams.",
+      cta: "View Sample Workspace",
+      ctaNote: "See how Monarca AI turns business data into operating judgment",
+      consultTitle: "Want to see what reports your data can generate?",
+      consultText:
+        "Book a business consultation and we will design daily, weekly, and monthly operating reports around your goals, data sources, and business questions.",
+      consultCta: "Book a 30-min Business Consultation",
+      cards: [
+        {
+          title: "Ecommerce operations team",
+          scene: "Orders, ads, refunds, and inventory data are scattered, making sales changes hard to explain quickly.",
+          pain: "Sales drops require manual comparison across Excel, orders, and ad data.",
+          finding: "Revenue decline mainly comes from rising CAC, lower repeat purchase, and low top-selling SKU inventory.",
+          action: "Pause low ROI channels, restock top-selling SKU, and reactivate existing customers.",
+          result: "Automatically finds why revenue declined"
+        },
+        {
+          title: "SaaS growth team",
+          scene: "Signups are healthy, but activation and paid conversion are falling, making drop-off hard to locate.",
+          pain: "Product behavior, subscription, and channel data are scattered across the funnel.",
+          finding: "onboarding step 2 has the highest drop-off, dragging down activation and paid conversion.",
+          action: "Improve first-time experience, then track activation, retention, and paid conversion.",
+          result: "Identifies conversion drop-off points"
+        },
+        {
+          title: "Executive weekly report",
+          scene: "Weekly PPT reporting is manual, metric definitions vary, and leadership cannot quickly see priorities.",
+          pain: "Revenue, cost, customer, and channel data are scattered and slow to explain.",
+          finding: "Automatically identifies revenue, cost, customer, and channel anomalies with priority and impact scope.",
+          action: "Generate daily reports, weekly reports, and monthly operating analysis for faster reviews.",
+          result: "Generates executive operating summaries"
+        }
+      ]
+    },
     system: {
       eyebrow: "Why teams need it",
       title: "Growth teams have dashboards, They need judgment",
@@ -154,18 +196,21 @@ const homepageCopy = {
       ]
     },
     investigation: {
+      sectionTitle: "A complete AI business investigation",
+      sectionSubtitle:
+        "After revenue, conversion, or cost anomalies appear, Monarca AI checks related metrics, identifies key root causes, and recommends actions with evidence.",
       eyebrow: "Active investigation",
       title: "Revenue dropped 12.4%",
       evidenceTitle: "Evidence chain",
       evidenceMetric: "Revenue dropped 18%",
-      evidenceDrivers: ["iOS conversion declined", "CAC increased", "Retention week 2 dropped"],
+      evidenceDrivers: ["iOS conversion declined", "CAC increased", "Retention Week 2 dropped"],
       confidenceLabel: "Confidence",
       confidenceValue: "82%",
       whyLabel: "Why AI believes this",
       timeline: [
-        ["08:42", "Monarca AI detected a revenue anomaly across self-serve plans"],
+        ["08:42", "System detected a revenue anomaly"],
         ["08:43", "Compared cohorts, campaigns, billing events, and product activation"],
-        ["08:45", "Drafted recommendations for growth, finance, and product owners"]
+        ["08:45", "Generated root-cause judgment and recommended actions"]
       ],
       steps: [
         {
@@ -178,7 +223,7 @@ const homepageCopy = {
         },
         {
           title: "Recommended actions",
-          text: "Monarca AI proposed three actions with owners, expected lift, and confidence scores"
+          text: "Outputs three recommended actions with expected impact and confidence"
         }
       ]
     },
@@ -221,8 +266,8 @@ const homepageCopy = {
             "Metric definition checks to reduce misleading analysis",
             "Built for sales, operations, growth, ecommerce, and management teams"
           ],
-          cta: "Start professional",
-          href: "/checkout/professional"
+          cta: "Book a 30-min Business Consultation",
+          href: "/consulting"
         },
         {
           name: "Enterprise",
@@ -265,7 +310,8 @@ const homepageCopy = {
       { label: "智能调查", href: "#investigations" },
       { label: "异常提醒", href: "#alerts" },
       { label: "报告", href: "#reports" },
-      { label: "价格", href: "#pricing" }
+      { label: "价格", href: "#pricing" },
+      { label: "预约咨询", href: "/consulting" }
     ],
     auth: {
       login: "登录",
@@ -284,7 +330,7 @@ const homepageCopy = {
         { role: "经营洞察", text: "解释变化，定位关键根因" },
         { role: "增长运营", text: "把洞察转化为增长行动" }
       ],
-      primaryCta: "开通专业版",
+      primaryCta: "预约 30 分钟商业咨询",
       secondaryCta: "查看演示工作区",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
     },
@@ -332,6 +378,41 @@ const homepageCopy = {
         }
       ]
     },
+    useCases: {
+      title: "不同团队如何使用蝴蝶效应",
+      subtitle: "从每天要回答的业务问题出发，把分散数据转化为可执行的经营判断。",
+      cta: "查看演示工作区",
+      ctaNote: "看看蝴蝶效应如何把业务数据转化为经营判断",
+      consultTitle: "想看看你的数据可以生成什么报告？",
+      consultText: "预约一次商业咨询，我们会根据你的业务目标、数据来源和经营问题，帮你设计适合团队的日报、周报和月经营分析。",
+      consultCta: "预约 30 分钟商业咨询",
+      cards: [
+        {
+          title: "电商运营团队",
+          scene: "订单、广告、退款和库存数据分散，销售一波动，就很难快速回答“为什么掉了”。",
+          pain: "订单、广告、库存和复购数据都散在不同地方，需要手动拉表对比，才能回答销售额为什么掉了。",
+          finding: "收入下降主要来自 CAC 上升、复购率下降和热销 SKU 库存不足。",
+          action: "暂停低 ROI 渠道，优先补货热销 SKU，并召回近期未复购客户。",
+          result: "自动定位收入下滑原因"
+        },
+        {
+          title: "SaaS 增长团队",
+          scene: "注册量看起来不少，但激活和付费转化下降，很难判断用户到底卡在哪一步。",
+          pain: "产品行为、订阅和渠道数据分散，增长漏斗无法快速定位问题。",
+          finding: "onboarding 第 2 步流失最高，激活率下降正在影响后续付费转化。",
+          action: "优先优化首次体验，并持续追踪激活率、留存和付费转化。",
+          result: "识别转化流失节点"
+        },
+        {
+          title: "管理层经营周报",
+          scene: "每周靠人工整理 PPT，数据口径不一致，管理层很难快速判断本周重点。",
+          pain: "收入、成本、客户和渠道数据分散，周报制作耗时，解释也不统一。",
+          finding: "自动识别收入、成本、客户和渠道异常，并标记优先级和影响范围。",
+          action: "生成日报、周报和月经营分析，帮助管理层快速复盘和决策。",
+          result: "生成管理层经营摘要"
+        }
+      ]
+    },
     system: {
       eyebrow: "为什么需要它",
       title: "增长不缺数据，缺的是能转化为价值的洞察",
@@ -351,18 +432,20 @@ const homepageCopy = {
       ]
     },
     investigation: {
+      sectionTitle: "一次完整的 AI 经营调查",
+      sectionSubtitle: "发现收入、转化或成本异常后，蝴蝶效应会自动检查相关指标，定位关键根因，并给出带证据链的行动建议。",
       eyebrow: "进行中的智能调查",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",
       evidenceMetric: "收入下降 18%",
-      evidenceDrivers: ["iOS 转化下降", "CAC 上升", "Retention week2 下滑"],
+      evidenceDrivers: ["iOS 转化下降", "CAC 上升", "Retention Week 2 下滑"],
       confidenceLabel: "置信度",
       confidenceValue: "82%",
       whyLabel: "AI 为什么这么判断",
       timeline: [
-        ["08:42", "蝴蝶效应在自助订阅计划中检测到收入异常"],
+        ["08:42", "系统检测到收入异常"],
         ["08:43", "对比了客群、投放、计费事件和产品激活数据"],
-        ["08:45", "为增长、财务和产品团队生成了行动建议"]
+        ["08:45", "生成根因判断和行动建议"]
       ],
       steps: [
         {
@@ -375,7 +458,7 @@ const homepageCopy = {
         },
         {
           title: "推荐可执行行动",
-          text: "蝴蝶效应输出了 3 个行动建议，并附带预期提升和置信度"
+          text: "输出 3 个行动建议，并附带预期影响和置信度"
         }
       ]
     },
@@ -416,8 +499,8 @@ const homepageCopy = {
             "提供指标口径校验，减少错误分析结论",
             "适合销售、运营、增长、电商和管理团队使用"
           ],
-          cta: "开通专业版",
-          href: "/checkout/professional"
+          cta: "预约 30 分钟商业咨询",
+          href: "/consulting"
         },
         {
           name: "企业版",
@@ -805,9 +888,190 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
   );
 }
 
+function UseCaseMockup({ index, isZh }: { index: number; isZh: boolean }) {
+  if (index === 1) {
+    const steps = [
+      { label: isZh ? "注册" : "Signup", value: "100%", width: "w-full" },
+      { label: "onboarding 2", value: "-42%", width: "w-[58%]", alert: true },
+      { label: isZh ? "激活" : "Activation", value: "31%", width: "w-[42%]" },
+      { label: isZh ? "付费" : "Paid", value: "12%", width: "w-[28%]" }
+    ];
+
+    return (
+      <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-slate-500">{isZh ? "增长漏斗" : "Growth funnel"}</span>
+          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
+            {isZh ? "第 2 步流失" : "Step 2 drop"}
+          </span>
+        </div>
+        <div className="space-y-1.5">
+          {steps.map((step) => (
+            <div key={step.label} className="grid grid-cols-[86px_1fr_36px] items-center gap-2">
+              <span className="truncate text-[11px] text-slate-500">{step.label}</span>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className={`${step.width} h-full rounded-full ${step.alert ? "bg-rose-300" : "bg-emerald-300"}`} />
+              </div>
+              <span className={`text-right text-[11px] font-semibold ${step.alert ? "text-rose-600" : "text-slate-700"}`}>
+                {step.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (index === 2) {
+    const items = [
+      [isZh ? "收入" : "Revenue", "-6.1%", "text-rose-600"],
+      [isZh ? "成本" : "Cost", "+4.3%", "text-amber-600"],
+      [isZh ? "客户" : "Customers", "-0.9%", "text-slate-700"],
+      [isZh ? "渠道" : "Channel", isZh ? "异常" : "Alert", "text-emerald-700"]
+    ];
+
+    return (
+      <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-slate-500">{isZh ? "本周重点" : "Weekly summary"}</span>
+          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+            {isZh ? "经营摘要" : "Brief"}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {items.map(([label, value, tone]) => (
+            <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+              <p className="text-[10px] font-medium text-slate-500">{label}</p>
+              <p className={`mt-0.5 text-xs font-semibold ${tone}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 h-1.5 w-10/12 rounded-full bg-emerald-100">
+          <div className="h-full w-7/12 rounded-full bg-emerald-400" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-slate-500">{isZh ? "经营分析" : "Operations view"}</span>
+        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
+          {isZh ? "收入下降" : "Revenue down"}
+        </span>
+      </div>
+      <div className="grid grid-cols-[1fr_74px] gap-2">
+        <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-2">
+          <svg viewBox="0 0 120 42" className="h-11 w-full" aria-hidden="true">
+            <path d="M4 12 C22 8 30 18 45 15 C62 12 67 28 82 25 C98 22 105 34 116 31" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" />
+            <path d="M4 12 C22 8 30 18 45 15 C62 12 67 28 82 25 C98 22 105 34 116 31 L116 42 L4 42 Z" fill="#d1fae5" opacity="0.72" />
+          </svg>
+        </div>
+        <div className="grid gap-1">
+          <span className="rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">CAC +18%</span>
+          <span className="rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-600">{isZh ? "复购 -9%" : "Repeat -9%"}</span>
+          <span className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">SKU {isZh ? "不足" : "low"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
+  const labels = ["痛点", "AI 发现", "建议行动"];
+  const englishLabels = ["Pain point", "AI finding", "Recommended action"];
+  const isZh = copy.cta === "查看演示工作区";
+  const fieldLabels = isZh ? labels : englishLabels;
+
+  return (
+    <section className="mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-11">
+      <div className="mb-5 max-w-3xl">
+        <p className="text-xs font-medium text-emerald-700 sm:text-sm">
+          {isZh ? "团队案例" : "Team use cases"}
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
+          {copy.title}
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.subtitle}</p>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        {copy.cards.map((card, index) => {
+          const Icon = useCaseIcons[index];
+          const rows = [card.pain, card.finding, card.action];
+
+          return (
+            <article
+              key={card.title}
+              className="group flex min-w-0 flex-col rounded-[24px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#fbfffd_100%)] p-4 shadow-[0_14px_50px_rgba(15,23,42,0.045)] backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-[0_18px_60px_rgba(4,120,87,0.1)] sm:p-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100 transition group-hover:bg-emerald-100">
+                  <Icon className="size-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold leading-6 text-slate-950">{card.title}</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{card.scene}</p>
+                </div>
+              </div>
+
+              <UseCaseMockup index={index} isZh={isZh} />
+
+              <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
+                {rows.map((text, rowIndex) => (
+                  <div key={fieldLabels[rowIndex]} className="grid gap-1 py-2.5">
+                    <span className="text-[11px] font-semibold text-emerald-800">
+                      {fieldLabels[rowIndex]}
+                    </span>
+                    <p className="text-sm leading-6 text-slate-700">{text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4">
+                <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+                  {card.result}
+                </span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 flex justify-center">
+        <Button asChild variant="outline" className="h-10 w-full rounded-full border-slate-200 bg-white/80 px-5 text-sm text-slate-950 hover:bg-slate-50 sm:w-auto">
+          <Link href="/dashboard">
+            {copy.cta}
+            <ArrowRight />
+          </Link>
+        </Button>
+      </div>
+
+      <div className="mx-auto mt-6 max-w-3xl text-center">
+        <h3 className="text-lg font-semibold tracking-normal text-slate-950">{copy.consultTitle}</h3>
+        <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">{copy.consultText}</p>
+        <Button asChild className="mt-4 h-11 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto">
+          <Link href="/consulting">
+            {copy.consultCta}
+            <ArrowRight />
+          </Link>
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
   return (
     <section id="investigations" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
+      <div className="mb-6 max-w-3xl">
+        <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
+          {copy.sectionTitle}
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.sectionSubtitle}</p>
+      </div>
       <div className="overflow-hidden rounded-[30px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
         <div className="grid gap-0 lg:grid-cols-[0.88fr_1.12fr]">
           <div className="border-b border-slate-200/80 p-5 sm:p-6 lg:border-b-0 lg:border-r">
@@ -1153,7 +1417,7 @@ export function Homepage() {
           <div className="mt-6 flex flex-col gap-3 sm:flex-row lg:mt-7">
             <Show when="signed-out">
               <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
-                <Link href="/sign-up">
+                <Link href="/consulting">
                   {copy.hero.primaryCta}
                   <ArrowRight />
                 </Link>
@@ -1161,7 +1425,7 @@ export function Homepage() {
             </Show>
             <Show when="signed-in">
               <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
-                <Link href="/dashboard">
+                <Link href="/consulting">
                   {copy.hero.primaryCta}
                   <ArrowRight />
                 </Link>
@@ -1193,6 +1457,7 @@ export function Homepage() {
 
       <OperatingLayer copy={copy.system} />
       <FeatureCards copy={copy.features} />
+      <UseCaseSection copy={copy.useCases} />
       <InvestigationPreview copy={copy.investigation} />
       <ReportsSection copy={copy.reports} />
       <PricingSection copy={copy.pricing} />

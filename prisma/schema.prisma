@@ -544,3 +544,22 @@ model SupportTicket {
   @@index([submitterId, createdAt])
   @@index([assigneeId, status])
 }
+
+model ConsultingRequest {
+  id          String   @id @default(cuid())
+  name        String
+  email       String
+  companyName String?
+  role        String?
+  dataSources String?
+  painPoints  String?
+  message     String?
+  status      String   @default("NEW")
+  source      String?  @default("consulting_page")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([email])
+}

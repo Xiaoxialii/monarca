@@ -418,11 +418,6 @@ function pickInsightItems(items: Array<Record<string, unknown>> = [], limit = 3)
   }));
 }
 
-function leadingInsightSummary(items: Array<Record<string, unknown>> = [], fallback: string) {
-  const lead = items[0];
-  return lead ? insightText(lead, fallback) : fallback;
-}
-
 function formatMetricNumber(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";

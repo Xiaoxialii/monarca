@@ -93,7 +93,6 @@ const homepageCopy = {
         { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
       primaryCta: "Book a 30-min Business Consultation",
-      secondaryCta: "View Sample Workspace",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
     visual: {
@@ -144,8 +143,6 @@ const homepageCopy = {
       title: "How different teams use Monarca AI",
       subtitle:
         "From scattered data to actionable operating judgment, adapted to the everyday analysis workflows of different business teams.",
-      cta: "View Sample Workspace",
-      ctaNote: "See how Monarca AI turns business data into operating judgment",
       consultTitle: "Want to see what reports your data can generate?",
       consultText:
         "Book a business consultation and we will design daily, weekly, and monthly operating reports around your goals, data sources, and business questions.",
@@ -228,6 +225,7 @@ const homepageCopy = {
       ]
     },
     reports: {
+      sectionEyebrow: "Team-specific reports",
       eyebrow: "Reports",
       title: "A daily growth brief that writes itself",
       intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses",
@@ -331,7 +329,6 @@ const homepageCopy = {
         { role: "增长运营", text: "把洞察转化为增长行动" }
       ],
       primaryCta: "预约 30 分钟商业咨询",
-      secondaryCta: "查看演示工作区",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
     },
     visual: {
@@ -357,7 +354,7 @@ const homepageCopy = {
       ]
     },
     features: {
-      eyebrow: "收入智能",
+      eyebrow: "",
       title: "蝴蝶效应能帮你做什么",
       cards: [
         {
@@ -381,8 +378,6 @@ const homepageCopy = {
     useCases: {
       title: "不同团队如何使用蝴蝶效应",
       subtitle: "从每天要回答的业务问题出发，把分散数据转化为可执行的经营判断。",
-      cta: "查看演示工作区",
-      ctaNote: "看看蝴蝶效应如何把业务数据转化为经营判断",
       consultTitle: "想看看你的数据可以生成什么报告？",
       consultText: "预约一次商业咨询，我们会根据你的业务目标、数据来源和经营问题，帮你设计适合团队的日报、周报和月经营分析。",
       consultCta: "预约 30 分钟商业咨询",
@@ -432,9 +427,9 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "一次完整的 AI 经营调查",
+      sectionTitle: "完整的 AI 经营调查",
       sectionSubtitle: "发现收入、转化或成本异常后，蝴蝶效应会自动检查相关指标，定位关键根因，并给出带证据链的行动建议。",
-      eyebrow: "进行中的智能调查",
+      eyebrow: "AI 如何工作",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",
       evidenceMetric: "收入下降 18%",
@@ -463,6 +458,7 @@ const homepageCopy = {
       ]
     },
     reports: {
+      sectionEyebrow: "团队专属报告",
       eyebrow: "报告",
       title: "自动生成每天增长简报",
       intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表",
@@ -861,7 +857,9 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
     <section id="alerts" className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-12">
       <div className="mb-6">
         <div>
-          <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+          {copy.eyebrow ? (
+            <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+          ) : null}
           <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
             {copy.title}
           </h2>
@@ -981,7 +979,7 @@ function UseCaseMockup({ index, isZh }: { index: number; isZh: boolean }) {
 function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
   const labels = ["痛点", "AI 发现", "建议行动"];
   const englishLabels = ["Pain point", "AI finding", "Recommended action"];
-  const isZh = copy.cta === "查看演示工作区";
+  const isZh = copy.title === "不同团队如何使用蝴蝶效应";
   const fieldLabels = isZh ? labels : englishLabels;
 
   return (
@@ -1037,15 +1035,6 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
             </article>
           );
         })}
-      </div>
-
-      <div className="mt-6 flex justify-center">
-        <Button asChild variant="outline" className="h-10 w-full rounded-full border-slate-200 bg-white/80 px-5 text-sm text-slate-950 hover:bg-slate-50 sm:w-auto">
-          <Link href="/dashboard">
-            {copy.cta}
-            <ArrowRight />
-          </Link>
-        </Button>
       </div>
 
       <div className="mx-auto mt-6 max-w-3xl text-center">
@@ -1154,6 +1143,7 @@ function ReportsSection({ copy }: { copy: HomeCopy["reports"] }) {
 
   return (
     <section id="reports" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
+      <p className="mb-4 text-xs font-medium text-emerald-700 sm:text-sm">{copy.sectionEyebrow}</p>
       <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr] lg:items-stretch">
         <div className="rounded-[30px] border border-slate-200/80 bg-slate-950 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.12)] sm:p-6">
           <p className="text-xs font-medium text-emerald-300 sm:text-sm">{copy.eyebrow}</p>
@@ -1431,12 +1421,6 @@ export function Homepage() {
                 </Link>
               </Button>
             </Show>
-            <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 text-sm sm:w-auto lg:h-10">
-              <Link href="/dashboard">
-                <Search />
-                {copy.hero.secondaryCta}
-              </Link>
-            </Button>
           </div>
           <div className="mt-5 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 lg:flex">
             {copy.hero.trust.map((item) => (

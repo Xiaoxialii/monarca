@@ -444,6 +444,7 @@ const dashboardCopy = {
       sources: [
         { name: "SQL Server", type: "Database", kind: "database" },
         { name: "PostgreSQL", type: "Database", kind: "database" },
+        { name: "MySQL", type: "Database", kind: "database" },
         { name: "Excel / CSV", type: "File upload", kind: "file" },
         { name: "Snowflake", type: "Data warehouse", kind: "warehouse" },
         { name: "BigQuery", type: "Data warehouse", kind: "warehouse" },
@@ -1127,6 +1128,7 @@ const dashboardCopy = {
       sources: [
         { name: "SQL Server", type: "数据库", kind: "database" },
         { name: "PostgreSQL", type: "数据库", kind: "database" },
+        { name: "MySQL", type: "数据库", kind: "database" },
         { name: "Excel / CSV", type: "文件上传", kind: "file" },
         { name: "Snowflake", type: "数据仓库", kind: "warehouse" },
         { name: "BigQuery", type: "数据仓库", kind: "warehouse" },

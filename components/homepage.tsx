@@ -93,6 +93,7 @@ const homepageCopy = {
         { role: "Growth Operations", text: "Turns insights into focused growth actions" }
       ],
       primaryCta: "Book a 30-min Business Consultation",
+      secondaryCta: "View Demo",
       trust: ["No credit card required", "5 min setup", "Cancel anytime"]
     },
     visual: {
@@ -329,6 +330,7 @@ const homepageCopy = {
         { role: "增长运营", text: "把洞察转化为增长行动" }
       ],
       primaryCta: "预约 30 分钟商业咨询",
+      secondaryCta: "查看 Demo",
       trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
     },
     visual: {
@@ -1421,6 +1423,12 @@ export function Homepage() {
                 </Link>
               </Button>
             </Show>
+            <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 text-sm sm:w-auto lg:h-10">
+              <Link href="/sign-up">
+                {copy.hero.secondaryCta}
+                <ArrowRight />
+              </Link>
+            </Button>
           </div>
           <div className="mt-5 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 lg:flex">
             {copy.hero.trust.map((item) => (

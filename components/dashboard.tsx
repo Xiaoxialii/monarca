@@ -1847,11 +1847,30 @@ function Header({
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;
 }) {
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const isZh = copy.sidebar.brand === "蝴蝶效应";
+  const mobileNavItems = [...copy.navItems, ...copy.dataNavItems].map((item) => ({
+    ...item,
+    label: item.href === "/dashboard/report"
+      ? (isZh ? "报表页" : "Reports Page")
+      : item.href === "/dashboard/settings"
+        ? (isZh ? "设置页" : "Settings Page")
+        : item.label
+  }));
+
   return (
     <header className="sticky top-0 z-20 border-b bg-background/86 backdrop-blur">
       <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
-        <Button variant="ghost" size="icon" className="lg:hidden" aria-label={copy.header.openNav}>
-          <PanelLeft />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          aria-label={copy.header.openNav}
+          aria-expanded={isMobileNavOpen}
+          onClick={() => setIsMobileNavOpen((current) => !current)}
+        >
+          {isMobileNavOpen ? <X /> : <PanelLeft />}
         </Button>
         <div className="hidden min-w-0 flex-1 md:block">
           <div className="relative max-w-md">
@@ -1886,6 +1905,23 @@ function Header({
           <AuthControls />
         </div>
       </div>
+      {isMobileNavOpen ? (
+        <div className="border-t bg-white px-4 py-3 shadow-lg lg:hidden">
+          <nav className="grid gap-2">
+            {mobileNavItems.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                onClick={() => setIsMobileNavOpen(false)}
+                className="flex h-12 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm transition active:scale-[0.99]"
+              >
+                <item.icon className="size-4 text-slate-500" />
+                <span>{item.label}</span>
+              </a>
+            ))}
+          </nav>
+        </div>
+      ) : null}
     </header>
   );
 }

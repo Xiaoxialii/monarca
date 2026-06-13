@@ -62,6 +62,21 @@ test("database setup checkout submits a request instead of starting Stripe", () 
     /summaryTitle[\s\S]*"评估后报价"/,
     "Professional checkout should show quote-after-review wording instead of secure settlement"
   );
+  assert.match(
+    paymentPage,
+    /price: "¥2,000 起"[\s\S]*cadence: "\/ 月"[\s\S]*billingNote: "年度服务周期，按年支付"/,
+    "Chinese professional checkout should show the annual billed from-2000 monthly price"
+  );
+  assert.match(
+    paymentPage,
+    /price: "From ¥2,000"[\s\S]*cadence: "\/ month"[\s\S]*billingNote: "Annual service term, billed annually"/,
+    "English professional checkout should show the annual billed from-2000 monthly price"
+  );
+  assert.doesNotMatch(
+    paymentPage,
+    /\$600|monthly payment supported|billed monthly|支持按月支付|按月付款/,
+    "Professional checkout should not show the old dollar monthly-payment copy"
+  );
   assert.doesNotMatch(
     paymentPage,
     /selectedPlan === "professional" && response\.status === 401/,

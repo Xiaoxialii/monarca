@@ -43,7 +43,7 @@ const paymentCopy = {
     noActivePlan: "No active plan",
     loadingPlan: "Loading current plan...",
     monthlyPlan: "Monthly service",
-    annualMonthlyPlan: "Annual plan, paid monthly",
+    annualMonthlyPlan: "Annual service term, billed annually",
     addonLabel: "Add-on service",
     secure: "Secure checkout",
     formTitle: "Checkout details",
@@ -79,12 +79,12 @@ const paymentCopy = {
     stripePrices: {
       professional: {
         cny: {
-          price: "¥2,000",
-          due: "¥2,000"
+          price: "¥2,000 起",
+          due: "评估后报价"
         },
         usd: {
-          price: "$600",
-          due: "$600"
+          price: "From ¥2,000",
+          due: "Quote after review"
         }
       }
     },
@@ -110,12 +110,12 @@ const paymentCopy = {
         badge: "Recommended",
         name: "Professional",
         subtitle: "Ongoing automated operating analysis with dedicated analyst support",
-        price: "$600",
+        price: "From ¥2,000",
         cadence: "/ month",
-        billingNote: "Annual service term, monthly payment supported",
+        billingNote: "Annual service term, billed annually",
         description:
           "Data onboarding + metric system configuration + dedicated analyst support + automated operating reports.",
-        due: "$600",
+        due: "Quote after review",
         primary: "Start professional",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
@@ -159,7 +159,7 @@ const paymentCopy = {
     noActivePlan: "暂无套餐",
     loadingPlan: "正在加载当前套餐...",
     monthlyPlan: "月服务",
-    annualMonthlyPlan: "年度套餐，按月支付",
+    annualMonthlyPlan: "年度服务周期，按年支付",
     addonLabel: "附加服务",
     secure: "安全结算",
     formTitle: "付费信息",
@@ -195,12 +195,12 @@ const paymentCopy = {
     stripePrices: {
       professional: {
         cny: {
-          price: "¥2,000",
-          due: "¥2,000"
+          price: "¥2,000 起",
+          due: "评估后报价"
         },
         usd: {
-          price: "$600",
-          due: "$600"
+          price: "From ¥2,000",
+          due: "Quote after review"
         }
       }
     },
@@ -225,11 +225,11 @@ const paymentCopy = {
         badge: "推荐",
         name: "专业版",
         subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
-        price: "¥2,000",
-        cadence: "/ 月起",
-        billingNote: "年度服务周期，支持按月支付",
+        price: "¥2,000 起",
+        cadence: "/ 月",
+        billingNote: "年度服务周期，按年支付",
         description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
-        due: "¥2,000",
+        due: "评估后报价",
         primary: "开通专业版",
         next: "结算后进入工作区，然后连接数据源",
         features: [
@@ -607,7 +607,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
                     </div>
                     {planId === "professional" ? (
                       <p className="mt-1 text-xs font-medium text-slate-500">
-                        {locale === "zh" ? "年度服务周期，支持按月支付" : "Annual service term, monthly payment supported"}
+                        {locale === "zh" ? "年度服务周期，按年支付" : "Annual service term, billed annually"}
                       </p>
                     ) : null}
                   </button>

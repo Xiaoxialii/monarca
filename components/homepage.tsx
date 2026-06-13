@@ -247,9 +247,9 @@ const homepageCopy = {
         {
           name: "Professional",
           subtitle: "For teams that need ongoing automated operating analysis with dedicated analyst support",
-          price: "$600",
+          price: "From ¥2,000",
           cadence: "/ month",
-          billingNote: "Annual service term, monthly payment supported",
+          billingNote: "Annual service term, billed annually",
           badge: "Recommended",
           description:
             "Data onboarding + metric system configuration + dedicated analyst support + automated operating reports",
@@ -480,9 +480,9 @@ const homepageCopy = {
         {
           name: "专业版",
           subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
-          price: "¥2,000",
-          cadence: "/ 月起",
-          billingNote: "年度服务周期，支持按月支付",
+          price: "¥2,000 起",
+          cadence: "/ 月",
+          billingNote: "年度服务周期，按年支付",
           badge: "推荐",
           description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
           features: [

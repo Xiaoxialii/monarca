@@ -4360,7 +4360,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     value ? new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(value)) : "-";
   const planTypeLabel =
     entitlement?.planType === "MONTHLY"
-      ? isZh ? "年度套餐，按月支付" : "Annual plan, paid monthly"
+      ? isZh ? "年度服务周期，按年支付" : "Annual service term, billed annually"
       : isZh ? "免费" : "Free";
   const statusLabel = entitlement?.status ?? "free";
   const usageLabel = entitlement?.isUnlimitedReports
@@ -4377,7 +4377,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     ? [
         {
           name: "专业版",
-          price: "¥2,000 / 月起",
+          price: "¥2,000 起 / 月",
           description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "开通专业版",
@@ -4395,7 +4395,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     : [
         {
           name: "Professional",
-          price: "$600 / mo",
+          price: "From ¥2,000 / month",
           description: "Data integration, expert-assisted metric configuration, and automated reports",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Start professional",
@@ -4564,11 +4564,11 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
             {(isZh
               ? [
                   ["免费版", "仅可查看 dashboard。升级后才能连接数据并生成报告。"],
-                  ["专业版", "年度服务周期，按月付款；包含数据接入协助、指标体系配置和自动化报告。"]
+                  ["专业版", "年度服务周期，按年支付；包含数据接入协助、指标体系配置和自动化报告。"]
                 ]
               : [
                   ["Free", "View dashboard only. Upgrade to connect data and generate reports."],
-                  ["Professional", "Annual service term, paid monthly, with expert-assisted data onboarding, metric configuration, and automated reports."]
+                  ["Professional", "Annual service term, billed annually, with expert-assisted data onboarding, metric configuration, and automated reports."]
                 ]).map(([plan, description]) => (
               <div key={plan} className="px-4 py-3">
                 <p className="text-sm font-medium">{plan}</p>

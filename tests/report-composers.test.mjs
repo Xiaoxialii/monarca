@@ -643,6 +643,7 @@ test("daily brief remains a formal business daily even when daily record count i
   assert.equal(report.dailyBriefMode, "daily_full");
   assert.ok(report.dailySampleSize < 10);
   assert.match(report.reportTitle, /经营日报/);
+  assert.doesNotMatch(report.reportTitle, /电商/);
   assert.equal(report.lowSampleNotice, undefined);
 });
 

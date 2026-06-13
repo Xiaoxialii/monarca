@@ -2821,12 +2821,12 @@ export function composeDailyBrief(input: ReportComposerInput) {
     totalRows: input.reportDataAudit?.totalRows ?? null,
     rowsUsedForMetrics: input.reportDataAudit?.rowsUsedForMetrics ?? null,
     fullDataValidated: input.reportDataAudit ? input.reportDataAudit.passed && input.reportDataAudit.usesFullData : null,
-    reportTitle: isZh ? `${isoDate(latestDate)} 电商经营日报` : `${isoDate(latestDate)} Daily Business Brief`,
+    reportTitle: isZh ? `${isoDate(latestDate)} 经营日报` : `${isoDate(latestDate)} Daily Business Brief`,
     comparisonDate: reportTimeMode === "baseline_snapshot" ? null : isoDate(input.metricSnapshots[0]?.snapshotDate as string | Date | null),
     todayOverview: reportTimeMode === "baseline_snapshot"
       ? baselineMessage
       : (isZh
-        ? `${isoDate(latestDate)} 电商经营日报：基于数据中的最新业务日期生成。`
+        ? `${isoDate(latestDate)} 经营日报：基于数据中的最新业务日期生成。`
         : `${isoDate(latestDate)} Daily Business Brief based on the latest business date in the data.`),
     latestDateNotice,
     aiBrief,
@@ -2922,8 +2922,8 @@ export function composeWeeklyReport(input: ReportComposerInput) {
     reportTimeMode,
     latestDataDate: isoDate(latestDate),
     reportTitle: isZh
-      ? `${rangeLabel(comparisonPeriod.currentStart, comparisonPeriod.currentEnd, input.locale)} 电商经营周报`
-      : `${rangeLabel(comparisonPeriod.currentStart, comparisonPeriod.currentEnd, input.locale)} Ecommerce Weekly Report`,
+        ? `${rangeLabel(comparisonPeriod.currentStart, comparisonPeriod.currentEnd, input.locale)} 经营周报`
+      : `${rangeLabel(comparisonPeriod.currentStart, comparisonPeriod.currentEnd, input.locale)} Weekly Report`,
     dateField: input.timeConfig?.defaultTimeField ?? null,
     dataFreshnessNote: freshnessNote,
     weekStart: isoDate(comparisonPeriod.currentStart),

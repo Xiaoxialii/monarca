@@ -5201,12 +5201,20 @@ function ConnectorPanel({
         : "The database is unavailable. Check the PostgreSQL / Neon connection string before continuing.";
     }
 
-    if (message.includes("Please choose a plan to connect data sources")) {
-      return isZh ? "请先升级套餐后再连接数据源。" : message;
+    if (
+      message.includes("Please choose a plan to connect data sources") ||
+      message.includes("请先升级套餐后再连接数据源") ||
+      message.includes("请选择套餐后再连接数据源")
+    ) {
+      return isZh ? "请先升级套餐后再连接数据源。" : "Please choose a plan to connect data sources.";
     }
 
-    if (message.includes("Please choose a plan to generate reports")) {
-      return isZh ? "请先升级套餐后再生成报告。" : message;
+    if (
+      message.includes("Please choose a plan to generate reports") ||
+      message.includes("请先升级套餐后再生成报告") ||
+      message.includes("请选择套餐后再生成报告")
+    ) {
+      return isZh ? "请先升级套餐后再生成报告。" : "Please choose a plan to generate reports.";
     }
 
     return message;
@@ -6426,7 +6434,7 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
   const dailyContent = {
     isDemo: true,
     reportMode: "daily_brief",
-    reportTitle: isZh ? "2026-06-09 Demo 电商经营日报" : "2026-06-09 Demo Ecommerce Daily Report",
+    reportTitle: isZh ? "2026-06-09 Demo 经营日报" : "2026-06-09 Demo Daily Report",
     latestDataDate: "2026-06-09",
     latestDateNotice: isZh ? "Demo 示例" : "Demo",
     dailySampleSize: 680,
@@ -6480,7 +6488,7 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
     return {
       ...dailyContent,
       reportMode: "weekly_report",
-      reportTitle: isZh ? "2026-06-03 至 2026-06-09 Demo 电商经营周报" : "2026-06-03 to 2026-06-09 Demo Ecommerce Weekly Report",
+      reportTitle: isZh ? "2026-06-03 至 2026-06-09 Demo 经营周报" : "2026-06-03 to 2026-06-09 Demo Weekly Report",
       currentPeriodStart: "2026-06-03",
       currentPeriodEnd: "2026-06-09",
       previousPeriodStart: "2026-05-27",
@@ -6558,7 +6566,7 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
           id: "demo-history-daily-2026-06-09",
           reportMode: "daily_brief",
           reportTimeMode: "daily_business_report",
-          title: isZh ? "2026-06-09 Demo 电商经营日报" : "2026-06-09 Demo Ecommerce Daily Report",
+          title: isZh ? "2026-06-09 Demo 经营日报" : "2026-06-09 Demo Daily Report",
           status: isZh ? "Demo 示例" : "Demo",
           generatedAt: "2026-06-09T09:00:00.000Z",
           summaryJson: {
@@ -6569,7 +6577,7 @@ function demoReportContent(mode: ReportModeView, locale: Locale): Record<string,
           id: "demo-history-weekly-2026-06-09",
           reportMode: "weekly_report",
           reportTimeMode: "weekly_business_report",
-          title: isZh ? "2026-06-03 至 2026-06-09 Demo 电商经营周报" : "2026-06-03 to 2026-06-09 Demo Ecommerce Weekly Report",
+          title: isZh ? "2026-06-03 至 2026-06-09 Demo 经营周报" : "2026-06-03 to 2026-06-09 Demo Weekly Report",
           status: isZh ? "Demo 示例" : "Demo",
           generatedAt: "2026-06-09T09:10:00.000Z",
           summaryJson: {
@@ -6685,6 +6693,14 @@ function ReportComposerList({
   className?: string;
   maxItems?: number;
 }) {
+  const isZh = containsCjkText(`${title} ${emptyText}`);
+  const previousLabel = isZh ? "昨日" : "Previous";
+  const evidenceLabel = isZh ? "证据" : "Evidence";
+  const judgmentLabel = isZh ? "业务判断" : "Business judgment";
+  const actionLabel = isZh ? "建议决策" : "Recommended action";
+  const detailsLabel = isZh ? "查看详情" : "View details";
+  const objectSeparator = isZh ? "、" : ", ";
+
   return (
     <div className={`rounded-xl border bg-white p-4 shadow-sm ${className}`}>
       <div className="flex items-center justify-between gap-3">
@@ -6699,7 +6715,7 @@ function ReportComposerList({
                 {item.caveat ? <Badge variant="secondary" className={cn("text-[11px]", priorityBadgeClass(item.caveat))}>{item.caveat}</Badge> : null}
               </div>
               {item.targetObjects?.length ? (
-                <p className="mt-2 text-xs font-medium text-slate-700">{item.targetObjects.join("、")}</p>
+                <p className="mt-2 text-xs font-medium text-slate-700">{item.targetObjects.join(objectSeparator)}</p>
               ) : null}
               {item.summary ? <p className="mt-2 text-xs leading-5 text-slate-800">{item.summary}</p> : null}
               {item.keyEvidence ? (
@@ -6712,19 +6728,19 @@ function ReportComposerList({
                           <p className="text-sm font-semibold tabular-nums text-slate-950">{metric.current}</p>
                           <p className={cn("text-xs font-semibold tabular-nums", evidenceChangeTone(metric.change))}>{metric.change}</p>
                         </div>
-                        <p className="mt-1 text-[11px] text-muted-foreground">昨日 {metric.previous}</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{previousLabel} {metric.previous}</p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">证据：{item.keyEvidence}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{evidenceLabel}: {item.keyEvidence}</p>
                 )
               ) : null}
-              {item.businessJudgment ? <p className="mt-2 text-xs leading-5 text-slate-700">业务判断：{item.businessJudgment}</p> : null}
-              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-emerald-800">建议决策：{item.recommendedAction}</p> : null}
+              {item.businessJudgment ? <p className="mt-2 text-xs leading-5 text-slate-700">{judgmentLabel}: {item.businessJudgment}</p> : null}
+              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-emerald-800">{actionLabel}: {item.recommendedAction}</p> : null}
               {item.details ? (
                 <details className="mt-2 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-slate-700">查看详情</summary>
+                  <summary className="cursor-pointer font-medium text-slate-700">{detailsLabel}</summary>
                   <p className="mt-1 leading-5">{item.details}</p>
                 </details>
               ) : null}
@@ -7514,7 +7530,7 @@ function ReportModeSummaryPanel({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle className="min-w-0 break-words text-base leading-6">
-                    {String(content.reportTitle ?? (isZh ? `${currentPeriod} 电商经营周报` : `${currentPeriod} Ecommerce Weekly Report`))}
+                    {String(content.reportTitle ?? (isZh ? `${currentPeriod} 经营周报` : `${currentPeriod} Weekly Report`))}
                   </CardTitle>
                   <Badge variant="secondary" className={currentComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
                     {currentComplete ? (isZh ? "当前周期完整" : "Complete period") : (isZh ? "当前周期不足 7 天" : "Partial period")}
@@ -8133,23 +8149,17 @@ function ReportsPage({
             </div>
           ) : null}
           <div className="flex w-full flex-nowrap items-center gap-2 xl:w-auto">
-            {reportEntitlement?.canGenerateReport !== false ? (
-              <Button
-                size="sm"
-                onClick={() => generateReport(activeReportMode === "history" ? "custom_report" : activeReportMode)}
-                disabled={isGeneratingReport}
-                className="whitespace-nowrap"
-              >
-                <RefreshCw className={cn(isGeneratingReport && "animate-spin")} />
-                {isGeneratingReport
-                  ? copy.reports.generatingAction
-                  : reportGenerateButtonLabel(reportEntitlement, locale, copy.reports.generateAction)}
-              </Button>
-            ) : (
-              <Button asChild size="sm" className="whitespace-nowrap">
-                <a href="/checkout/professional">{isReportsZh ? "升级套餐" : "Upgrade plan"}</a>
-              </Button>
-            )}
+            <Button
+              size="sm"
+              onClick={() => generateReport(activeReportMode === "history" ? "custom_report" : activeReportMode)}
+              disabled={isGeneratingReport}
+              className="whitespace-nowrap"
+            >
+              <RefreshCw className={cn(isGeneratingReport && "animate-spin")} />
+              {isGeneratingReport
+                ? copy.reports.generatingAction
+                : reportGenerateButtonLabel(reportEntitlement, locale, copy.reports.generateAction)}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -8174,7 +8184,18 @@ function ReportsPage({
         </div>
       </div>
       {reportActionMessage ? (
-        <div className="report-no-print rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
+        <div className="report-no-print relative rounded-xl border bg-white px-4 py-3 pr-11 text-sm text-muted-foreground shadow-sm">
+          <button
+            type="button"
+            aria-label={isReportsZh ? "关闭提示" : "Dismiss message"}
+            className="absolute right-3 top-3 inline-flex size-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
+            onClick={() => {
+              setReportActionMessage(null);
+              setReportActionLink(null);
+            }}
+          >
+            <X className="size-4" />
+          </button>
           <p>{reportActionMessage}</p>
           {reportActionLink ? (
             <p className="mt-2 break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">

@@ -783,3 +783,33 @@ Before changing checkout UI or billing actions, classify the current product int
 - `tests/payment-page-checkout.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 028
+
+### Date
+2026-06-13
+
+### Area
+Report UI localization and product copy
+
+### Symptom
+- English report cards displayed Chinese labels such as `昨日`, `证据`, `业务判断`, and `建议决策`.
+- Generated report titles included a hard-coded industry word such as `电商经营日报` even after the report was generated from general user data.
+- The report header primary button showed `升级套餐` instead of the intended `生成报告`.
+- Share invite success text could not be dismissed.
+
+### Root cause
+Several report UI labels were hard-coded in Chinese inside reusable report card components, and report titles embedded an ecommerce-specific label instead of using neutral operating-report wording. The report action header also mixed entitlement CTA behavior with the primary report generation action.
+
+### Fix
+Localize reusable report-card labels by the rendered report language, remove hard-coded ecommerce words from generated report titles and demo titles, always render the primary report button as report generation, and add a dismiss control for share-link messages.
+
+### Prevention rule
+Before changing report UI, search reusable report components for hard-coded Chinese or English labels. In English mode, all chrome labels must be English even when report data values are mixed. Generated report titles should be neutral unless the user explicitly selected an industry template.
+
+### Files changed
+- `components/dashboard.tsx`
+- `lib/report-composers.ts`
+- `tests/report-composers.test.mjs`
+- `tests/report-header-actions.test.mjs`
+- `docs/ERROR_MEMORY.md`

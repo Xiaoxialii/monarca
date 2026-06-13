@@ -10,9 +10,26 @@ type StoredUpload = {
 
 let r2CorsSetup: Promise<void> | null = null;
 
+export const r2UploadCorsPolicy = {
+  allowedOrigins: [
+    "https://www.monarcadata.com",
+    "https://monarcadata.com",
+    "http://localhost:3000",
+    "http://localhost:3001"
+  ],
+  allowedMethods: ["PUT", "GET", "HEAD", "POST"],
+  allowedHeaders: ["*"],
+  exposeHeaders: ["ETag"],
+  maxAgeSeconds: 3600
+} as const;
+
+function canonicalR2Endpoint(accountId: string) {
+  return `https://${accountId}.r2.cloudflarestorage.com`;
+}
+
 function r2Config() {
   const accountId = process.env.R2_ACCOUNT_ID;
-  const endpoint = accountId ? `https://${accountId}.r2.cloudflarestorage.com` : process.env.R2_ENDPOINT || null;
+  const endpoint = accountId ? canonicalR2Endpoint(accountId) : process.env.R2_ENDPOINT || null;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   const bucket = process.env.R2_BUCKET_NAME;
@@ -70,10 +87,7 @@ export async function ensureR2UploadCors(extraOrigins: Array<string | null | und
   }
 
   const allowedOrigins = Array.from(new Set([
-    "https://www.monarcadata.com",
-    "https://monarcadata.com",
-    "http://localhost:3000",
-    "http://localhost:3001",
+    ...r2UploadCorsPolicy.allowedOrigins,
     ...extraOrigins.map(originValue).filter((origin): origin is string => Boolean(origin))
   ]));
 
@@ -83,11 +97,11 @@ export async function ensureR2UploadCors(extraOrigins: Array<string | null | und
       CORSConfiguration: {
         CORSRules: [
           {
-            AllowedHeaders: ["*"],
-            AllowedMethods: ["PUT", "GET", "HEAD", "POST"],
+            AllowedHeaders: [...r2UploadCorsPolicy.allowedHeaders],
+            AllowedMethods: [...r2UploadCorsPolicy.allowedMethods],
             AllowedOrigins: allowedOrigins,
-            ExposeHeaders: ["ETag"],
-            MaxAgeSeconds: 3600
+            ExposeHeaders: [...r2UploadCorsPolicy.exposeHeaders],
+            MaxAgeSeconds: r2UploadCorsPolicy.maxAgeSeconds
           }
         ]
       }

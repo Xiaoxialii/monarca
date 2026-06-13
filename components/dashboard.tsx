@@ -5297,6 +5297,7 @@ function ConnectorPanel({
       bucket?: string;
       contentType?: string;
       uploadOrigin?: string;
+      corsPolicy?: unknown;
     } | null;
     const uploadOrigin = presignPayload?.uploadOrigin ??
       (presignPayload?.uploadUrl
@@ -5316,6 +5317,7 @@ function ConnectorPanel({
       provider: presignPayload?.provider,
       bucket: presignPayload?.bucket,
       uploadOrigin,
+      corsPolicy: presignPayload?.corsPolicy,
       key: presignPayload?.key ?? presignPayload?.path,
       contentType: presignPayload?.contentType
     });

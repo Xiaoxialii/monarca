@@ -7,7 +7,7 @@ import {
   requireCanConnectDataSource
 } from "@/lib/billing/entitlements";
 import { fileExtension } from "@/lib/file-upload-schema";
-import { createPresignedUploadUrl, ensureR2UploadCors, isR2Configured } from "@/lib/r2-storage";
+import { createPresignedUploadUrl, ensureR2UploadCors, isR2Configured, r2UploadCorsPolicy } from "@/lib/r2-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -83,6 +83,7 @@ export async function POST(request: Request) {
       provider: "cloudflare-r2",
       bucket: upload.bucket,
       endpointOrigin: new URL(upload.endpoint).origin,
+      corsPolicy: r2UploadCorsPolicy,
       key: upload.key,
       contentType: upload.contentType,
       fileSize
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
       provider: "cloudflare-r2",
       uploadUrl: upload.uploadUrl,
       uploadOrigin: new URL(upload.uploadUrl).origin,
+      corsPolicy: r2UploadCorsPolicy,
       key: upload.key,
       path: upload.key,
       bucket: upload.bucket,

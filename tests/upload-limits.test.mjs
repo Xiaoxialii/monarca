@@ -41,7 +41,9 @@ test("upload size limit is centralized and used by all upload paths", () => {
   assert.match(files["components/dashboard.tsx"], /file\.size <= directApiUploadMaxBytes/);
   assert.match(
     r2Storage,
-    /const endpoint = accountId \? `https:\/\/\$\{accountId\}\.r2\.cloudflarestorage\.com` : process\.env\.R2_ENDPOINT \|\| null/,
+    /const endpoint = accountId \? canonicalR2Endpoint\(accountId\) : process\.env\.R2_ENDPOINT \|\| null/,
     "R2 endpoint should prefer the canonical account S3 API endpoint over an env override"
   );
+  assert.match(r2Storage, /allowedMethods: \["PUT", "GET", "HEAD", "POST"\]/);
+  assert.match(files["app/api/uploads/presign/route.ts"], /corsPolicy: r2UploadCorsPolicy/);
 });

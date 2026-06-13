@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import type { SignInFirstFactor } from "@clerk/nextjs/types";
 import { ArrowRight } from "lucide-react";
@@ -105,8 +106,16 @@ type CodeFactor = Extract<SignInFirstFactor, { strategy: "email_code" }>;
 
 export function SignInPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const router = useRouter();
+  const { isLoaded: isUserLoaded, isSignedIn } = useUser();
   const [locale, setLocale] = useLocale("en");
   const copy = signInCopy[getCopyLocale(locale)];
+
+  useEffect(() => {
+    if (clerkKey && isUserLoaded && isSignedIn) {
+      router.replace("/dashboard");
+    }
+  }, [clerkKey, isSignedIn, isUserLoaded, router]);
 
   return (
     <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#f6f8fb] px-5 py-6 sm:px-8">
@@ -217,13 +226,17 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
     setError("");
   }, [copy]);
 
-  function getErrorMessage(errorValue: unknown) {
+  function clerkErrorMessage(errorValue: unknown) {
     if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
       const clerkError = errorValue as { errors?: Array<{ longMessage?: string; message?: string }> };
       return clerkError.errors?.[0]?.longMessage || clerkError.errors?.[0]?.message || copy.passwordUnavailable;
     }
 
     return errorValue instanceof Error ? errorValue.message : copy.passwordUnavailable;
+  }
+
+  function isAlreadySignedInError(errorValue: unknown) {
+    return /already\s+signed\s+in/i.test(clerkErrorMessage(errorValue));
   }
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
@@ -260,7 +273,12 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 
       setError(result.status === "needs_second_factor" ? copy.secondFactorRequired : copy.passwordUnavailable);
     } catch (caughtError) {
-      setError(getErrorMessage(caughtError));
+      if (isAlreadySignedInError(caughtError)) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      setError(clerkErrorMessage(caughtError));
     } finally {
       setIsSubmitting(false);
     }

@@ -28,6 +28,16 @@ test("business date field prefers order_date over created_at", () => {
   assert.equal(findBusinessDateColumn(columns)?.name, "order_date");
 });
 
+test("business date field recognizes Chinese business date columns", () => {
+  const chineseColumns = [
+    { name: "订单编号", type: "string" },
+    { name: "业务日期", type: "date" },
+    { name: "销售额", type: "number" }
+  ];
+
+  assert.equal(findBusinessDateColumn(chineseColumns)?.name, "业务日期");
+});
+
 test("7D range filters rows to the current period only", () => {
   const range = resolveReportDateRange({ preset: "7D" }, new Date("2026-06-07T12:00:00.000Z"));
   const filtered = filterRowsByReportDateRange(rows, "order_date", range);

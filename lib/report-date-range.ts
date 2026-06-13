@@ -32,6 +32,7 @@ const presetDays: Partial<Record<DateRangePreset, number>> = {
 
 const preferredBusinessTimeFields = [
   "order_date",
+  "business_date",
   "created_at",
   "paid_at",
   "transaction_date",
@@ -43,11 +44,28 @@ const preferredBusinessTimeFields = [
   "completed_at",
   "timestamp",
   "date",
-  "updated_at"
+  "updated_at",
+  "业务日期",
+  "订单日期",
+  "下单日期",
+  "交易日期",
+  "支付日期",
+  "付款日期",
+  "成交日期",
+  "创建日期",
+  "创建时间",
+  "发生日期",
+  "发生时间",
+  "日期",
+  "时间"
 ];
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function compact(value: string) {
+  return value.toLowerCase().replace(/[\s_\-/.]+/g, "");
 }
 
 function parseDate(value: unknown) {
@@ -166,25 +184,50 @@ export function findBusinessDateColumn(
   manualField?: string | null
 ) {
   if (manualField) {
-    const manual = columns.find((column) => normalize(column.name) === normalize(manualField));
+    const normalizedManual = normalize(manualField);
+    const compactManual = compact(manualField);
+    const manual = columns.find((column) =>
+      (normalizedManual && normalize(column.name) === normalizedManual) ||
+      compact(column.name) === compactManual
+    );
     if (manual) return manual;
   }
 
   const exact = preferredBusinessTimeFields
-    .map((candidate) => columns.find((column) => normalize(column.name) === normalize(candidate)))
+    .map((candidate) => {
+      const normalizedCandidate = normalize(candidate);
+      const compactCandidate = compact(candidate);
+
+      return columns.find((column) =>
+        (normalizedCandidate && normalize(column.name) === normalizedCandidate) ||
+        compact(column.name) === compactCandidate
+      );
+    })
     .find(Boolean);
 
   if (exact) {
     return exact;
   }
 
-  return columns.find((column) => {
+  const namedDateColumn = columns.find((column) => {
     const name = normalize(column.name);
+    const compactName = compact(column.name);
     const type = String(column.type ?? "").toLowerCase();
 
-    return /date|time|timestamp/.test(type) &&
-      preferredBusinessTimeFields.some((candidate) => name.includes(normalize(candidate)));
-  }) ?? null;
+    return preferredBusinessTimeFields.some((candidate) => {
+      const normalizedCandidate = normalize(candidate);
+      const compactCandidate = compact(candidate);
+
+      return (normalizedCandidate && name.includes(normalizedCandidate)) ||
+        (compactCandidate && compactName.includes(compactCandidate));
+    }) && (/date|time|timestamp/.test(type) || /日期|时间/.test(compactName));
+  });
+
+  if (namedDateColumn) {
+    return namedDateColumn;
+  }
+
+  return columns.find((column) => /date|time|timestamp/.test(String(column.type ?? "").toLowerCase())) ?? null;
 }
 
 export function rowDateValue(row: Record<string, unknown>, fieldName: string) {

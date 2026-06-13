@@ -727,3 +727,31 @@ For report actions, verify the user-facing meaning of the control: export should
 - `tests/workspace-invite-links.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 026
+
+### Date
+2026-06-13
+
+### Area
+Checkout, billing, and request-form routing
+
+### Symptom
+- Database setup checkout showed a Stripe payment configuration warning for `STRIPE_PRICE_DATABASE_SETUP`.
+- The database setup flow looked like a payment page even though it should submit a setup request.
+- Enterprise and setup contact forms labeled the contact field as optional email instead of asking for `工作邮箱/微信`.
+
+### Root cause
+The shared checkout component treated every non-enterprise plan as a Stripe checkout plan. Database setup was an add-on/request workflow, but it inherited the professional payment path and Stripe price requirements. The contact field also reused billing-email copy and `type="email"` even when WeChat should be accepted.
+
+### Fix
+Limit Stripe checkout to the professional plan. Route enterprise and database setup through `/api/help-requests`. Give database setup its own request title and scope-confirmation subtitle. Use `工作邮箱/微信` for non-payment request forms and a text input so WeChat IDs are accepted.
+
+### Prevention rule
+Before changing checkout pages, classify each plan as payment, consultation, enterprise, or setup request. Only payment plans should call Stripe or require Stripe price environment variables. Request forms must allow the contact methods shown in the label.
+
+### Files changed
+- `components/payment-page.tsx`
+- `tests/payment-page-checkout.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

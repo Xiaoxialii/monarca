@@ -18,4 +18,5 @@ Read this before every coding task. Keep it short. Use `docs/ERROR_MEMORY.md` on
 12. **Workspace data must be isolated.** Scope data sources, snapshots, metrics, reports, members, billing actions, and invite links by `workspaceId`; new workspace creators must be `OWNER`.
 13. **UI should hide internals and real controls must work.** Do not leak `STORED_FILE_PATH`, `dailyRows`, or `verifiedMetrics`; visible buttons need handlers, feedback, and empty/error states.
 14. **Mobile UI is not desktop UI.** Test signed-in/signed-out and narrow viewport states; do not blindly reuse desktop navigation on mobile.
-15. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.
+15. **Checkout flows must match product intent.** Professional can use Stripe; consulting, enterprise, and setup requests must submit requests unless explicitly configured for payment.
+16. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.

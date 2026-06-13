@@ -51,8 +51,8 @@ const paymentCopy = {
     contactSubtitle: "Tell us about your business context and we will confirm scope",
     paymentSubtitle: "Confirm your billing information to start the plan",
     name: "Name",
-    email: "Work email",
-    emailOptional: "Work email (optional)",
+    email: "Work email / WeChat",
+    emailOptional: "Work email / WeChat",
     company: "Company",
     card: "Card number",
     expiry: "Expiry",
@@ -167,8 +167,8 @@ const paymentCopy = {
     contactSubtitle: "告诉我们业务背景，我们会确认交付范围",
     paymentSubtitle: "填写信息后即可开始方案",
     name: "姓名",
-    email: "工作邮箱",
-    emailOptional: "工作邮箱（选填）",
+    email: "工作邮箱/微信",
+    emailOptional: "工作邮箱/微信",
     company: "公司",
     card: "银行卡号",
     expiry: "有效期",
@@ -343,7 +343,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
   const hasCurrencyPrice = selectedPlan === "professional";
-  const usesStripe = selectedPlan !== "enterprise";
+  const usesStripe = selectedPlan === "professional";
   const selectedCurrencyPrice = hasCurrencyPrice
     ? copy.stripePrices[selectedPlan][checkoutCurrency]
     : null;
@@ -358,6 +358,25 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
     entitlement?.planType === "MONTHLY"
       ? copy.monthlyPlan
       : null;
+  const localeKey = getCopyLocale(locale);
+  const contactMethodLabel = localeKey === "zh" ? "工作邮箱/微信" : "Work email / WeChat";
+  const billingEmailLabel = localeKey === "zh" ? "工作邮箱" : "Work email";
+  const formTitle =
+    selectedPlan === "database-setup"
+      ? localeKey === "zh"
+        ? "搭建需求"
+        : "Setup request"
+      : usesStripe
+        ? copy.formTitle
+        : copy.contactTitle;
+  const formSubtitle =
+    selectedPlan === "database-setup"
+      ? localeKey === "zh"
+        ? "填写信息后，我们会确认数据库搭建范围"
+        : "Tell us what you need built and we will confirm the setup scope"
+      : usesStripe
+        ? copy.paymentSubtitle
+        : copy.contactSubtitle;
 
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -634,10 +653,10 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <CardTitle className="text-xl">
-                  {usesStripe ? copy.formTitle : copy.contactTitle}
+                  {formTitle}
                 </CardTitle>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  {usesStripe ? copy.paymentSubtitle : copy.contactSubtitle}
+                  {formSubtitle}
                 </p>
               </div>
             </div>
@@ -666,12 +685,12 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
               </label>
               <label className="space-y-1.5 sm:col-span-2">
                 <span className="text-xs font-medium text-slate-500">
-                  {usesStripe ? copy.emailOptional : copy.email}
+                  {usesStripe ? billingEmailLabel : contactMethodLabel}
                 </span>
                 <Input
                   name="email"
-                  type="email"
-                  autoComplete="email"
+                  type={usesStripe ? "email" : "text"}
+                  autoComplete={usesStripe ? "email" : "off"}
                   className="h-12 bg-white"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}

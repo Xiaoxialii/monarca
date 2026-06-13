@@ -82,6 +82,7 @@ export async function POST(request: Request) {
       ok: true,
       provider: "cloudflare-r2",
       bucket: upload.bucket,
+      endpointOrigin: new URL(upload.endpoint).origin,
       key: upload.key,
       contentType: upload.contentType,
       fileSize
@@ -91,6 +92,7 @@ export async function POST(request: Request) {
       ok: true,
       provider: "cloudflare-r2",
       uploadUrl: upload.uploadUrl,
+      uploadOrigin: new URL(upload.uploadUrl).origin,
       key: upload.key,
       path: upload.key,
       bucket: upload.bucket,

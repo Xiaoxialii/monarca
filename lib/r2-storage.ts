@@ -12,7 +12,7 @@ let r2CorsSetup: Promise<void> | null = null;
 
 function r2Config() {
   const accountId = process.env.R2_ACCOUNT_ID;
-  const endpoint = process.env.R2_ENDPOINT || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : null);
+  const endpoint = accountId ? `https://${accountId}.r2.cloudflarestorage.com` : process.env.R2_ENDPOINT || null;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   const bucket = process.env.R2_BUCKET_NAME;
@@ -139,6 +139,7 @@ export async function createPresignedUploadUrl(params: {
 
   return {
     bucket: config.bucket,
+    endpoint: config.endpoint,
     key,
     uploadUrl: await getSignedUrl(r2Client(config), command, { expiresIn: 15 * 60 }),
     contentType

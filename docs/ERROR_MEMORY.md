@@ -598,3 +598,31 @@ Do not route large file fallback through Vercel Functions. Keep serverless uploa
 - `components/dashboard.tsx`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 022
+
+### Date
+2026-06-13
+
+### Area
+R2 endpoint configuration
+
+### Symptom
+- R2 bucket CORS looked correct in Cloudflare, but browser direct upload still failed.
+- Production had both `R2_ACCOUNT_ID` and `R2_ENDPOINT`, so a misconfigured endpoint could override the standard account S3 API endpoint.
+
+### Root cause
+The R2 client trusted `R2_ENDPOINT` before deriving the canonical endpoint from `R2_ACCOUNT_ID`. If `R2_ENDPOINT` was set to a non-S3 endpoint, a bucket-specific URL, or another origin, the generated presigned URL could fail even with correct bucket CORS.
+
+### Fix
+Prefer `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` whenever `R2_ACCOUNT_ID` is available. Keep `R2_ENDPOINT` only as a fallback for environments without account id. Log the endpoint/upload origin without exposing signed query parameters or secrets.
+
+### Prevention rule
+For Cloudflare R2 presigned uploads, derive the S3 API endpoint from `R2_ACCOUNT_ID` first. Never expose R2 secrets to the browser, and log only safe origin/host diagnostics.
+
+### Files changed
+- `lib/r2-storage.ts`
+- `app/api/uploads/presign/route.ts`
+- `components/dashboard.tsx`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

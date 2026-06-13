@@ -12,7 +12,7 @@ Read this before every coding task. Keep it short. Use `docs/ERROR_MEMORY.md` on
 6. **Uploaded files must be fully readable.** A saved path or object key is not enough; verified metrics require reading the full file or querying the database.
 7. **Daily report row counts must match.** For daily reports, compute `dailyRows` from the latest business date and ensure `rowsUsedForMetrics === dailyRows`.
 8. **Support Chinese and English business fields.** Field detection must handle `业务日期`, `订单日期`, `交易日期`, `order_date`, `business_date`, and avoid empty normalized Chinese matches.
-9. **Browser direct uploads need storage CORS.** Presigned R2/S3 uploads must allow the production origin and show actionable errors instead of raw `Failed to fetch`.
+9. **Browser direct uploads need storage CORS and the account S3 endpoint.** Presigned R2/S3 uploads must use `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, allow the production origin, and show actionable errors instead of raw `Failed to fetch`.
 10. **Large files cannot fall back to serverless uploads.** Keep API upload fallback under the platform payload limit; larger files must use direct storage upload.
 11. **Workspace data must be isolated.** Scope data sources, snapshots, metrics, reports, members, and billing actions by `workspaceId`; new workspace creators must be `OWNER`.
 12. **UI should hide internals and show states.** Do not leak `STORED_FILE_PATH`, `dailyRows`, or `verifiedMetrics`; show audit-failed, empty, and insufficient-data states clearly.

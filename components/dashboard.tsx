@@ -5296,7 +5296,18 @@ function ConnectorPanel({
       token?: string;
       bucket?: string;
       contentType?: string;
+      uploadOrigin?: string;
     } | null;
+    const uploadOrigin = presignPayload?.uploadOrigin ??
+      (presignPayload?.uploadUrl
+        ? (() => {
+            try {
+              return new URL(presignPayload.uploadUrl).origin;
+            } catch {
+              return null;
+            }
+          })()
+        : null);
 
     console.info("Upload presign response", {
       ok: presignResponse.ok,
@@ -5304,6 +5315,7 @@ function ConnectorPanel({
       statusText: presignResponse.statusText,
       provider: presignPayload?.provider,
       bucket: presignPayload?.bucket,
+      uploadOrigin,
       key: presignPayload?.key ?? presignPayload?.path,
       contentType: presignPayload?.contentType
     });

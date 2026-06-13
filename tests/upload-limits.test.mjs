@@ -22,6 +22,7 @@ test("upload size limit is centralized and used by all upload paths", () => {
     "app/api/data-sources/upload/complete/route.ts": read("app/api/data-sources/upload/complete/route.ts"),
     "components/dashboard.tsx": read("components/dashboard.tsx")
   };
+  const r2Storage = read("lib/r2-storage.ts");
 
   for (const [path, source] of Object.entries(files)) {
     assert.match(source, /FILE_UPLOAD_MAX_BYTES/, `${path} should use the shared upload byte limit`);
@@ -38,4 +39,9 @@ test("upload size limit is centralized and used by all upload paths", () => {
     "Large upload fallback must not send files up to the app limit through Vercel Functions"
   );
   assert.match(files["components/dashboard.tsx"], /file\.size <= directApiUploadMaxBytes/);
+  assert.match(
+    r2Storage,
+    /const endpoint = accountId \? `https:\/\/\$\{accountId\}\.r2\.cloudflarestorage\.com` : process\.env\.R2_ENDPOINT \|\| null/,
+    "R2 endpoint should prefer the canonical account S3 API endpoint over an env override"
+  );
 });

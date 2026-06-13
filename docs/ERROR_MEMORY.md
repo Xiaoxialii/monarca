@@ -658,3 +658,30 @@ For database connectors, never treat local defaults as production presets. If `h
 - `tests/mysql-readonly-data-sources.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 024
+
+### Date
+2026-06-13
+
+### Area
+Report UI actions
+
+### Symptom
+- The report header showed `导出` and `分享` buttons.
+- Clicking either button did nothing because they were rendered as static visual controls without client action handlers.
+
+### Root cause
+The UI added report action buttons for layout completeness but did not wire them to export or share behavior. There was no test asserting that visible report action controls had real handlers.
+
+### Fix
+Add export and share handlers to the report header. Export downloads the currently visible report tab payload as JSON. Share opens the native share sheet when available, otherwise copies the report link. Add user-facing success/failure feedback and a static regression test for the button handlers.
+
+### Prevention rule
+Before shipping visible UI controls, verify each button has an intended handler, a disabled/loading state when needed, and user feedback after the action. Add a regression test for high-visibility actions such as report export/share.
+
+### Files changed
+- `components/dashboard.tsx`
+- `tests/report-header-actions.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

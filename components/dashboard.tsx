@@ -6156,6 +6156,18 @@ function reportModeTabs(locale: Locale): Array<{ value: ReportModeView; label: s
   ];
 }
 
+function reportModeLabel(mode: ReportModeView, locale: Locale) {
+  return reportModeTabs(locale).find((tab) => tab.value === mode)?.label ?? mode;
+}
+
+function reportExportFileName(mode: ReportModeView, locale: Locale) {
+  const label = reportModeLabel(mode, locale)
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+  return `monarca-${label || mode}-${formatDateOnly(new Date())}.json`;
+}
+
 function reportModeDefaultDateRange(mode: Exclude<ReportModeView, "history">): SelectedReportDateRange {
   if (mode === "daily_brief") return { preset: "ALL" };
   if (mode === "weekly_report") return { preset: "ALL" };
@@ -7852,6 +7864,7 @@ function ReportsPage({
   });
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportGenerationMessage, setReportGenerationMessage] = useState<string | null>(null);
+  const [reportActionMessage, setReportActionMessage] = useState<string | null>(null);
   const [isDemoBannerDismissed, setIsDemoBannerDismissed] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(() => reportsPageDataCache as ReportData | null);
   const [reportDataByMode, setReportDataByMode] = useState<Partial<Record<ReportModeView, ReportData>>>(() =>
@@ -7978,7 +7991,10 @@ function ReportsPage({
   const composedReports = briefing?.payloadJson?.composedReports ?? {};
   const dailyBriefReport = composedReports.daily_brief ?? null;
   const weeklyReport = composedReports.weekly_report ?? null;
-  const reportHistory = activeReportData?.reportHistory ?? reportData?.reportHistory ?? [];
+  const reportHistory = useMemo(
+    () => activeReportData?.reportHistory ?? reportData?.reportHistory ?? [],
+    [activeReportData?.reportHistory, reportData?.reportHistory]
+  );
   const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
   const activeComposedReport = activeReportMode === "daily_brief"
     ? dailyBriefReport
@@ -7995,13 +8011,85 @@ function ReportsPage({
   const isLoadingReportsWorkspaceState = isLoadingReport || isLoadingConnectedSources;
   const showDemoReport = !hasRealReportContent;
   const demoMode = activeReportMode;
-  const demoContent = demoReportContent(demoMode, locale);
+  const demoContent = useMemo(() => demoReportContent(demoMode, locale), [demoMode, locale]);
   const reportPageTitle = copy.reports.pageTitle;
   const shouldShowOnboarding = false;
   const displayedHasConnectedData = hasConnectedDatabase || cachedSetupState.hasConnectedData || isLoadingConnectedSources;
   const displayedHasReport = hasRealReportContent || cachedSetupState.hasReport;
   const shouldShowSetupProgress =
     !shouldShowOnboarding && (displayedHasConnectedData || displayedHasReport || isLoadingReportsWorkspaceState);
+  const visibleReportContent = useMemo(() => {
+    if (activeReportMode === "history") {
+      return {
+        history: showDemoReport
+          ? (demoContent.reportHistory as NonNullable<ReportData["reportHistory"]>) ?? []
+          : reportHistory
+      };
+    }
+
+    return showDemoReport
+      ? demoContent
+      : activeComposedReport ?? briefing?.payloadJson ?? null;
+  }, [activeComposedReport, activeReportMode, briefing?.payloadJson, demoContent, reportHistory, showDemoReport]);
+  const visibleReportTitle = useMemo(
+    () => `${reportPageTitle} · ${reportModeLabel(activeReportMode, locale)}`,
+    [activeReportMode, locale, reportPageTitle]
+  );
+  const handleExportReport = useCallback(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+
+    const payload = {
+      title: visibleReportTitle,
+      mode: activeReportMode,
+      locale,
+      exportedAt: new Date().toISOString(),
+      generatedAt: lastReportUpdatedAt ?? null,
+      demo: showDemoReport,
+      content: visibleReportContent
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = reportExportFileName(activeReportMode, locale);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setReportActionMessage(isReportsZh ? "报告已导出为 JSON 文件。" : "Report exported as a JSON file.");
+  }, [activeReportMode, isReportsZh, lastReportUpdatedAt, locale, showDemoReport, visibleReportContent, visibleReportTitle]);
+  const handleShareReport = useCallback(async () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const shareUrl = `${window.location.origin}/dashboard/reports`;
+    const shareText = isReportsZh
+      ? `${visibleReportTitle}，上次更新时间：${lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : "尚未生成"}`
+      : `${visibleReportTitle}, last updated: ${lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : "not generated yet"}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: visibleReportTitle,
+          text: shareText,
+          url: shareUrl
+        });
+        setReportActionMessage(isReportsZh ? "分享面板已打开。" : "Share sheet opened.");
+        return;
+      }
+
+      await navigator.clipboard?.writeText(`${shareText}\n${shareUrl}`);
+      setReportActionMessage(isReportsZh ? "报告链接已复制。" : "Report link copied.");
+    } catch {
+      setReportActionMessage(isReportsZh ? "分享失败，请稍后重试。" : "Sharing failed. Please try again.");
+    }
+  }, [isReportsZh, lastReportUpdatedAt, visibleReportTitle]);
 
   useEffect(() => {
     if (isLoadingReportsWorkspaceState) {
@@ -8061,17 +8149,33 @@ function ReportsPage({
                 <a href="/checkout/professional">{isReportsZh ? "升级套餐" : "Upgrade plan"}</a>
               </Button>
             )}
-            <Button variant="outline" size="sm" className="whitespace-nowrap">
+            <Button
+              variant="outline"
+              size="sm"
+              className="whitespace-nowrap"
+              onClick={handleExportReport}
+              disabled={!visibleReportContent}
+            >
               <Download />
               {copy.reports.exportAction}
             </Button>
-            <Button variant="outline" size="sm" className="whitespace-nowrap">
+            <Button
+              variant="outline"
+              size="sm"
+              className="whitespace-nowrap"
+              onClick={() => void handleShareReport()}
+            >
               <Share2 />
               {copy.reports.shareAction}
             </Button>
           </div>
         </div>
       </div>
+      {reportActionMessage ? (
+        <div className="rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
+          {reportActionMessage}
+        </div>
+      ) : null}
       {reportGenerationMessage && hasRealReportContent ? (
         <div className="rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
           {reportGenerationMessage}

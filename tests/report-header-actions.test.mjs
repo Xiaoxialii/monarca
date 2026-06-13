@@ -9,16 +9,15 @@ function read(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("report header export and share buttons have real client actions", () => {
+test("report header share button has real client actions and PDF export is removed", () => {
   const dashboard = read("components/dashboard.tsx");
 
-  assert.match(dashboard, /const handleExportReport = useCallback/, "Reports page should define an export handler");
   assert.match(dashboard, /onClick=\{\(\) => generateReport\(activeReportMode === "history" \? "custom_report" : activeReportMode\)\}/, "Primary report button should always generate a report");
   assert.doesNotMatch(dashboard, /<a href="\/checkout\/professional">\{isReportsZh \? "升级套餐" : "Upgrade plan"\}<\/a>/, "Primary report button should not turn into an upgrade button");
-  assert.match(dashboard, /window\.print\(\)/, "Export should open browser print for PDF export");
-  assert.match(dashboard, /reportPdfTitle/, "PDF export should set a report-specific document title");
-  assert.match(dashboard, /导出 PDF/, "Export button should be labeled as PDF export in Chinese");
-  assert.match(dashboard, /onClick=\{handleExportReport\}/, "Export button should call the export handler");
+  assert.doesNotMatch(dashboard, /const handleExportReport = useCallback/, "Reports page should not define a PDF export handler");
+  assert.doesNotMatch(dashboard, /window\.print\(\)/, "Reports page should not open browser print for PDF export");
+  assert.doesNotMatch(dashboard, /导出 PDF|Export PDF/, "Reports page should not show a PDF export button");
+  assert.doesNotMatch(dashboard, /onClick=\{handleExportReport\}/, "Reports page should not wire a PDF export button");
   assert.match(dashboard, /const handleShareReport = useCallback/, "Reports page should define a share handler");
   assert.match(dashboard, /fetch\(\"\/api\/workspace\/invite-links\"/, "Share should create a workspace invite link");
   assert.match(dashboard, /navigator\.clipboard\?\.writeText\(payload\.inviteUrl\)/, "Share should copy the generated invite link");

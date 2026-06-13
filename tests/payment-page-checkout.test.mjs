@@ -64,19 +64,32 @@ test("database setup checkout submits a request instead of starting Stripe", () 
   );
   assert.match(
     paymentPage,
-    /price: "¥2,000 起"[\s\S]*cadence: "\/ 月"[\s\S]*billingNote: "年度服务周期，按年支付"/,
-    "Chinese professional checkout should show the annual billed from-2000 monthly price"
+    /price: "¥2,000"[\s\S]*cadence: "\/ 月"[\s\S]*billingNote: "年度服务周期，按年支付"/,
+    "Chinese professional checkout should show the annual billed 2000 monthly price"
   );
   assert.match(
     paymentPage,
-    /price: "From ¥2,000"[\s\S]*cadence: "\/ month"[\s\S]*billingNote: "Annual service term, billed annually"/,
-    "English professional checkout should show the annual billed from-2000 monthly price"
+    /price: "¥2,000"[\s\S]*cadence: "\/ month"[\s\S]*billingNote: "Annual service term, billed annually"/,
+    "English professional checkout should show the annual billed 2000 monthly price"
   );
   assert.doesNotMatch(
     paymentPage,
     /\$600|monthly payment supported|billed monthly|支持按月支付|按月付款/,
     "Professional checkout should not show the old dollar monthly-payment copy"
   );
+  for (const file of ["components/payment-page.tsx", "components/homepage.tsx"]) {
+    const source = read(file);
+    assert.match(source, /"连接数据库、Excel、SQL、CSV 等数据源"/, `${file} should include concise Chinese data-source benefit`);
+    assert.match(source, /"配置专属指标体系与经营报告结构"/, `${file} should include concise Chinese metric/report benefit`);
+    assert.match(source, /"专属分析师协助数据接入与分析落地"/, `${file} should include concise Chinese analyst benefit`);
+    assert.match(source, /"自动生成日报、周报和月经营分析"/, `${file} should include concise Chinese report benefit`);
+    assert.match(source, /"支持异常提醒、报告刷新和指标口径校验"/, `${file} should include concise Chinese quality benefit`);
+    assert.doesNotMatch(
+      source,
+      /配备专属分析师，协助梳理业务目标|包含一次数据接入与基础数据整理|协助定义日报、周报、月经营分析|适合销售、运营、增长、电商和管理团队使用|Dedicated analyst support to clarify goals|Built for sales, operations/,
+      `${file} should not keep the old long professional benefit copy`
+    );
+  }
   assert.doesNotMatch(
     paymentPage,
     /selectedPlan === "professional" && response\.status === 401/,

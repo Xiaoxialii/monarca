@@ -79,11 +79,11 @@ const paymentCopy = {
     stripePrices: {
       professional: {
         cny: {
-          price: "¥2,000 起",
+          price: "¥2,000",
           due: "评估后报价"
         },
         usd: {
-          price: "From ¥2,000",
+          price: "¥2,000",
           due: "Quote after review"
         }
       }
@@ -110,7 +110,7 @@ const paymentCopy = {
         badge: "Recommended",
         name: "Professional",
         subtitle: "Ongoing automated operating analysis with dedicated analyst support",
-        price: "From ¥2,000",
+        price: "¥2,000",
         cadence: "/ month",
         billingNote: "Annual service term, billed annually",
         description:
@@ -119,16 +119,11 @@ const paymentCopy = {
         primary: "Start professional",
         next: "Your workspace opens after checkout, then you can connect data",
         features: [
-          "Connect databases, Excel, SQL, and CSV files",
-          "Dedicated analyst support to clarify goals, data structure, and analysis needs",
-          "One data onboarding and basic data cleanup setup",
-          "Core team metric system configured around business goals",
-          "Report structure setup for daily, weekly, and monthly operating analysis",
+          "Connect databases, Excel, SQL, CSV, and other data sources",
+          "Configure a dedicated metric system and report structure",
+          "Dedicated analyst support for data onboarding and adoption",
           "Auto-generate daily, weekly, and monthly operating reports",
-          "Anomaly alerts, trend explanations, and AI action recommendations",
-          "Ongoing data updates and automatic report refresh",
-          "Metric definition checks to reduce misleading analysis",
-          "Built for sales, operations, growth, ecommerce, and management teams"
+          "Support anomaly alerts, report refresh, and metric checks"
         ]
       },
       enterprise: {
@@ -195,11 +190,11 @@ const paymentCopy = {
     stripePrices: {
       professional: {
         cny: {
-          price: "¥2,000 起",
+          price: "¥2,000",
           due: "评估后报价"
         },
         usd: {
-          price: "From ¥2,000",
+          price: "¥2,000",
           due: "Quote after review"
         }
       }
@@ -225,7 +220,7 @@ const paymentCopy = {
         badge: "推荐",
         name: "专业版",
         subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
-        price: "¥2,000 起",
+        price: "¥2,000",
         cadence: "/ 月",
         billingNote: "年度服务周期，按年支付",
         description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
@@ -233,16 +228,11 @@ const paymentCopy = {
         primary: "开通专业版",
         next: "结算后进入工作区，然后连接数据源",
         features: [
-          "支持连接数据库、Excel、SQL、CSV",
-          "配备专属分析师，协助梳理业务目标、数据结构和分析需求",
-          "包含一次数据接入与基础数据整理",
-          "根据业务目标配置团队核心指标体系",
-          "协助定义日报、周报、月经营分析的报告结构",
-          "自动生成日报、周报、月经营分析",
-          "支持异常提醒、趋势解读与 AI 行动建议",
-          "支持数据持续更新与报告自动刷新",
-          "提供指标口径校验，减少错误分析结论",
-          "适合销售、运营、增长、电商和管理团队使用"
+          "连接数据库、Excel、SQL、CSV 等数据源",
+          "配置专属指标体系与经营报告结构",
+          "专属分析师协助数据接入与分析落地",
+          "自动生成日报、周报和月经营分析",
+          "支持异常提醒、报告刷新和指标口径校验"
         ]
       },
       enterprise: {

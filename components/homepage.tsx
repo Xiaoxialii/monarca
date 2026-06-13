@@ -247,23 +247,18 @@ const homepageCopy = {
         {
           name: "Professional",
           subtitle: "For teams that need ongoing automated operating analysis with dedicated analyst support",
-          price: "From ¥2,000",
+          price: "¥2,000",
           cadence: "/ month",
           billingNote: "Annual service term, billed annually",
           badge: "Recommended",
           description:
             "Data onboarding + metric system configuration + dedicated analyst support + automated operating reports",
           features: [
-            "Connect databases, Excel, SQL, and CSV files",
-            "Dedicated analyst support to clarify goals, data structure, and analysis needs",
-            "One data onboarding and basic data cleanup setup",
-            "Core team metric system configured around business goals",
-            "Report structure setup for daily, weekly, and monthly operating analysis",
+            "Connect databases, Excel, SQL, CSV, and other data sources",
+            "Configure a dedicated metric system and report structure",
+            "Dedicated analyst support for data onboarding and adoption",
             "Auto-generate daily, weekly, and monthly operating reports",
-            "Anomaly alerts, trend explanations, and AI action recommendations",
-            "Ongoing data updates and automatic report refresh",
-            "Metric definition checks to reduce misleading analysis",
-            "Built for sales, operations, growth, ecommerce, and management teams"
+            "Support anomaly alerts, report refresh, and metric checks"
           ],
           cta: "Book a 30-min Business Consultation",
           href: "/consulting"
@@ -480,22 +475,17 @@ const homepageCopy = {
         {
           name: "专业版",
           subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
-          price: "¥2,000 起",
+          price: "¥2,000",
           cadence: "/ 月",
           billingNote: "年度服务周期，按年支付",
           badge: "推荐",
           description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
           features: [
-            "支持连接数据库、Excel、SQL、CSV",
-            "配备专属分析师，协助梳理业务目标、数据结构和分析需求",
-            "包含一次数据接入与基础数据整理",
-            "根据业务目标配置团队核心指标体系",
-            "协助定义日报、周报、月经营分析的报告结构",
-            "自动生成日报、周报、月经营分析",
-            "支持异常提醒、趋势解读与 AI 行动建议",
-            "支持数据持续更新与报告自动刷新",
-            "提供指标口径校验，减少错误分析结论",
-            "适合销售、运营、增长、电商和管理团队使用"
+            "连接数据库、Excel、SQL、CSV 等数据源",
+            "配置专属指标体系与经营报告结构",
+            "专属分析师协助数据接入与分析落地",
+            "自动生成日报、周报和月经营分析",
+            "支持异常提醒、报告刷新和指标口径校验"
           ],
           cta: "预约 30 分钟商业咨询",
           href: "/consulting"

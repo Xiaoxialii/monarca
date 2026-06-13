@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   CreditCard,
   Database,
-  Download,
   FileText,
   HelpCircle,
   LineChart,
@@ -4377,7 +4376,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     ? [
         {
           name: "专业版",
-          price: "¥2,000 起 / 月",
+          price: "¥2,000 / 月",
           description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "开通专业版",
@@ -4395,7 +4394,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     : [
         {
           name: "Professional",
-          price: "From ¥2,000 / month",
+          price: "¥2,000 / month",
           description: "Data integration, expert-assisted metric configuration, and automated reports",
           href: "/checkout/professional",
           action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Start professional",
@@ -6164,18 +6163,6 @@ function reportModeTabs(locale: Locale): Array<{ value: ReportModeView; label: s
     { value: "custom_report", label: isZh ? "月经营报告" : "Monthly Business Report" },
     { value: "history", label: isZh ? "历史记录" : "History" }
   ];
-}
-
-function reportModeLabel(mode: ReportModeView, locale: Locale) {
-  return reportModeTabs(locale).find((tab) => tab.value === mode)?.label ?? mode;
-}
-
-function reportPdfTitle(mode: ReportModeView, locale: Locale) {
-  const label = reportModeLabel(mode, locale)
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")
-    .replace(/^-+|-+$/g, "");
-  return `monarca-${label || mode}-${formatDateOnly(new Date())}`;
 }
 
 function reportModeDefaultDateRange(mode: Exclude<ReportModeView, "history">): SelectedReportDateRange {
@@ -8038,39 +8025,6 @@ function ReportsPage({
   const displayedHasReport = hasRealReportContent || cachedSetupState.hasReport;
   const shouldShowSetupProgress =
     !shouldShowOnboarding && (displayedHasConnectedData || displayedHasReport || isLoadingReportsWorkspaceState);
-  const visibleReportContent = useMemo(() => {
-    if (activeReportMode === "history") {
-      return {
-        history: showDemoReport
-          ? (demoContent.reportHistory as NonNullable<ReportData["reportHistory"]>) ?? []
-          : reportHistory
-      };
-    }
-
-    return showDemoReport
-      ? demoContent
-      : activeComposedReport ?? briefing?.payloadJson ?? null;
-  }, [activeComposedReport, activeReportMode, briefing?.payloadJson, demoContent, reportHistory, showDemoReport]);
-  const handleExportReport = useCallback(() => {
-    if (typeof window === "undefined" || typeof document === "undefined") {
-      return;
-    }
-
-    const previousTitle = document.title;
-
-    document.title = reportPdfTitle(activeReportMode, locale);
-    setReportActionMessage(
-      isReportsZh
-        ? "正在打开 PDF 导出面板，请在打印窗口中选择“保存为 PDF”。"
-        : "Opening PDF export. Choose “Save as PDF” in the print dialog."
-    );
-    window.setTimeout(() => {
-      window.print();
-      window.setTimeout(() => {
-        document.title = previousTitle;
-      }, 500);
-    }, 50);
-  }, [activeReportMode, isReportsZh, locale]);
   const handleShareReport = useCallback(async () => {
     if (typeof window === "undefined") {
       return;
@@ -8159,16 +8113,6 @@ function ReportsPage({
               {isGeneratingReport
                 ? copy.reports.generatingAction
                 : reportGenerateButtonLabel(reportEntitlement, locale, copy.reports.generateAction)}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="whitespace-nowrap"
-              onClick={handleExportReport}
-              disabled={!visibleReportContent}
-            >
-              <Download />
-              {isReportsZh ? "导出 PDF" : "Export PDF"}
             </Button>
             <Button
               variant="outline"

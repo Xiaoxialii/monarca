@@ -20,7 +20,7 @@ const successCopy = {
     confirmFailed: "Payment succeeded, but plan access was not activated automatically. Please refresh or contact support.",
     plans: {
       "database-setup": "Database setup",
-      professional: "Professional · From ¥2,000 / month · annual service term, billed annually"
+      professional: "Professional · ¥2,000 / month · annual service term, billed annually"
     }
   },
   zh: {
@@ -35,7 +35,7 @@ const successCopy = {
     confirmFailed: "付款已成功，但套餐权限未自动开通。请刷新页面或联系支持。",
     plans: {
       "database-setup": "数据库搭建",
-      professional: "专业版 · ¥2,000 起 / 月 · 年度服务周期，按年支付"
+      professional: "专业版 · ¥2,000 / 月 · 年度服务周期，按年支付"
     }
   }
 };

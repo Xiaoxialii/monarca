@@ -1,4 +1,5 @@
 import { Dashboard } from "@/components/dashboard";
+import { getRequestLocale } from "@/lib/server-locale";
 
 export default async function ConnectDataSourcePage({
   searchParams
@@ -7,5 +8,5 @@ export default async function ConnectDataSourcePage({
 }) {
   const params = await searchParams;
 
-  return <Dashboard view="import-data-connect" initialDataSource={params.source} />;
+  return <Dashboard view="import-data-connect" initialDataSource={params.source} defaultLocale={await getRequestLocale("en")} />;
 }

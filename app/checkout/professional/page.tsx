@@ -1,5 +1,6 @@
 import { PaymentPage } from "@/components/payment-page";
+import { getRequestLocale } from "@/lib/server-locale";
 
-export default function ProfessionalCheckoutPage() {
-  return <PaymentPage plan="professional" />;
+export default async function ProfessionalCheckoutPage() {
+  return <PaymentPage plan="professional" defaultLocale={await getRequestLocale("en")} />;
 }

@@ -1289,8 +1289,8 @@ function Integrations({ copy }: { copy: HomeCopy["integrations"] }) {
   );
 }
 
-export function Homepage() {
-  const [locale, setLocale] = useLocale("en");
+export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
+  const [locale, setLocale] = useLocale(defaultLocale);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const copy = homepageCopy[getCopyLocale(locale)];
   const router = useRouter();

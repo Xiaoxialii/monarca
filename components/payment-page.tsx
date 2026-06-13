@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getCopyLocale, getHtmlLang, useLocale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type Locale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
 export type PaymentPlan = "database-setup" | "professional" | "enterprise";
@@ -275,7 +275,7 @@ type BillingEntitlementSummary = {
   upgradeRequiredReason: string | null;
 };
 
-export function PaymentPage({ plan }: { plan: PaymentPlan }) {
+export function PaymentPage({ plan, defaultLocale = "en" }: { plan: PaymentPlan; defaultLocale?: Locale }) {
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan>(plan);
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
@@ -286,7 +286,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const [checkoutStatus, setCheckoutStatus] = useState<"success" | "cancelled" | null>(null);
   const [entitlement, setEntitlement] = useState<BillingEntitlementSummary | null>(null);
   const [isLoadingEntitlement, setIsLoadingEntitlement] = useState(true);
-  const [locale] = useLocale("en");
+  const [locale] = useLocale(defaultLocale);
   const [checkoutCurrency, setCheckoutCurrency] = useState<CheckoutCurrency>("cny");
   const router = useRouter();
   const copy = paymentCopy[getCopyLocale(locale)];

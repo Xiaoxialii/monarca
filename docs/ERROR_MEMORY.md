@@ -813,3 +813,45 @@ Before changing report UI, search reusable report components for hard-coded Chin
 - `tests/report-composers.test.mjs`
 - `tests/report-header-actions.test.mjs`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 029
+
+### Date
+2026-06-14
+
+### Area
+Locale detection and first render
+
+### Symptom
+- Users from China IP addresses saw English on the first render.
+- The `/api/geo/country` endpoint returned a country code, but page language still defaulted to English.
+- Language could switch later only after local storage or user preference loaded, causing a wrong-language first screen.
+
+### Root cause
+Public pages and dashboard components called `useLocale("en")` directly. IP geo detection was only used by the phone country selector and was not part of server-side locale initialization.
+
+### Fix
+Add server request-locale resolution from locale cookie, IP country headers, and `Accept-Language`. Pass that default locale into public pages, checkout, sign-in/sign-up, support, and dashboard. Persist IP-derived locale in middleware when no locale cookie exists, and sync localStorage language preferences back to the locale cookie.
+
+### Prevention rule
+For locale-sensitive pages, never hard-code the client default locale as English. Compute the first-render locale on the server from user cookie, IP country, and `Accept-Language`, then allow stored or saved user preferences to override it.
+
+### Files changed
+- `lib/server-locale.ts`
+- `lib/locale.ts`
+- `proxy.ts`
+- `app/layout.tsx`
+- `app/page.tsx`
+- `app/sign-in/page.tsx`
+- `app/sign-up/page.tsx`
+- `app/checkout/**/page.tsx`
+- `app/dashboard/**/page.tsx`
+- `components/homepage.tsx`
+- `components/sign-in-panel.tsx`
+- `components/sign-up-panel.tsx`
+- `components/payment-page.tsx`
+- `components/support-page.tsx`
+- `components/dashboard.tsx`
+- `tests/locale-default.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

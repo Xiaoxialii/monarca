@@ -16,6 +16,7 @@ const LOCALE_USER_STORAGE_KEY = "butterfly-locale-user-id";
 const LOCALE_DIRTY_STORAGE_KEY = "butterfly-locale-dirty";
 
 const LOCALE_CHANGE_EVENT = "butterfly-locale-change";
+const localeCookieMaxAge = 60 * 60 * 24 * 365;
 
 function isLocale(value: string | null): value is Locale {
   return value === "en" || value === "zh";
@@ -48,6 +49,7 @@ function readStoredLocale(defaultLocale: Locale) {
 
 export function setStoredLocale(locale: Locale) {
   window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  document.cookie = `${LOCALE_STORAGE_KEY}=${locale}; path=/; max-age=${localeCookieMaxAge}; samesite=lax`;
   window.dispatchEvent(new CustomEvent<Locale>(LOCALE_CHANGE_EVENT, { detail: locale }));
 }
 
@@ -89,6 +91,7 @@ export function useLocale(defaultLocale: Locale = "en") {
     let isCancelled = false;
     const storedLocale = readStoredLocale(defaultLocale);
 
+    document.cookie = `${LOCALE_STORAGE_KEY}=${storedLocale}; path=/; max-age=${localeCookieMaxAge}; samesite=lax`;
     setLocaleState(storedLocale);
     setIsReady(true);
 

@@ -1,5 +1,6 @@
 import { Dashboard } from "@/components/dashboard";
+import { getRequestLocale } from "@/lib/server-locale";
 
-export default function ReportPage() {
-  return <Dashboard view="report" />;
+export default async function ReportPage() {
+  return <Dashboard view="report" defaultLocale={await getRequestLocale("en")} />;
 }

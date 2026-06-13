@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale, type Locale } from "@/lib/locale";
 
 const supportCopy: Record<
   CopyLocale,
@@ -123,8 +123,8 @@ const supportCopy: Record<
   }
 };
 
-export function SupportPage() {
-  const [locale, , isLocaleReady] = useLocale("en");
+export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
+  const [locale, , isLocaleReady] = useLocale(defaultLocale);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");

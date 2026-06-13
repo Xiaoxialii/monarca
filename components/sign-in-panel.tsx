@@ -10,7 +10,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale, type Locale } from "@/lib/locale";
 
 const signInCopy = {
   en: {
@@ -114,12 +114,12 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   return fallback;
 }
 
-export function SignInPanel() {
+export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded: isUserLoaded, isSignedIn } = useUser();
-  const [locale, setLocale] = useLocale("en");
+  const [locale, setLocale] = useLocale(defaultLocale);
   const copy = signInCopy[getCopyLocale(locale)];
   const redirectPath = authRedirectPath(searchParams);
 

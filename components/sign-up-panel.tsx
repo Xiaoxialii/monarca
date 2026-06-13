@@ -8,7 +8,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale } from "@/lib/locale";
+import { getCopyLocale, getHtmlLang, useLocale, type CopyLocale, type Locale } from "@/lib/locale";
 
 const signUpCopy = {
   en: {
@@ -136,9 +136,9 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   return fallback;
 }
 
-export function SignUpPanel() {
+export function SignUpPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  const [locale, setLocale] = useLocale("en");
+  const [locale, setLocale] = useLocale(defaultLocale);
   const copy = signUpCopy[getCopyLocale(locale)];
 
   return (

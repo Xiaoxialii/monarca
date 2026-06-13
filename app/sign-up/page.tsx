@@ -1,10 +1,13 @@
 import { Suspense } from "react";
 import { SignUpPanel } from "@/components/sign-up-panel";
+import { getRequestLocale } from "@/lib/server-locale";
 
-export default function SignUpPage() {
+export default async function SignUpPage() {
+  const defaultLocale = await getRequestLocale("en");
+
   return (
     <Suspense>
-      <SignUpPanel />
+      <SignUpPanel defaultLocale={defaultLocale} />
     </Suspense>
   );
 }

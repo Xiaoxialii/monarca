@@ -19,4 +19,5 @@ Read this before every coding task. Keep it short. Use `docs/ERROR_MEMORY.md` on
 13. **UI should hide internals and real controls must work.** Do not leak `STORED_FILE_PATH`, `dailyRows`, or `verifiedMetrics`; visible buttons need handlers, feedback, and empty/error states.
 14. **Mobile UI is not desktop UI.** Test signed-in/signed-out and narrow viewport states; do not blindly reuse desktop navigation on mobile.
 15. **Checkout flows must match current product intent.** Do not infer Stripe from a plan name; only explicitly payment-enabled plans should call Stripe. Evaluation, consulting, enterprise, and setup flows submit requests.
-16. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.
+16. **Locale first render must use request context.** Do not hard-code `useLocale("en")` on public entry pages; pass a server request locale from cookie, IP country, or `Accept-Language`, then let user preference override it.
+17. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.

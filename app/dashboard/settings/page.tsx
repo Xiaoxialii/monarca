@@ -1,5 +1,6 @@
 import { Dashboard } from "@/components/dashboard";
+import { getRequestLocale } from "@/lib/server-locale";
 
-export default function SettingsPage() {
-  return <Dashboard view="settings" />;
+export default async function SettingsPage() {
+  return <Dashboard view="settings" defaultLocale={await getRequestLocale("en")} />;
 }

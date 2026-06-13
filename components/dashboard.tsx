@@ -15002,12 +15002,14 @@ function ReportPage({ locale }: { locale: Locale }) {
 
 export function Dashboard({
   view = "overview",
-  initialDataSource
+  initialDataSource,
+  defaultLocale = "en"
 }: {
   view?: DashboardView;
   initialDataSource?: string;
+  defaultLocale?: Locale;
 }) {
-  const [locale, setLocale, isLocaleReady] = useLocale("en");
+  const [locale, setLocale, isLocaleReady] = useLocale(defaultLocale);
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? []);

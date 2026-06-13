@@ -1,5 +1,6 @@
 import { Homepage } from "@/components/homepage";
+import { getRequestLocale } from "@/lib/server-locale";
 
-export default function Page() {
-  return <Homepage />;
+export default async function Page() {
+  return <Homepage defaultLocale={await getRequestLocale("en")} />;
 }

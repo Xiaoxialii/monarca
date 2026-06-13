@@ -5279,7 +5279,7 @@ function ConnectorPanel({
     }).catch(() => null);
 
     if (!presignResponse) {
-      if (file.size <= directApiUploadMaxBytes) {
+      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
         return uploadSmallFile(file);
       }
 
@@ -5297,6 +5297,16 @@ function ConnectorPanel({
       bucket?: string;
       contentType?: string;
     } | null;
+
+    console.info("Upload presign response", {
+      ok: presignResponse.ok,
+      status: presignResponse.status,
+      statusText: presignResponse.statusText,
+      provider: presignPayload?.provider,
+      bucket: presignPayload?.bucket,
+      key: presignPayload?.key ?? presignPayload?.path,
+      contentType: presignPayload?.contentType
+    });
 
     if (!presignResponse.ok || !presignPayload?.ok || !presignPayload.uploadUrl || !presignPayload.path) {
       if (presignPayload?.message?.includes("R2 storage is not configured")) {
@@ -5316,7 +5326,7 @@ function ConnectorPanel({
     }).catch(() => null);
 
     if (!uploadResponse) {
-      if (file.size <= directApiUploadMaxBytes) {
+      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
         return uploadSmallFile(file);
       }
 
@@ -5340,7 +5350,18 @@ function ConnectorPanel({
         })()
       : null;
 
+    console.info("R2 direct upload response", {
+      ok: uploadResponse.ok,
+      status: uploadResponse.status,
+      statusText: uploadResponse.statusText,
+      body: uploadText.slice(0, 1000)
+    });
+
     if (!uploadResponse.ok) {
+      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
+        return uploadSmallFile(file);
+      }
+
       throw new Error(uploadPayload?.message || uploadPayload?.error || (isZh
         ? "大文件直传失败。请检查 Cloudflare R2 CORS、bucket 或凭证配置。"
         : "Large file direct upload failed. Check Cloudflare R2 CORS, bucket, or credentials."));

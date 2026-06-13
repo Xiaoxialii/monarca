@@ -84,7 +84,7 @@ export async function ensureR2UploadCors(extraOrigins: Array<string | null | und
         CORSRules: [
           {
             AllowedHeaders: ["*"],
-            AllowedMethods: ["PUT", "GET", "HEAD"],
+            AllowedMethods: ["PUT", "GET", "HEAD", "POST"],
             AllowedOrigins: allowedOrigins,
             ExposeHeaders: ["ETag"],
             MaxAgeSeconds: 3600

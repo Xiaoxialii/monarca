@@ -78,6 +78,15 @@ export async function POST(request: Request) {
       contentType: stringValue(payload?.contentType) || "application/octet-stream"
     });
 
+    console.info("R2 presign upload prepared", {
+      ok: true,
+      provider: "cloudflare-r2",
+      bucket: upload.bucket,
+      key: upload.key,
+      contentType: upload.contentType,
+      fileSize
+    });
+
     return NextResponse.json({
       ok: true,
       provider: "cloudflare-r2",

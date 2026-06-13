@@ -547,3 +547,28 @@ Before changing browser direct upload logic, verify the presign route, storage C
 - `lib/r2-storage.ts`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 020
+
+### Date
+2026-06-13
+
+### Area
+Browser direct upload fallback scope
+
+### Symptom
+- Production upload still showed the R2 direct-upload failure message after CORS handling was added.
+- The fallback path only retried app API upload for files under the direct API threshold, so larger CSV/XLS/XLSX files stayed blocked by R2 CORS.
+
+### Root cause
+The upload fallback was scoped to the small-file threshold instead of the project upload limit. R2 direct upload was treated as required for larger files, even though the app upload API can still be attempted as a reliability fallback.
+
+### Fix
+When presign, direct `PUT`, or direct upload status fails, retry the app upload API for any file within `FILE_UPLOAD_MAX_BYTES`.
+
+### Prevention rule
+Browser direct-to-storage upload should be an optimization, not the only path. For files within the project upload limit, keep an app API fallback unless a platform hard limit is confirmed and handled with a clear message.
+
+### Files changed
+- `components/dashboard.tsx`
+- `docs/ERROR_MEMORY.md`

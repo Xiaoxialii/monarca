@@ -5,7 +5,7 @@ import { useSignIn } from "@clerk/nextjs/legacy";
 import type { SignInFirstFactor } from "@clerk/nextjs/types";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
@@ -104,18 +104,30 @@ const signInCopy = {
 type SignInCopy = (typeof signInCopy)[CopyLocale];
 type CodeFactor = Extract<SignInFirstFactor, { strategy: "email_code" }>;
 
+function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/dashboard") {
+  const value = searchParams?.get("redirect_url");
+
+  if (value?.startsWith("/") && !value.startsWith("//")) {
+    return value;
+  }
+
+  return fallback;
+}
+
 export function SignInPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded: isUserLoaded, isSignedIn } = useUser();
   const [locale, setLocale] = useLocale("en");
   const copy = signInCopy[getCopyLocale(locale)];
+  const redirectPath = authRedirectPath(searchParams);
 
   useEffect(() => {
     if (clerkKey && isUserLoaded && isSignedIn) {
-      router.replace("/dashboard");
+      router.replace(redirectPath);
     }
-  }, [clerkKey, isSignedIn, isUserLoaded, router]);
+  }, [clerkKey, isSignedIn, isUserLoaded, redirectPath, router]);
 
   return (
     <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#f6f8fb] px-5 py-6 sm:px-8">
@@ -216,6 +228,7 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
 
 function PasswordSignIn({ copy }: { copy: SignInCopy }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, signIn, setActive } = useSignIn();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -267,14 +280,14 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
+        router.push(authRedirectPath(searchParams));
         return;
       }
 
       setError(result.status === "needs_second_factor" ? copy.secondFactorRequired : copy.passwordUnavailable);
     } catch (caughtError) {
       if (isAlreadySignedInError(caughtError)) {
-        router.replace("/dashboard");
+        router.replace(authRedirectPath(searchParams));
         return;
       }
 
@@ -327,6 +340,7 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 
 function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
   const { isLoaded, signIn } = useSignIn();
+  const searchParams = useSearchParams();
   const [error, setError] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
 
@@ -349,7 +363,7 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
       await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: "/sign-in/sso-callback",
-        redirectUrlComplete: "/dashboard"
+        redirectUrlComplete: authRedirectPath(searchParams)
       });
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
@@ -377,6 +391,7 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
 
 function CodeSignIn({ copy }: { copy: SignInCopy }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, signIn, setActive } = useSignIn();
   const [emailAddress, setEmailAddress] = useState("");
   const [code, setCode] = useState("");
@@ -427,7 +442,7 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
 
         if (result.status === "complete" && result.createdSessionId) {
           await setActive({ session: result.createdSessionId });
-          router.push("/dashboard");
+          router.push(authRedirectPath(searchParams));
           return;
         }
 
@@ -477,7 +492,7 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
+        router.push(authRedirectPath(searchParams));
         return;
       }
 

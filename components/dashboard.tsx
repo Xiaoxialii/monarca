@@ -4354,7 +4354,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
 
   const currentPlan =
     entitlement?.planType === "MONTHLY"
-      ? isZh ? "月付无限版" : "Monthly Unlimited"
+      ? isZh ? "专业版" : "Professional"
       : isZh ? "免费版" : "Free";
   const formatDate = (value: string | null) =>
     value ? new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", { dateStyle: "medium" }).format(new Date(value)) : "-";
@@ -4388,7 +4388,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           price: "定制",
           description: "适合多工作区、权限隔离和企业级数据治理",
           href: "/checkout/enterprise",
-          action: "升级套餐",
+          action: "升级企业版",
           tone: "primary"
         }
       ]
@@ -4406,7 +4406,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           price: "Custom",
           description: "Workspace controls, governance, and enterprise data workflows",
           href: "/checkout/enterprise",
-          action: "Upgrade plan",
+          action: "Upgrade to Enterprise",
           tone: "primary"
         }
       ];
@@ -4498,9 +4498,9 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
 
           <div className="mt-4 flex flex-wrap gap-2">
             <Button asChild size="sm">
-              <a href="/checkout/professional">
+              <a href={entitlement?.planType === "MONTHLY" ? "/checkout/enterprise" : "/checkout/professional"}>
                 <CreditCard className="size-4" />
-                {entitlement?.planType === "MONTHLY" ? isZh ? "管理订阅" : "Manage subscription" : isZh ? "开通专业版" : "Start Professional"}
+                {entitlement?.planType === "MONTHLY" ? isZh ? "升级企业版" : "Upgrade to Enterprise" : isZh ? "开通专业版" : "Start Professional"}
               </a>
             </Button>
             {canCancelSubscription ? (
@@ -4582,7 +4582,9 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
           <CardHeader className="border-b p-4">
             <CardTitle className="text-base">{isZh ? "套餐操作" : "Plan actions"}</CardTitle>
             <CardDescription className="mt-1">
-              {isZh ? "开通专业版以连接数据并生成报告" : "Start Professional to connect data and generate reports"}
+              {entitlement?.planType === "MONTHLY"
+                ? isZh ? "升级企业版以获得多工作区、权限隔离和企业级数据治理" : "Upgrade to Enterprise for workspace controls, governance, and enterprise data workflows"
+                : isZh ? "开通专业版以连接数据并生成报告" : "Start Professional to connect data and generate reports"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 p-4">
@@ -4596,9 +4598,9 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
               </p>
             </div>
             <Button asChild className="w-full" size="sm">
-              <a href="/checkout/professional">
+              <a href={entitlement?.planType === "MONTHLY" ? "/checkout/enterprise" : "/checkout/professional"}>
                 <CreditCard className="size-4" />
-                {isZh ? "开通专业版" : "Start Professional"}
+                {entitlement?.planType === "MONTHLY" ? isZh ? "升级企业版" : "Upgrade to Enterprise" : isZh ? "开通专业版" : "Start Professional"}
               </a>
             </Button>
           </CardContent>
@@ -6160,12 +6162,12 @@ function reportModeLabel(mode: ReportModeView, locale: Locale) {
   return reportModeTabs(locale).find((tab) => tab.value === mode)?.label ?? mode;
 }
 
-function reportExportFileName(mode: ReportModeView, locale: Locale) {
+function reportPdfTitle(mode: ReportModeView, locale: Locale) {
   const label = reportModeLabel(mode, locale)
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")
     .replace(/^-+|-+$/g, "");
-  return `monarca-${label || mode}-${formatDateOnly(new Date())}.json`;
+  return `monarca-${label || mode}-${formatDateOnly(new Date())}`;
 }
 
 function reportModeDefaultDateRange(mode: Exclude<ReportModeView, "history">): SelectedReportDateRange {
@@ -7863,8 +7865,10 @@ function ReportsPage({
     }
   });
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isCreatingShareLink, setIsCreatingShareLink] = useState(false);
   const [reportGenerationMessage, setReportGenerationMessage] = useState<string | null>(null);
   const [reportActionMessage, setReportActionMessage] = useState<string | null>(null);
+  const [reportActionLink, setReportActionLink] = useState<string | null>(null);
   const [isDemoBannerDismissed, setIsDemoBannerDismissed] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(() => reportsPageDataCache as ReportData | null);
   const [reportDataByMode, setReportDataByMode] = useState<Partial<Record<ReportModeView, ReportData>>>(() =>
@@ -8031,65 +8035,62 @@ function ReportsPage({
       ? demoContent
       : activeComposedReport ?? briefing?.payloadJson ?? null;
   }, [activeComposedReport, activeReportMode, briefing?.payloadJson, demoContent, reportHistory, showDemoReport]);
-  const visibleReportTitle = useMemo(
-    () => `${reportPageTitle} · ${reportModeLabel(activeReportMode, locale)}`,
-    [activeReportMode, locale, reportPageTitle]
-  );
   const handleExportReport = useCallback(() => {
     if (typeof window === "undefined" || typeof document === "undefined") {
       return;
     }
 
-    const payload = {
-      title: visibleReportTitle,
-      mode: activeReportMode,
-      locale,
-      exportedAt: new Date().toISOString(),
-      generatedAt: lastReportUpdatedAt ?? null,
-      demo: showDemoReport,
-      content: visibleReportContent
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json;charset=utf-8"
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
+    const previousTitle = document.title;
 
-    anchor.href = url;
-    anchor.download = reportExportFileName(activeReportMode, locale);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    setReportActionMessage(isReportsZh ? "报告已导出为 JSON 文件。" : "Report exported as a JSON file.");
-  }, [activeReportMode, isReportsZh, lastReportUpdatedAt, locale, showDemoReport, visibleReportContent, visibleReportTitle]);
+    document.title = reportPdfTitle(activeReportMode, locale);
+    setReportActionMessage(
+      isReportsZh
+        ? "正在打开 PDF 导出面板，请在打印窗口中选择“保存为 PDF”。"
+        : "Opening PDF export. Choose “Save as PDF” in the print dialog."
+    );
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => {
+        document.title = previousTitle;
+      }, 500);
+    }, 50);
+  }, [activeReportMode, isReportsZh, locale]);
   const handleShareReport = useCallback(async () => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const shareUrl = `${window.location.origin}/dashboard/reports`;
-    const shareText = isReportsZh
-      ? `${visibleReportTitle}，上次更新时间：${lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : "尚未生成"}`
-      : `${visibleReportTitle}, last updated: ${lastReportUpdatedAt ? formatReportDate(lastReportUpdatedAt) : "not generated yet"}`;
+    setIsCreatingShareLink(true);
+    setReportActionMessage(null);
+    setReportActionLink(null);
 
     try {
-      if (navigator.share) {
-        await navigator.share({
-          title: visibleReportTitle,
-          text: shareText,
-          url: shareUrl
-        });
-        setReportActionMessage(isReportsZh ? "分享面板已打开。" : "Share sheet opened.");
-        return;
+      const response = await fetch("/api/workspace/invite-links", {
+        method: "POST"
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        inviteUrl?: string;
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok || !payload.inviteUrl) {
+        throw new Error(payload?.message || (isReportsZh ? "生成邀请链接失败。" : "Failed to create invite link."));
       }
 
-      await navigator.clipboard?.writeText(`${shareText}\n${shareUrl}`);
-      setReportActionMessage(isReportsZh ? "报告链接已复制。" : "Report link copied.");
-    } catch {
-      setReportActionMessage(isReportsZh ? "分享失败，请稍后重试。" : "Sharing failed. Please try again.");
+      await navigator.clipboard?.writeText(payload.inviteUrl);
+      setReportActionLink(payload.inviteUrl);
+      setReportActionMessage(
+        isReportsZh
+          ? "阅读权限邀请链接已复制。对方打开链接并登录后，会以观察者权限加入当前工作区。"
+          : "Viewer invite link copied. The recipient can open it and sign in to join this workspace as a viewer."
+      );
+    } catch (error) {
+      setReportActionMessage(error instanceof Error ? error.message : isReportsZh ? "分享失败，请稍后重试。" : "Sharing failed. Please try again.");
+    } finally {
+      setIsCreatingShareLink(false);
     }
-  }, [isReportsZh, lastReportUpdatedAt, visibleReportTitle]);
+  }, [isReportsZh]);
 
   useEffect(() => {
     if (isLoadingReportsWorkspaceState) {
@@ -8106,8 +8107,8 @@ function ReportsPage({
   }, [hasConnectedDatabase, hasRealReportContent, isLoadingReportsWorkspaceState]);
 
   return (
-    <section id="reports" className="dashboard-density flex min-h-full min-w-0 max-w-full flex-col gap-3 overflow-hidden scroll-mt-20">
-      <div className="flex flex-col gap-4 px-1 pb-1 xl:flex-row xl:items-start xl:justify-between">
+    <section id="reports" className="report-print-scope dashboard-density flex min-h-full min-w-0 max-w-full flex-col gap-3 overflow-hidden scroll-mt-20">
+      <div className="report-print-header flex flex-col gap-4 px-1 pb-1 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-3xl">
           <Badge className="mb-2 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
             {copy.reports.pageBadge}
@@ -8119,7 +8120,7 @@ function ReportsPage({
             {copy.reports.pageSubtitle}
           </p>
         </div>
-        <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
+        <div className="report-no-print flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
           <div className="whitespace-nowrap rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm">
             {isReportsZh ? "上次更新时间" : "Last updated"}{" "}
             <span className="text-slate-950">
@@ -8157,23 +8158,29 @@ function ReportsPage({
               disabled={!visibleReportContent}
             >
               <Download />
-              {copy.reports.exportAction}
+              {isReportsZh ? "导出 PDF" : "Export PDF"}
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="whitespace-nowrap"
               onClick={() => void handleShareReport()}
+              disabled={isCreatingShareLink}
             >
-              <Share2 />
+              <Share2 className={cn(isCreatingShareLink && "animate-pulse")} />
               {copy.reports.shareAction}
             </Button>
           </div>
         </div>
       </div>
       {reportActionMessage ? (
-        <div className="rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
-          {reportActionMessage}
+        <div className="report-no-print rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
+          <p>{reportActionMessage}</p>
+          {reportActionLink ? (
+            <p className="mt-2 break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              {reportActionLink}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {reportGenerationMessage && hasRealReportContent ? (
@@ -8195,7 +8202,7 @@ function ReportsPage({
       ) : null}
 
       {!shouldShowOnboarding ? (
-        <div className="sticky top-0 z-40 -mx-4 bg-slate-50/95 px-4 py-2 backdrop-blur lg:-mx-6 lg:px-6">
+        <div className="report-no-print sticky top-0 z-40 -mx-4 bg-slate-50/95 px-4 py-2 backdrop-blur lg:-mx-6 lg:px-6">
           <div className="flex flex-wrap gap-2 rounded-xl border bg-white p-2 shadow-sm">
             {reportModeTabs(locale).map((tab) => (
               <button

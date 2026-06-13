@@ -3,7 +3,7 @@
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,16 @@ const signUpCopy = {
 
 type SignUpCopy = (typeof signUpCopy)[CopyLocale];
 
+function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/dashboard") {
+  const value = searchParams?.get("redirect_url");
+
+  if (value?.startsWith("/") && !value.startsWith("//")) {
+    return value;
+  }
+
+  return fallback;
+}
+
 export function SignUpPanel() {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const [locale, setLocale] = useLocale("en");
@@ -193,6 +203,7 @@ function ClerkSignUp({ copy }: { copy: SignUpCopy }) {
 
 function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, signUp, setActive } = useSignUp();
   const [mode, setMode] = useState<"email" | "password">("email");
   const [emailAddress, setEmailAddress] = useState("");
@@ -295,7 +306,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
   async function activateCompletedSignUp(createdSessionId: string | null) {
     if (createdSessionId && setActive) {
       await setActive({ session: createdSessionId });
-      router.push("/dashboard");
+      router.push(authRedirectPath(searchParams));
     }
   }
 
@@ -309,7 +320,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
       await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: "/sign-up/sso-callback",
-        redirectUrlComplete: "/dashboard"
+        redirectUrlComplete: authRedirectPath(searchParams)
       });
     } catch (caughtError) {
       setError(getErrorMessage(caughtError) || copy.googleUnavailable);
@@ -423,7 +434,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
+        router.push(authRedirectPath(searchParams));
         return;
       }
 

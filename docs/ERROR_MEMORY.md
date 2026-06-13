@@ -685,3 +685,45 @@ Before shipping visible UI controls, verify each button has an intended handler,
 - `tests/report-header-actions.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 025
+
+### Date
+2026-06-13
+
+### Area
+Report sharing, PDF export, and workspace invite permissions
+
+### Symptom
+- Report export needed to produce a PDF-style output, not just a JSON payload.
+- Report share needed to generate a join link for another person with read-only workspace access, not just open the native share sheet.
+- Billing UI showed `月付无限版` even though the product name should be `专业版`, and upgrade actions should point to `企业版`.
+
+### Root cause
+The first report action implementation treated export/share as generic client utilities instead of product-specific workflows. Sharing a report in this app is also an access-control action, so it needs a workspace-scoped invite link with a fixed viewer role.
+
+### Fix
+Use browser print for PDF export with print-only report scope. Create workspace invite link storage with hashed tokens, a server API to generate viewer links, an accept API that joins the signed-in user as `VIEWER`, and a `/join-workspace` page that preserves redirect through sign-in/sign-up. Update billing copy from `月付无限版` to `专业版` and change paid upgrade actions to enterprise.
+
+### Prevention rule
+For report actions, verify the user-facing meaning of the control: export should match the expected format, and share must preserve workspace permissions. Any share link that grants access must be tokenized, scoped to `workspaceId`, default to least privilege, and set the intended workspace after acceptance.
+
+### Files changed
+- `components/dashboard.tsx`
+- `app/globals.css`
+- `prisma/schema.prisma`
+- `prisma/migrations/20260613_workspace_invite_links/migration.sql`
+- `lib/workspace-invite-links.ts`
+- `lib/clerk-user-sync.ts`
+- `app/api/workspace/invite-links/route.ts`
+- `app/api/workspace/invite-links/accept/route.ts`
+- `components/join-workspace-page.tsx`
+- `app/join-workspace/page.tsx`
+- `components/sign-in-panel.tsx`
+- `components/sign-up-panel.tsx`
+- `app/sign-in/page.tsx`
+- `app/sign-up/page.tsx`
+- `tests/report-header-actions.test.mjs`
+- `tests/workspace-invite-links.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

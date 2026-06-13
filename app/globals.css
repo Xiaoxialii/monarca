@@ -72,6 +72,62 @@ body > script[data-nextjs-dev-overlay],
   display: none !important;
 }
 
+@media print {
+  @page {
+    margin: 14mm;
+    size: A4;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .report-print-scope,
+  .report-print-scope * {
+    visibility: visible !important;
+  }
+
+  .report-print-scope {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  .report-print-scope .report-no-print {
+    display: none !important;
+  }
+
+  .report-print-scope .sticky {
+    position: static !important;
+  }
+
+  .report-print-scope [class*="shadow"] {
+    box-shadow: none !important;
+  }
+
+  .report-print-scope .rounded-xl,
+  .report-print-scope .rounded-2xl,
+  .report-print-scope .rounded-lg {
+    border-radius: 6px !important;
+  }
+
+  .report-print-scope .overflow-hidden {
+    overflow: visible !important;
+  }
+
+  .report-print-header {
+    break-after: avoid;
+  }
+}
+
 .dashboard-density {
   --dashboard-page-gap: 0.75rem;
   --dashboard-card-padding: 0.875rem;

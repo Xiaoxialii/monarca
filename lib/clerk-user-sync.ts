@@ -1,7 +1,9 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { WorkspaceMemberStatus, WorkspaceRole } from "@prisma/client";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { ensureReportEntitlement } from "@/lib/report-entitlements";
+import { workspaceInviteCookieName } from "@/lib/workspace-invite-links";
 
 function createWorkspaceSlug(clerkUserId: string) {
   return `workspace-${clerkUserId.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase()}`;
@@ -77,7 +79,17 @@ export async function syncClerkUserById(
     }
   });
 
-  const existingMembership = user.memberships.find(
+  const cookieStore = await cookies().catch(() => null);
+  const preferredWorkspaceId = cookieStore?.get(workspaceInviteCookieName)?.value ?? null;
+  const existingMembership = (
+    preferredWorkspaceId
+      ? user.memberships.find(
+        (membership) =>
+          membership.status === WorkspaceMemberStatus.ACTIVE &&
+          membership.workspaceId === preferredWorkspaceId
+      )
+      : null
+  ) ?? user.memberships.find(
     (membership) => membership.status === WorkspaceMemberStatus.ACTIVE
   ) ?? user.memberships[0];
 

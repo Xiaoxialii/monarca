@@ -180,6 +180,7 @@ model Workspace {
   reportMetricCaches ReportMetricCache[]
   metricSnapshots   MetricSnapshot[]
   reportHistory     ReportHistory[]
+  inviteLinks       WorkspaceInviteLink[]
 }
 
 model WorkspaceMember {
@@ -199,6 +200,22 @@ model WorkspaceMember {
 
   @@unique([workspaceId, userId])
   @@unique([workspaceId, invitedEmail])
+}
+
+model WorkspaceInviteLink {
+  id          String        @id @default(cuid())
+  workspaceId String
+  tokenHash   String        @unique
+  role        WorkspaceRole @default(VIEWER)
+  createdBy   String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([expiresAt])
 }
 
 model DataSourceConnection {

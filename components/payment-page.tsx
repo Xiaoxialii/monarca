@@ -377,6 +377,20 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
       : usesStripe
         ? copy.paymentSubtitle
         : copy.contactSubtitle;
+  const requestSuccessMessage =
+    selectedPlan === "database-setup"
+      ? localeKey === "zh"
+        ? "提交成功！我们会评估数据源和业务复杂度，再确认最终报价"
+        : "Submitted. We will evaluate your data sources and business complexity, then confirm the final quote."
+      : selectedPlan === "enterprise"
+        ? localeKey === "zh"
+          ? "提交成功！我们会安排方案评审，并确认企业部署范围"
+          : "Submitted. We will schedule a solution review and confirm the enterprise deployment scope."
+        : selected.next;
+  const professionalRequestSuccessMessage =
+    localeKey === "zh"
+      ? "提交成功！我们会在24小时内，与您联系！"
+      : "Submitted. We will contact you within 24 hours.";
 
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -407,7 +421,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
           throw new Error(typeof data?.message === "string" ? data.message : copy.contactError);
         }
 
-        setCheckoutMessage(selected.next);
+        setCheckoutMessage(requestSuccessMessage);
       } catch (error) {
         setCheckoutMessage(error instanceof Error ? error.message : copy.contactError);
       } finally {
@@ -436,6 +450,35 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
       const data = await response.json().catch(() => null);
 
       if (!response.ok || !data?.url) {
+        if (selectedPlan === "professional" && response.status === 401) {
+          const helpResponse = await fetch("/api/help-requests", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              source: "checkout",
+              plan: selectedPlan,
+              name,
+              company,
+              email,
+              notes,
+              locale
+            })
+          });
+          const helpData = await helpResponse.json().catch(() => null);
+
+          if (!helpResponse.ok || !helpData?.ok) {
+            throw new Error(
+              typeof helpData?.message === "string" ? helpData.message : copy.contactError
+            );
+          }
+
+          setCheckoutMessage(professionalRequestSuccessMessage);
+          setIsSubmitting(false);
+          return;
+        }
+
         throw new Error(typeof data?.message === "string" ? data.message : copy.checkoutError);
       }
 
@@ -447,7 +490,12 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   };
 
   const handleGoBack = () => {
-    router.push("/dashboard");
+    if (window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push("/");
   };
 
   return (
@@ -746,16 +794,18 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
               </label>
             )}
 
-            <div className="mt-5 rounded-2xl border bg-emerald-50/60 p-4">
-              <div className="flex items-center justify-between gap-4 border-b border-emerald-100 pb-3">
-                <span className="text-sm font-medium text-slate-600">{copy.dueToday}</span>
-                <span className="text-lg font-semibold text-slate-950">{selectedDue}</span>
+            {!usesStripe ? (
+              <div className="mt-5 rounded-2xl border bg-emerald-50/60 p-4">
+                <div className="flex items-center justify-between gap-4 border-b border-emerald-100 pb-3">
+                  <span className="text-sm font-medium text-slate-600">{copy.dueToday}</span>
+                  <span className="text-lg font-semibold text-slate-950">{selectedDue}</span>
+                </div>
+                <div className="mt-3 flex gap-3 text-sm leading-6 text-slate-600">
+                  <Lock className="mt-1 size-4 shrink-0 text-emerald-700" />
+                  <span>{selected.next}</span>
+                </div>
               </div>
-              <div className="mt-3 flex gap-3 text-sm leading-6 text-slate-600">
-                <Lock className="mt-1 size-4 shrink-0 text-emerald-700" />
-                <span>{usesStripe ? copy.protected : selected.next}</span>
-              </div>
-            </div>
+            ) : null}
 
             {checkoutMessage ? (
               <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">

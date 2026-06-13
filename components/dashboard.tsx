@@ -1849,14 +1849,14 @@ function Header({
 }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const isZh = copy.sidebar.brand === "蝴蝶效应";
-  const mobileNavItems = [...copy.navItems, ...copy.dataNavItems].map((item) => ({
-    ...item,
-    label: item.href === "/dashboard/report"
-      ? (isZh ? "报表页" : "Reports Page")
-      : item.href === "/dashboard/settings"
-        ? (isZh ? "设置页" : "Settings Page")
-        : item.label
-  }));
+  const mobileNavItems = copy.navItems
+    .filter((item) => item.href === "/dashboard/report" || item.href === "/dashboard/settings")
+    .map((item) => ({
+      ...item,
+      label: item.href === "/dashboard/report"
+        ? (isZh ? "报表页" : "Reports Page")
+        : (isZh ? "设置页" : "Settings Page")
+    }));
 
   return (
     <header className="sticky top-0 z-20 border-b bg-background/86 backdrop-blur">

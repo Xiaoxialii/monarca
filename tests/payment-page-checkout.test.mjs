@@ -14,8 +14,8 @@ test("database setup checkout submits a request instead of starting Stripe", () 
 
   assert.match(
     paymentPage,
-    /const usesStripe = selectedPlan === "professional"/,
-    "Only the professional plan should use Stripe checkout"
+    /const usesStripe = false/,
+    "Checkout plans should submit requests instead of starting Stripe"
   );
   assert.match(
     paymentPage,
@@ -49,8 +49,23 @@ test("database setup checkout submits a request instead of starting Stripe", () 
   );
   assert.match(
     paymentPage,
+    /"评估需求"/,
+    "Professional checkout should use needs-review wording instead of payment wording"
+  );
+  assert.match(
+    paymentPage,
+    /redirecting: "提交中\.\.\."/,
+    "Checkout loading text should say submitting instead of redirecting to Stripe"
+  );
+  assert.match(
+    paymentPage,
+    /summaryTitle[\s\S]*"评估后报价"/,
+    "Professional checkout should show quote-after-review wording instead of secure settlement"
+  );
+  assert.doesNotMatch(
+    paymentPage,
     /selectedPlan === "professional" && response\.status === 401/,
-    "Professional checkout should create a contact request when an unsigned user cannot start Stripe"
+    "Professional checkout should no longer rely on Stripe fallback for contact requests"
   );
   assert.match(
     paymentPage,
@@ -60,7 +75,7 @@ test("database setup checkout submits a request instead of starting Stripe", () 
   assert.match(
     paymentPage,
     /!\s*usesStripe \? \(/,
-    "The due-today summary card should be hidden on the professional Stripe form"
+    "The summary card should render only for request forms"
   );
   assert.match(
     paymentPage,

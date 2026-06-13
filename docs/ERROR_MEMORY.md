@@ -755,3 +755,31 @@ Before changing checkout pages, classify each plan as payment, consultation, ent
 - `tests/payment-page-checkout.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 027
+
+### Date
+2026-06-13
+
+### Area
+Checkout product intent and Stripe assumptions
+
+### Symptom
+- Professional checkout still displayed `币种`, `安全结算`, and encrypted payment language after the flow had been changed to a request/evaluation workflow.
+- The loading state still said it was redirecting to Stripe.
+- The form title and left-card eyebrow still used payment wording instead of `评估需求`.
+
+### Root cause
+The checkout component tied `professional` to Stripe by plan name and kept payment UI branches, even after the product requirement shifted to collecting an evaluation request and contacting the user within 24 hours.
+
+### Fix
+Route checkout-page submissions through `/api/help-requests`, remove the Stripe fallback branch from the page, change the loading state to `提交中...`, show `评估需求` and `评估后报价` for the professional plan, and keep plan-specific success messages.
+
+### Prevention rule
+Before changing checkout UI or billing actions, classify the current product intent for each plan. Do not assume `professional` means direct Stripe checkout. Only a plan explicitly marked as payment-enabled should show currency, secure checkout copy, Stripe loading text, or call `/api/stripe/checkout`.
+
+### Files changed
+- `components/payment-page.tsx`
+- `tests/payment-page-checkout.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

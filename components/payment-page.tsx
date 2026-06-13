@@ -59,7 +59,7 @@ const paymentCopy = {
     cvc: "CVC",
     notes: "Business context",
     notesPlaceholder: "Data sources, team size, current reporting flow",
-    redirecting: "Redirecting to Stripe...",
+    redirecting: "Submitting...",
     checkoutError: "Unable to start Stripe checkout. Please try again.",
     contactError: "Unable to submit the request. Please try again.",
     checkoutSuccessTitle: "Payment completed",
@@ -175,7 +175,7 @@ const paymentCopy = {
     cvc: "CVC",
     notes: "业务背景",
     notesPlaceholder: "数据源、团队规模、当前报表流程",
-    redirecting: "正在跳转到 Stripe...",
+    redirecting: "提交中...",
     checkoutError: "暂时无法发起 Stripe 付款，请稍后重试。",
     contactError: "暂时无法提交咨询，请稍后重试。",
     checkoutSuccessTitle: "付款已完成",
@@ -343,7 +343,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
   const selected = copy.plans[selectedPlan];
   const Icon = planIcons[selectedPlan];
   const hasCurrencyPrice = selectedPlan === "professional";
-  const usesStripe = selectedPlan === "professional";
+  const usesStripe = false;
   const selectedCurrencyPrice = hasCurrencyPrice
     ? copy.stripePrices[selectedPlan][checkoutCurrency]
     : null;
@@ -366,6 +366,10 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
       ? localeKey === "zh"
         ? "搭建需求"
         : "Setup request"
+      : selectedPlan === "professional"
+        ? localeKey === "zh"
+          ? "评估需求"
+          : "Needs review"
       : usesStripe
         ? copy.formTitle
         : copy.contactTitle;
@@ -374,6 +378,10 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
       ? localeKey === "zh"
         ? "填写信息后，我们会确认数据库搭建范围"
         : "Tell us what you need built and we will confirm the setup scope"
+      : selectedPlan === "professional"
+        ? localeKey === "zh"
+          ? "填写信息后，我们会在24小时内联系你"
+          : "Submit your details and we will contact you within 24 hours"
       : usesStripe
         ? copy.paymentSubtitle
         : copy.contactSubtitle;
@@ -386,105 +394,62 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
         ? localeKey === "zh"
           ? "提交成功！我们会安排方案评审，并确认企业部署范围"
           : "Submitted. We will schedule a solution review and confirm the enterprise deployment scope."
-        : selected.next;
-  const professionalRequestSuccessMessage =
-    localeKey === "zh"
-      ? "提交成功！我们会在24小时内，与您联系！"
-      : "Submitted. We will contact you within 24 hours.";
+        : selectedPlan === "professional"
+          ? localeKey === "zh"
+            ? "提交成功！我们会在24小时内，与您联系！"
+            : "Submitted. We will contact you within 24 hours."
+          : selected.next;
+  const summaryTitle =
+    selectedPlan === "professional"
+      ? localeKey === "zh"
+        ? "评估后报价"
+        : "Quote after review"
+      : copy.dueToday;
+  const summaryValue = selectedPlan === "professional" ? "" : selectedDue;
+  const summaryDescription =
+    selectedPlan === "professional"
+      ? localeKey === "zh"
+        ? "提交后我们会在24小时内，与您联系！"
+        : "Submit your request and we will contact you within 24 hours."
+      : selected.next;
+  const planEyebrow =
+    selectedPlan === "professional"
+      ? localeKey === "zh"
+        ? "评估需求"
+        : "Needs review"
+      : copy.secure;
 
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCheckoutMessage("");
-
-    if (!usesStripe) {
-      setIsSubmitting(true);
-
-      try {
-        const response = await fetch("/api/help-requests", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            source: "checkout",
-            plan: selectedPlan,
-            name,
-            company,
-            email,
-            notes,
-            locale
-          })
-        });
-        const data = await response.json().catch(() => null);
-
-        if (!response.ok || !data?.ok) {
-          throw new Error(typeof data?.message === "string" ? data.message : copy.contactError);
-        }
-
-        setCheckoutMessage(requestSuccessMessage);
-      } catch (error) {
-        setCheckoutMessage(error instanceof Error ? error.message : copy.contactError);
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/stripe/checkout", {
+      const response = await fetch("/api/help-requests", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          source: "checkout",
           plan: selectedPlan,
-          currency: checkoutCurrency,
           name,
           company,
           email,
-          notes
+          notes,
+          locale
         })
       });
       const data = await response.json().catch(() => null);
 
-      if (!response.ok || !data?.url) {
-        if (selectedPlan === "professional" && response.status === 401) {
-          const helpResponse = await fetch("/api/help-requests", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              source: "checkout",
-              plan: selectedPlan,
-              name,
-              company,
-              email,
-              notes,
-              locale
-            })
-          });
-          const helpData = await helpResponse.json().catch(() => null);
-
-          if (!helpResponse.ok || !helpData?.ok) {
-            throw new Error(
-              typeof helpData?.message === "string" ? helpData.message : copy.contactError
-            );
-          }
-
-          setCheckoutMessage(professionalRequestSuccessMessage);
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw new Error(typeof data?.message === "string" ? data.message : copy.checkoutError);
+      if (!response.ok || !data?.ok) {
+        throw new Error(typeof data?.message === "string" ? data.message : copy.contactError);
       }
 
-      window.location.href = data.url;
+      setCheckoutMessage(requestSuccessMessage);
     } catch (error) {
-      setCheckoutMessage(error instanceof Error ? error.message : copy.checkoutError);
+      setCheckoutMessage(error instanceof Error ? error.message : copy.contactError);
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -661,7 +626,7 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
               </div>
               <PlanBadge>{selected.badge}</PlanBadge>
             </div>
-            <p className="text-sm font-medium text-emerald-700">{copy.secure}</p>
+            <p className="text-sm font-medium text-emerald-700">{planEyebrow}</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-normal text-slate-950 sm:text-5xl">
               {selected.name}
             </h1>
@@ -797,12 +762,14 @@ export function PaymentPage({ plan }: { plan: PaymentPlan }) {
             {!usesStripe ? (
               <div className="mt-5 rounded-2xl border bg-emerald-50/60 p-4">
                 <div className="flex items-center justify-between gap-4 border-b border-emerald-100 pb-3">
-                  <span className="text-sm font-medium text-slate-600">{copy.dueToday}</span>
-                  <span className="text-lg font-semibold text-slate-950">{selectedDue}</span>
+                  <span className="text-sm font-medium text-slate-600">{summaryTitle}</span>
+                  {summaryValue ? (
+                    <span className="text-lg font-semibold text-slate-950">{summaryValue}</span>
+                  ) : null}
                 </div>
                 <div className="mt-3 flex gap-3 text-sm leading-6 text-slate-600">
                   <Lock className="mt-1 size-4 shrink-0 text-emerald-700" />
-                  <span>{selected.next}</span>
+                  <span>{summaryDescription}</span>
                 </div>
               </div>
             ) : null}

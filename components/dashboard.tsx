@@ -5230,6 +5230,17 @@ function ConnectorPanel({
       body: formData
     });
   };
+  const uploadNetworkErrorMessage = (scope: "api" | "direct") => {
+    if (scope === "direct") {
+      return isZh
+        ? "文件直传存储失败。请检查 Cloudflare R2 CORS 是否允许 https://www.monarcadata.com，或稍后重试。"
+        : "Direct file upload failed. Check that Cloudflare R2 CORS allows https://www.monarcadata.com, or try again later.";
+    }
+
+    return isZh
+      ? "无法连接上传服务。请检查网络后重试；如果文件较大，请确认生产上传存储已配置。"
+      : "Could not reach the upload service. Check your network and try again; for larger files, confirm production upload storage is configured.";
+  };
   type UploadResponsePayload = {
     ok?: boolean;
     message?: string;
@@ -5265,7 +5276,16 @@ function ConnectorPanel({
         fileSize: file.size,
         contentType: file.type || "application/octet-stream"
       })
-    });
+    }).catch(() => null);
+
+    if (!presignResponse) {
+      if (file.size <= directApiUploadMaxBytes) {
+        return uploadSmallFile(file);
+      }
+
+      throw new Error(uploadNetworkErrorMessage("api"));
+    }
+
     const presignPayload = await responsePayload(presignResponse) as {
       ok?: boolean;
       message?: string;
@@ -5293,7 +5313,16 @@ function ConnectorPanel({
         "Content-Type": uploadContentType
       },
       body: file
-    });
+    }).catch(() => null);
+
+    if (!uploadResponse) {
+      if (file.size <= directApiUploadMaxBytes) {
+        return uploadSmallFile(file);
+      }
+
+      throw new Error(uploadNetworkErrorMessage("direct"));
+    }
+
     const uploadText = await uploadResponse.text().catch(() => "");
     const uploadPayload = uploadText
       ? (() => {
@@ -5360,8 +5389,13 @@ function ConnectorPanel({
 
     try {
       const response = file.size <= directApiUploadMaxBytes
-        ? await uploadSmallFile(file)
+        ? await uploadSmallFile(file).catch(() => null)
         : await uploadLargeFile(file);
+
+      if (!response) {
+        throw new Error(uploadNetworkErrorMessage("api"));
+      }
+
       const payload = await responsePayload(response);
 
       if (!response.ok || !payload?.ok || !payload?.dataSource) {

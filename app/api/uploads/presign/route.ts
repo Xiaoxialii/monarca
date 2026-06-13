@@ -7,7 +7,7 @@ import {
   requireCanConnectDataSource
 } from "@/lib/billing/entitlements";
 import { fileExtension } from "@/lib/file-upload-schema";
-import { createPresignedUploadUrl, isR2Configured } from "@/lib/r2-storage";
+import { createPresignedUploadUrl, ensureR2UploadCors, isR2Configured } from "@/lib/r2-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -64,6 +64,13 @@ export async function POST(request: Request) {
         { status: 413 }
       );
     }
+
+    await ensureR2UploadCors([
+      request.headers.get("origin"),
+      request.headers.get("referer")
+    ]).catch((error) => {
+      console.warn("Failed to ensure R2 upload CORS; returning presigned URL anyway", error);
+    });
 
     const upload = await createPresignedUploadUrl({
       workspaceId: session.workspace.id,

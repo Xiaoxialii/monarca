@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutBucketCorsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
@@ -7,6 +7,8 @@ type StoredUpload = {
   endpoint: string;
   key: string;
 };
+
+let r2CorsSetup: Promise<void> | null = null;
 
 function r2Config() {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -44,6 +46,58 @@ function r2Client(config: NonNullable<ReturnType<typeof r2Config>>) {
       secretAccessKey: config.secretAccessKey
     }
   });
+}
+
+function originValue(value: string | null | undefined) {
+  if (!value) return null;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureR2UploadCors(extraOrigins: Array<string | null | undefined> = []) {
+  const config = r2Config();
+
+  if (!config) {
+    throw new Error("R2 storage is not configured.");
+  }
+
+  if (r2CorsSetup) {
+    return r2CorsSetup;
+  }
+
+  const allowedOrigins = Array.from(new Set([
+    "https://www.monarcadata.com",
+    "https://monarcadata.com",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    ...extraOrigins.map(originValue).filter((origin): origin is string => Boolean(origin))
+  ]));
+
+  r2CorsSetup = r2Client(config).send(
+    new PutBucketCorsCommand({
+      Bucket: config.bucket,
+      CORSConfiguration: {
+        CORSRules: [
+          {
+            AllowedHeaders: ["*"],
+            AllowedMethods: ["PUT", "GET", "HEAD"],
+            AllowedOrigins: allowedOrigins,
+            ExposeHeaders: ["ETag"],
+            MaxAgeSeconds: 3600
+          }
+        ]
+      }
+    })
+  ).then(() => undefined).catch((error) => {
+    r2CorsSetup = null;
+    throw error;
+  });
+
+  return r2CorsSetup;
 }
 
 export function uploadKeyForWorkspace(workspaceId: string, fileName: string) {

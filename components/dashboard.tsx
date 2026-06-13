@@ -5165,8 +5165,10 @@ function ConnectorPanel({
   const directApiUploadMaxBytes = Math.min(FILE_UPLOAD_MAX_BYTES, 4 * 1024 * 1024);
   const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
   const effectiveDatabasePort = databasePort || defaultDatabasePort;
-  const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";
+  const databaseHostPreview = databaseHost || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
+  const databaseNamePreview = databaseName || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
+  const isSupportedDatabase = databaseType !== null;
   const showWizard = connectionPage || wizardStarted;
   const connectPageHref = `/dashboard/import-data/connect?source=${encodeURIComponent(selectedSource.name)}`;
   const addSelectedSource = (source: ConnectedSourceRow) => {
@@ -5177,6 +5179,14 @@ function ConnectorPanel({
     }
   };
   const friendlyConnectionMessage = (message: string) => {
+    if (message.includes("DATABASE_PRESET_INCOMPLETE")) {
+      const cleanedMessage = message.replace(/^DATABASE_PRESET_INCOMPLETE:\s*/, "");
+
+      return isZh
+        ? cleanedMessage
+        : `The ${selectedSource.name} server preset is incomplete. Fill Host, Database, and Username in this form, or configure the matching database environment variables in Vercel.`;
+    }
+
     if (message.includes("PostgreSQL") || message.includes("DATABASE_URL")) {
       return isZh
         ? "数据库连接地址不是 PostgreSQL。请把 DATABASE_URL 改为 Neon/PostgreSQL 连接串后重试。"
@@ -5490,9 +5500,11 @@ function ConnectorPanel({
         message: isZh ? "连接测试通过" : "Connection verified"
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "连接失败" : "Connection failed";
+
       setConnectionResult({
         ok: false,
-        message: error instanceof Error ? error.message : isZh ? "连接失败" : "Connection failed"
+        message: friendlyConnectionMessage(message)
       });
     } finally {
       setIsTestingConnection(false);
@@ -5537,9 +5549,11 @@ function ConnectorPanel({
         message: copy.connectors.databaseConnected.replace("{provider}", selectedSource.name)
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "连接数据库失败" : "Database connection failed";
+
       setConnectionResult({
         ok: false,
-        message: error instanceof Error ? error.message : isZh ? "连接数据库失败" : "Database connection failed"
+        message: friendlyConnectionMessage(message)
       });
     } finally {
       setIsConnectingDatabase(false);
@@ -5694,7 +5708,11 @@ function ConnectorPanel({
                         setDatabaseHost(event.target.value);
                         resetConnectionResult();
                       }}
-                      placeholder={isSqlLikeSource ? "127.0.0.1" : copy.connectors.workspacePlaceholder}
+                      placeholder={
+                        isSqlLikeSource
+                          ? (isZh ? "例如 db.example.com，留空使用服务器预设" : "e.g. db.example.com, blank uses server preset")
+                          : copy.connectors.workspacePlaceholder
+                      }
                     />
                   </label>
                   <label className="block">
@@ -5872,8 +5890,8 @@ function ConnectorPanel({
                 <>
                   {[
                     `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
-                    `${isZh ? "地址" : "Host"}: ${databaseHost || "-"}`,
-                    `${isZh ? "数据库" : "Database"}: ${databaseName || "-"}`,
+                    `${isZh ? "地址" : "Host"}: ${databaseHostPreview}`,
+                    `${isZh ? "数据库" : "Database"}: ${databaseNamePreview}`,
                     `Port: ${effectiveDatabasePort} (${databasePort ? (isZh ? "自定义" : "custom") : (isZh ? "自动" : "auto")})`,
                     `SSL: ${databaseSsl ? "On" : "Off"}`
                   ].map((row) => (

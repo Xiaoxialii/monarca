@@ -2,7 +2,12 @@ import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client"
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { normalizeDatabaseType, resolveDatabaseConfig } from "@/lib/database-connection-config";
+import {
+  databasePresetIncompleteMessage,
+  missingRequiredDatabaseConfigFields,
+  normalizeDatabaseType,
+  resolveDatabaseConfig
+} from "@/lib/database-connection-config";
 import { introspectDatabase } from "@/lib/database-introspection";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -10,8 +15,8 @@ import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-me
 
 export const runtime = "nodejs";
 
-function jsonError(message: string, status = 400) {
-  return NextResponse.json({ ok: false, message }, { status });
+function jsonError(message: string, status = 400, details: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: false, message, ...details }, { status });
 }
 
 export async function POST(request: Request) {
@@ -25,9 +30,17 @@ export async function POST(request: Request) {
     }
 
     const config = resolveDatabaseConfig(type, payload);
+    const missingFields = missingRequiredDatabaseConfigFields(config);
 
-    if (!config.host || !config.database || !config.username) {
-      return jsonError("Database preset is incomplete. Configure host, database, and username on the server.");
+    if (missingFields.length > 0) {
+      return jsonError(
+        databasePresetIncompleteMessage(type, missingFields),
+        400,
+        {
+          code: "DATABASE_PRESET_INCOMPLETE",
+          missingFields
+        }
+      );
     }
 
     const tables = await introspectDatabase(config);

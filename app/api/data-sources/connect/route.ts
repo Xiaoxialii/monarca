@@ -9,6 +9,8 @@ import {
 } from "@/lib/billing/entitlements";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import {
+  databasePresetIncompleteMessage,
+  missingRequiredDatabaseConfigFields,
   normalizeDatabaseType,
   publicDatabaseConfig,
   resolveDatabaseConfig
@@ -23,8 +25,8 @@ import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 
 export const runtime = "nodejs";
 
-function jsonError(message: string, status = 400) {
-  return NextResponse.json({ ok: false, message }, { status });
+function jsonError(message: string, status = 400, details: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: false, message, ...details }, { status });
 }
 
 export async function POST(request: Request) {
@@ -39,10 +41,16 @@ export async function POST(request: Request) {
     }
 
     const config = resolveDatabaseConfig(type, payload);
+    const missingFields = missingRequiredDatabaseConfigFields(config);
 
-    if (!config.host || !config.database || !config.username) {
+    if (missingFields.length > 0) {
       return jsonError(
-        "Database preset is incomplete. Configure host, database, and username on the server or provide them as overrides."
+        databasePresetIncompleteMessage(type, missingFields),
+        400,
+        {
+          code: "DATABASE_PRESET_INCOMPLETE",
+          missingFields
+        }
       );
     }
 

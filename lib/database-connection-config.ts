@@ -10,6 +10,8 @@ export type ResolvedDatabaseConfig = {
   ssl: boolean;
 };
 
+export type RequiredDatabaseConfigField = "host" | "database" | "username";
+
 const DEFAULT_PORTS: Record<SupportedDatabaseType, number> = {
   postgresql: 5432,
   mysql: 3306
@@ -150,7 +152,7 @@ export function resolveDatabaseConfig(
       payloadHost ||
       firstEnv(...envKeys(type, "host")) ||
       databaseUrlPreset?.host ||
-      "127.0.0.1",
+      "",
     port: resolvePort(type, payload?.port, databaseUrlPreset?.port),
     database:
       payloadDatabase ||
@@ -169,6 +171,39 @@ export function resolveDatabaseConfig(
       "",
     ssl: Boolean(payload?.ssl) || parseBooleanEnv(firstEnv(...envKeys(type, "ssl")))
   };
+}
+
+export function missingRequiredDatabaseConfigFields(
+  config: ResolvedDatabaseConfig
+): RequiredDatabaseConfigField[] {
+  const missing: RequiredDatabaseConfigField[] = [];
+
+  if (!config.host) {
+    missing.push("host");
+  }
+
+  if (!config.database) {
+    missing.push("database");
+  }
+
+  if (!config.username) {
+    missing.push("username");
+  }
+
+  return missing;
+}
+
+export function databasePresetIncompleteMessage(
+  type: SupportedDatabaseType,
+  missingFields: RequiredDatabaseConfigField[]
+) {
+  const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
+  const envHint = type === "mysql"
+    ? "MYSQL_DATABASE_URL / MYSQL_HOST / MYSQL_DATABASE / MYSQL_USER / MYSQL_PASSWORD"
+    : "POSTGRESQL_DATABASE_URL / POSTGRESQL_HOST / POSTGRESQL_DATABASE / POSTGRESQL_USER / POSTGRESQL_PASSWORD";
+  const missingText = missingFields.length ? `缺少 ${missingFields.join(", ")}。` : "";
+
+  return `DATABASE_PRESET_INCOMPLETE: ${provider} 服务器预设未配置完整。${missingText}请填写 Host、数据库、用户名（以及需要时的密码），或在 Vercel 环境变量中配置 ${envHint}。`;
 }
 
 export function publicDatabaseConfig(config: ResolvedDatabaseConfig) {

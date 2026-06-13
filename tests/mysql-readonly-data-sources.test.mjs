@@ -22,11 +22,18 @@ test("MySQL is a supported read-only data source type end to end", () => {
   assert.match(schema, /model DataSourceStats/, "Prisma should store only aggregate data source stats");
   assert.match(config, /"postgresql" \| "mysql"/, "Database config should accept mysql");
   assert.match(config, /protocol === "mysql"[\s\S]*protocol === "mysql2"/, "Database URL parsing should recognize MySQL URLs");
+  assert.match(config, /missingRequiredDatabaseConfigFields/, "Database config should expose missing required fields");
+  assert.doesNotMatch(config, /databaseUrlPreset\?\.host\s*\|\|\s*"127\.0\.0\.1"/, "Database config must not silently use localhost as a production preset");
   assert.match(dashboard, /selectedSource\.name === "MySQL"[\s\S]*\? "mysql"/, "MySQL card should map to databaseType=mysql");
   assert.match(dashboard, /databaseType === "mysql" \? "3306" : "5432"/, "MySQL should default to port 3306");
+  assert.match(dashboard, /DATABASE_PRESET_INCOMPLETE/, "Dashboard should translate incomplete database presets");
+  assert.match(dashboard, /服务器预设 \/ 未配置/, "Database preview should not imply a blank preset is localhost");
   assert.match(testConnectionRoute, /databaseType:\s*type/, "Test connection should echo the accepted databaseType");
+  assert.match(testConnectionRoute, /code:\s*"DATABASE_PRESET_INCOMPLETE"/, "Test connection should return a stable incomplete preset error code");
   assert.match(connectRoute, /DataSourceType\.MYSQL/, "Connect route should save MySQL as MYSQL");
+  assert.match(connectRoute, /code:\s*"DATABASE_PRESET_INCOMPLETE"/, "Connect route should return a stable incomplete preset error code");
   assert.match(introspectRoute, /DataSourceType\.MYSQL/, "Introspect route should save MySQL as MYSQL");
+  assert.match(introspectRoute, /code:\s*"DATABASE_PRESET_INCOMPLETE"/, "Introspect route should return a stable incomplete preset error code");
   assert.match(rescanRoute, /DataSourceType\.MYSQL/, "Rescan route should support MySQL");
 });
 

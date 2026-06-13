@@ -626,3 +626,35 @@ For Cloudflare R2 presigned uploads, derive the S3 API endpoint from `R2_ACCOUNT
 - `components/dashboard.tsx`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 023
+
+### Date
+2026-06-13
+
+### Area
+Database source presets and MySQL connection UX
+
+### Symptom
+- MySQL connection preview showed `127.0.0.1:3306` and an empty database, then failed with `Database preset is incomplete`.
+- The UI implied a usable local MySQL preset on production even when no MySQL host, database, or username was configured.
+- The error message was English and did not tell the user which Vercel environment variables or form overrides were required.
+
+### Root cause
+The database config resolver silently fell back to `127.0.0.1` when no host was provided by payload, database URL, or environment variables. Production does not have access to a user's local MySQL server, and the API returned a generic string instead of a stable error code with missing fields.
+
+### Fix
+Stop using localhost as a server-side preset fallback. Add required-field detection, return `DATABASE_PRESET_INCOMPLETE` with missing fields and provider-specific env var guidance, and update the frontend preview/error copy so blank presets are shown as unconfigured instead of localhost.
+
+### Prevention rule
+For database connectors, never treat local defaults as production presets. If `host`, `database`, or `username` are missing, return a structured error with missing fields and show the exact override fields or Vercel env vars needed before attempting a connection.
+
+### Files changed
+- `lib/database-connection-config.ts`
+- `app/api/data-sources/test-connection/route.ts`
+- `app/api/data-sources/connect/route.ts`
+- `app/api/data-sources/introspect/route.ts`
+- `components/dashboard.tsx`
+- `tests/mysql-readonly-data-sources.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

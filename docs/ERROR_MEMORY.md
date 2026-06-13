@@ -572,3 +572,29 @@ Browser direct-to-storage upload should be an optimization, not the only path. F
 ### Files changed
 - `components/dashboard.tsx`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 021
+
+### Date
+2026-06-13
+
+### Area
+Serverless upload payload limit
+
+### Symptom
+- Upload fallback returned `Request Entity Too Large FUNCTION_PAYLOAD_TOO_LARGE`.
+- The R2 direct upload failed first, then the app retried a large file through the Vercel Function upload API.
+
+### Root cause
+The fallback assumed files up to the app-level `FILE_UPLOAD_MAX_BYTES` could be sent through the application API. Vercel Functions have a stricter request payload limit, so large file fallback must not use serverless request bodies.
+
+### Fix
+Restrict app API upload fallback to the small direct API threshold. Larger files must use presigned R2 direct upload, with clear CORS/storage instructions when that direct path fails.
+
+### Prevention rule
+Do not route large file fallback through Vercel Functions. Keep serverless upload bodies below the platform payload limit and require direct object storage upload for larger files.
+
+### Files changed
+- `components/dashboard.tsx`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

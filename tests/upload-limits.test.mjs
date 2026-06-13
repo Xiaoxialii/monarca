@@ -32,4 +32,10 @@ test("upload size limit is centralized and used by all upload paths", () => {
   assert.doesNotMatch(files["app/api/uploads/presign/route.ts"], /MAX_DIRECT_UPLOAD_BYTES/);
   assert.doesNotMatch(files["app/api/data-sources/upload/complete/route.ts"], /MAX_DIRECT_UPLOAD_BYTES/);
   assert.doesNotMatch(files["components/dashboard.tsx"], /100 \* 1024 \* 1024/);
+  assert.doesNotMatch(
+    files["components/dashboard.tsx"],
+    /file\.size <= FILE_UPLOAD_MAX_BYTES/,
+    "Large upload fallback must not send files up to the app limit through Vercel Functions"
+  );
+  assert.match(files["components/dashboard.tsx"], /file\.size <= directApiUploadMaxBytes/);
 });

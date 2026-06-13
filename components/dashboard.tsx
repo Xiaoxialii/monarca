@@ -5233,13 +5233,13 @@ function ConnectorPanel({
   const uploadNetworkErrorMessage = (scope: "api" | "direct") => {
     if (scope === "direct") {
       return isZh
-        ? "文件直传存储失败。请检查 Cloudflare R2 CORS 是否允许 https://www.monarcadata.com，或稍后重试。"
-        : "Direct file upload failed. Check that Cloudflare R2 CORS allows https://www.monarcadata.com, or try again later.";
+        ? "文件直传存储失败。大文件不能回退到 Vercel Function 上传，请在 Cloudflare R2 bucket CORS 中允许 https://www.monarcadata.com 后重试。"
+        : "Direct file upload failed. Large files cannot fall back to Vercel Function upload; allow https://www.monarcadata.com in Cloudflare R2 bucket CORS and try again.";
     }
 
     return isZh
-      ? "无法连接上传服务。请检查网络后重试；如果文件较大，请确认生产上传存储已配置。"
-      : "Could not reach the upload service. Check your network and try again; for larger files, confirm production upload storage is configured.";
+      ? "无法连接上传服务。请检查网络后重试；大文件需要通过 Cloudflare R2 直传。"
+      : "Could not reach the upload service. Check your network and try again; larger files must use Cloudflare R2 direct upload.";
   };
   type UploadResponsePayload = {
     ok?: boolean;
@@ -5279,7 +5279,7 @@ function ConnectorPanel({
     }).catch(() => null);
 
     if (!presignResponse) {
-      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
+      if (file.size <= directApiUploadMaxBytes) {
         return uploadSmallFile(file);
       }
 
@@ -5326,7 +5326,7 @@ function ConnectorPanel({
     }).catch(() => null);
 
     if (!uploadResponse) {
-      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
+      if (file.size <= directApiUploadMaxBytes) {
         return uploadSmallFile(file);
       }
 
@@ -5358,7 +5358,7 @@ function ConnectorPanel({
     });
 
     if (!uploadResponse.ok) {
-      if (file.size <= FILE_UPLOAD_MAX_BYTES) {
+      if (file.size <= directApiUploadMaxBytes) {
         return uploadSmallFile(file);
       }
 

@@ -48,30 +48,23 @@ function schemaTables(schemaJson: unknown) {
     : [];
 }
 
-function sampleRowsForTable(schemaJson: unknown, tableName: string) {
-  const table = schemaTables(schemaJson).find((item) => normalize(String(item.name ?? "")) === normalize(tableName));
-  const rows = Array.isArray(table?.sampleRows) ? table.sampleRows : [];
-
-  return rows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)));
-}
-
 async function storedRowsForContext(context: AggregationContext) {
   const config = asRecord(context.dataSource.config);
   return readCsvRowsFromStorageConfig(config);
 }
 
-async function rowsForAggregationTable(context: AggregationContext, tableName: string) {
+async function rowsForAggregationTable(context: AggregationContext) {
   try {
     const storedRows = await storedRowsForContext(context);
 
     if (storedRows?.length) {
       return storedRows;
     }
-  } catch (storageError) {
-    console.warn("Falling back to schema sample rows for aggregation", storageError);
+  } catch {
+    // Formal aggregation must use complete persisted data, not schema samples.
   }
 
-  return sampleRowsForTable(context.schemaJson, tableName);
+  throw new Error("DATA_SOURCE_FULL_DATA_UNAVAILABLE");
 }
 
 function rowCountForTable(schemaJson: unknown, tableName: string) {
@@ -1027,7 +1020,7 @@ export async function buildAggregationResults({
 
   for (const context of contexts) {
     for (const table of context.tables) {
-      const allRows = await rowsForAggregationTable(context, table.name);
+      const allRows = await rowsForAggregationTable(context);
       const dateColumn = findBusinessDateColumn(table.columns);
       const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
       const warnings = [];

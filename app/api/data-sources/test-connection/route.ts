@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const type = normalizeDatabaseType(payload?.type);
 
     if (!type) {
-      return jsonError("Database type must be postgresql");
+      return jsonError("UNSUPPORTED_DATABASE_TYPE: 当前暂不支持该数据库类型。");
     }
 
     const config = resolveDatabaseConfig(type, payload);
@@ -39,7 +39,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: "Connection verified",
+      success: true,
+      databaseType: type,
+      message: type === "mysql" ? "MySQL connection successful" : "PostgreSQL connection successful",
       database: publicDatabaseConfig(config)
     });
   } catch (error) {

@@ -1,6 +1,5 @@
 "use client";
 
-import { SignIn } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import type { SignInFirstFactor } from "@clerk/nextjs/types";
 import { ArrowRight } from "lucide-react";
@@ -33,12 +32,20 @@ const signInCopy = {
     sentCode: "Code sent to",
     otherMethods: "Password login",
     codeMethods: "Verification code login",
+    identifierLabel: "Email address or username",
+    identifierPlaceholder: "Enter email or username",
+    passwordLabel: "Password",
+    passwordPlaceholder: "Enter password",
+    signingIn: "Signing in...",
+    passwordSignIn: "Continue",
     continueWithGoogle: "Continue with Google",
     divider: "or",
     googleUnavailable: "Google sign-in is not available right now.",
     missingIdentifier: "Enter your email.",
+    missingPassword: "Enter your password.",
     missingCode: "Enter the verification code.",
     codeUnavailable: "Verification code login is not enabled for this account. Use another sign-in method.",
+    passwordUnavailable: "Password login is not available for this account.",
     secondFactorRequired: "This account needs an extra verification step. Use password login below.",
     forgotEmail: "Forgot email?",
     note: "Not your computer? Use a private browsing window to sign in",
@@ -68,12 +75,20 @@ const signInCopy = {
     sentCode: "验证码已发送至",
     otherMethods: "密码登录",
     codeMethods: "验证码登录",
+    identifierLabel: "邮箱或用户名",
+    identifierPlaceholder: "请输入邮箱或用户名",
+    passwordLabel: "密码",
+    passwordPlaceholder: "请输入密码",
+    signingIn: "登录中...",
+    passwordSignIn: "登录",
     continueWithGoogle: "使用 Google 登录",
     divider: "或",
     googleUnavailable: "当前无法使用 Google 登录。",
     missingIdentifier: "请输入邮箱。",
+    missingPassword: "请输入密码。",
     missingCode: "请输入验证码。",
     codeUnavailable: "当前账号未启用验证码登录，请使用下面的其他登录方式。",
+    passwordUnavailable: "当前账号无法使用密码登录。",
     secondFactorRequired: "这个账号还需要额外验证，请使用下面的密码登录。",
     forgotEmail: "忘记邮箱？",
     note: "这不是你的电脑？请使用无痕窗口登录当前演示会直接进入数据看板",
@@ -182,31 +197,113 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
         {mode === "code" ? (
           <CodeSignIn copy={copy} />
         ) : (
-          <SignIn
-            routing="path"
-            path="/sign-in"
-            fallbackRedirectUrl="/dashboard"
-            forceRedirectUrl="/dashboard"
-            appearance={{
-              elements: {
-                rootBox: "w-full max-w-[520px] min-w-0",
-                cardBox: "w-full shadow-none border-0",
-                card: "w-full shadow-none p-0",
-                header: "hidden",
-                socialButtonsBlockButton: "hidden",
-                socialButtonsBlockButtonText: "text-base font-medium",
-                socialButtonsProviderIcon: "size-5",
-                dividerRow: "hidden",
-                formFieldInput: "h-14 rounded-md border-slate-300 text-base",
-                formButtonPrimary: "h-14 rounded-md bg-primary px-6 text-base hover:bg-primary/90 text-primary-foreground",
-                footer: "hidden"
-              }
-            }}
-          />
+          <PasswordSignIn copy={copy} />
         )}
         </div>
       </div>
     </div>
+  );
+}
+
+function PasswordSignIn({ copy }: { copy: SignInCopy }) {
+  const router = useRouter();
+  const { isLoaded, signIn, setActive } = useSignIn();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setError("");
+  }, [copy]);
+
+  function getErrorMessage(errorValue: unknown) {
+    if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
+      const clerkError = errorValue as { errors?: Array<{ longMessage?: string; message?: string }> };
+      return clerkError.errors?.[0]?.longMessage || clerkError.errors?.[0]?.message || copy.passwordUnavailable;
+    }
+
+    return errorValue instanceof Error ? errorValue.message : copy.passwordUnavailable;
+  }
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!isLoaded) return;
+
+    const trimmedIdentifier = identifier.trim();
+
+    if (!trimmedIdentifier) {
+      setError(copy.missingIdentifier);
+      return;
+    }
+
+    if (!password) {
+      setError(copy.missingPassword);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const result = await signIn.create({
+        identifier: trimmedIdentifier,
+        password
+      });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        router.push("/dashboard");
+        return;
+      }
+
+      setError(result.status === "needs_second_factor" ? copy.secondFactorRequired : copy.passwordUnavailable);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="w-full min-w-0 space-y-4" onSubmit={submitPassword}>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-slate-700" htmlFor="signin-identifier">
+          {copy.identifierLabel}
+        </label>
+        <Input
+          id="signin-identifier"
+          autoComplete="username"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          placeholder={copy.identifierPlaceholder}
+          className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-slate-700" htmlFor="signin-password">
+          {copy.passwordLabel}
+        </label>
+        <Input
+          id="signin-password"
+          autoComplete="current-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder={copy.passwordPlaceholder}
+          className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
+        />
+      </div>
+
+      {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
+
+      <Button type="submit" disabled={isSubmitting || !isLoaded} className="h-14 w-full rounded-md px-6 text-base">
+        {isSubmitting ? copy.signingIn : copy.passwordSignIn}
+        <ArrowRight />
+      </Button>
+    </form>
   );
 }
 

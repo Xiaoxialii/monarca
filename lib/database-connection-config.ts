@@ -1,4 +1,4 @@
-export type SupportedDatabaseType = "postgresql";
+export type SupportedDatabaseType = "postgresql" | "mysql";
 
 export type ResolvedDatabaseConfig = {
   type: SupportedDatabaseType;
@@ -11,7 +11,8 @@ export type ResolvedDatabaseConfig = {
 };
 
 const DEFAULT_PORTS: Record<SupportedDatabaseType, number> = {
-  postgresql: 5432
+  postgresql: 5432,
+  mysql: 3306
 };
 
 type ParsedDatabaseUrl = Partial<Omit<ResolvedDatabaseConfig, "type" | "ssl">> & {
@@ -21,6 +22,10 @@ type ParsedDatabaseUrl = Partial<Omit<ResolvedDatabaseConfig, "type" | "ssl">> &
 export function normalizeDatabaseType(value: unknown): SupportedDatabaseType | null {
   if (value === "postgresql") {
     return "postgresql";
+  }
+
+  if (value === "mysql") {
+    return "mysql";
   }
 
   return null;
@@ -50,7 +55,12 @@ function parseDatabaseUrl(value: string): ParsedDatabaseUrl | null {
   try {
     const url = new URL(value);
     const protocol = url.protocol.replace(":", "");
-    const type = protocol === "postgresql" || protocol === "postgres" ? "postgresql" : null;
+    const type =
+      protocol === "postgresql" || protocol === "postgres"
+        ? "postgresql"
+        : protocol === "mysql" || protocol === "mysql2"
+          ? "mysql"
+          : null;
 
     if (!type) {
       return null;
@@ -70,7 +80,11 @@ function parseDatabaseUrl(value: string): ParsedDatabaseUrl | null {
 }
 
 function getDatabaseUrlPreset(type: SupportedDatabaseType) {
-  const parsed = parseDatabaseUrl(firstEnv("DATABASE_URL"));
+  const parsed = parseDatabaseUrl(firstEnv(
+    type === "mysql" ? "MYSQL_DATABASE_URL" : "POSTGRESQL_DATABASE_URL",
+    type === "mysql" ? "PRESET_MYSQL_DATABASE_URL" : "PRESET_POSTGRESQL_DATABASE_URL",
+    "DATABASE_URL"
+  ));
 
   if (parsed?.type === type) {
     return parsed;
@@ -81,7 +95,9 @@ function getDatabaseUrlPreset(type: SupportedDatabaseType) {
 
 function resolvePort(type: SupportedDatabaseType, payloadPort: unknown, presetPort?: number) {
   const payloadPortNumber = Number(payloadPort);
-  const envPort = Number(firstEnv("POSTGRESQL_PORT", "POSTGRES_PORT", "PGPORT", "PRESET_POSTGRESQL_PORT"));
+  const envPort = Number(type === "mysql"
+    ? firstEnv("MYSQL_PORT", "PRESET_MYSQL_PORT")
+    : firstEnv("POSTGRESQL_PORT", "POSTGRES_PORT", "PGPORT", "PRESET_POSTGRESQL_PORT"));
 
   if (Number.isInteger(payloadPortNumber) && payloadPortNumber > 0) {
     return payloadPortNumber;
@@ -98,6 +114,26 @@ function resolvePort(type: SupportedDatabaseType, payloadPort: unknown, presetPo
   return DEFAULT_PORTS[type];
 }
 
+function envKeys(type: SupportedDatabaseType, field: "host" | "database" | "username" | "password" | "ssl") {
+  if (type === "mysql") {
+    return {
+      host: ["MYSQL_HOST", "PRESET_MYSQL_HOST"],
+      database: ["MYSQL_DATABASE", "PRESET_MYSQL_DATABASE"],
+      username: ["MYSQL_USER", "MYSQL_USERNAME", "PRESET_MYSQL_USER"],
+      password: ["MYSQL_PASSWORD", "PRESET_MYSQL_PASSWORD"],
+      ssl: ["MYSQL_SSL", "PRESET_MYSQL_SSL"]
+    }[field];
+  }
+
+  return {
+    host: ["POSTGRESQL_HOST", "POSTGRES_HOST", "PGHOST", "PRESET_POSTGRESQL_HOST"],
+    database: ["POSTGRESQL_DATABASE", "POSTGRES_DATABASE", "PGDATABASE", "PRESET_POSTGRESQL_DATABASE"],
+    username: ["POSTGRESQL_USER", "POSTGRES_USER", "PGUSER", "PRESET_POSTGRESQL_USER"],
+    password: ["POSTGRESQL_PASSWORD", "POSTGRES_PASSWORD", "PGPASSWORD", "PRESET_POSTGRESQL_PASSWORD"],
+    ssl: ["POSTGRESQL_SSL", "POSTGRES_SSL", "PRESET_POSTGRESQL_SSL"]
+  }[field];
+}
+
 export function resolveDatabaseConfig(
   type: SupportedDatabaseType,
   payload: Record<string, unknown> | null
@@ -112,26 +148,26 @@ export function resolveDatabaseConfig(
     type,
     host:
       payloadHost ||
-      firstEnv("POSTGRESQL_HOST", "POSTGRES_HOST", "PGHOST", "PRESET_POSTGRESQL_HOST") ||
+      firstEnv(...envKeys(type, "host")) ||
       databaseUrlPreset?.host ||
       "127.0.0.1",
     port: resolvePort(type, payload?.port, databaseUrlPreset?.port),
     database:
       payloadDatabase ||
-      firstEnv("POSTGRESQL_DATABASE", "POSTGRES_DATABASE", "PGDATABASE", "PRESET_POSTGRESQL_DATABASE") ||
+      firstEnv(...envKeys(type, "database")) ||
       databaseUrlPreset?.database ||
       "",
     username:
       payloadUsername ||
-      firstEnv("POSTGRESQL_USER", "POSTGRES_USER", "PGUSER", "PRESET_POSTGRESQL_USER") ||
+      firstEnv(...envKeys(type, "username")) ||
       databaseUrlPreset?.username ||
       "",
     password:
       payloadPassword ||
-      firstEnv("POSTGRESQL_PASSWORD", "POSTGRES_PASSWORD", "PGPASSWORD", "PRESET_POSTGRESQL_PASSWORD") ||
+      firstEnv(...envKeys(type, "password")) ||
       databaseUrlPreset?.password ||
       "",
-    ssl: Boolean(payload?.ssl) || parseBooleanEnv(firstEnv("POSTGRESQL_SSL", "POSTGRES_SSL", "PRESET_POSTGRESQL_SSL"))
+    ssl: Boolean(payload?.ssl) || parseBooleanEnv(firstEnv(...envKeys(type, "ssl")))
   };
 }
 

@@ -1,4 +1,5 @@
 import { Client as PostgresClient } from "pg";
+import mysql from "mysql2/promise";
 import {
   ConnectionStatus,
   DataSourceType,
@@ -17,7 +18,7 @@ import type { SchemaColumn, SchemaTable } from "@/lib/metric-validation";
 import { validationFromLineage } from "@/lib/metric-validation";
 import { storedSecret } from "@/lib/secret-crypto";
 
-type SupportedResultDatabase = "postgresql";
+type SupportedResultDatabase = "postgresql" | "mysql";
 
 type ResultConfig = {
   type: SupportedResultDatabase;
@@ -212,6 +213,7 @@ function normalize(value: string) {
 
 function sourceType(source: Pick<DataSourceConnection, "type">): SupportedResultDatabase | null {
   if (source.type === DataSourceType.POSTGRESQL) return "postgresql";
+  if (source.type === DataSourceType.MYSQL) return "mysql";
   return null;
 }
 
@@ -246,13 +248,14 @@ function configFromSource(source: Pick<DataSourceConnection, "type" | "config">)
 
 function quoteIdentifier(type: SupportedResultDatabase, value: string) {
   const parts = value.split(".").filter(Boolean);
+  const quote = type === "mysql" ? "`" : `"`;
 
   return parts.map((part) => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(part)) {
       throw new Error(`Unsafe identifier: ${part}`);
     }
 
-    return `"${part}"`;
+    return `${quote}${part}${quote}`;
   }).join(".");
 }
 
@@ -308,7 +311,9 @@ function singleFieldReference(tables: SchemaTable[], expression: string) {
 }
 
 function textCast(type: SupportedResultDatabase, expressionSql: string) {
-  return `CAST(${expressionSql} AS TEXT)`;
+  return type === "mysql"
+    ? `CAST(${expressionSql} AS CHAR)`
+    : `CAST(${expressionSql} AS TEXT)`;
 }
 
 function nonEmptyTextCountSql(type: SupportedResultDatabase, expressionSql: string) {
@@ -499,8 +504,7 @@ function canComputeContext(context: MetricResultContext) {
         ? storage.key
         : null;
 
-  return getSchemaTables(context.schemaJson).some((table) => Array.isArray(table.sampleRows)) ||
-    typeof config.storedFilePath === "string" ||
+  return typeof config.storedFilePath === "string" ||
     ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && Boolean(objectKey));
 }
 
@@ -742,6 +746,29 @@ function buildMetricSql(
 }
 
 async function queryMetric(config: ResultConfig, sql: string) {
+  assertReadOnlySql(sql);
+
+  if (config.type === "mysql") {
+    const connection = await mysql.createConnection({
+      host: config.host,
+      port: config.port,
+      database: config.database,
+      user: config.username,
+      password: config.password,
+      connectTimeout: 5000,
+      ssl: config.ssl ? {} : undefined,
+      multipleStatements: false
+    });
+
+    try {
+      await connection.query("SET SESSION MAX_EXECUTION_TIME=15000").catch(() => undefined);
+      const [rows] = await connection.query(sql);
+      return rows as Array<Record<string, unknown>>;
+    } finally {
+      await connection.end().catch(() => undefined);
+    }
+  }
+
   const client = new PostgresClient({
     host: config.host,
     port: config.port,
@@ -761,21 +788,20 @@ async function queryMetric(config: ResultConfig, sql: string) {
   }
 }
 
-function getSchemaTables(schemaJson: unknown): Array<Record<string, unknown>> {
-  const schema = asRecord(schemaJson);
-  return Array.isArray(schema.tables)
-    ? schema.tables.filter((table): table is Record<string, unknown> => Boolean(asRecord(table)))
-    : [];
+function assertReadOnlySql(sql: string) {
+  const normalized = sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--.*$/gm, " ").trim();
+
+  if (!/^select\b/i.test(normalized)) {
+    throw new Error("Only SELECT aggregation queries are allowed");
+  }
+
+  if (/\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|call|execute)\b/i.test(normalized)) {
+    throw new Error("Unsafe SQL statement blocked");
+  }
 }
 
-async function rowsForCsvTable(context: MetricResultContext, table: SchemaTable) {
-  const schemaTable = getSchemaTables(context.schemaJson).find((candidate) =>
-    normalize(String(candidate.name ?? "")) === normalize(table.name)
-  );
+async function rowsForCsvTable(context: MetricResultContext) {
   const config = asRecord(context.dataSource.config);
-  const sampleRows = Array.isArray(schemaTable?.sampleRows)
-    ? schemaTable.sampleRows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)))
-    : [];
 
   try {
     const storedRows = await readCsvRowsFromStorageConfig(config);
@@ -783,15 +809,11 @@ async function rowsForCsvTable(context: MetricResultContext, table: SchemaTable)
     if (storedRows?.length) {
       return storedRows;
     }
-  } catch (storageError) {
-    console.warn("Falling back to schema sample rows for CSV metric execution", storageError);
+  } catch {
+    // Formal metric execution must use the complete persisted file, not schema samples.
   }
 
-  if (sampleRows.length > 0) {
-    return sampleRows;
-  }
-
-  throw new Error("No CSV rows are available for metric execution");
+  throw new Error("DATA_SOURCE_FULL_DATA_UNAVAILABLE");
 }
 
 function parseNumber(value: unknown) {
@@ -1125,7 +1147,7 @@ async function computeCsvMetricResult(
   dateRange?: ResolvedReportDateRange
 ): Promise<MetricResultValue> {
   const sourceTable = sourceTableForFormula(context.tables, metric.formula);
-  const allRows = await rowsForCsvTable(context, sourceTable);
+  const allRows = await rowsForCsvTable(context);
   const dateColumn = findBusinessDateColumn(sourceTable.columns);
   const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
   const previousRows = filterRowsByPreviousReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });

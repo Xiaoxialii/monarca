@@ -2581,17 +2581,22 @@ function validationFailureReport(input: ReportComposerInput) {
   const audit = input.reportDataAudit;
   const failures = audit?.failures?.length ? audit.failures : [isZh ? "当前报告未通过数据口径校验。" : "The report did not pass data-scope validation."];
   const metricRowsUsed = audit?.rowsUsedForMetrics ?? audit?.fullDataGuardrail?.rowsUsedForMetrics ?? audit?.fullDataGuardrail?.rowsUsed ?? audit?.totalRows ?? "未知";
+  const isDaily = input.requestedReportMode === "daily_brief";
   const auditScopeEvidence = audit
-    ? (isZh
-      ? `当前使用的数据来源：${audit.analysisSource ?? "未知"}；使用行数：${metricRowsUsed}；预期完整行数：${audit.expectedFullRows ?? "未知"}；今日订单记录数：${audit.dailyRows ?? "未知"}；用于计算的记录数：${audit.rowsUsedForMetrics ?? "未知"}。`
-      : `Current source: ${audit.analysisSource ?? "unknown"}; rows used: ${metricRowsUsed}; expected full rows: ${audit.expectedFullRows ?? "unknown"}; latest-day order rows: ${audit.dailyRows ?? "unknown"}; rows used for metrics: ${audit.rowsUsedForMetrics ?? "unknown"}.`)
+    ? isDaily
+      ? (isZh
+        ? `当前使用的数据来源：${audit.analysisSource ?? "未知"}；数据源总行数：${audit.totalRows ?? audit.expectedFullRows ?? "未知"}；日报分析行数：${audit.dailyRows ?? metricRowsUsed}；日期过滤：${audit.dateField ?? "业务日期"} = ${audit.latestDataDate ?? "-"}。日报基于最新业务日期当天数据生成；完整文件用于校验和历史对比。`
+        : `Current source: ${audit.analysisSource ?? "unknown"}; total source rows: ${audit.totalRows ?? audit.expectedFullRows ?? "unknown"}; daily analysis rows: ${audit.dailyRows ?? metricRowsUsed}; date filter: ${audit.dateField ?? "business date"} = ${audit.latestDataDate ?? "-"}. The daily brief uses the latest business day; the full file is used for validation and history.`)
+      : (isZh
+        ? `当前使用的数据来源：${audit.analysisSource ?? "未知"}；用于计算的记录数：${metricRowsUsed}；数据源总行数：${audit.totalRows ?? audit.expectedFullRows ?? "未知"}。`
+        : `Current source: ${audit.analysisSource ?? "unknown"}; rows used for metrics: ${metricRowsUsed}; total source rows: ${audit.totalRows ?? audit.expectedFullRows ?? "unknown"}.`)
     : "";
   const caveats = [
     auditScopeEvidence ? {
       id: "audit-scope-summary",
-      title: isZh ? "当前不能生成正式业务报告" : "Cannot generate a formal business report",
+      title: isZh ? "报告生成已暂停：指标口径校验未通过" : "Report generation paused: metric validation failed",
       keyEvidence: auditScopeEvidence,
-      businessJudgment: isZh ? "系统已阻止基于错误样本量、预览数据或部分数据生成经营结论。" : "The system blocked conclusions based on incorrect sample size, preview data, or partial data.",
+      businessJudgment: isZh ? "系统已读取完整数据源，并按当前报告日期范围复算关键指标；如果复算结果与报告使用指标不一致，会暂停输出以避免生成错误经营结论。" : "The system reads the full data source and recomputes key metrics for the report date range; output is paused if the recomputation differs from the report metrics.",
       recommendedAction: (audit?.requiredFixes ?? []).join(isZh ? "；" : "; "),
       caveat: isZh ? "未通过校验" : "Validation failed"
     } : null,

@@ -13,7 +13,7 @@ import {
   publicDatabaseConfig,
   resolveDatabaseConfig
 } from "@/lib/database-connection-config";
-import { introspectDatabase, testDatabaseConnection } from "@/lib/database-introspection";
+import { getDataSourceStats, introspectDatabase, testDatabaseConnection } from "@/lib/database-introspection";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     const type = normalizeDatabaseType(payload?.type);
 
     if (!type) {
-      return jsonError("Database type must be postgresql");
+      return jsonError("UNSUPPORTED_DATABASE_TYPE: 当前暂不支持该数据库类型。");
     }
 
     const config = resolveDatabaseConfig(type, payload);
@@ -48,10 +48,12 @@ export async function POST(request: Request) {
 
     await testDatabaseConnection(config);
     const tables = await introspectDatabase(config);
-    const provider = "PostgreSQL";
+    const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
+    const dataSourceType = type === "mysql" ? DataSourceType.MYSQL : DataSourceType.POSTGRESQL;
     const publicConfig = publicDatabaseConfig(config);
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(tables);
+    const tableStats = await getDataSourceStats(config, tables);
 
     const result = await prisma.$transaction(async (tx) => {
       await clearWorkspaceReportCaches(tx, session.workspace.id);
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
       const dataSource = await tx.dataSourceConnection.create({
         data: {
           workspaceId: session.workspace.id,
-          type: DataSourceType.POSTGRESQL,
+          type: dataSourceType,
           name: `${provider} - ${config.database}`,
           provider,
           isActive: true,
@@ -74,13 +76,29 @@ export async function POST(request: Request) {
           },
           schemas: {
             scannedAt: new Date().toISOString(),
+            databaseType: type,
             tables,
             semanticLayer,
-            analysisReport
+            analysisReport,
+            stats: tableStats
           },
           connectedAt: new Date(),
           lastSyncAt: new Date()
         }
+      });
+
+      await tx.dataSourceStats.createMany({
+        data: tableStats.map((stat) => ({
+          dataSourceConnectionId: dataSource.id,
+          tableName: stat.tableName,
+          rowCount: stat.rowCount,
+          minDate: stat.minDate,
+          maxDate: stat.maxDate,
+          dateField: stat.dateField,
+          schemaHash: stat.schemaHash,
+          calculatedAt: new Date()
+        })),
+        skipDuplicates: true
       });
 
       const latestSnapshot = await tx.schemaSnapshot.findFirst({
@@ -104,9 +122,11 @@ export async function POST(request: Request) {
           schemaJson: {
             sourceId: dataSource.id,
             scannedAt: new Date().toISOString(),
+            databaseType: type,
             tables,
             semanticLayer,
-            analysisReport
+            analysisReport,
+            stats: tableStats
           },
           qualityReport: {
             tableCount: tables.length,
@@ -114,6 +134,7 @@ export async function POST(request: Request) {
             semanticFieldCount: semanticLayer.fields.length,
             businessEntityCount: semanticLayer.entities.length,
             generatedMetricCount: semanticLayer.metrics.length,
+            stats: tableStats,
             analysisReport
           }
         }
@@ -144,7 +165,8 @@ export async function POST(request: Request) {
           scannedAt: new Date().toISOString(),
           tables,
           semanticLayer,
-          analysisReport
+          analysisReport,
+          stats: tableStats
         },
         connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null
@@ -157,6 +179,7 @@ export async function POST(request: Request) {
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
         generatedMetricCount: result.generatedMetricCount,
+        stats: tableStats,
         analysisReport
       }
     });

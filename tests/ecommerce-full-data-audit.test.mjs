@@ -125,11 +125,42 @@ test("full-data audit blocks stale KPI results that do not match the full CSV ag
     return;
   }
 
+  const context = contextForDataset();
+  const tableName = context.tables[0].name;
   const audit = await buildReportDataAudit({
-    contexts: [contextForDataset()],
+    contexts: [context],
     reportType: "custom_report",
+    dateRange: { preset: "ALL" },
+    metricDefinitions: [{
+      id: "net-sales",
+      workspaceId: "workspace",
+      layer: MetricLayer.PRIMARY,
+      category: "Revenue",
+      name: "Net Sales",
+      definition: "Net sales from order rows",
+      formula: `SUM(${tableName}.net_sales)`,
+      expressionType: MetricExpressionType.CALCULATION,
+      unit: null,
+      window: null,
+      sourceMetricIds: null,
+      mappingJson: { sourceFields: [{ table: tableName, field: "net_sales" }] },
+      lineageJson: {
+        validation: { validation_status: "valid", validation_errors: [], validation_warnings: [] },
+        metricType: "core_metric",
+        businessType: "ecommerce",
+        displayName: "Net Sales"
+      },
+      isActive: true,
+      maintainerRole: MetricMaintainerRole.AI,
+      maintainerUserId: null,
+      status: MetricStatus.AI_READY,
+      tagsJson: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }],
     metricResults: [
       {
+        metricId: "net-sales",
         metricName: "Net Sales",
         displayName: "Net Sales",
         formula: "SUM(ecommerce_dataset_2026_jan_to_jun09_82911_rows.net_sales)",

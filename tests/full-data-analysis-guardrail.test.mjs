@@ -100,6 +100,28 @@ test("daily full data allows report when rowsUsedForMetrics equals latest-day ro
   assert.equal(result.sampleRowsCount, 3);
 });
 
+test("daily report compares metrics against latest-day rows, not total file rows", () => {
+  const result = validateFullDataAnalysisContext({
+    reportType: "daily_brief",
+    metricSource: "FULL_DATA",
+    rowsUsed: 82911,
+    expectedFullRows: 82911,
+    dailyRows: 680,
+    rowsUsedForMetrics: 680,
+    fullDataAvailable: true,
+    storedFilePath: ".data-source-uploads/orders.csv",
+    latestDataDate: "2026-06-09",
+    businessFieldMap: ecommerceFieldMap,
+    detectedIndustry: "ecommerce"
+  });
+
+  assert.equal(result.canGenerateReport, true);
+  assert.equal(result.dataScope, "FULL_DATA");
+  assert.equal(result.rowsUsed, 82911);
+  assert.equal(result.rowsUsedForMetrics, 680);
+  assert.equal(result.blockingIssues.join(" "), "");
+});
+
 test("ecommerce field map blocks app template industry", () => {
   const result = validateFullDataAnalysisContext({
     reportType: "daily_brief",

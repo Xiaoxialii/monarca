@@ -496,17 +496,17 @@ async function buildDateRangedReportPayload({
       orderBy: { createdAt: "asc" }
     });
   }
-  const registryMetrics = metrics.filter(isBusinessMetricRegistryMetric);
-  const metricsForExecution = registryMetrics.length > 0 ? registryMetrics : metrics;
+  const tableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
+  const tableScopedRegistryMetrics = tableScopedMetrics.filter(isBusinessMetricRegistryMetric);
+  const metricsForExecution = tableScopedRegistryMetrics.length > 0 ? tableScopedRegistryMetrics : tableScopedMetrics;
   const executableMetrics = metricsForExecution
-    .filter((metric) => metricBelongsToTables(metric, labels))
     .filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
       validationFromLineage(metric.lineageJson)?.validation_status === "valid"
     );
 
   const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-  const consistency = registryMetrics.length > 0
+  const consistency = tableScopedRegistryMetrics.length > 0
     ? validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
       reportType: reportType as "daily" | "weekly" | "custom",
       metricRegistryId: executableMetricRegistryId,
@@ -579,6 +579,8 @@ async function buildDateRangedReportPayload({
   const reportDataAudit = await buildReportDataAudit({
     contexts,
     reportType: reportMode,
+    metricDefinitions: executableMetrics,
+    dateRange: effectiveDateRange,
     metricResults: metricResults as unknown as Array<Record<string, unknown>>,
     aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
     trendMetrics: timeArtifacts.trendMetrics as Array<Record<string, unknown>>
@@ -768,14 +770,31 @@ export async function GET(request: Request) {
         sourceSnapshotVersion
       });
     }
-    const rangedBriefing = rangedPayload && selectedBriefing
-      ? {
-          ...selectedBriefing,
-          payloadJson: {
-            ...asRecord(selectedBriefing.payloadJson),
-            ...rangedPayload
+    const rangedBriefing = rangedPayload
+      ? selectedBriefing
+        ? {
+            ...selectedBriefing,
+            payloadJson: {
+              ...asRecord(selectedBriefing.payloadJson),
+              ...rangedPayload
+            }
           }
-        }
+        : {
+            id: `computed-${requestedReportMode}-${rangedPayload.generatedAt}`,
+            workspaceId: session.workspace.id,
+            briefingDate: new Date(),
+            title: locale === "zh" ? "实时业务报告" : "Live business report",
+            summary: typeof asRecord(rangedPayload.structuredReport).coreSummary === "string"
+              ? String(asRecord(rangedPayload.structuredReport).coreSummary)
+              : locale === "zh"
+                ? "已基于当前数据源生成实时报告。"
+                : "Generated from the current data source.",
+            confidence: 0,
+            payloadJson: rangedPayload,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            insights: []
+          }
       : selectedBriefing;
     const visibleBriefing = filterBriefingMetricResults(rangedBriefing, visibleMetricIds, visibleMetricsById);
     const metricSnapshots = await loadMetricSnapshots(prisma, session.workspace.id).catch(() => []);

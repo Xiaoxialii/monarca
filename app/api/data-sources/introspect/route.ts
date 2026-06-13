@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const type = normalizeDatabaseType(payload?.type);
 
     if (!type) {
-      return jsonError("Database type must be postgresql");
+      return jsonError("UNSUPPORTED_DATABASE_TYPE: 当前暂不支持该数据库类型。");
     }
 
     const config = resolveDatabaseConfig(type, payload);
@@ -32,6 +32,8 @@ export async function POST(request: Request) {
 
     const tables = await introspectDatabase(config);
     const semanticLayer = buildSemanticLayer(tables);
+    const provider = type === "mysql" ? "MySQL" : "PostgreSQL";
+    const dataSourceType = type === "mysql" ? DataSourceType.MYSQL : DataSourceType.POSTGRESQL;
     const schemaPayload = {
       type,
       database: config.database,
@@ -45,9 +47,9 @@ export async function POST(request: Request) {
     const dataSource = await prisma.dataSourceConnection.create({
       data: {
         workspaceId: session.workspace.id,
-        type: DataSourceType.POSTGRESQL,
-        name: `PostgreSQL · ${config.database}`,
-        provider: "PostgreSQL",
+        type: dataSourceType,
+        name: `${provider} · ${config.database}`,
+        provider,
         status: ConnectionStatus.CONNECTED,
         connectionMode: "server-preset",
         authMethod: "database",

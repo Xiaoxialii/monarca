@@ -15,6 +15,7 @@ enum WorkspaceRole {
 enum DataSourceType {
   SQL_SERVER
   POSTGRESQL
+  MYSQL
   SNOWFLAKE
   BIGQUERY
   EXCEL
@@ -219,8 +220,25 @@ model DataSourceConnection {
   updatedAt       DateTime         @updatedAt
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   schemaSnapshots SchemaSnapshot[]
+  stats           DataSourceStats[]
 
   @@index([workspaceId, status])
+}
+
+model DataSourceStats {
+  id                     String               @id @default(cuid())
+  dataSourceConnectionId String
+  tableName              String
+  rowCount               Int?
+  minDate                DateTime?
+  maxDate                DateTime?
+  dateField              String?
+  schemaHash             String?
+  calculatedAt           DateTime             @default(now())
+  dataSource             DataSourceConnection @relation(fields: [dataSourceConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([dataSourceConnectionId])
+  @@unique([dataSourceConnectionId, tableName])
 }
 
 model SchemaSnapshot {

@@ -30,7 +30,11 @@ function publicTables(tables: Array<{
   return tables.map((table) => ({
     name: table.name,
     rowCount: table.rowCount,
-    columns: table.columns
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      type: column.type ?? "unknown",
+      nullable: column.nullable
+    }))
   }));
 }
 
@@ -116,13 +120,14 @@ export async function POST(request: Request) {
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const provider = isCsv ? "CSV" : "Excel";
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
+    const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
-    const analysisReport = generateUniversalDataAnalysisReport(tables);
+    const analysisReport = generateUniversalDataAnalysisReport(schemaTables);
     const snapshotSchemaPayload = {
       scannedAt,
       fileName: file.name,
       fileSize: file.size,
-      tables,
+      tables: schemaTables,
       semanticLayer,
       analysisReport
     };
@@ -130,7 +135,7 @@ export async function POST(request: Request) {
       scannedAt,
       fileName: file.name,
       fileSize: file.size,
-      tables: publicTables(tables)
+      tables: schemaTables
     };
 
     const result = await prisma.$transaction(async (tx) => {
@@ -307,7 +312,7 @@ export async function POST(request: Request) {
           tableCount: tables.length,
           columnCount,
           scannedAt,
-          tables: publicTables(tables)
+          tables: schemaTables
         },
         connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null

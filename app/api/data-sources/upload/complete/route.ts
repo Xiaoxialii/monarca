@@ -34,6 +34,22 @@ function toNumber(value: unknown) {
   return null;
 }
 
+function publicTables(tables: Array<{
+  name: string;
+  rowCount?: number;
+  columns: Array<{ name: string; type?: string; nullable?: boolean }>;
+}>) {
+  return tables.map((table) => ({
+    name: table.name,
+    rowCount: table.rowCount,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      type: column.type ?? "unknown",
+      nullable: column.nullable
+    }))
+  }));
+}
+
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   const safeMessage = message.replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[DATABASE_URL]");
@@ -140,8 +156,9 @@ export async function POST(request: Request) {
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const provider = isCsv ? "CSV" : "Excel";
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
+    const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
-    const analysisReport = generateUniversalDataAnalysisReport(tables);
+    const analysisReport = generateUniversalDataAnalysisReport(schemaTables);
     const storage = {
       provider: "cloudflare-r2",
       bucket: stringValue(payload?.bucket),
@@ -151,7 +168,7 @@ export async function POST(request: Request) {
       scannedAt,
       fileName,
       fileSize,
-      tables,
+      tables: schemaTables,
       semanticLayer,
       analysisReport
     };
@@ -254,7 +271,7 @@ export async function POST(request: Request) {
           tableCount: tables.length,
           columnCount,
           scannedAt,
-          tables,
+          tables: schemaTables,
           semanticLayer,
           analysisReport
         },

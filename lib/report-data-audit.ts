@@ -1,10 +1,12 @@
-import { DataSourceType, type DataSourceConnection } from "@prisma/client";
+import { DataSourceType, type DataSourceConnection, type MetricDefinition } from "@prisma/client";
 import { readCsvRowsFromStorageConfig } from "@/lib/csv-upload-rows";
 import {
   findBusinessDateColumn,
   rowDateValue
 } from "@/lib/report-date-range";
+import type { ResolvedReportDateRange } from "@/lib/report-date-range";
 import type { SchemaTable } from "@/lib/metric-validation";
+import { computeMetricResultsForContexts, type MetricResultContext } from "@/lib/metric-results";
 import {
   ecommerceBusinessFieldMap,
   validateFullDataAnalysisContext,
@@ -15,6 +17,21 @@ type AuditContext = {
   dataSource: Pick<DataSourceConnection, "id" | "name" | "type" | "config">;
   tables: SchemaTable[];
   schemaJson?: unknown;
+};
+
+export type ReportMetricAuditDiff = {
+  metricKey: string;
+  displayName: string;
+  reportValue: number | string | null;
+  auditValue: number | string | null;
+  dateRange: {
+    preset: string;
+    startDate: string | null;
+    endDate: string | null;
+  };
+  formula: string;
+  rowCount: number | null;
+  sourceMode: string;
 };
 
 export type ReportDataAudit = {
@@ -35,6 +52,7 @@ export type ReportDataAudit = {
   warnings: string[];
   requiredFixes: string[];
   analysisSource: string;
+  auditDiffs: ReportMetricAuditDiff[];
   businessFieldMap: Record<string, string>;
   fullDataGuardrail: FullDataAnalysisGuardrailResult;
   ecommerceFullDataMetrics: {
@@ -353,70 +371,6 @@ function mergeEcommerceMetrics(
   };
 }
 
-function metricResultNumber(metricResults: Array<Record<string, unknown>>, patterns: RegExp[], formulaPatterns: RegExp[] = []) {
-  const result = metricResults.find((item) => {
-    const labelText = [
-      item.metricName,
-      item.displayName
-    ].filter(Boolean).join(" ");
-    const formulaText = String(item.formula ?? "");
-
-    return patterns.some((pattern) => pattern.test(labelText)) ||
-      formulaPatterns.some((pattern) => pattern.test(formulaText));
-  });
-  const value = result ? parseNumber(result.value) : null;
-
-  return value == null ? null : roundMetric(value);
-}
-
-function categoryMetricRows(metricResults: Array<Record<string, unknown>>) {
-  const result = metricResults.find((item) => {
-    const text = [item.metricName, item.displayName, item.formula].filter(Boolean).join(" ");
-
-    return /category/i.test(text) && /order|count|COUNT/i.test(text) && Array.isArray(item.rows);
-  });
-
-  return Array.isArray(result?.rows) ? result.rows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row))) : [];
-}
-
-function addMetricMismatchFailures(
-  failures: string[],
-  fullMetrics: NonNullable<ReportDataAudit["ecommerceFullDataMetrics"]>,
-  metricResults: Array<Record<string, unknown>>,
-  expectedScopeLabel = "完整文件聚合值"
-) {
-  const checks: Array<[string, number | null, RegExp[], number]> = [
-    ["Total Orders", fullMetrics.totalOrders, [/total orders/i, /^orders$/i, /订单数/], 0.01],
-    ["Total Customers", fullMetrics.totalCustomers, [/total customers/i, /^customers$/i, /客户数/], 0.01],
-    ["Gross Sales", fullMetrics.grossSales, [/gross sales/i], 0.01],
-    ["Net Sales", fullMetrics.netSales, [/net sales/i], 0.01],
-    ["Total Paid", fullMetrics.totalPaid, [/total paid/i], 0.01],
-    ["AOV", fullMetrics.aov, [/\baov\b/i, /average order value/i], 0.01],
-    ["Average Rating", fullMetrics.averageRating, [/average rating/i, /customer rating/i], 0.01]
-  ];
-
-  const formulaChecks: Record<string, RegExp[]> = {
-    "Total Orders": [/^COUNT_DISTINCT\s*\([^)]*order/i, /^COUNT\s*\(\s*\*\s*\)$/i],
-    "Total Customers": [/^COUNT_DISTINCT\s*\([^)]*customer/i]
-  };
-
-  for (const [label, expected, patterns, tolerance] of checks) {
-    const actual = metricResultNumber(metricResults, patterns, formulaChecks[label] ?? []);
-    if (expected != null && actual != null && Math.abs(actual - expected) > tolerance) {
-      failures.push(`数据口径校验失败：${label} 指标结果 ${actual} 与${expectedScopeLabel} ${expected} 不一致。`);
-    }
-  }
-
-  for (const row of categoryMetricRows(metricResults)) {
-    const category = String(row.dimension ?? "").trim();
-    const actual = parseNumber(row.value);
-    const expected = category ? fullMetrics.categoryOrders[category] : null;
-    if (category && expected != null && actual != null && Math.abs(actual - expected) > 0.01) {
-      failures.push(`数据口径校验失败：${category} orders 指标结果 ${actual} 与${expectedScopeLabel} ${expected} 不一致。`);
-    }
-  }
-}
-
 function isDailyReport(reportType?: string) {
   return /daily|日报|brief/i.test(String(reportType ?? "")) && !/weekly|周报/i.test(String(reportType ?? ""));
 }
@@ -440,9 +394,103 @@ function metricResultDateRange(metricResults?: Array<Record<string, unknown>>) {
   return { start: null, end: null };
 }
 
+function metricResultKey(metric: Record<string, unknown>) {
+  return String(metric.metricId ?? metric.metricName ?? metric.displayName ?? metric.formula ?? "");
+}
+
+function metricDisplayName(metric: Record<string, unknown>) {
+  return String(metric.displayName ?? metric.metricName ?? metric.metricId ?? "Metric");
+}
+
+function metricValue(metric: Record<string, unknown>) {
+  return (metric.value ?? metric.currentValue ?? null) as number | string | null;
+}
+
+function metricTolerance(metric: Record<string, unknown>) {
+  const text = [
+    metric.metricName,
+    metric.displayName,
+    metric.formula,
+    metric.unit
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (/count|orders|customers|订单|客户|数量/.test(text)) return 0;
+  if (/percent|rate|率|%/.test(text)) return 0.001;
+  return 0.01;
+}
+
+function valuesDiffer(left: number | string | null, right: number | string | null, tolerance: number) {
+  const leftNumber = parseNumber(left);
+  const rightNumber = parseNumber(right);
+
+  if (leftNumber != null && rightNumber != null) {
+    return tolerance === 0
+      ? Math.round(leftNumber) !== Math.round(rightNumber)
+      : Math.abs(leftNumber - rightNumber) > tolerance;
+  }
+
+  return String(left ?? "") !== String(right ?? "");
+}
+
+function auditDisplayValue(value: number | string | null) {
+  const numeric = parseNumber(value);
+  return numeric == null ? value : roundMetric(numeric, 4);
+}
+
+async function buildMetricAuditDiffs(input: {
+  contexts: AuditContext[];
+  metricDefinitions?: MetricDefinition[];
+  metricResults?: Array<Record<string, unknown>>;
+  dateRange?: ResolvedReportDateRange;
+  rowsUsedForMetrics: number | null;
+  sourceMode: string;
+}): Promise<ReportMetricAuditDiff[]> {
+  if (!input.metricDefinitions?.length || !input.metricResults?.length || !input.dateRange) {
+    return [];
+  }
+
+  const auditResults = await computeMetricResultsForContexts({
+    contexts: input.contexts as unknown as MetricResultContext[],
+    metrics: input.metricDefinitions,
+    dateRange: input.dateRange
+  });
+  const auditByKey = new Map(auditResults.map((result) => [metricResultKey(result as unknown as Record<string, unknown>), result as unknown as Record<string, unknown>]));
+  const diffs: ReportMetricAuditDiff[] = [];
+
+  for (const result of input.metricResults) {
+    const key = metricResultKey(result);
+    const audit = auditByKey.get(key);
+    if (!key || !audit) continue;
+    const reportValue = metricValue(result);
+    const auditValue = metricValue(audit);
+    const tolerance = metricTolerance(result);
+
+    if (valuesDiffer(reportValue, auditValue, tolerance)) {
+      diffs.push({
+        metricKey: key,
+        displayName: metricDisplayName(result),
+        reportValue: auditDisplayValue(reportValue),
+        auditValue: auditDisplayValue(auditValue),
+        dateRange: {
+          preset: input.dateRange.preset,
+          startDate: input.dateRange.startDate ?? null,
+          endDate: input.dateRange.endDate ?? null
+        },
+        formula: String(result.formula ?? audit.formula ?? ""),
+        rowCount: input.rowsUsedForMetrics,
+        sourceMode: input.sourceMode
+      });
+    }
+  }
+
+  return diffs;
+}
+
 export async function buildReportDataAudit(input: {
   contexts: AuditContext[];
   reportType?: string;
+  metricDefinitions?: MetricDefinition[];
+  dateRange?: ResolvedReportDateRange;
   trendMetrics?: Array<Record<string, unknown>>;
   aggregationResults?: Array<Record<string, unknown>>;
   metricResults?: Array<Record<string, unknown>>;
@@ -481,7 +529,7 @@ export async function buildReportDataAudit(input: {
     firstStoredFilePath = firstStoredFilePath ?? storedFilePath(config);
     firstStorageObjectKey = firstStorageObjectKey ?? storageObjectKey(config);
 
-    if (context.dataSource.type === DataSourceType.POSTGRESQL) {
+    if (context.dataSource.type === DataSourceType.POSTGRESQL || context.dataSource.type === DataSourceType.MYSQL) {
       hasDatabaseSource = true;
       fullContextCount += 1;
       dataScope = mergeDataScope(dataScope, "database_query");
@@ -558,18 +606,6 @@ export async function buildReportDataAudit(input: {
     warnings.push("已存在真实收入字段，Estimated GMV 不应作为核心收入 KPI。");
   }
 
-  if (input.metricResults?.length) {
-    if (isDailyReport(input.reportType) && ecommerceDailyDataMetrics) {
-      addMetricMismatchFailures(failures, ecommerceDailyDataMetrics, input.metricResults, "当日完整数据聚合值");
-    } else if (isWeeklyReport(input.reportType) && ecommerceWeeklyDataMetrics) {
-      addMetricMismatchFailures(failures, ecommerceWeeklyDataMetrics, input.metricResults, "最近 7 天完整数据聚合值");
-    } else if (isMonthlyReport(input.reportType) && ecommerceMonthlyDataMetrics) {
-      addMetricMismatchFailures(failures, ecommerceMonthlyDataMetrics, input.metricResults, "当前月完整数据聚合值");
-    } else if (ecommerceFullDataMetrics) {
-      addMetricMismatchFailures(failures, ecommerceFullDataMetrics, input.metricResults);
-    }
-  }
-
   if (!latestDataDate) {
     warnings.push("未能从完整数据中识别最新业务日期，时间类报告可信度较低。");
   }
@@ -589,6 +625,26 @@ export async function buildReportDataAudit(input: {
         ? monthlyRows
       : totalRows;
   const fullDataAvailable = dataScope === "full_file" || dataScope === "database_query";
+  const sourceMode = dataScope === "full_file"
+    ? firstStoredFilePath ? "STORED_FILE_PATH" : firstStorageObjectKey ? "STORAGE_OBJECT" : "FULL_FILE"
+    : dataScope === "database_query"
+      ? "DATABASE_QUERY"
+      : metricSource;
+  const auditDiffs = await buildMetricAuditDiffs({
+    contexts: input.contexts,
+    metricDefinitions: input.metricDefinitions,
+    metricResults: input.metricResults,
+    dateRange: input.dateRange,
+    rowsUsedForMetrics,
+    sourceMode
+  });
+
+  if (auditDiffs.length > 0) {
+    failures.push(...auditDiffs.map((diff) =>
+      `指标口径校验未通过：${diff.displayName} 报告值 ${diff.reportValue ?? "-"} 与同口径复算值 ${diff.auditValue ?? "-"} 不一致。`
+    ));
+  }
+
   const guardrail = validateFullDataAnalysisContext({
     reportType: input.reportType ?? "report",
     metricSource,
@@ -626,6 +682,7 @@ export async function buildReportDataAudit(input: {
     warnings,
     requiredFixes: guardrail.requiredFixes,
     analysisSource: guardrail.analysisSource,
+    auditDiffs,
     businessFieldMap,
     fullDataGuardrail: guardrail,
     ecommerceFullDataMetrics,

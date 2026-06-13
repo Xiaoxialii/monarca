@@ -18,6 +18,7 @@ import {
   FileText,
   HelpCircle,
   LineChart,
+  Loader2,
   Lock,
   Users,
   PanelLeft,
@@ -455,6 +456,11 @@ const dashboardCopy = {
       serverPlaceholder: "server.database.windows.net or host\\instance",
       database: "Database",
       databasePlaceholder: "Optional database name",
+      readOnlyTitle: "Read-only connection. Data is not imported.",
+      readOnlyDescription: "The system reads schema metadata and aggregate metrics only. It does not copy, store, or sync your business detail rows.",
+      readOnlyTip: "Use a read-only database user for this connection.",
+      connectionSuccess: "Connection successful. Schema has been identified; future reports will be generated from read-only aggregate queries.",
+      databaseConnected: "{provider} database connected. The system will query aggregate results in read-only mode and will not copy or store your business detail data.",
       workspace: "Account, project, or workspace",
       workspacePlaceholder: "Workspace, project, or account id",
       tableScope: "Tables, schema, or dataset",
@@ -1139,6 +1145,11 @@ const dashboardCopy = {
       serverPlaceholder: "server.database.windows.net 或 host\\instance",
       database: "数据库",
       databasePlaceholder: "可选数据库名称",
+      readOnlyTitle: "只读连接，数据不入库",
+      readOnlyDescription: "系统只会读取表结构和聚合指标，用于生成分析报告。不会复制、保存或同步你的业务明细数据。",
+      readOnlyTip: "建议使用只读数据库账号连接。",
+      connectionSuccess: "连接成功。已完成表结构识别，后续报告将基于只读聚合查询生成。",
+      databaseConnected: "{provider} 数据库已连接。系统将以只读方式查询聚合结果，不会复制或存储你的业务明细数据。",
       workspace: "账户、项目或工作区",
       workspacePlaceholder: "工作区、项目或账户 ID",
       tableScope: "表、Schema 或数据集",
@@ -3252,11 +3263,13 @@ function SchemaPage({ copy }: { copy: DashboardCopy }) {
 function SettingsPage({
   copy,
   connectedSources,
+  isLoadingConnectedSources = false,
   onUpdateConnectedSource,
   onRemoveConnectedSource
 }: {
   copy: DashboardCopy;
   connectedSources?: ConnectedSourceRow[];
+  isLoadingConnectedSources?: boolean;
   onUpdateConnectedSource?: (source: ConnectedSourceRow) => void;
   onRemoveConnectedSource?: (sourceId: string) => void;
 }) {
@@ -3344,6 +3357,7 @@ function SettingsPage({
             <SettingsConnectedSourcesPanel
               copy={copy}
               connectedSources={connectedSources ?? []}
+              isLoadingConnectedSources={isLoadingConnectedSources}
               onUpdateConnectedSource={onUpdateConnectedSource ?? (() => {})}
               onRemoveConnectedSource={onRemoveConnectedSource ?? (() => {})}
             />
@@ -3527,11 +3541,13 @@ function sourceTypeLabel(copy: DashboardCopy, source: ConnectedSourceRow) {
 function SettingsConnectedSourcesPanel({
   copy,
   connectedSources,
+  isLoadingConnectedSources = false,
   onUpdateConnectedSource,
   onRemoveConnectedSource
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
+  isLoadingConnectedSources?: boolean;
   onUpdateConnectedSource: (source: ConnectedSourceRow) => void;
   onRemoveConnectedSource: (sourceId: string) => void;
 }) {
@@ -3539,7 +3555,9 @@ function SettingsConnectedSourcesPanel({
   const [expandedTableKeys, setExpandedTableKeys] = useState<string[]>([]);
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
   const isZh = copy.connectors.connectedCountLabel.includes("个");
-  const connectedCountLabel = `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
+  const connectedCountLabel = isLoadingConnectedSources
+    ? (isZh ? "加载中" : "Loading")
+    : `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
   const labels = isZh
     ? {
         host: "Host",
@@ -3651,7 +3669,21 @@ function SettingsConnectedSourcesPanel({
         </div>
       </CardHeader>
       <CardContent className="p-4">
-        {connectedSources.length > 0 ? (
+        {isLoadingConnectedSources ? (
+          <div className="rounded-lg border border-dashed bg-secondary/20 p-4">
+            <div className="flex items-center gap-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-md bg-white text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{isZh ? "正在加载数据源" : "Loading data sources"}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {isZh ? "正在同步已连接数据源状态，请稍候" : "Refreshing connected source status."}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : connectedSources.length > 0 ? (
           <div className="grid gap-3">
             {connectedSources.map((source) => {
               const isExpanded = expandedSourceIds.includes(source.id);
@@ -4589,12 +4621,14 @@ function ImportDataSection({
   copy,
   connectedSources,
   onAddConnectedSource,
+  isLoadingConnectedSources = false,
   connectionPage = false,
   initialSourceName
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
   onAddConnectedSource: (source: ConnectedSourceRow) => void;
+  isLoadingConnectedSources?: boolean;
   connectionPage?: boolean;
   initialSourceName?: string;
 }) {
@@ -4624,7 +4658,11 @@ function ImportDataSection({
       </div>
       <div className="grid gap-4">
         {!connectionPage ? (
-          <ConnectedDataOverview copy={copy} connectedSources={connectedSources} />
+          <ConnectedDataOverview
+            copy={copy}
+            connectedSources={connectedSources}
+            isLoadingConnectedSources={isLoadingConnectedSources}
+          />
         ) : null}
         <ConnectorPanel
           copy={copy}
@@ -4639,12 +4677,17 @@ function ImportDataSection({
 
 function ConnectedDataOverview({
   copy,
-  connectedSources
+  connectedSources,
+  isLoadingConnectedSources = false
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
+  isLoadingConnectedSources?: boolean;
 }) {
-  const connectedCountLabel = `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
+  const isZh = copy.connectors.connectedCountLabel.includes("个");
+  const connectedCountLabel = isLoadingConnectedSources
+    ? (isZh ? "加载中" : "Loading")
+    : `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
 
   return (
     <Card className="overflow-hidden bg-white shadow-sm">
@@ -4667,7 +4710,21 @@ function ConnectedDataOverview({
             {connectedCountLabel}
           </Badge>
         </div>
-        {connectedSources.length > 0 ? (
+        {isLoadingConnectedSources ? (
+          <div className="mt-4 rounded-lg border border-dashed bg-secondary/25 p-4">
+            <div className="flex items-center gap-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{isZh ? "正在加载数据源" : "Loading data sources"}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {isZh ? "正在同步已连接数据源状态，请稍候" : "Refreshing connected source status."}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : connectedSources.length > 0 ? (
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {connectedSources.map((source) => (
               <div key={source.id} className="flex items-center gap-3 rounded-lg border bg-secondary/15 p-3">
@@ -5037,6 +5094,7 @@ function ConnectorPanel({
   const [selectedAuth, setSelectedAuth] = useState<string>(copy.connectors.authOptions[0]);
   const [wizardStarted, setWizardStarted] = useState(connectionPage);
   const [databaseHost, setDatabaseHost] = useState("");
+  const [databasePort, setDatabasePort] = useState("");
   const [databaseName, setDatabaseName] = useState("");
   const [databaseUser, setDatabaseUser] = useState("");
   const [databasePassword, setDatabasePassword] = useState("");
@@ -5062,10 +5120,15 @@ function ConnectorPanel({
   const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
   const isFileSource = selectedSource.kind === "file";
   const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
-  const databaseType = selectedSource.name === "PostgreSQL" ? "postgresql" : null;
-  const defaultDatabasePort = "5432";
-  const directApiUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
+  const databaseType = selectedSource.name === "PostgreSQL"
+    ? "postgresql"
+    : selectedSource.name === "MySQL"
+      ? "mysql"
+      : null;
+  const defaultDatabasePort = databaseType === "mysql" ? "3306" : "5432";
+  const directApiUploadMaxBytes = Math.min(FILE_UPLOAD_MAX_BYTES, 4 * 1024 * 1024);
   const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
+  const effectiveDatabasePort = databasePort || defaultDatabasePort;
   const isSupportedDatabase = databaseType !== null;
   const isZh = copy.connectors.title === "连接数据源";
   const showWizard = connectionPage || wizardStarted;
@@ -5104,9 +5167,19 @@ function ConnectorPanel({
     setConnectionResult(null);
     setSchemaResult(null);
   };
+  const previewSchemaTables = (tables: NonNullable<ConnectedSourceRow["schema"]>["tables"] = []) =>
+    tables.map((table) => ({
+      name: table.name,
+      schema: table.schema ?? undefined,
+      columns: table.columns.map((column) => ({
+        name: column.name,
+        type: column.type ?? "unknown"
+      }))
+    }));
   const databaseConnectionPayload = () => ({
     type: databaseType,
     host: databaseHost,
+    port: Number(effectiveDatabasePort),
     database: databaseName,
     username: databaseUser,
     password: databasePassword,
@@ -5121,6 +5194,30 @@ function ConnectorPanel({
       body: formData
     });
   };
+  type UploadResponsePayload = {
+    ok?: boolean;
+    message?: string;
+    dataSource?: ConnectedSourceRow;
+    schema?: {
+      tableCount?: number;
+    };
+  };
+  const responsePayload = async (response: Response): Promise<UploadResponsePayload | null> => {
+    const text = await response.text().catch(() => "");
+
+    if (!text) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(text) as UploadResponsePayload;
+    } catch {
+      return {
+        ok: false,
+        message: text.slice(0, 240)
+      };
+    }
+  };
   const uploadLargeFile = async (file: File) => {
     const presignResponse = await fetch("/api/uploads/presign", {
       method: "POST",
@@ -5133,7 +5230,7 @@ function ConnectorPanel({
         contentType: file.type || "application/octet-stream"
       })
     });
-    const presignPayload = await presignResponse.json().catch(() => null) as {
+    const presignPayload = await responsePayload(presignResponse) as {
       ok?: boolean;
       message?: string;
       provider?: string;
@@ -5146,6 +5243,9 @@ function ConnectorPanel({
     } | null;
 
     if (!presignResponse.ok || !presignPayload?.ok || !presignPayload.uploadUrl || !presignPayload.path) {
+      if (presignPayload?.message?.includes("R2 storage is not configured")) {
+        return uploadSmallFile(file);
+      }
       throw new Error(presignPayload?.message || (isZh ? "无法准备大文件上传" : "Failed to prepare large file upload"));
     }
 
@@ -5226,15 +5326,17 @@ function ConnectorPanel({
       const response = file.size <= directApiUploadMaxBytes
         ? await uploadSmallFile(file)
         : await uploadLargeFile(file);
-      const payload = await response.json().catch(() => null);
+      const payload = await responsePayload(response);
 
       if (!response.ok || !payload?.ok || !payload?.dataSource) {
-        throw new Error(payload?.message || (isZh ? "文件上传失败" : "File upload failed"));
+        throw new Error(payload?.message || (isZh
+          ? "文件上传失败，请稍后重试。"
+          : "File upload failed. Please try again."));
       }
 
       setSchemaResult({
         tableCount: payload.schema?.tableCount ?? 0,
-        tables: payload.dataSource.schema?.tables ?? []
+        tables: previewSchemaTables(payload.dataSource.schema?.tables)
       });
       const uploadedSource = payload.dataSource as ConnectedSourceRow;
       addSelectedSource(uploadedSource);
@@ -5306,6 +5408,7 @@ function ConnectorPanel({
         body: JSON.stringify({
           type: databaseType,
           host: databaseHost,
+          port: Number(effectiveDatabasePort),
           database: databaseName,
           username: databaseUser,
           password: databasePassword,
@@ -5326,7 +5429,7 @@ function ConnectorPanel({
       addSelectedSource(payload.dataSource as ConnectedSourceRow);
       setConnectionResult({
         ok: true,
-        message: isZh ? "数据库已连接，正在扫描数据结构" : "Database connected, schema scan started"
+        message: copy.connectors.databaseConnected.replace("{provider}", selectedSource.name)
       });
     } catch (error) {
       setConnectionResult({
@@ -5343,6 +5446,7 @@ function ConnectorPanel({
     setSchemaResult(null);
     setSelectedFile(null);
     setUploadedFileSource(null);
+    setDatabasePort("");
   }, [selectedSource.name]);
 
   return (
@@ -5465,6 +5569,11 @@ function ConnectorPanel({
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 md:col-span-2">
+                    <p className="font-semibold">{copy.connectors.readOnlyTitle}</p>
+                    <p className="mt-1">{copy.connectors.readOnlyDescription}</p>
+                    <p className="mt-1 font-medium">{copy.connectors.readOnlyTip}</p>
+                  </div>
                   <p className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 md:col-span-2">
                     {isZh
                       ? `默认使用服务器预设连接，端口自动使用 ${defaultDatabasePort}。下面信息可留空，仅在需要覆盖预设时填写。`
@@ -5494,6 +5603,20 @@ function ConnectorPanel({
                         resetConnectionResult();
                       }}
                       placeholder={copy.connectors.databasePlaceholder}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      Port
+                    </span>
+                    <Input
+                      inputMode="numeric"
+                      value={databasePort}
+                      onChange={(event) => {
+                        setDatabasePort(event.target.value.replace(/[^\d]/g, ""));
+                        resetConnectionResult();
+                      }}
+                      placeholder={defaultDatabasePort}
                     />
                   </label>
                   <label className="flex items-center gap-2 self-end rounded-md border bg-secondary/20 px-3 py-2.5">
@@ -5646,7 +5769,7 @@ function ConnectorPanel({
                     `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
                     `${isZh ? "地址" : "Host"}: ${databaseHost || "-"}`,
                     `${isZh ? "数据库" : "Database"}: ${databaseName || "-"}`,
-                    `Port: ${defaultDatabasePort} (${isZh ? "自动" : "auto"})`,
+                    `Port: ${effectiveDatabasePort} (${databasePort ? (isZh ? "自定义" : "custom") : (isZh ? "自动" : "auto")})`,
                     `SSL: ${databaseSsl ? "On" : "Off"}`
                   ].map((row) => (
                     <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -5658,8 +5781,8 @@ function ConnectorPanel({
               ) : (
                 <div className="text-xs leading-5 text-muted-foreground">
                   {isZh
-                    ? "当前版本仅支持 PostgreSQL 的连接测试"
-                    : "This wizard currently supports PostgreSQL connection testing"}
+                    ? "当前版本支持 PostgreSQL 和 MySQL 的连接测试"
+                    : "This wizard currently supports PostgreSQL and MySQL connection testing"}
                 </div>
               )}
             </div>
@@ -5905,7 +6028,7 @@ function reportModeTabs(locale: Locale): Array<{ value: ReportModeView; label: s
   return [
     { value: "daily_brief", label: isZh ? "日报" : "Daily Brief" },
     { value: "weekly_report", label: isZh ? "周报" : "Weekly Report" },
-    { value: "custom_report", label: isZh ? "自定义报告" : "Custom Report" },
+    { value: "custom_report", label: isZh ? "月经营报告" : "Monthly Business Report" },
     { value: "history", label: isZh ? "历史记录" : "History" }
   ];
 }
@@ -7160,18 +7283,20 @@ function DailyValidationFailedView({ content, locale }: { content: Record<string
   const audit = reportRecord(content.reportDataAudit);
   const guardrail = reportRecord(audit.fullDataGuardrail);
   const rowsUsed = audit.rowsUsedForMetrics ?? guardrail.rowsUsedForMetrics ?? guardrail.rowsUsed ?? audit.totalRows ?? "-";
-  const expectedRows = audit.expectedFullRows ?? "-";
+  const totalRows = audit.totalRows ?? audit.expectedFullRows ?? "-";
+  const latestDataDate = String(audit.latestDataDate ?? (isZh ? "无法确认" : "unknown"));
+  const dateField = String(audit.dateField ?? (isZh ? "业务日期" : "business date"));
   const issues = reportListItems(content.dataCaveats ?? content.keyChanges, "Validation");
 
   return (
     <div className="space-y-3">
       <Card className="border border-rose-100 bg-white shadow-sm">
         <CardHeader>
-          <CardTitle>{isZh ? "当前未通过完整数据校验" : "Full Data Validation Failed"}</CardTitle>
+          <CardTitle>{isZh ? "报告生成已暂停：指标口径校验未通过" : "Report generation paused: metric validation failed"}</CardTitle>
           <CardDescription>
             {isZh
-              ? `当前数据来源：${String(audit.analysisSource ?? "-")}｜使用行数：${String(rowsUsed)}｜预期完整行数：${String(expectedRows)}｜最新业务日期：${String(audit.latestDataDate ?? "无法确认")}`
-              : `Source: ${String(audit.analysisSource ?? "-")} | Rows used: ${String(rowsUsed)} | Expected rows: ${String(expectedRows)} | Latest business date: ${String(audit.latestDataDate ?? "unknown")}`}
+              ? `当前数据来源：${String(audit.analysisSource ?? "-")}｜数据源总行数：${String(totalRows)}｜日报分析行数：${String(rowsUsed)}｜日期过滤：${dateField} = ${latestDataDate}`
+              : `Source: ${String(audit.analysisSource ?? "-")} | Total source rows: ${String(totalRows)} | Daily analysis rows: ${String(rowsUsed)} | Date filter: ${dateField} = ${latestDataDate}`}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -7732,18 +7857,26 @@ function ReportsPage({
   const weeklyReport = composedReports.weekly_report ?? null;
   const reportHistory = activeReportData?.reportHistory ?? reportData?.reportHistory ?? [];
   const hasReportMetrics = reportMetricResults.some((result) => result.status === "computed");
-  const hasReportContent = Boolean(briefing) || hasReportMetrics;
+  const activeComposedReport = activeReportMode === "daily_brief"
+    ? dailyBriefReport
+    : activeReportMode === "weekly_report"
+      ? weeklyReport
+      : activeReportMode === "custom_report"
+        ? composedReports.custom_report ?? null
+        : null;
+  const hasRealReportContent = Boolean(briefing && (hasReportMetrics || activeComposedReport || Object.keys(composedReports).length > 0));
+  const hasReportContent = hasRealReportContent || hasReportMetrics;
   const hasAnyReportContent = Boolean(reportData?.briefing) ||
     Object.values(reportDataByMode).some((data) => Boolean(data?.briefing));
   const isWaitingForActiveModeData = !hasReportContent && (isLoadingReport || hasAnyReportContent);
   const isLoadingReportsWorkspaceState = isLoadingReport || isLoadingConnectedSources;
-  const showDemoReport = !hasReportMetrics;
+  const showDemoReport = !hasRealReportContent;
   const demoMode = activeReportMode;
   const demoContent = demoReportContent(demoMode, locale);
   const reportPageTitle = copy.reports.pageTitle;
   const shouldShowOnboarding = false;
   const displayedHasConnectedData = hasConnectedDatabase || cachedSetupState.hasConnectedData || isLoadingConnectedSources;
-  const displayedHasReport = hasReportMetrics || cachedSetupState.hasReport;
+  const displayedHasReport = hasRealReportContent || cachedSetupState.hasReport;
   const shouldShowSetupProgress =
     !shouldShowOnboarding && (displayedHasConnectedData || displayedHasReport || isLoadingReportsWorkspaceState);
 
@@ -7754,12 +7887,12 @@ function ReportsPage({
 
     const nextState = {
       hasConnectedData: hasConnectedDatabase,
-      hasReport: hasReportMetrics
+      hasReport: hasRealReportContent
     };
 
     setCachedSetupState(nextState);
     window.localStorage.setItem(setupStateStorageKey, JSON.stringify(nextState));
-  }, [hasConnectedDatabase, hasReportMetrics, isLoadingReportsWorkspaceState]);
+  }, [hasConnectedDatabase, hasRealReportContent, isLoadingReportsWorkspaceState]);
 
   return (
     <section id="reports" className="dashboard-density flex min-h-full min-w-0 max-w-full flex-col gap-3 overflow-hidden scroll-mt-20">
@@ -7816,7 +7949,7 @@ function ReportsPage({
           </div>
         </div>
       </div>
-      {reportGenerationMessage && hasReportMetrics ? (
+      {reportGenerationMessage && hasRealReportContent ? (
         <div className="rounded-xl border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
           {reportGenerationMessage}
         </div>
@@ -7892,7 +8025,7 @@ function ReportsPage({
               />
             )}
           </div>
-        ) : hasReportMetrics && briefing ? (
+        ) : hasRealReportContent && briefing ? (
           <>
             {activeReportMode === "daily_brief" ? (
               <ReportModeSummaryPanel mode="daily_brief" content={dailyBriefReport} locale={isReportsZh ? "zh" : "en"} />
@@ -14809,6 +14942,7 @@ export function Dashboard({
                   copy={copy}
                   connectedSources={connectedSources}
                   onAddConnectedSource={addConnectedSource}
+                  isLoadingConnectedSources={isLoadingConnectedSources}
                   connectionPage={view === "import-data-connect"}
                   initialSourceName={initialDataSource}
                 />
@@ -14826,6 +14960,7 @@ export function Dashboard({
                 <SettingsPage
                   copy={copy}
                   connectedSources={connectedSources}
+                  isLoadingConnectedSources={isLoadingConnectedSources}
                   onUpdateConnectedSource={updateConnectedSource}
                   onRemoveConnectedSource={removeConnectedSource}
                 />

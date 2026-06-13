@@ -269,10 +269,11 @@ async function runReportGenerationJob(input: {
       orderBy: { createdAt: "asc" }
     });
   }
-    const registryMetrics = metrics.filter(isBusinessMetricRegistryMetric);
-    const metricsForExecution = registryMetrics.length > 0 ? registryMetrics : metrics;
-    const visibleMetrics = metricsForExecution.filter((metric) => metricBelongsToTables(metric, activeTableLabels(tables)));
-    const executableMetrics = visibleMetrics.filter((metric) =>
+    const labels = activeTableLabels(tables);
+    const tableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
+    const tableScopedRegistryMetrics = tableScopedMetrics.filter(isBusinessMetricRegistryMetric);
+    const metricsForExecution = tableScopedRegistryMetrics.length > 0 ? tableScopedRegistryMetrics : tableScopedMetrics;
+    const executableMetrics = metricsForExecution.filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
       validationFromLineage(metric.lineageJson)?.validation_status === "valid"
     );
@@ -456,7 +457,7 @@ async function runReportGenerationJob(input: {
       };
     }
     const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-    if (registryMetrics.length > 0) {
+    if (tableScopedRegistryMetrics.length > 0) {
       const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
         reportType: reportType as "daily" | "weekly" | "custom",
         metricRegistryId: executableMetricRegistryId,
@@ -492,6 +493,8 @@ async function runReportGenerationJob(input: {
     const reportDataAudit = await buildReportDataAudit({
       contexts,
       reportType: input.reportMode,
+      metricDefinitions: executableMetrics,
+      dateRange: effectiveDateRange,
       metricResults: metricResults as unknown as Array<Record<string, unknown>>,
       aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
       trendMetrics: reportTimeArtifacts.trendMetrics as Array<Record<string, unknown>>

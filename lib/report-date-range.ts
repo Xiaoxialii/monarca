@@ -64,6 +64,12 @@ function parseDate(value: unknown) {
     return null;
   }
 
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
   const normalized = /^\d{4}$/.test(text) ? `${text}-01-01` : /^\d{4}-\d{2}$/.test(text) ? `${text}-01` : text;
   const date = new Date(normalized);
 

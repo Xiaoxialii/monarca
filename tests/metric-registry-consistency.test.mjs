@@ -143,3 +143,15 @@ test("monthly report defaults to previous month same-day comparison", () => {
   assert.equal(localDate(monthly.previousStart), "2026-05-01");
   assert.equal(localDate(monthly.previousEnd), "2026-05-09");
 });
+
+test("report execution only prioritizes registry metrics scoped to active tables", () => {
+  const generateRoute = readFileSync(join(process.cwd(), "app/api/dashboard/reports/generate/route.ts"), "utf8");
+  const reportRoute = readFileSync(join(process.cwd(), "app/api/dashboard/reports/route.ts"), "utf8");
+
+  for (const source of [generateRoute, reportRoute]) {
+    assert.match(source, /tableScopedMetrics\s*=\s*metrics\.filter\(\(metric\) => metricBelongsToTables\(metric, labels\)\)/);
+    assert.match(source, /tableScopedRegistryMetrics\s*=\s*tableScopedMetrics\.filter\(isBusinessMetricRegistryMetric\)/);
+    assert.match(source, /metricsForExecution\s*=\s*tableScopedRegistryMetrics\.length > 0 \? tableScopedRegistryMetrics : tableScopedMetrics/);
+    assert.doesNotMatch(source, /metricsForExecution\s*=\s*registryMetrics\.length > 0 \? registryMetrics : metrics/);
+  }
+});

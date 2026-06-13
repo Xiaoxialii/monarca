@@ -2,7 +2,7 @@ import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client"
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveDatabaseConfig, type SupportedDatabaseType } from "@/lib/database-connection-config";
-import { introspectDatabase } from "@/lib/database-introspection";
+import { getDataSourceStats, introspectDatabase } from "@/lib/database-introspection";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
@@ -20,6 +20,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function dataSourceTypeToDatabaseType(type: DataSourceType): SupportedDatabaseType | null {
   if (type === DataSourceType.POSTGRESQL) {
     return "postgresql";
+  }
+
+  if (type === DataSourceType.MYSQL) {
+    return "mysql";
   }
 
   return null;
@@ -57,7 +61,7 @@ export async function POST(
     const type = dataSourceTypeToDatabaseType(dataSource.type);
 
     if (!type) {
-      return NextResponse.json({ ok: false, message: "Only PostgreSQL data sources can be rescanned" }, { status: 400 });
+      return NextResponse.json({ ok: false, message: "当前暂不支持该数据库类型。" }, { status: 400 });
     }
 
     const savedConfig = asRecord(dataSource.config);
@@ -73,10 +77,13 @@ export async function POST(
     const tables = await introspectDatabase(config);
     const scannedAt = new Date().toISOString();
     const semanticLayer = buildSemanticLayer(tables);
+    const tableStats = await getDataSourceStats(config, tables);
     const schemaPayload = {
       scannedAt,
+      databaseType: type,
       tables,
-      semanticLayer
+      semanticLayer,
+      stats: tableStats
     };
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
 
@@ -111,6 +118,24 @@ export async function POST(
         }
       });
 
+      await tx.dataSourceStats.deleteMany({
+        where: {
+          dataSourceConnectionId: dataSource.id
+        }
+      });
+      await tx.dataSourceStats.createMany({
+        data: tableStats.map((stat) => ({
+          dataSourceConnectionId: dataSource.id,
+          tableName: stat.tableName,
+          rowCount: stat.rowCount,
+          minDate: stat.minDate,
+          maxDate: stat.maxDate,
+          dateField: stat.dateField,
+          schemaHash: stat.schemaHash,
+          calculatedAt: new Date()
+        }))
+      });
+
       const schemaSnapshot = await tx.schemaSnapshot.create({
         data: {
           workspaceId: session.workspace.id,
@@ -126,7 +151,8 @@ export async function POST(
             columnCount,
             semanticFieldCount: semanticLayer.fields.length,
             businessEntityCount: semanticLayer.entities.length,
-            generatedMetricCount: semanticLayer.metrics.length
+            generatedMetricCount: semanticLayer.metrics.length,
+            stats: tableStats
           }
         }
       });
@@ -155,7 +181,8 @@ export async function POST(
           columnCount,
           scannedAt,
           tables,
-          semanticLayer
+          semanticLayer,
+          stats: tableStats
         },
         connectedAt: result.updatedSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.updatedSource.lastSyncAt?.toISOString() ?? null
@@ -167,7 +194,8 @@ export async function POST(
         columnCount,
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
-        generatedMetricCount: result.generatedMetricCount
+        generatedMetricCount: result.generatedMetricCount,
+        stats: tableStats
       }
     });
   } catch (error) {

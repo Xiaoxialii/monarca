@@ -9,18 +9,18 @@ function read(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("mobile sign-in is passwordless and performs a full redirect after session activation", () => {
+test("auth keeps password and email-code flows with mobile-safe redirects", () => {
   const signInPanel = read("components/sign-in-panel.tsx");
   const signUpPanel = read("components/sign-up-panel.tsx");
 
-  assert.doesNotMatch(signInPanel, /function PasswordSignIn/, "Sign-in should not expose a password form");
-  assert.doesNotMatch(signInPanel, /type="password"/, "Sign-in should not render password inputs");
-  assert.doesNotMatch(signUpPanel, /type=\{showPassword \? "text" : "password"\}/, "Sign-up should not render password inputs");
-  assert.doesNotMatch(signUpPanel, /username:/, "Sign-up should not create username/password accounts");
+  assert.match(signInPanel, /function PasswordSignIn/, "Sign-in should keep username/password login");
+  assert.match(signInPanel, /type="password"/, "Sign-in should render a password input");
+  assert.match(signUpPanel, /type=\{showPassword \? "text" : "password"\}/, "Sign-up should keep password inputs");
+  assert.match(signUpPanel, /username: trimmedUsername/, "Sign-up should keep username/password account creation");
   assert.match(
     signUpPanel,
     /password: createClerkManagedPassword\(\)/,
-    "Passwordless sign-up should satisfy Clerk password-required settings without showing a password field"
+    "Email-code sign-up should satisfy Clerk password-required settings without showing a password field in that flow"
   );
   assert.match(
     signInPanel,

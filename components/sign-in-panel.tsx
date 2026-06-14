@@ -30,13 +30,23 @@ const signInCopy = {
     resendCode: "Resend code",
     changeIdentifier: "Use another email",
     sentCode: "Code sent to",
+    otherMethods: "Password login",
+    codeMethods: "Email code",
+    identifierLabel: "Email address or username",
+    identifierPlaceholder: "Enter email or username",
+    passwordLabel: "Password",
+    passwordPlaceholder: "Enter password",
+    signingIn: "Signing in...",
+    passwordSignIn: "Sign in",
     continueWithGoogle: "Continue with Google",
     divider: "or",
     googleUnavailable: "Google sign-in is not available right now.",
     missingIdentifier: "Enter your email.",
+    missingPassword: "Enter your password.",
     missingCode: "Enter the verification code.",
     codeUnavailable: "Verification code login is not enabled for this account. Use another sign-in method.",
-    secondFactorRequired: "This account needs an extra verification step. Please use Google sign-in or contact support.",
+    passwordUnavailable: "Password login is not available for this account.",
+    secondFactorRequired: "This account needs an extra verification step.",
     forgotEmail: "Forgot email?",
     note: "Not your computer? Use a private browsing window to sign in",
     createAccount: "New here?",
@@ -44,7 +54,7 @@ const signInCopy = {
     next: "Next",
     brand: "Monarca AI",
     title: "Welcome back",
-    description: "Continue with Google or a one-time email code. No password required."
+    description: "Continue with Google, a one-time email code, or your account password."
   },
   zh: {
     language: "中文（简体）",
@@ -63,13 +73,23 @@ const signInCopy = {
     resendCode: "重新发送",
     changeIdentifier: "换一个邮箱",
     sentCode: "验证码已发送至",
+    otherMethods: "密码登录",
+    codeMethods: "邮箱验证码",
+    identifierLabel: "邮箱或用户名",
+    identifierPlaceholder: "请输入邮箱或用户名",
+    passwordLabel: "密码",
+    passwordPlaceholder: "请输入密码",
+    signingIn: "登录中...",
+    passwordSignIn: "登录",
     continueWithGoogle: "使用 Google 登录",
     divider: "或",
     googleUnavailable: "当前无法使用 Google 登录。",
     missingIdentifier: "请输入邮箱。",
+    missingPassword: "请输入密码。",
     missingCode: "请输入验证码。",
     codeUnavailable: "当前账号未启用验证码登录，请使用下面的其他登录方式。",
-    secondFactorRequired: "这个账号还需要额外验证，请使用 Google 登录或联系支持。",
+    passwordUnavailable: "当前账号无法使用密码登录。",
+    secondFactorRequired: "这个账号还需要额外验证。",
     forgotEmail: "忘记邮箱？",
     note: "这不是你的电脑？请使用无痕窗口登录当前演示会直接进入数据看板",
     createAccount: "还没有账号？",
@@ -77,7 +97,7 @@ const signInCopy = {
     next: "下一步",
     brand: "蝴蝶效应",
     title: "欢迎回来",
-    description: "使用 Google 或邮箱一次性验证码继续访问，无需密码。"
+    description: "使用 Google、邮箱验证码或账号密码继续访问。"
   }
 } as const;
 
@@ -167,6 +187,8 @@ export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }
 }
 
 function ClerkSignIn({ copy }: { copy: SignInCopy }) {
+  const [mode, setMode] = useState<"code" | "password">("code");
+
   return (
     <div className="grid min-h-[620px] grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(360px,0.86fr)_minmax(520px,560px)] lg:items-center lg:gap-20">
       <SignInBrand copy={copy} />
@@ -180,7 +202,28 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
             <span className="h-px flex-1 bg-border" />
           </div>
 
-          <CodeSignIn copy={copy} />
+          <div className="my-5 grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("code")}
+              className={`h-11 rounded-[5px] text-sm font-medium transition ${
+                mode === "code" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {copy.codeMethods}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("password")}
+              className={`h-11 rounded-[5px] text-sm font-medium transition ${
+                mode === "password" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {copy.otherMethods}
+            </button>
+          </div>
+
+          {mode === "code" ? <CodeSignIn copy={copy} /> : <PasswordSignIn copy={copy} />}
           <div className="mt-5 text-center text-sm text-slate-500">
             {copy.createAccount}
             <Link href="/sign-up" className="ml-1 font-medium text-slate-800 hover:text-slate-950 hover:underline">
@@ -190,6 +233,122 @@ function ClerkSignIn({ copy }: { copy: SignInCopy }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function PasswordSignIn({ copy }: { copy: SignInCopy }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isLoaded, signIn, setActive } = useSignIn();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setError("");
+  }, [copy]);
+
+  function clerkErrorMessage(errorValue: unknown) {
+    if (typeof errorValue === "object" && errorValue && "errors" in errorValue) {
+      const clerkError = errorValue as { errors?: Array<{ longMessage?: string; message?: string }> };
+      return clerkError.errors?.[0]?.longMessage || clerkError.errors?.[0]?.message || copy.passwordUnavailable;
+    }
+
+    return errorValue instanceof Error ? errorValue.message : copy.passwordUnavailable;
+  }
+
+  function isAlreadySignedInError(errorValue: unknown) {
+    return /already\s+signed\s+in/i.test(clerkErrorMessage(errorValue));
+  }
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!isLoaded) return;
+
+    const trimmedIdentifier = identifier.trim();
+
+    if (!trimmedIdentifier) {
+      setError(copy.missingIdentifier);
+      return;
+    }
+
+    if (!password) {
+      setError(copy.missingPassword);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const result = await signIn.create({
+        identifier: trimmedIdentifier,
+        password
+      });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        const redirectPath = authRedirectPath(searchParams);
+        router.replace(redirectPath);
+        completeSignInRedirect(redirectPath);
+        return;
+      }
+
+      setError(result.status === "needs_second_factor" ? copy.secondFactorRequired : copy.passwordUnavailable);
+    } catch (caughtError) {
+      if (isAlreadySignedInError(caughtError)) {
+        const redirectPath = authRedirectPath(searchParams);
+        router.replace(redirectPath);
+        completeSignInRedirect(redirectPath);
+        return;
+      }
+
+      setError(clerkErrorMessage(caughtError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="w-full min-w-0 space-y-4" onSubmit={submitPassword}>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-slate-700" htmlFor="signin-identifier">
+          {copy.identifierLabel}
+        </label>
+        <Input
+          id="signin-identifier"
+          autoComplete="username"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          placeholder={copy.identifierPlaceholder}
+          className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-slate-700" htmlFor="signin-password">
+          {copy.passwordLabel}
+        </label>
+        <Input
+          id="signin-password"
+          autoComplete="current-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder={copy.passwordPlaceholder}
+          className="h-14 rounded-md border-slate-300 bg-white text-base shadow-sm focus-visible:ring-slate-200"
+        />
+      </div>
+
+      {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
+
+      <Button type="submit" disabled={isSubmitting || !isLoaded} className="h-14 w-full rounded-md px-6 text-base">
+        {isSubmitting ? copy.signingIn : copy.passwordSignIn}
+        <ArrowRight />
+      </Button>
+    </form>
   );
 }
 

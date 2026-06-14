@@ -9,13 +9,18 @@ function read(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("mobile sign-in defaults to password login and performs a full redirect after session activation", () => {
+test("mobile sign-in is passwordless and performs a full redirect after session activation", () => {
   const signInPanel = read("components/sign-in-panel.tsx");
+  const signUpPanel = read("components/sign-up-panel.tsx");
 
+  assert.doesNotMatch(signInPanel, /function PasswordSignIn/, "Sign-in should not expose a password form");
+  assert.doesNotMatch(signInPanel, /type="password"/, "Sign-in should not render password inputs");
+  assert.doesNotMatch(signUpPanel, /type=\{showPassword \? "text" : "password"\}/, "Sign-up should not render password inputs");
+  assert.doesNotMatch(signUpPanel, /username:/, "Sign-up should not create username/password accounts");
   assert.match(
-    signInPanel,
-    /useState<"code" \| "other">\("other"\)/,
-    "Password login should be the default visible sign-in mode"
+    signUpPanel,
+    /password: createClerkManagedPassword\(\)/,
+    "Passwordless sign-up should satisfy Clerk password-required settings without showing a password field"
   );
   assert.match(
     signInPanel,
@@ -30,12 +35,16 @@ test("mobile sign-in defaults to password login and performs a full redirect aft
   assert.match(
     signInPanel,
     /await setActive\(\{ session: result\.createdSessionId \}\);[\s\S]*router\.replace\(redirectPath\);[\s\S]*completeSignInRedirect\(redirectPath\);/,
-    "Password sign-in should activate the session before redirecting"
+    "Email-code sign-in should activate the session before redirecting"
   );
   assert.match(
-    signInPanel,
-    /isAlreadySignedInError\(caughtError\)[\s\S]*router\.replace\(redirectPath\);[\s\S]*completeSignInRedirect\(redirectPath\);/,
-    "Already-signed-in mobile users should be sent to the dashboard"
+    signUpPanel,
+    /function completeSignUpRedirect\(path: string\)/,
+    "Sign-up should also use a dedicated completion redirect helper"
+  );
+  assert.match(
+    signUpPanel,
+    /router\.replace\(redirectPath\);[\s\S]*completeSignUpRedirect\(redirectPath\);/,
+    "Email-code sign-up should activate the session before redirecting"
   );
 });
-

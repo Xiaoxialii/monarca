@@ -1,7 +1,8 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useSignUp } from "@clerk/nextjs/legacy";
-import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
@@ -17,47 +18,26 @@ const signUpCopy = {
     privacy: "Privacy",
     terms: "Terms",
     emailCodeMode: "Email",
-    passwordMode: "Username",
     emailLabel: "Email",
-    usernameLabel: "Username",
-    passwordLabel: "Password",
-    confirmPasswordLabel: "Confirm password",
-    showPassword: "Show password",
-    hidePassword: "Hide password",
     emailPlaceholder: "you@example.com",
-    usernamePlaceholder: "Choose a username",
-    passwordPlaceholder: "At least 8 characters",
-    confirmPasswordPlaceholder: "Enter password again",
     codeLabel: "Verification code",
     codePlaceholder: "Enter code",
-    emailCodeIntro: "We will send a one-time verification code to your email. No password is required.",
-    passwordIntro: "Create an account with only a username and password. No email is required.",
+    emailCodeIntro: "Enter your email and we will send a one-time code. No password required.",
     continueWithGoogle: "Continue with Google",
     divider: "or",
-    sendEmailCode: "Send email code",
+    sendEmailCode: "Continue with email",
     sendingEmailCode: "Sending...",
-    createWithPassword: "Create with username",
-    creatingWithPassword: "Creating...",
     createWithCode: "Create account",
     creatingWithCode: "Creating...",
     resendCode: "Resend code",
     changeIdentifier: "Edit account details",
     sentCode: "Code sent to",
     missingEmail: "Enter your email.",
-    missingUsername: "Enter your username.",
-    invalidUsernameLength: "Username must be between 4 and 64 characters long.",
-    missingPassword: "Enter your password.",
-    shortPassword: "Password must be at least 8 characters.",
-    passwordMismatch: "Passwords do not match.",
     missingCode: "Enter the verification code.",
     codeUnavailable: "Email verification code sign-up is not enabled. Check the Clerk sign-up settings.",
-    passwordUnavailable: "Username and password sign-up is not enabled. Enable username sign-up in Clerk, then try again.",
     incompleteSignUp: "The code was verified, but Clerk still requires: {fields}. Make these fields optional in Clerk, or add them to this sign-up form.",
-    passwordIncompleteSignUp: "Clerk still requires: {fields}. Make email optional in Clerk to support username-only sign-up, or switch this form back to email + password.",
     pendingVerification: "The code was accepted, but Clerk still needs verification for: {fields}.",
-    passwordPendingVerification: "Clerk still needs verification for: {fields}. Check the username/password sign-up settings in Clerk.",
     incompleteStatus: "The code was accepted, but sign-up is not complete yet. Clerk status: {status}.",
-    passwordIncompleteStatus: "Sign-up is not complete yet. Clerk status: {status}.",
     googleUnavailable: "Google sign-up is not available right now.",
     signInPrompt: "Already have an account?",
     signInInstead: "Sign in",
@@ -73,47 +53,26 @@ const signUpCopy = {
     privacy: "隐私",
     terms: "条款",
     emailCodeMode: "邮箱",
-    passwordMode: "用户名密码",
     emailLabel: "邮箱",
-    usernameLabel: "用户名",
-    passwordLabel: "密码",
-    confirmPasswordLabel: "确认密码",
-    showPassword: "显示密码",
-    hidePassword: "隐藏密码",
     emailPlaceholder: "you@example.com",
-    usernamePlaceholder: "请输入用户名",
-    passwordPlaceholder: "至少 8 位",
-    confirmPasswordPlaceholder: "请再次输入密码",
     codeLabel: "验证码",
     codePlaceholder: "请输入验证码",
-    emailCodeIntro: "我们会向你的邮箱发送一次性验证码，不需要设置密码。",
-    passwordIntro: "只使用用户名和密码创建账号，不需要输入邮箱。",
-    continueWithGoogle: "Continue with Google",
+    emailCodeIntro: "输入邮箱，我们会发送一次性验证码，无需设置密码。",
+    continueWithGoogle: "使用 Google 继续",
     divider: "或",
-    sendEmailCode: "发送邮箱验证码",
+    sendEmailCode: "使用邮箱继续",
     sendingEmailCode: "发送中...",
-    createWithPassword: "使用用户名创建账号",
-    creatingWithPassword: "创建中...",
     createWithCode: "创建账号",
     creatingWithCode: "创建中...",
     resendCode: "重新发送",
     changeIdentifier: "修改注册信息",
     sentCode: "验证码已发送至",
     missingEmail: "请输入邮箱。",
-    missingUsername: "请输入用户名。",
-    invalidUsernameLength: "用户名长度需要在 4 到 64 个字符之间。",
-    missingPassword: "请输入密码。",
-    shortPassword: "密码至少需要 8 位。",
-    passwordMismatch: "两次输入的密码不一致。",
     missingCode: "请输入验证码。",
     codeUnavailable: "当前未启用邮箱验证码注册，请检查 Clerk 注册设置。",
-    passwordUnavailable: "当前 Clerk 后台没有开启用户名注册，请先在 Clerk 注册设置中启用 username。",
     incompleteSignUp: "验证码已通过，但 Clerk 注册还缺必填项：{fields}。请在 Clerk Dashboard 把这些字段改为 optional，或把注册页补上对应字段。",
-    passwordIncompleteSignUp: "Clerk 注册还缺必填项：{fields}。如果要支持只用用户名和密码注册，请在 Clerk 后台把邮箱改为 optional；否则需要把注册页改回邮箱 + 密码。",
     pendingVerification: "验证码已通过，但 Clerk 还要求继续验证：{fields}。",
-    passwordPendingVerification: "Clerk 还要求继续验证：{fields}。请检查 Clerk 后台的用户名密码注册设置。",
     incompleteStatus: "验证码已通过，但注册还没有完成。Clerk 当前状态：{status}。",
-    passwordIncompleteStatus: "注册还没有完成。Clerk 当前状态：{status}。",
     googleUnavailable: "当前无法使用 Google 注册。",
     signInPrompt: "已有账号？",
     signInInstead: "登录",
@@ -136,10 +95,43 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   return fallback;
 }
 
+function completeSignUpRedirect(path: string) {
+  if (typeof window !== "undefined") {
+    window.location.assign(path);
+  }
+}
+
+function createClerkManagedPassword() {
+  const randomBytes = new Uint8Array(16);
+
+  if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(randomBytes);
+  } else {
+    for (let index = 0; index < randomBytes.length; index += 1) {
+      randomBytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  const token = Array.from(randomBytes, (byte) => byte.toString(36).padStart(2, "0")).join("");
+
+  return `Monarca!${token}Aa1`;
+}
+
 export function SignUpPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isLoaded: isUserLoaded, isSignedIn } = useUser();
   const [locale, setLocale] = useLocale(defaultLocale);
   const copy = signUpCopy[getCopyLocale(locale)];
+  const redirectPath = authRedirectPath(searchParams);
+
+  useEffect(() => {
+    if (clerkKey && isUserLoaded && isSignedIn) {
+      router.replace(redirectPath);
+      completeSignUpRedirect(redirectPath);
+    }
+  }, [clerkKey, isSignedIn, isUserLoaded, redirectPath, router]);
 
   return (
     <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#f7f8fa] px-5 py-5 sm:px-8">
@@ -195,22 +187,17 @@ function ClerkSignUp({ copy }: { copy: SignUpCopy }) {
     <div className="grid min-h-[560px] grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(300px,380px)_minmax(420px,480px)] lg:items-center lg:justify-center lg:gap-14">
       <AccountBrand copy={copy} />
       <div className="flex w-full min-w-0 items-center justify-center lg:justify-end">
-        <PasswordSignUp copy={copy} />
+        <PasswordlessSignUp copy={copy} />
       </div>
     </div>
   );
 }
 
-function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
+function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, signUp, setActive } = useSignUp();
-  const [mode, setMode] = useState<"email" | "password">("email");
   const [emailAddress, setEmailAddress] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [code, setCode] = useState("");
   const [sentTo, setSentTo] = useState("");
   const [step, setStep] = useState<"identifier" | "code">("identifier");
@@ -227,31 +214,11 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
       const clerkError = errorValue as { errors?: Array<{ code?: string; longMessage?: string; message?: string }> };
       const firstError = clerkError.errors?.[0];
       const clerkMessage = firstError?.longMessage || firstError?.message || "";
-      const errorCode = firstError?.code || "";
 
-      if (
-        mode === "password" &&
-        (errorCode.includes("form_param") ||
-          clerkMessage.toLowerCase().includes("username is not a valid parameter"))
-      ) {
-        return copy.passwordUnavailable;
-      }
-
-      if (
-        mode === "password" &&
-        clerkMessage.toLowerCase().includes("username must be between 4 and 64 characters")
-      ) {
-        return copy.invalidUsernameLength;
-      }
-
-      return clerkMessage || (mode === "password" ? copy.passwordUnavailable : copy.codeUnavailable);
+      return clerkMessage || copy.codeUnavailable;
     }
 
-    return errorValue instanceof Error
-      ? errorValue.message
-      : mode === "password"
-        ? copy.passwordUnavailable
-        : copy.codeUnavailable;
+    return errorValue instanceof Error ? errorValue.message : copy.codeUnavailable;
   }
 
   function getSignUpStateMessage(result: unknown) {
@@ -272,41 +239,26 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
     const unverifiedFields = signUpState.unverifiedFields || [];
 
     if (missingFields.length) {
-      return (mode === "password" ? copy.passwordIncompleteSignUp : copy.incompleteSignUp).replace(
-        "{fields}",
-        missingFields.join(", ")
-      );
+      return copy.incompleteSignUp.replace("{fields}", missingFields.join(", "));
     }
 
     if (unverifiedFields.length) {
-      return (mode === "password" ? copy.passwordPendingVerification : copy.pendingVerification).replace(
-        "{fields}",
-        unverifiedFields.join(", ")
-      );
+      return copy.pendingVerification.replace("{fields}", unverifiedFields.join(", "));
     }
 
     if (signUpState.status) {
-      return (mode === "password" ? copy.passwordIncompleteStatus : copy.incompleteStatus).replace(
-        "{status}",
-        signUpState.status
-      );
+      return copy.incompleteStatus.replace("{status}", signUpState.status);
     }
 
     return copy.codeUnavailable;
   }
 
-  function selectMode(nextMode: "email" | "password") {
-    setMode(nextMode);
-    setError("");
-    setCode("");
-    setSentTo("");
-    setStep("identifier");
-  }
-
   async function activateCompletedSignUp(createdSessionId: string | null) {
     if (createdSessionId && setActive) {
       await setActive({ session: createdSessionId });
-      router.push(authRedirectPath(searchParams));
+      const redirectPath = authRedirectPath(searchParams);
+      router.replace(redirectPath);
+      completeSignUpRedirect(redirectPath);
     }
   }
 
@@ -343,7 +295,8 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
 
     try {
       const nextSignUp = await signUp.create({
-        emailAddress: trimmedEmail
+        emailAddress: trimmedEmail,
+        password: createClerkManagedPassword()
       });
 
       if (nextSignUp.status === "complete") {
@@ -355,58 +308,6 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
 
       setSentTo(trimmedEmail);
       setStep("code");
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function createPasswordAccount() {
-    if (!isLoaded) return;
-
-    const trimmedUsername = username.trim();
-
-    if (!trimmedUsername) {
-      setError(copy.missingUsername);
-      return;
-    }
-
-    if (trimmedUsername.length < 4 || trimmedUsername.length > 64) {
-      setError(copy.invalidUsernameLength);
-      return;
-    }
-
-    if (!password) {
-      setError(copy.missingPassword);
-      return;
-    }
-
-    if (password.length < 8) {
-      setError(copy.shortPassword);
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError(copy.passwordMismatch);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError("");
-
-    try {
-      const nextSignUp = await signUp.create({
-        username: trimmedUsername,
-        password
-      });
-
-      if (nextSignUp.status === "complete") {
-        await activateCompletedSignUp(nextSignUp.createdSessionId);
-        return;
-      }
-
-      setError(getSignUpStateMessage(nextSignUp));
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
     } finally {
@@ -433,8 +334,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
       const result = await signUp.attemptEmailAddressVerification({ code: trimmedCode });
 
       if (result.status === "complete" && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
-        router.push(authRedirectPath(searchParams));
+        await activateCompletedSignUp(result.createdSessionId);
         return;
       }
 
@@ -460,12 +360,7 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            if (mode === "email") {
-              void createAccount();
-              return;
-            }
-
-            void createPasswordAccount();
+            void createAccount();
           }}
         >
           <Button
@@ -486,133 +381,30 @@ function PasswordSignUp({ copy }: { copy: SignUpCopy }) {
             <span className="h-px flex-1 bg-border" />
           </div>
 
-          <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1 text-sm font-medium text-slate-500">
-            <button
-              type="button"
-              onClick={() => selectMode("email")}
-              className={`flex h-10 items-center justify-center rounded transition ${
-                mode === "email" ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-900"
-              }`}
-            >
-              {copy.emailCodeMode}
-            </button>
-            <button
-              type="button"
-              onClick={() => selectMode("password")}
-              className={`flex h-10 items-center justify-center rounded transition ${
-                mode === "password" ? "bg-white text-slate-950 shadow-sm" : "hover:text-slate-900"
-              }`}
-            >
-              {copy.passwordMode}
-            </button>
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="signup-email">
+              {copy.emailLabel}
+            </label>
+            <Input
+              id="signup-email"
+              autoComplete="email"
+              inputMode="email"
+              type="email"
+              value={emailAddress}
+              onChange={(event) => setEmailAddress(event.target.value)}
+              placeholder={copy.emailPlaceholder}
+              className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
+            />
           </div>
 
-          {mode === "email" ? (
-            <>
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="signup-email">
-                  {copy.emailLabel}
-                </label>
-                <Input
-                  id="signup-email"
-                  autoComplete="email"
-                  inputMode="email"
-                  type="email"
-                  value={emailAddress}
-                  onChange={(event) => setEmailAddress(event.target.value)}
-                  placeholder={copy.emailPlaceholder}
-                  className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
-                />
-              </div>
-
-              <p className="px-1 text-sm leading-6 text-slate-500">
-                {copy.emailCodeIntro}
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="signup-username">
-                  {copy.usernameLabel}
-                </label>
-                <Input
-                  id="signup-username"
-                  autoComplete="username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder={copy.usernamePlaceholder}
-                  className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="signup-password">
-                  {copy.passwordLabel}
-                </label>
-                <div className="relative">
-                  <Input
-                    id="signup-password"
-                    autoComplete="new-password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder={copy.passwordPlaceholder}
-                    className="h-12 rounded-md border-slate-200 bg-white pr-12 text-sm shadow-none focus-visible:ring-slate-200"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute right-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
-                    aria-label={showPassword ? copy.hidePassword : copy.showPassword}
-                    title={showPassword ? copy.hidePassword : copy.showPassword}
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="signup-confirm-password">
-                  {copy.confirmPasswordLabel}
-                </label>
-                <div className="relative">
-                  <Input
-                    id="signup-confirm-password"
-                    autoComplete="new-password"
-                    type={showPassword ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder={copy.confirmPasswordPlaceholder}
-                    className="h-12 rounded-md border-slate-200 bg-white pr-12 text-sm shadow-none focus-visible:ring-slate-200"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute right-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
-                    aria-label={showPassword ? copy.hidePassword : copy.showPassword}
-                    title={showPassword ? copy.hidePassword : copy.showPassword}
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <p className="px-1 text-sm leading-6 text-slate-500">
-                {copy.passwordIntro}
-              </p>
-            </>
-          )}
+          <p className="px-1 text-sm leading-6 text-slate-500">
+            {copy.emailCodeIntro}
+          </p>
 
           {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
 
           <Button type="submit" disabled={isSubmitting} className="h-12 w-full rounded-md px-6 text-sm font-medium">
-            {isSubmitting
-              ? mode === "password"
-                ? copy.creatingWithPassword
-                : copy.sendingEmailCode
-              : mode === "password"
-                ? copy.createWithPassword
-                : copy.sendEmailCode}
+            {isSubmitting ? copy.sendingEmailCode : copy.sendEmailCode}
             <ArrowRight />
           </Button>
           <div className="text-center text-sm text-slate-400">

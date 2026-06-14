@@ -855,3 +855,30 @@ For locale-sensitive pages, never hard-code the client default locale as English
 - `tests/locale-default.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 030
+
+### Date
+2026-06-15
+
+### Area
+Auth / Clerk passwordless registration
+
+### Symptom
+- Passwordless sign-up UI accepted an email verification code, then Clerk returned that registration still required `password`.
+- The user saw an internal Clerk setup message instead of a Google/Notion-style no-password account creation flow.
+
+### Root cause
+The UI removed password inputs, but the Clerk Dashboard still treated `password` as a required sign-up field. Calling `signUp.create` with only `emailAddress` left the sign-up incomplete after email verification.
+
+### Fix
+Keep the passwordless UI, but pass a generated strong managed password to `signUp.create` so Clerk requirements are satisfied invisibly. Login remains email-code or Google based and does not ask for a password.
+
+### Prevention rule
+When implementing Clerk passwordless UX, verify both frontend fields and Clerk backend required fields. If passwords are hidden from users while Clerk requires one, generate a strong managed password during sign-up instead of exposing a password step or leaking Clerk missing-field errors.
+
+### Files changed
+- `components/sign-up-panel.tsx`
+- `tests/mobile-sign-in.test.mjs`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

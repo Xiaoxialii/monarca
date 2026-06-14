@@ -114,6 +114,13 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   return fallback;
 }
 
+function completeSignInRedirect(path: string) {
+  if (typeof window !== "undefined") {
+    window.location.assign(path);
+    return;
+  }
+}
+
 export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const router = useRouter();
@@ -179,7 +186,7 @@ export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }
 }
 
 function ClerkSignIn({ copy }: { copy: SignInCopy }) {
-  const [mode, setMode] = useState<"code" | "other">("code");
+  const [mode, setMode] = useState<"code" | "other">("other");
 
   return (
     <div className="grid min-h-[620px] grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(360px,0.86fr)_minmax(520px,560px)] lg:items-center lg:gap-20">
@@ -280,14 +287,18 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push(authRedirectPath(searchParams));
+        const redirectPath = authRedirectPath(searchParams);
+        router.replace(redirectPath);
+        completeSignInRedirect(redirectPath);
         return;
       }
 
       setError(result.status === "needs_second_factor" ? copy.secondFactorRequired : copy.passwordUnavailable);
     } catch (caughtError) {
       if (isAlreadySignedInError(caughtError)) {
-        router.replace(authRedirectPath(searchParams));
+        const redirectPath = authRedirectPath(searchParams);
+        router.replace(redirectPath);
+        completeSignInRedirect(redirectPath);
         return;
       }
 
@@ -442,7 +453,9 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
 
         if (result.status === "complete" && result.createdSessionId) {
           await setActive({ session: result.createdSessionId });
-          router.push(authRedirectPath(searchParams));
+          const redirectPath = authRedirectPath(searchParams);
+          router.replace(redirectPath);
+          completeSignInRedirect(redirectPath);
           return;
         }
 
@@ -492,7 +505,9 @@ function CodeSignIn({ copy }: { copy: SignInCopy }) {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push(authRedirectPath(searchParams));
+        const redirectPath = authRedirectPath(searchParams);
+        router.replace(redirectPath);
+        completeSignInRedirect(redirectPath);
         return;
       }
 

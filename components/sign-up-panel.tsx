@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSignUp as useCurrentSignUp, useUser } from "@clerk/nextjs";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
@@ -237,6 +237,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, signUp, setActive } = useSignUp();
+  const { fetchStatus: currentSignUpFetchStatus, signUp: currentSignUp } = useCurrentSignUp();
   const [mode, setMode] = useState<"email" | "password">("email");
   const [emailAddress, setEmailAddress] = useState("");
   const [username, setUsername] = useState("");
@@ -345,17 +346,19 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   }
 
   async function startGoogleSignUp() {
-    if (!isLoaded || isGoogleRedirecting) return;
+    if (currentSignUpFetchStatus === "fetching" || isGoogleRedirecting) return;
 
     setError("");
     setIsGoogleRedirecting(true);
 
     try {
-      await signUp.authenticateWithRedirect({
-        strategy: "google" as never,
-        redirectUrl: "/sign-up/sso-callback",
-        redirectUrlComplete: authRedirectPath(searchParams)
+      const { error: ssoError } = await currentSignUp.sso({
+        strategy: "oauth_google",
+        redirectCallbackUrl: "/sign-up/sso-callback",
+        redirectUrl: authRedirectPath(searchParams)
       });
+
+      if (ssoError) throw ssoError;
     } catch (caughtError) {
       setError(getErrorMessage(caughtError) || copy.googleUnavailable);
       setIsGoogleRedirecting(false);
@@ -506,7 +509,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
             type="button"
             variant="outline"
             onClick={() => void startGoogleSignUp()}
-            disabled={!isLoaded || isGoogleRedirecting}
+            disabled={currentSignUpFetchStatus === "fetching" || isGoogleRedirecting}
             aria-busy={isGoogleRedirecting}
             className="h-12 w-full cursor-pointer select-none rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
           >

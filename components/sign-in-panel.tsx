@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSignIn as useCurrentSignIn, useUser } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import type { SignInFirstFactor } from "@clerk/nextjs/types";
 import { ArrowRight } from "lucide-react";
@@ -353,7 +353,7 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 }
 
 function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
-  const { isLoaded, signIn } = useSignIn();
+  const { fetchStatus, signIn } = useCurrentSignIn();
   const searchParams = useSearchParams();
   const [error, setError] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -368,17 +368,19 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
   }
 
   async function startGoogleSignIn() {
-    if (!isLoaded || isRedirecting) return;
+    if (fetchStatus === "fetching" || isRedirecting) return;
 
     setError("");
     setIsRedirecting(true);
 
     try {
-      await signIn.authenticateWithRedirect({
-        strategy: "google" as never,
-        redirectUrl: "/sign-in/sso-callback",
-        redirectUrlComplete: authRedirectPath(searchParams)
+      const { error: ssoError } = await signIn.sso({
+        strategy: "oauth_google",
+        redirectCallbackUrl: "/sign-in/sso-callback",
+        redirectUrl: authRedirectPath(searchParams)
       });
+
+      if (ssoError) throw ssoError;
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
       setIsRedirecting(false);
@@ -391,7 +393,7 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
         type="button"
         variant="outline"
         onClick={() => void startGoogleSignIn()}
-        disabled={!isLoaded || isRedirecting}
+        disabled={fetchStatus === "fetching" || isRedirecting}
         aria-busy={isRedirecting}
         className="h-14 w-full cursor-pointer select-none rounded-md border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
       >

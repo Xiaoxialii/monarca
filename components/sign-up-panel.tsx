@@ -353,7 +353,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
 
     try {
       const { error: ssoError } = await currentSignUp.sso({
-        strategy: "google",
+        strategy: "oauth_google",
         redirectCallbackUrl: "/sign-up/sso-callback",
         redirectUrl: authRedirectPath(searchParams)
       });

@@ -375,7 +375,7 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
 
     try {
       const { error: ssoError } = await signIn.sso({
-        strategy: "google" as never,
+        strategy: "oauth_google",
         redirectCallbackUrl: "/sign-in/sso-callback",
         redirectUrl: authRedirectPath(searchParams)
       });

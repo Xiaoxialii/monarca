@@ -1,12 +1,8 @@
 "use client";
 
 import {
-  BarChart3,
   CheckCircle2,
-  Database,
-  FileText,
   Languages,
-  LineChart,
   Send,
   Sparkles
 } from "lucide-react";
@@ -255,43 +251,21 @@ export function ConsultingPage() {
         </nav>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-5 pb-10 pt-10 sm:px-8 lg:grid-cols-[minmax(0,0.92fr)_440px] lg:items-start lg:pb-16 lg:pt-16">
-        <div className="min-w-0">
+      <section className="mx-auto grid min-h-[calc(100vh-56px)] max-w-7xl gap-10 px-5 py-12 sm:px-8 sm:py-14 lg:grid-cols-[minmax(0,0.9fr)_460px] lg:items-center lg:gap-14 lg:py-12">
+        <div className="mx-auto min-w-0 max-w-3xl lg:mx-0 lg:pl-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
             <Sparkles className="size-3.5" />
             {isZh ? "商业咨询" : "Business consultation"}
           </div>
-          <h1 className="mt-5 max-w-3xl text-4xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+          <h1 className="mt-6 max-w-3xl text-4xl font-semibold leading-[1.08] tracking-normal text-slate-950 sm:text-5xl lg:text-[3.5rem]">
             {copy.heroTitle}
           </h1>
-          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
+          <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">
             {copy.heroSubtitle}
           </p>
-          <p className="mt-4 max-w-2xl rounded-2xl border border-emerald-100 bg-white/72 p-4 text-sm leading-6 text-emerald-950 shadow-sm">
-            {copy.heroNote}
-          </p>
-
-          <div className="mt-8 rounded-[28px] border border-slate-200/80 bg-white/82 p-5 shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:p-6">
-            <h2 className="text-xl font-semibold tracking-normal text-slate-950">{copy.clarifyTitle}</h2>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {copy.clarifyItems.map((item, index) => {
-                const icons = [Database, LineChart, FileText, BarChart3];
-                const Icon = icons[index];
-
-                return (
-                  <div key={item} className="flex gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100">
-                      <Icon className="size-3.5" />
-                    </span>
-                    <p className="text-sm leading-6 text-slate-700">{item}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
-        <aside className="rounded-[28px] border border-slate-200/80 bg-white/92 p-5 shadow-[0_22px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
+        <aside className="mx-auto w-full max-w-[460px] rounded-[28px] border border-slate-200/80 bg-white/92 p-5 shadow-[0_22px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6 lg:mx-0">
           {isSubmitted ? (
             <div className="rounded-3xl border border-emerald-100 bg-emerald-50/70 p-5">
               <div className="grid size-11 place-items-center rounded-full bg-white text-emerald-800">
@@ -372,20 +346,6 @@ export function ConsultingPage() {
             </>
           )}
         </aside>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-5 pb-14 sm:px-8">
-        <div className="rounded-[28px] border border-emerald-100 bg-white/82 p-5 text-center shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:p-6">
-          <h2 className="text-xl font-semibold tracking-normal text-slate-950">{copy.trustTitle}</h2>
-          <p className="mx-auto mt-3 max-w-3xl text-sm leading-6 text-slate-500">{copy.trustText}</p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
-            {copy.trustTags.map((tag) => (
-              <span key={tag} className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
       </section>
     </main>
   );

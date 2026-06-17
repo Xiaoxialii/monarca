@@ -1,27 +1,20 @@
 "use client";
 
-import { Show, useUser } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   BrainCircuit,
   Check,
-  CircleDollarSign,
   Database,
   FileText,
-  GitBranch,
   Languages,
-  LineChart,
   ListChecks,
   Menu,
-  MoveRight,
   Rocket,
-  Search,
   ShoppingBag,
   Sparkles,
-  Target,
   TrendingUp,
   UsersRound,
   X,
@@ -42,13 +35,41 @@ import {
 } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
-const integrations = [
-  "Google Analytics",
-  "Mixpanel",
-  "Snowflake",
-  "BigQuery",
-  "PostgreSQL",
-  "Stripe"
+const ecommerceIntegrations = [
+  { name: "Shopify", mark: "S", tone: "bg-emerald-100 text-emerald-700" },
+  { name: "Klaviyo", mark: "K", tone: "bg-rose-100 text-rose-700" },
+  { name: "Meta Ads", mark: "f", tone: "bg-blue-100 text-blue-700" },
+  { name: "Google Ads", mark: "G", tone: "bg-amber-100 text-amber-700" },
+  { name: "Google Analytics", mark: "GA", tone: "bg-orange-100 text-orange-700" },
+  { name: "Amazon Ads", mark: "a", tone: "bg-slate-100 text-slate-800" },
+  { name: "Amazon", mark: "A", tone: "bg-orange-100 text-orange-700" },
+  { name: "TikTok", mark: "T", tone: "bg-slate-900 text-white" },
+  { name: "Recharge", mark: "R", tone: "bg-violet-100 text-violet-700" },
+  { name: "Attentive", mark: "At", tone: "bg-pink-100 text-pink-700" },
+  { name: "NetSuite", mark: "N", tone: "bg-slate-100 text-slate-700" },
+  { name: "Google Sheets", mark: "GS", tone: "bg-green-100 text-green-700" },
+  { name: "Pinterest", mark: "P", tone: "bg-red-100 text-red-700" },
+  { name: "Snapchat", mark: "S", tone: "bg-yellow-100 text-yellow-700" },
+  { name: "Mailchimp", mark: "M", tone: "bg-amber-100 text-amber-800" },
+  { name: "HubSpot", mark: "H", tone: "bg-orange-100 text-orange-700" },
+  { name: "Zendesk", mark: "Z", tone: "bg-teal-100 text-teal-700" },
+  { name: "Slack", mark: "#", tone: "bg-purple-100 text-purple-700" },
+  { name: "Xero", mark: "X", tone: "bg-sky-100 text-sky-700" },
+  { name: "LinkedIn", mark: "in", tone: "bg-blue-100 text-blue-700" },
+  { name: "Instagram", mark: "IG", tone: "bg-fuchsia-100 text-fuchsia-700" },
+  { name: "Yotpo", mark: "Y", tone: "bg-indigo-100 text-indigo-700" },
+  { name: "WooCommerce", mark: "W", tone: "bg-purple-100 text-purple-700" },
+  { name: "Square", mark: "Sq", tone: "bg-slate-100 text-slate-700" },
+  { name: "Typeform", mark: "T", tone: "bg-stone-100 text-stone-700" },
+  { name: "Intercom", mark: "I", tone: "bg-blue-100 text-blue-700" },
+  { name: "QuickBooks", mark: "QB", tone: "bg-lime-100 text-lime-700" },
+  { name: "Stripe", mark: "St", tone: "bg-indigo-100 text-indigo-700" }
+];
+
+const integrationRows = [
+  ecommerceIntegrations.slice(0, 10),
+  ecommerceIntegrations.slice(10, 19),
+  ecommerceIntegrations.slice(19)
 ];
 
 const featureMeta = [
@@ -58,9 +79,48 @@ const featureMeta = [
   { icon: TrendingUp, className: "bg-emerald-100/70" }
 ];
 
-const teamRoleIcons = [Database, GitBranch, BarChart3, Search, Target];
-const pricingIcons = [Sparkles, BrainCircuit, Database];
 const useCaseIcons = [ShoppingBag, Rocket, UsersRound];
+const useCaseAvatars = [
+  { face: "EC", role: "Ecommerce", className: "from-emerald-100 via-white to-lime-100 text-emerald-900" },
+  { face: "EX", role: "Executive", className: "from-sky-100 via-white to-indigo-100 text-sky-900" },
+  { face: "OP", role: "Operations", className: "from-amber-100 via-white to-rose-100 text-amber-900" }
+];
+const useCaseThemes = [
+  {
+    card: "bg-gradient-to-br from-emerald-50 via-white to-lime-50 ring-emerald-100/80",
+    icon: "bg-emerald-100/70 text-emerald-800 ring-emerald-200/70",
+    pill: "bg-emerald-100/75 text-emerald-800 ring-emerald-200/70",
+    line: "border-emerald-300",
+    action: "bg-emerald-50/85 text-emerald-950 ring-emerald-100"
+  },
+  {
+    card: "bg-gradient-to-br from-sky-50 via-white to-indigo-50 ring-sky-100/80",
+    icon: "bg-sky-100/75 text-sky-800 ring-sky-200/70",
+    pill: "bg-sky-100/75 text-sky-800 ring-sky-200/70",
+    line: "border-sky-300",
+    action: "bg-sky-50/85 text-sky-950 ring-sky-100"
+  },
+  {
+    card: "bg-gradient-to-br from-amber-50 via-white to-rose-50 ring-amber-100/80",
+    icon: "bg-amber-100/75 text-amber-800 ring-amber-200/70",
+    pill: "bg-amber-100/75 text-amber-800 ring-amber-200/70",
+    line: "border-amber-300",
+    action: "bg-amber-50/85 text-amber-950 ring-amber-100"
+  }
+];
+
+const useCaseLayout = [
+  "lg:w-[35%] lg:-translate-y-1 lg:-rotate-[0.8deg]",
+  "lg:w-[31%] lg:translate-y-8 lg:rotate-[0.7deg]",
+  "lg:w-[34%] lg:translate-y-2 lg:-rotate-[0.35deg]"
+];
+
+const personaAvatarStyles = [
+  "from-emerald-200 via-teal-100 to-white text-emerald-950 ring-emerald-100",
+  "from-amber-200 via-orange-100 to-white text-amber-950 ring-amber-100",
+  "from-sky-200 via-indigo-100 to-white text-sky-950 ring-sky-100",
+  "from-rose-200 via-pink-100 to-white text-rose-950 ring-rose-100"
+];
 
 const homepageCopy = {
   en: {
@@ -80,10 +140,9 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "AI operating system for revenue teams",
-      headline: "Your AI Data Analyst Team",
-      subheadline:
-        "Connect your database, spreadsheets, and business tools. Automatically generate revenue, sales, customer, and operations reports with insights and next-step recommendations.",
+      eyebrow: "AI Revenue & Growth System",
+      headline: "Identify growth opportunities and business risks earlier",
+      subheadline: "",
       teamLabel: "One AI team covering the full analytics workflow",
       team: [
         { role: "Data Engineer", text: "Connects sources and keeps pipelines clean" },
@@ -94,7 +153,7 @@ const homepageCopy = {
       ],
       primaryCta: "Book a 30-min Business Consultation",
       secondaryCta: "View Demo",
-      trust: ["No credit card required", "5 min setup", "Cancel anytime"]
+      trust: ["Automated data analysis", "Real-time insights", "Actionable recommendations"]
     },
     visual: {
       status: "Investigating",
@@ -150,28 +209,31 @@ const homepageCopy = {
       consultCta: "Book a 30-min Business Consultation",
       cards: [
         {
-          title: "Ecommerce operations team",
-          scene: "Orders, ads, refunds, and inventory data are scattered, making sales changes hard to explain quickly.",
-          pain: "Sales drops require manual comparison across Excel, orders, and ad data.",
-          finding: "Revenue decline mainly comes from rising CAC, lower repeat purchase, and low top-selling SKU inventory.",
-          action: "Pause low ROI channels, restock top-selling SKU, and reactivate existing customers.",
-          result: "Automatically finds why revenue declined"
+          title: "Ecommerce team",
+          persona:
+            "We used to stitch together order, ad, and inventory data ourselves just to barely understand what happened; now Monarca AI identifies the real profit sources directly, so we know faster which products are worth scaling.",
+          scene: "Orders look like they are growing, but I am not sure whether it is healthy growth.",
+          insight: "AI sees growth coming from short-term channel spikes rather than stable demand.",
+          action: "Identify the real growth source before increasing spend.",
+          roles: ["🚀 Growth Analyst", "📣 Marketing Operator"]
         },
         {
-          title: "SaaS growth team",
-          scene: "Signups are healthy, but activation and paid conversion are falling, making drop-off hard to locate.",
-          pain: "Product behavior, subscription, and channel data are scattered across the funnel.",
-          finding: "onboarding step 2 has the highest drop-off, dragging down activation and paid conversion.",
-          action: "Improve first-time experience, then track activation, retention, and paid conversion.",
-          result: "Identifies conversion drop-off points"
+          title: "Executive team",
+          persona:
+            "Monarca AI makes our operating review much faster. It automatically turns complex data changes into key points, so we no longer spend hours preparing weekly reports by hand.",
+          scene: "Ad spend and inventory are both increasing, but profit is going down.",
+          insight: "AI sees rising cost and weaker ad efficiency eroding margin.",
+          action: "Reduce low-ROI channel spend and rebalance cost structure.",
+          roles: ["⚠ Risk Analyst", "📊 Finance Operator"]
         },
         {
-          title: "Executive weekly report",
-          scene: "Weekly PPT reporting is manual, metric definitions vary, and leadership cannot quickly see priorities.",
-          pain: "Revenue, cost, customer, and channel data are scattered and slow to explain.",
-          finding: "Automatically identifies revenue, cost, customer, and channel anomalies with priority and impact scope.",
-          action: "Generate daily reports, weekly reports, and monthly operating analysis for faster reviews.",
-          result: "Generates executive operating summaries"
+          title: "Operations team",
+          persona:
+            "We often do not know which issue to handle first, and it is hard to judge the impact range; Monarca AI locates anomalies, ranks priorities, and turns each issue into a clear executable task.",
+          scene: "There is a lot of data, but no clear direction.",
+          insight: "AI turns multi-dimensional data into prioritized operating actions.",
+          action: "Execute the recommended next step and track impact.",
+          roles: ["👤 Growth Operator", "🚀 Decision Maker"]
         }
       ]
     },
@@ -194,10 +256,10 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "A complete AI business investigation",
+      sectionTitle: "Work with AI",
       sectionSubtitle:
         "After revenue, conversion, or cost anomalies appear, Monarca AI checks related metrics, identifies key root causes, and recommends actions with evidence.",
-      eyebrow: "Active investigation",
+      eyebrow: "",
       title: "Revenue dropped 12.4%",
       evidenceTitle: "Evidence chain",
       evidenceMetric: "Revenue dropped 18%",
@@ -247,7 +309,7 @@ const homepageCopy = {
         {
           name: "Professional",
           subtitle: "For teams that need ongoing automated operating analysis with dedicated analyst support",
-          price: "¥2,000",
+          price: "$600",
           cadence: "/ month",
           billingNote: "Annual service term, billed annually",
           badge: "Recommended",
@@ -312,21 +374,18 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "为增长团队和中小企业打造的 AI 数据系统",
-      headline: "你的 AI 商业分析团队",
-      subheadline:
-        "连接你的业务数据，自动生成经营报告，发现异常、定位原因，并给出可执行的增长建议",
-      teamLabel: "一套 AI 工作流，完成从数据连接到经营洞察的全过程",
+      eyebrow: "AI Revenue & Growth System",
+      headline: "提前识别增长机会与业务风险",
+      subheadline: "连接业务数据，自动生成增长分析与行动建议",
+      teamLabel: "三类关键洞察，帮助团队更早行动",
       team: [
-        { role: "数据工程师", text: "建立数据库，连接数据源，清洗和同步数据" },
-        { role: "分析工程师", text: "建立语义层，统一指标口径" },
-        { role: "商业智能工程师", text: "生成报告、看板和可信视图" },
-        { role: "经营洞察", text: "解释变化，定位关键根因" },
-        { role: "增长运营", text: "把洞察转化为增长行动" }
+        { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
+        { role: "更快识别风险与亏损", text: "发现利润下滑、低效投入、库存风险或业务异常，减少不必要的损失。" },
+        { role: "自动生成行动建议", text: "基于数据变化自动给出下一步建议，帮助团队更快判断、执行和优化。" }
       ],
-      primaryCta: "预约 30 分钟商业咨询",
+      primaryCta: "预约 30 分钟咨询",
       secondaryCta: "查看 Demo",
-      trust: ["语义层管理（映射业务）", "数据质量", "随时取消"]
+      trust: ["数据自动分析", "实时洞察", "可执行建议"]
     },
     visual: {
       status: "正在调查",
@@ -352,7 +411,7 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "",
-      title: "蝴蝶效应能帮你做什么",
+      title: "一套 AI 工作流，完成从数据连接到经营洞察的全过程",
       cards: [
         {
           title: "汇总分散数据",
@@ -380,28 +439,28 @@ const homepageCopy = {
       consultCta: "预约 30 分钟商业咨询",
       cards: [
         {
-          title: "电商运营团队",
-          scene: "订单、广告、退款和库存数据分散，销售一波动，就很难快速回答“为什么掉了”。",
-          pain: "订单、广告、库存和复购数据都散在不同地方，需要手动拉表对比，才能回答销售额为什么掉了。",
-          finding: "收入下降主要来自 CAC 上升、复购率下降和热销 SKU 库存不足。",
-          action: "暂停低 ROI 渠道，优先补货热销 SKU，并召回近期未复购客户。",
-          result: "自动定位收入下滑原因"
+          title: "电商团队",
+          persona: "以前我们总是要自己拼订单、广告和库存数据，才能勉强看清发生了什么；现在 Monarca AI 能直接识别真实利润来源，让我们更快知道哪些商品值得继续放大。",
+          scene: "",
+          insight: "Monarca AI 直接识别真实利润来源。",
+          action: "更快知道哪些商品值得继续放大。",
+          roles: ["🛒 Ecommerce Operator", "🚀 Growth Analyst"]
         },
         {
-          title: "SaaS 增长团队",
-          scene: "注册量看起来不少，但激活和付费转化下降，很难判断用户到底卡在哪一步。",
-          pain: "产品行为、订阅和渠道数据分散，增长漏斗无法快速定位问题。",
-          finding: "onboarding 第 2 步流失最高，激活率下降正在影响后续付费转化。",
-          action: "优先优化首次体验，并持续追踪激活率、留存和付费转化。",
-          result: "识别转化流失节点"
+          title: "管理层",
+          persona: "Monarca AI 让我们的经营复盘快了很多，它会自动把复杂的数据变化整理成重点，让我们不需要再花大量时间手工准备每周汇报。",
+          scene: "",
+          insight: "Monarca AI 自动把复杂变化整理成重点。",
+          action: "团队能更快完成复盘和决策。",
+          roles: ["👔 Executive", "📊 Business Analyst"]
         },
         {
-          title: "管理层经营周报",
-          scene: "每周靠人工整理 PPT，数据口径不一致，管理层很难快速判断本周重点。",
-          pain: "收入、成本、客户和渠道数据分散，周报制作耗时，解释也不统一。",
-          finding: "自动识别收入、成本、客户和渠道异常，并标记优先级和影响范围。",
-          action: "生成日报、周报和月经营分析，帮助管理层快速复盘和决策。",
-          result: "生成管理层经营摘要"
+          title: "运营团队",
+          persona: "我们常常不知道该先处理哪一个，也很难判断影响范围；Monarca AI 会先帮我们定位异常、判断优先级，再把问题转成清晰可执行的任务。",
+          scene: "",
+          insight: "Monarca AI 先定位异常并判断优先级。",
+          action: "再把问题转成清晰可执行的任务。",
+          roles: ["👤 Ops Operator", "⚠ Risk Controller"]
         }
       ]
     },
@@ -424,9 +483,9 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "完整的 AI 经营调查",
+      sectionTitle: "与 AI 一起工作",
       sectionSubtitle: "发现收入、转化或成本异常后，蝴蝶效应会自动检查相关指标，定位关键根因，并给出带证据链的行动建议。",
-      eyebrow: "AI 如何工作",
+      eyebrow: "",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",
       evidenceMetric: "收入下降 18%",
@@ -543,198 +602,174 @@ function TrustItem({ children }: { children: React.ReactNode }) {
   );
 }
 
-function TeamRoster({ copy }: { copy: HomeCopy["hero"] }) {
-  return (
-    <div className="mt-5 max-w-2xl rounded-[26px] border border-emerald-100/80 bg-white/72 p-3 shadow-[0_16px_50px_rgba(6,78,59,0.07)] backdrop-blur">
-      <p className="px-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
-        {copy.teamLabel}
-      </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {copy.team.map((member, index) => {
-          const Icon = teamRoleIcons[index];
-
-          return (
-            <div
-              key={member.role}
-              className={cn(
-                "flex items-start gap-2.5 rounded-2xl border border-slate-200/75 bg-slate-50/80 p-2.5",
-                index === copy.team.length - 1 && "sm:col-span-2"
-              )}
-            >
-              <div className="grid size-7 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
-                <Icon className="size-3.5" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-950">{member.role}</p>
-                <p className="mt-0.5 text-xs leading-4 text-slate-500">{member.text}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+function normalizeRoleName(role: string) {
+  return role.replace(/^[^\p{L}\p{N}]+/u, "").trim();
 }
 
-function HeroWorkflowMobile({ copy }: { copy: HomeCopy["hero"] }) {
-  const mobileTextByRole: Record<string, string> = {
-    "Data Engineer": "Connect, clean, and sync data",
-    "Analytics Engineer": "Standardize metric logic",
-    "BI Engineer": "Generate reports and dashboards",
-    "Business Intelligence": "Explain root causes",
-    "Growth Operations": "Recommend next actions",
-    数据工程师: "连接、清洗和同步数据",
-    分析工程师: "统一指标口径",
-    商业智能工程师: "生成报告和看板",
-    经营洞察: "解释变化原因",
-    增长运营: "输出行动建议"
+function roleInitials(role: string) {
+  const normalized = normalizeRoleName(role);
+  const words = normalized.split(/\s+/).filter(Boolean);
+
+  if (words.length === 0) {
+    return "AI";
+  }
+
+  return words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+}
+
+const businessCaseSignals = [
+  { channel: "TikTok", icon: "🚀", value: "+42%", zh: "爆发增长", en: "Explosive growth", tone: "green" },
+  { channel: "Amazon", icon: "📉", value: "-18%", zh: "广告亏损扩大", en: "Ad loss widening", tone: "red" },
+  { channel: "Shopify", icon: "🔁", value: "82%", zh: "复购表现健康", en: "Healthy repeat purchase", tone: "blue" }
+] as const;
+
+const businessCaseRecommendations = [
+  { zh: "降低 Amazon（SKU 9）广告投放 15–25%", en: "Reduce Amazon (SKU 9) ad spend by 15–25%" },
+  { zh: "检查 iOS 落地页转化率", en: "Review iOS landing page conversion rate" },
+  { zh: "扩大 Shopify（SKU 1992）复购库存", en: "Increase Shopify (SKU 1992) retention inventory" }
+] as const;
+
+function signalToneClass(tone: (typeof businessCaseSignals)[number]["tone"]) {
+  if (tone === "green") {
+    return {
+      card: "bg-emerald-50/70 ring-emerald-100",
+      status: "bg-emerald-100 text-emerald-800",
+      icon: "bg-emerald-100 text-emerald-900"
+    };
+  }
+
+  if (tone === "red") {
+    return {
+      card: "bg-rose-50/65 ring-rose-100",
+      status: "bg-rose-100 text-rose-700",
+      icon: "bg-rose-100 text-rose-700"
+    };
+  }
+
+  return {
+    card: "bg-sky-50/65 ring-sky-100",
+    status: "bg-sky-100 text-sky-800",
+    icon: "bg-sky-100 text-sky-800"
+  };
+}
+
+function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?: boolean; isZh?: boolean }) {
+  const labels = {
+    case: isZh ? "业务案例" : "Business case",
+    title: isZh ? "我赚了多少？" : "How much did we earn?",
+    live: isZh ? "AI 实时判断" : "AI live judgment",
+    signals: isZh ? "渠道信号" : "Channel signals",
+    window: isZh ? "7 天窗口" : "7-day window",
+    diagnosis: isZh ? "AI 诊断" : "AI diagnosis",
+    diagnosisText: isZh
+      ? "美国 iOS 用户转化下降，Amazon SKU 9 是持续亏损的投放中心，Shopify（SKU 1992）复购是唯一稳定利润。"
+      : "U.S. iOS conversion is declining. Amazon SKU 9 is the persistent loss-making ad center, while Shopify (SKU 1992) repeat purchase is the only stable profit source.",
+    tags: isZh ? ["iOS 转化下降", "SKU 9 亏损", "SKU 1992 稳定利润"] : ["iOS conversion down", "SKU 9 loss center", "SKU 1992 stable profit"],
+    actions: isZh ? "建议动作" : "Recommended actions",
+    confidence: isZh ? "置信度：82%" : "Confidence: 82%"
   };
 
   return (
-    <div className="mt-5 rounded-[24px] border border-emerald-100/80 bg-white/78 p-4 shadow-[0_14px_42px_rgba(6,78,59,0.06)] backdrop-blur">
-      <p className="text-sm font-semibold leading-6 text-emerald-900">{copy.teamLabel}</p>
-      <div className="mt-3 grid gap-2">
-        {copy.team.map((member, index) => {
-          const Icon = teamRoleIcons[index];
-
-          return (
-            <div
-              key={member.role}
-              className="flex min-h-16 items-center gap-3 rounded-2xl border border-slate-200/75 bg-slate-50/85 px-3 py-2.5"
-            >
-              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
-                <Icon className="size-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold leading-5 text-slate-950">{member.role}</p>
-                <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                  {mobileTextByRole[member.role] ?? member.text}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function HeroPreviewCardMobile({ copy }: { copy: HomeCopy["visual"] }) {
-  const causes = copy.causes.slice(0, 3);
-
-  return (
-    <div className="mt-5 w-full rounded-[24px] border border-emerald-100/90 bg-gradient-to-br from-emerald-50 via-white to-lime-50 p-5 shadow-[0_14px_40px_rgba(6,78,59,0.08)]">
+    <article
+      className={cn(
+        "group w-full rounded-2xl bg-white p-3.5 shadow-[0_22px_72px_rgba(15,23,42,0.10)] ring-1 ring-slate-900/[0.06] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_84px_rgba(15,23,42,0.14)]",
+        compact ? "mt-5" : "mx-auto max-w-[500px]"
+      )}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">{copy.monitor}</p>
-          <h3 className="mt-2 text-lg font-semibold leading-tight text-slate-950">{copy.drop}</h3>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{labels.case}</p>
+          <h3 className="mt-1.5 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-[1.35rem]">
+            {labels.title}
+          </h3>
         </div>
-        <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-600">
-          -12.4%
+        <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)] sm:mr-10">
+          {labels.live}
         </span>
       </div>
-      <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/82 p-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-emerald-700" />
-          <p className="text-sm font-semibold text-slate-900">
-            {copy.preview}，{copy.rootCauses}
-          </p>
+
+      <section className="mt-3.5">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.signals}</p>
+          <p className="text-xs font-medium text-slate-400">{labels.window}</p>
         </div>
-        <div className="mt-3 space-y-2">
-          {causes.map(([label, value]) => (
-            <div key={label} className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-slate-600">{label}</span>
-              <span className={cn("font-semibold", value.startsWith("-") || value.startsWith("+") ? "text-rose-600" : "text-slate-950")}>
-                {value}
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          {businessCaseSignals.map((signal) => {
+            const tone = signalToneClass(signal.tone);
+
+            return (
+              <div key={signal.channel} className={cn("rounded-2xl p-2.5 ring-1", tone.card)}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn("grid size-7 place-items-center rounded-xl text-sm", tone.icon)}>{signal.icon}</span>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase", tone.status)}>
+                    {signal.value}
+                  </span>
+                </div>
+                <p className="mt-2 text-[13px] font-semibold leading-5 text-slate-950">{signal.channel}</p>
+                <p className="text-xs leading-5 text-slate-600">{isZh ? signal.zh : signal.en}</p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mt-3 rounded-2xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50/60 p-3 ring-1 ring-emerald-100/80">
+        <div className="flex items-start gap-3">
+          <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-slate-950 text-white shadow-[0_10px_24px_rgba(15,23,42,0.16)]">
+            <Sparkles className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">{labels.diagnosis}</p>
+            <p className="mt-1 text-sm font-semibold leading-6 text-slate-950">
+              {labels.diagnosisText}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {labels.tags.map((item) => (
+                <span key={item} className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-emerald-100/80">
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.actions}</p>
+          <p className="text-xs font-semibold text-emerald-700">{labels.confidence}</p>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {businessCaseRecommendations.map((action) => (
+            <div key={action.zh} className="flex items-center gap-2 rounded-2xl bg-white px-3 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] ring-1 ring-slate-900/[0.05]">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-800">
+                <ArrowRight className="size-3.5" />
               </span>
+              <p className="text-sm font-medium leading-5 text-slate-800">{isZh ? action.zh : action.en}</p>
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </section>
+    </article>
   );
 }
 
-function HeroVisualization({ copy }: { copy: HomeCopy["visual"] }) {
+function HeroPreviewCardMobile({ isZh }: { isZh: boolean }) {
+  return <BusinessCaseAnalysisCard compact isZh={isZh} />;
+}
+
+function HeroVisualization({ isZh }: { isZh: boolean }) {
   return (
-    <div className="relative mx-auto h-[440px] w-full max-w-[520px] lg:mx-0">
-      <div className="absolute inset-0 rounded-[44px] bg-gradient-to-br from-[#9dd8b8]/70 via-[#d6eadf]/75 to-[#aacfc1]/70 blur-3xl" />
-      <div className="butterfly-float absolute right-0 top-2 z-20 grid size-14 place-items-center rounded-[22px] border border-white/70 bg-white/82 text-emerald-800 shadow-[0_20px_60px_rgba(6,78,59,0.2)] backdrop-blur">
+    <div className="relative mx-auto w-full max-w-[520px] lg:mx-0">
+      <div className="absolute inset-[-24px] rounded-[44px] bg-gradient-to-br from-[#9dd8b8]/50 via-[#eef8f2]/75 to-[#aacfc1]/40 blur-3xl" />
+      <div className="butterfly-float absolute -right-4 -top-7 z-20 grid size-12 place-items-center rounded-[20px] bg-white/90 text-emerald-800 shadow-[0_20px_60px_rgba(6,78,59,0.16)] ring-1 ring-white/80 backdrop-blur">
         <BrainCircuit className="size-5" />
       </div>
-
-      <div className="absolute left-0 right-4 top-8 h-[292px] rounded-[32px] border border-white/70 bg-[#dceee4]/70 p-5 shadow-[0_28px_90px_rgba(6,78,59,0.17)] backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-slate-400">{copy.monitor}</p>
-            <h3 className="mt-2 text-xl font-semibold tracking-normal text-slate-950 sm:text-2xl">{copy.drop}</h3>
-          </div>
-          <div className="mt-3 rounded-full border border-rose-200 bg-rose-50/90 px-3 py-1.5 text-sm font-semibold text-rose-600">
-            -12.4%
-          </div>
-        </div>
-
-        <div className="mt-5 h-[140px] overflow-hidden rounded-[26px] border border-[#b8d9c8]/80 bg-[#eef8f2]/90 p-4 shadow-[0_18px_60px_rgba(6,78,59,0.09)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="grid size-9 place-items-center rounded-2xl bg-[#c8ead8] text-emerald-900">
-                <LineChart className="size-4" />
-              </div>
-              <span className="text-sm font-semibold text-slate-700">{copy.trend}</span>
-            </div>
-            <span className="text-xs font-medium text-slate-400">{copy.range}</span>
-          </div>
-          <svg viewBox="0 0 440 118" className="mt-1 h-20 w-full overflow-visible" aria-hidden="true">
-            <defs>
-              <linearGradient id="heroLine" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#22c55e" />
-                <stop offset="52%" stopColor="#059669" />
-                <stop offset="100%" stopColor="#0f766e" />
-              </linearGradient>
-              <linearGradient id="heroFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#059669" stopOpacity="0.2" />
-                <stop offset="100%" stopColor="#059669" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M12 92 C62 80 74 54 126 62 C177 70 184 28 236 36 C294 46 296 68 344 66 C387 64 404 48 428 28 L428 110 L12 110 Z"
-              fill="url(#heroFill)"
-            />
-            <path
-              className="butterfly-chart-line"
-              d="M12 92 C62 80 74 54 126 62 C177 70 184 28 236 36 C294 46 296 68 344 66 C387 64 404 48 428 28"
-              fill="none"
-              stroke="url(#heroLine)"
-              strokeLinecap="round"
-              strokeWidth="4"
-            />
-            <circle cx="428" cy="28" r="6" fill="#047857" />
-            <circle cx="428" cy="28" r="12" fill="#047857" opacity="0.14" />
-          </svg>
-        </div>
-      </div>
-
-      <div className="absolute left-5 right-0 top-[190px] z-10 rounded-[28px] border border-white/80 bg-[#e9f6ef]/94 p-4 shadow-[0_24px_70px_rgba(6,78,59,0.2)] backdrop-blur-xl sm:left-7">
-        <div className="mb-3 flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-2xl bg-slate-950 text-white">
-            <Sparkles className="size-4" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-slate-950 sm:text-base">{copy.preview}</p>
-            <p className="mt-1 text-xs text-slate-500">{copy.rootCauses}</p>
-          </div>
-        </div>
-        <div className="space-y-2">
-          {copy.causes.map(([label, value, text]) => (
-            <div key={label} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/85 px-3.5 py-2">
-              <div>
-                <p className="text-xs font-semibold text-slate-800 sm:text-sm">{label}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{text}</p>
-              </div>
-              <span className="shrink-0 text-sm font-semibold text-emerald-700 sm:text-base">{value}</span>
-            </div>
-          ))}
-        </div>
+      <div className="relative z-10">
+        <BusinessCaseAnalysisCard isZh={isZh} />
       </div>
     </div>
   );
@@ -813,59 +848,41 @@ function MobileNavDrawer({
   );
 }
 
-function OperatingLayer({ copy }: { copy: HomeCopy["system"] }) {
-  const icons = [Activity, GitBranch, Target];
-
-  return (
-    <section className="mx-auto max-w-7xl px-4 py-8 sm:px-8">
-      <div className="min-w-0 overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/76 p-5 shadow-[0_18px_70px_rgba(15,23,42,0.05)] backdrop-blur sm:rounded-[30px] sm:p-6">
-        <div className="mb-5">
-          <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
-          <h2 className="mt-2 max-w-full break-words text-2xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-3xl lg:whitespace-nowrap">
-            {copy.title}
-          </h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {copy.points.map((point, index) => {
-            const Icon = icons[index];
-            return (
-              <div key={point.title} className="rounded-3xl border border-slate-200/80 bg-slate-50/80 p-4">
-                <div className="mb-4 grid size-8 place-items-center rounded-2xl bg-white text-emerald-700 shadow-sm">
-                  <Icon className="size-4" />
-                </div>
-                <h3 className="text-base font-semibold text-slate-950">{point.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{point.text}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
+  const scrollingCards = [...copy.cards, ...copy.cards];
+
   return (
     <section id="alerts" className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-12">
-      <div className="mb-6">
-        <div>
-          {copy.eyebrow ? (
-            <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
-          ) : null}
-          <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-            {copy.title}
-          </h2>
+      {copy.eyebrow || copy.title ? (
+        <div className="mb-6">
+          <div>
+            {copy.eyebrow ? (
+              <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+            ) : null}
+            {copy.title ? (
+              <h2 className="mt-2 max-w-4xl text-2xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-3xl">
+                {copy.title}
+              </h2>
+            ) : null}
+          </div>
         </div>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {copy.cards.map((card, index) => {
-          const meta = featureMeta[index];
+      ) : null}
+      <div className="feature-card-marquee -mx-5 overflow-x-auto px-5 [scrollbar-width:none] sm:-mx-8 sm:px-8 [&::-webkit-scrollbar]:hidden">
+        <div className="feature-card-track flex gap-4 pr-4">
+        {scrollingCards.map((card, index) => {
+          const cardIndex = index % copy.cards.length;
+          const meta = featureMeta[cardIndex];
           return (
             <div
-              key={card.title}
-              className={cn("rounded-3xl border border-white/70 p-4 shadow-[0_16px_50px_rgba(15,23,42,0.06)]", meta.className)}
+              key={`${card.title}-${index}`}
+              aria-hidden={index >= copy.cards.length}
+              className={cn(
+                "feature-card-reveal group relative min-h-[172px] w-[82vw] shrink-0 overflow-hidden rounded-3xl border border-white/70 p-4 shadow-[0_16px_50px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_70px_rgba(6,78,59,0.13)] sm:w-[360px] lg:w-[380px]",
+                meta.className
+              )}
+              style={{ "--feature-card-delay": `${cardIndex * 120}ms` } as React.CSSProperties}
             >
-              <div className="mb-6 grid size-9 place-items-center rounded-2xl bg-white/80 text-slate-950 shadow-sm">
+              <div className="mb-6 grid size-9 place-items-center rounded-2xl bg-white/85 text-slate-950 shadow-sm transition duration-300 group-hover:scale-105 group-hover:text-emerald-800">
                 <meta.icon className="size-4" />
               </div>
               <h3 className="text-base font-semibold text-slate-950 sm:text-lg">{card.title}</h3>
@@ -873,112 +890,23 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
             </div>
           );
         })}
+        </div>
       </div>
     </section>
   );
 }
 
-function UseCaseMockup({ index, isZh }: { index: number; isZh: boolean }) {
-  if (index === 1) {
-    const steps = [
-      { label: isZh ? "注册" : "Signup", value: "100%", width: "w-full" },
-      { label: "onboarding 2", value: "-42%", width: "w-[58%]", alert: true },
-      { label: isZh ? "激活" : "Activation", value: "31%", width: "w-[42%]" },
-      { label: isZh ? "付费" : "Paid", value: "12%", width: "w-[28%]" }
-    ];
-
-    return (
-      <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-slate-500">{isZh ? "增长漏斗" : "Growth funnel"}</span>
-          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
-            {isZh ? "第 2 步流失" : "Step 2 drop"}
-          </span>
-        </div>
-        <div className="space-y-1.5">
-          {steps.map((step) => (
-            <div key={step.label} className="grid grid-cols-[86px_1fr_36px] items-center gap-2">
-              <span className="truncate text-[11px] text-slate-500">{step.label}</span>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                <div className={`${step.width} h-full rounded-full ${step.alert ? "bg-rose-300" : "bg-emerald-300"}`} />
-              </div>
-              <span className={`text-right text-[11px] font-semibold ${step.alert ? "text-rose-600" : "text-slate-700"}`}>
-                {step.value}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (index === 2) {
-    const items = [
-      [isZh ? "收入" : "Revenue", "-6.1%", "text-rose-600"],
-      [isZh ? "成本" : "Cost", "+4.3%", "text-amber-600"],
-      [isZh ? "客户" : "Customers", "-0.9%", "text-slate-700"],
-      [isZh ? "渠道" : "Channel", isZh ? "异常" : "Alert", "text-emerald-700"]
-    ];
-
-    return (
-      <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-slate-500">{isZh ? "本周重点" : "Weekly summary"}</span>
-          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-            {isZh ? "经营摘要" : "Brief"}
-          </span>
-        </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          {items.map(([label, value, tone]) => (
-            <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/70 px-2.5 py-2">
-              <p className="text-[10px] font-medium text-slate-500">{label}</p>
-              <p className={`mt-0.5 text-xs font-semibold ${tone}`}>{value}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 h-1.5 w-10/12 rounded-full bg-emerald-100">
-          <div className="h-full w-7/12 rounded-full bg-emerald-400" />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/78 p-3 shadow-[0_10px_34px_rgba(15,23,42,0.045)]">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-slate-500">{isZh ? "经营分析" : "Operations view"}</span>
-        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
-          {isZh ? "收入下降" : "Revenue down"}
-        </span>
-      </div>
-      <div className="grid grid-cols-[1fr_74px] gap-2">
-        <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-2">
-          <svg viewBox="0 0 120 42" className="h-11 w-full" aria-hidden="true">
-            <path d="M4 12 C22 8 30 18 45 15 C62 12 67 28 82 25 C98 22 105 34 116 31" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" />
-            <path d="M4 12 C22 8 30 18 45 15 C62 12 67 28 82 25 C98 22 105 34 116 31 L116 42 L4 42 Z" fill="#d1fae5" opacity="0.72" />
-          </svg>
-        </div>
-        <div className="grid gap-1">
-          <span className="rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">CAC +18%</span>
-          <span className="rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-600">{isZh ? "复购 -9%" : "Repeat -9%"}</span>
-          <span className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">SKU {isZh ? "不足" : "low"}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
-  const labels = ["痛点", "AI 发现", "建议行动"];
-  const englishLabels = ["Pain point", "AI finding", "Recommended action"];
   const isZh = copy.title === "不同团队如何使用蝴蝶效应";
-  const fieldLabels = isZh ? labels : englishLabels;
+  const labels = {
+    team: isZh ? "团队角色" : "Team act"
+  };
 
   return (
-    <section className="mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-11">
-      <div className="mb-5 max-w-3xl">
+    <section className="mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-12">
+      <div className="mb-6 max-w-3xl">
         <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-          {isZh ? "团队案例" : "Team use cases"}
+          {isZh ? "AI Operating Stories" : "AI operating stories"}
         </p>
         <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
           {copy.title}
@@ -986,50 +914,97 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
         <p className="mt-3 text-sm leading-6 text-slate-500">{copy.subtitle}</p>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-5">
         {copy.cards.map((card, index) => {
           const Icon = useCaseIcons[index];
-          const rows = [card.pain, card.finding, card.action];
+          const avatar = useCaseAvatars[index];
+          const theme = useCaseThemes[index];
 
           return (
             <article
               key={card.title}
-              className="group flex min-w-0 flex-col rounded-[24px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#fbfffd_100%)] p-4 shadow-[0_14px_50px_rgba(15,23,42,0.045)] backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-[0_18px_60px_rgba(4,120,87,0.1)] sm:p-4"
+              className={cn(
+                "group relative flex min-w-0 flex-col overflow-visible rounded-[28px] p-4 shadow-[0_16px_48px_rgba(15,23,42,0.05)] ring-1 transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_64px_rgba(15,23,42,0.08)] lg:min-h-[270px]",
+                theme.card,
+                useCaseLayout[index]
+              )}
             >
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100 transition group-hover:bg-emerald-100">
+              <div className={cn("absolute left-8 top-[-9px] size-5 rotate-45 ring-1", theme.card)} />
+              <div className="pointer-events-none absolute right-5 top-5 size-16 rounded-full bg-white/35 blur-2xl" />
+              <div className="relative flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn("relative grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br text-xs font-bold shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 ring-white/80", avatar.className)}>
+                    {avatar.face}
+                    <span className="absolute -right-0.5 bottom-1 size-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{avatar.role}</p>
+                    <span className={cn("mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1", theme.pill)}>
+                      {card.title}
+                    </span>
+                  </div>
+                </div>
+                <div className={cn("hidden size-8 shrink-0 place-items-center rounded-2xl ring-1 transition sm:grid", theme.icon)}>
                   <Icon className="size-3.5" />
                 </div>
-                <div className="min-w-0">
-                  <h3 className="text-base font-semibold leading-6 text-slate-950">{card.title}</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{card.scene}</p>
-                </div>
               </div>
 
-              <UseCaseMockup index={index} isZh={isZh} />
+              <div className="relative mt-5 rounded-[22px] bg-white/55 px-4 py-4 ring-1 ring-white/70">
+                <blockquote className="text-[0.95rem] font-medium leading-7 tracking-normal text-slate-800 sm:text-[0.98rem]">
+                  <span className="mr-1 text-xl font-semibold leading-none text-emerald-700/35">“</span>
+                  {card.persona}
+                  <span className="ml-1 text-xl font-semibold leading-none text-emerald-700/35">”</span>
+                </blockquote>
+              </div>
 
-              <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
-                {rows.map((text, rowIndex) => (
-                  <div key={fieldLabels[rowIndex]} className="grid gap-1 py-2.5">
-                    <span className="text-[11px] font-semibold text-emerald-800">
-                      {fieldLabels[rowIndex]}
+              <div className="relative mt-auto pt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.team}</p>
+                <div className="mt-2 rounded-2xl bg-white/58 p-2.5 ring-1 ring-white/80">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex -space-x-2">
+                      {card.roles.map((role, roleIndex) => (
+                        <div
+                          key={`${role}-avatar`}
+                          className={cn(
+                            "relative grid size-8 place-items-center rounded-full bg-gradient-to-br text-[10px] font-semibold shadow-[0_8px_20px_rgba(15,23,42,0.08)] ring-2 ring-white",
+                            personaAvatarStyles[(index + roleIndex) % personaAvatarStyles.length]
+                          )}
+                          title={normalizeRoleName(role)}
+                        >
+                          {roleInitials(role)}
+                          <span className="absolute -right-0.5 bottom-0 size-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                        </div>
+                      ))}
+                    </div>
+                    <span className="rounded-full bg-slate-950/5 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+                      {isZh ? "协作中" : "active"}
                     </span>
-                    <p className="text-sm leading-6 text-slate-700">{text}</p>
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-4">
-                <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-                  {card.result}
-                </span>
+                  <div className="mt-2 grid gap-1.5">
+                    {card.roles.map((role, roleIndex) => (
+                      <div key={role} className="flex items-center gap-2 rounded-xl bg-white/62 px-2 py-1.5 ring-1 ring-slate-900/[0.04]">
+                        <span
+                          className={cn(
+                            "grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br text-[9px] font-semibold ring-1",
+                            personaAvatarStyles[(index + roleIndex) % personaAvatarStyles.length]
+                          )}
+                        >
+                          {roleInitials(role)}
+                        </span>
+                        <span className="min-w-0 truncate text-xs font-medium text-slate-700">
+                          {normalizeRoleName(role)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </article>
           );
         })}
       </div>
 
-      <div className="mx-auto mt-6 max-w-3xl text-center">
+      <div className="mx-auto mt-12 max-w-3xl text-center lg:mt-20">
         <h3 className="text-lg font-semibold tracking-normal text-slate-950">{copy.consultTitle}</h3>
         <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">{copy.consultText}</p>
         <Button asChild className="mt-4 h-11 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto">
@@ -1044,80 +1019,124 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
 }
 
 function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
+  const isZh = copy.sectionTitle === "与 AI 一起工作";
+  const flow = {
+    alert: {
+      label: isZh ? "🔴 下降" : "🔴 Drop",
+      title: isZh ? "本周收入下降 12.4%" : "Revenue dropped 12.4% this week",
+      text: isZh ? "高影响异常，已进入 AI 调查链路。" : "High-impact anomaly entered the AI investigation flow."
+    },
+    diagnosis: {
+      label: isZh ? "🟡 分析中" : "🟡 Investigating",
+      title: isZh
+        ? "AI 判断：CAC 上升 + 留存下降正在拉低增长"
+        : "AI judgment: rising CAC + retention decline are pulling growth down",
+      text: isZh ? "问题集中在获客质量和二周留存。" : "The issue is concentrated in acquisition quality and week-2 retention."
+    },
+    evidence: [
+      { metric: "CAC", before: "12%", after: "18%", tone: "up" },
+      { metric: "Retention Week 2", before: "稳定", after: "-9%", tone: "down" },
+      { metric: "iOS conversion", before: "正常", after: isZh ? "下降" : "down", tone: "down" }
+    ],
+    actions: isZh
+      ? ["降低低 ROI 渠道投放", "优化获客结构", "复查 Week 2 留存路径"]
+      : ["Reduce low-ROI channel spend", "Optimize acquisition mix", "Review Week 2 retention path"]
+  };
+  const aiOps = isZh
+    ? ["AI 正在分析渠道 ROI", "已分析 24 个指标", "正在对比二周留存", "正在检查 iOS 转化", "正在识别高影响异常"]
+    : ["AI is analyzing channel ROI", "24 metrics analyzed", "Comparing Week 2 retention", "Checking iOS conversion", "Detecting high-impact anomalies"];
+
   return (
-    <section id="investigations" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
+    <section id="investigations" className="mx-auto max-w-7xl px-5 py-12 sm:px-8">
       <div className="mb-6 max-w-3xl">
-        <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+        {copy.eyebrow ? (
+          <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
+        ) : null}
         <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
           {copy.sectionTitle}
         </h2>
         <p className="mt-3 text-sm leading-6 text-slate-500">{copy.sectionSubtitle}</p>
       </div>
-      <div className="overflow-hidden rounded-[30px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-        <div className="grid gap-0 lg:grid-cols-[0.88fr_1.12fr]">
-          <div className="border-b border-slate-200/80 p-5 sm:p-6 lg:border-b-0 lg:border-r">
-            <div className="mb-8 flex items-center gap-3">
-              <div className="grid size-9 place-items-center rounded-2xl bg-rose-50 text-rose-600">
-                <CircleDollarSign className="size-4" />
-              </div>
-              <div>
-                <p className="text-xs font-medium text-slate-500 sm:text-sm">{copy.eyebrow}</p>
-                <h2 className="text-xl font-semibold text-slate-950 sm:text-2xl">{copy.title}</h2>
-              </div>
-            </div>
 
-            <div className="space-y-4">
-              {copy.timeline.map(([time, text]) => (
-                <div key={time} className="grid grid-cols-[64px_1fr] gap-4">
-                  <span className="text-sm font-medium text-slate-400">{time}</span>
-                  <p className="border-l border-slate-200 pl-4 text-sm leading-6 text-slate-600">{text}</p>
+      <div className="overflow-hidden rounded-[30px] bg-white p-3 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.06] sm:p-6">
+        <div className="relative mx-auto max-w-4xl overflow-hidden">
+          <div className="absolute bottom-4 left-4 top-5 w-px bg-gradient-to-b from-rose-200 via-amber-200 to-emerald-200 sm:left-5" />
+
+          <div className="relative grid gap-5">
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100 sm:size-10">
+                <AlertTriangle className="size-4" />
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-rose-50/80 p-3 ring-1 ring-rose-100 sm:p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{flow.alert.label}</span>
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                    {isZh ? "⚡ 高影响" : "⚡ High impact"}
+                  </span>
                 </div>
-              ))}
+                <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-rose-700 sm:text-3xl">{flow.alert.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-rose-900/70">{flow.alert.text}</p>
+              </div>
             </div>
-          </div>
 
-          <div className="bg-gradient-to-br from-slate-50 via-white to-emerald-100/65 p-5 sm:p-6">
-            <div className="grid gap-3">
-              {copy.steps.map((step, index) => (
-                <div key={step.title} className="flex items-center gap-3">
-                  <div className="grid size-10 shrink-0 place-items-center rounded-2xl border border-emerald-200 bg-white text-xs font-semibold text-emerald-700 shadow-sm">
-                    {index + 1}
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-amber-50 text-amber-700 ring-1 ring-amber-100 sm:size-10">
+                <BrainCircuit className="size-4" />
+              </div>
+              <div className="min-w-0 overflow-hidden rounded-[24px] bg-slate-50/90 p-3 ring-1 ring-slate-900/[0.05] sm:p-4">
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{flow.diagnosis.label}</span>
+                <h3 className="mt-3 break-words text-base font-semibold leading-7 text-slate-950 sm:text-lg">{flow.diagnosis.title}</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-600">{flow.diagnosis.text}</p>
+                <div className="mt-3 overflow-hidden rounded-2xl bg-white/80 px-3 py-2 ring-1 ring-slate-900/[0.05]">
+                  <div className="ai-ops-track flex gap-2">
+                    {[...aiOps, ...aiOps].map((item, index) => (
+                      <span key={`${item}-${index}`} className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                        {item}
+                      </span>
+                    ))}
                   </div>
-                  <div className="flex-1 rounded-3xl border border-white/80 bg-white/82 p-4 shadow-[0_16px_50px_rgba(4,120,87,0.1)] backdrop-blur">
-                    <p className="text-sm font-semibold text-slate-950">{step.title}</p>
-                    <p className="mt-1.5 text-sm leading-6 text-slate-500">{step.text}</p>
-                  </div>
-                  {index < copy.steps.length - 1 && (
-                    <MoveRight className="hidden size-5 shrink-0 text-emerald-500 lg:block" />
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 rounded-3xl border border-emerald-200/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(4,120,87,0.1)]">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                    {copy.evidenceTitle}
-                  </p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-950">
-                    {copy.whyLabel}
-                  </h3>
-                </div>
-                <div className="w-fit rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-800">
-                  {copy.confidenceLabel}: {copy.confidenceValue}
                 </div>
               </div>
+            </div>
 
-              <div className="grid gap-3 lg:grid-cols-[0.7fr_auto_1fr] lg:items-center">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-slate-950">{copy.evidenceMetric}</p>
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-sky-50 text-sky-700 ring-1 ring-sky-100 sm:size-10">
+                <BarChart3 className="size-4" />
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{isZh ? "证据层" : "Evidence"}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {flow.evidence.map((item) => (
+                    <div key={item.metric} className="min-w-0 rounded-2xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-900/[0.04]">
+                      <p className="text-xs font-semibold text-slate-500">{item.metric}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+                        <span>{item.before}</span>
+                        <ArrowRight className="size-3.5 text-slate-400" />
+                        <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.after}</span>
+                        <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.tone === "up" ? "↑" : "↓"}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <ArrowRight className="hidden size-5 text-slate-400 lg:block" />
-                <div className="grid gap-2">
-                  {copy.evidenceDrivers.map((driver) => (
-                    <div key={driver} className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                      <span className="size-1.5 rounded-full bg-emerald-700" aria-hidden="true" />
-                      <span className="text-sm font-medium text-slate-700">{driver}</span>
+              </div>
+            </div>
+
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 sm:size-10">
+                <Check className="size-4" />
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-emerald-50/80 p-3 ring-1 ring-emerald-100 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">{isZh ? "行动建议" : "Action"}</p>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                    {isZh ? "🟢 下一步明确" : "🟢 Stable next step"}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {flow.actions.map((action) => (
+                    <div key={action} className="flex min-w-0 items-center gap-2 rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
+                      <ArrowRight className="size-4 shrink-0 text-emerald-700" />
+                      <p className="break-words text-sm font-semibold leading-5 text-emerald-950">{action}</p>
                     </div>
                   ))}
                 </div>
@@ -1174,94 +1193,60 @@ function ReportsSection({ copy }: { copy: HomeCopy["reports"] }) {
 }
 
 function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
-  const displayPlans = [
-    ...copy.plans,
-    {
-      name: copy.addOn.name,
-      subtitle: copy.addOn.subtitle,
-      price: copy.addOn.price,
-      cadence: "",
-      badge: copy.addOn.eyebrow,
-      description: copy.addOn.description,
-      features: copy.addOn.features,
-      cta: copy.addOn.cta,
-      href: copy.addOn.href
-    }
-  ];
+  const primaryPlan = copy.plans[0];
+  const enterprisePlan = copy.plans[1];
 
   return (
     <section id="pricing" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
-      <div className="mb-6 max-w-3xl">
-        <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-          {copy.title}
-        </h2>
-        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.intro}</p>
-      </div>
+      <div className="overflow-hidden rounded-[30px] bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 p-5 text-white shadow-[0_24px_90px_rgba(6,78,59,0.18)] sm:p-7">
+        <div className="grid gap-6 lg:grid-cols-[1.05fr_1fr] lg:items-center">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">{copy.eyebrow}</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-normal sm:text-3xl">{copy.title}</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-50/80">{copy.intro}</p>
+          </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {displayPlans.map((plan, index) => {
-          const Icon = pricingIcons[index];
-          const isFeatured = index === 0;
-
-          return (
-            <div
-              key={plan.name}
-              className={cn(
-                "relative flex min-h-[400px] flex-col rounded-[28px] border bg-white/84 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.06)] backdrop-blur",
-                isFeatured && "border-emerald-300 bg-gradient-to-br from-white via-emerald-50/80 to-white shadow-[0_24px_90px_rgba(4,120,87,0.13)]"
-              )}
-            >
-              {plan.badge ? (
-                <span className="absolute right-5 top-5 rounded-full bg-emerald-700 px-3 py-1 text-xs font-semibold text-white">
-                  {plan.badge}
-                </span>
-              ) : null}
-
-              <div className="mb-5 grid size-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-800">
-                <Icon className="size-4" />
+          <div className="grid gap-5 sm:grid-cols-2 sm:divide-x sm:divide-white/16">
+            <div className="sm:pr-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold">{primaryPlan.name}</h3>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-800">{primaryPlan.badge}</span>
               </div>
-              <h3 className="text-lg font-semibold text-slate-950 sm:text-xl">{plan.name}</h3>
-              <p className="mt-2 text-sm font-medium text-slate-500">{plan.subtitle}</p>
-              {"description" in plan && plan.description ? (
-                <p className="mt-3 rounded-2xl bg-white/70 p-3 text-sm leading-6 text-slate-700">
-                  {plan.description}
-                </p>
-              ) : null}
-
-              <div className="mt-5 flex items-end gap-1">
-                <span className="text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">{plan.price}</span>
-                {plan.cadence ? (
-                  <span className="pb-1 text-sm font-medium text-slate-500">{plan.cadence}</span>
-                ) : null}
+              <p className="mt-2 text-sm leading-6 text-emerald-50/75">{primaryPlan.description}</p>
+              <div className="mt-4 flex items-end gap-1">
+                <span className="text-4xl font-semibold tracking-normal">{primaryPlan.price}</span>
+                <span className="pb-1 text-sm text-emerald-50/75">{primaryPlan.cadence}</span>
               </div>
-              <div className="mt-5 space-y-2.5">
-                {plan.features.map((feature) => (
-                  <div key={feature} className="flex gap-2.5 text-sm leading-6 text-slate-600">
-                    <Check className="mt-1 size-3.5 shrink-0 text-emerald-700" />
-                    <span>{feature}</span>
-                  </div>
-                ))}
-              </div>
-
-              <Button
-                asChild
-                className={cn(
-                  "mt-auto h-10 rounded-full text-sm",
-                  isFeatured ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white text-slate-950 hover:bg-slate-50"
-                )}
-                variant={isFeatured ? "default" : "outline"}
-              >
-                <Link href={`${plan.href}?from=home`}>
-                  {plan.cta}
+              <Button asChild className="mt-4 h-10 w-full rounded-full bg-white px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 sm:text-[13px]">
+                <Link href={`${primaryPlan.href}?from=home`}>
+                  {primaryPlan.cta}
                   <ArrowRight />
                 </Link>
               </Button>
             </div>
-          );
-        })}
-      </div>
 
+            <div className="sm:pl-5">
+              <h3 className="text-lg font-semibold">{enterprisePlan.name}</h3>
+              <p className="mt-2 text-sm leading-6 text-emerald-50/75">{enterprisePlan.subtitle}</p>
+              <div className="mt-4 text-3xl font-semibold tracking-normal">{enterprisePlan.price}</div>
+              <div className="mt-4 space-y-2">
+                {enterprisePlan.features.slice(0, 3).map((feature) => (
+                  <div key={feature} className="flex gap-2 text-sm leading-5 text-emerald-50/82">
+                    <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-200" />
+                    <span>{feature}</span>
+                  </div>
+                ))}
+              </div>
+              <Button asChild className="mt-4 h-10 w-full rounded-full border-white/25 bg-white/10 text-sm font-semibold text-white hover:bg-white/16" variant="outline">
+                <Link href={`${enterprisePlan.href}?from=home`}>
+                  {enterprisePlan.cta}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -1269,18 +1254,31 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
 function Integrations({ copy }: { copy: HomeCopy["integrations"] }) {
   return (
     <section id="sources" className="mx-auto max-w-7xl px-5 pb-14 pt-10 sm:px-8">
-      <div className="rounded-[30px] border border-slate-200/80 bg-white/80 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.06)] backdrop-blur sm:p-6">
-        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="overflow-hidden rounded-[32px] bg-[#e84824] py-7 shadow-[0_24px_90px_rgba(190,55,24,0.18)]">
+        <div className="mb-6 flex flex-col gap-2 px-5 text-white sm:flex-row sm:items-center sm:justify-between sm:px-7">
           <div>
-            <p className="text-xs font-medium text-slate-500 sm:text-sm">{copy.eyebrow}</p>
-            <h2 className="text-xl font-semibold text-slate-950 sm:text-2xl">{copy.title}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70 sm:text-sm">{copy.eyebrow}</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal sm:text-3xl">{copy.title}</h2>
           </div>
-          <Database className="hidden size-6 text-emerald-700 sm:block" />
+          <Database className="hidden size-7 text-white/80 sm:block" />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-          {integrations.map((integration) => (
-            <div key={integration} className="flex h-14 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 text-sm font-semibold text-slate-600">
-              {integration}
+        <div className="space-y-4">
+          {integrationRows.map((row, rowIndex) => (
+            <div key={rowIndex} className={cn("integration-marquee overflow-hidden", rowIndex % 2 === 1 && "integration-marquee-reverse")}>
+              <div className="integration-marquee-track flex gap-4 px-5 sm:px-7">
+                {[...row, ...row].map((integration, index) => (
+                  <div
+                    key={`${integration.name}-${rowIndex}-${index}`}
+                    className="flex h-14 shrink-0 items-center gap-3 rounded-2xl bg-white/94 px-5 text-slate-900 shadow-[0_10px_30px_rgba(94,24,12,0.16)] ring-1 ring-white/70"
+                    aria-hidden={index >= row.length}
+                  >
+                    <span className={cn("grid size-8 place-items-center rounded-xl text-xs font-bold", integration.tone)}>
+                      {integration.mark}
+                    </span>
+                    <span className="text-sm font-semibold sm:text-base">{integration.name}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
@@ -1368,51 +1366,42 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
         onClose={() => setIsMobileNavOpen(false)}
       />
 
-      <section className="relative mx-auto grid max-w-7xl gap-7 px-4 pb-8 pt-9 sm:px-6 sm:pt-12 lg:grid-cols-[0.98fr_1.02fr] lg:items-start lg:gap-10 lg:px-8 lg:pb-10 lg:pt-20">
+      <section className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[0.86fr_1.14fr] lg:items-center lg:gap-12 lg:px-8 lg:pb-14 lg:pt-18">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
         <div className="relative z-10">
-          <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-5 lg:text-xs">
+          <div className="mb-7 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-7 lg:text-xs">
             <Zap className="size-3.5 sm:size-4" />
             {copy.hero.eyebrow}
           </div>
-          <h1 className="max-w-3xl text-[2.35rem] font-semibold leading-[1.1] tracking-normal text-slate-950 sm:text-5xl lg:whitespace-nowrap lg:text-[3.25rem] lg:leading-[1.08]">
+          <h1
+            className="max-w-2xl text-[2.45rem] font-black leading-[1.02] tracking-normal text-slate-950 sm:text-[3.4rem] lg:text-[3.18rem] lg:leading-[1.02]"
+          >
             {isZh ? (
-              <>
-                <span className="block sm:inline lg:inline">你的 AI</span>
-                <span className="block sm:inline lg:inline"> 商业分析团队</span>
-              </>
+              <span className="block">
+                <span className="hero-title-shimmer block">提前识别</span>
+                <span className="mt-0.5 block">
+                  <span className="hero-title-shimmer inline-block">增长机会</span>
+                  <span className="hero-title-shimmer mx-2 inline-block">与</span>
+                  <span className="hero-title-shimmer inline-block">业务风险</span>
+                </span>
+              </span>
             ) : (
-              copy.hero.headline
+              <span className="hero-title-shimmer">{copy.hero.headline}</span>
             )}
           </h1>
-          <p className="mt-4 max-w-2xl text-base leading-[1.6] text-slate-600 lg:mt-5 lg:text-base lg:leading-7">
-            <span className="lg:hidden">
-              {isZh
-                ? "连接业务数据，自动生成经营报告，发现异常并给出增长建议。"
-                : "Connect business data, generate reports, detect anomalies, and get growth recommendations."}
-            </span>
-            <span className="hidden lg:inline">{copy.hero.subheadline}</span>
-          </p>
-          <div className="hidden lg:block">
-            <TeamRoster copy={copy.hero} />
-          </div>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row lg:mt-7">
-            <Show when="signed-out">
-              <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
-                <Link href="/consulting">
-                  {copy.hero.primaryCta}
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </Show>
-            <Show when="signed-in">
-              <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
-                <Link href="/consulting">
-                  {copy.hero.primaryCta}
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </Show>
+          {copy.hero.subheadline ? (
+            <p className="mt-6 max-w-xl text-base leading-[1.7] text-slate-600 lg:mt-6 lg:text-[1.02rem] lg:leading-8">
+              <span className="lg:hidden">{copy.hero.subheadline}</span>
+              <span className="hidden lg:inline">{copy.hero.subheadline}</span>
+            </p>
+          ) : null}
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row lg:mt-9">
+            <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
+              <Link href="/consulting">
+                {copy.hero.primaryCta}
+                <ArrowRight />
+              </Link>
+            </Button>
             <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 text-sm sm:w-auto lg:h-10">
               <Link href="/sign-up">
                 {copy.hero.secondaryCta}
@@ -1420,30 +1409,28 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
               </Link>
             </Button>
           </div>
-          <div className="mt-5 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 lg:flex">
+          <div className="mt-7 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 lg:flex">
             {copy.hero.trust.map((item) => (
               <TrustItem key={item}>{item}</TrustItem>
             ))}
           </div>
           <div className="lg:hidden">
-            <HeroWorkflowMobile copy={copy.hero} />
-            <HeroPreviewCardMobile copy={copy.visual} />
+            <HeroPreviewCardMobile isZh={isZh} />
           </div>
         </div>
 
-        <div className="relative z-10 hidden pt-8 lg:flex lg:justify-end">
-          <HeroVisualization copy={copy.visual} />
+        <div className="relative z-10 hidden lg:flex lg:justify-end">
+          <HeroVisualization isZh={isZh} />
         </div>
 
       </section>
 
-      <OperatingLayer copy={copy.system} />
       <FeatureCards copy={copy.features} />
       <UseCaseSection copy={copy.useCases} />
       <InvestigationPreview copy={copy.investigation} />
       <ReportsSection copy={copy.reports} />
-      <PricingSection copy={copy.pricing} />
       <Integrations copy={copy.integrations} />
+      <PricingSection copy={copy.pricing} />
     </main>
   );
 }

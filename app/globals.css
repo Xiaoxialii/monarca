@@ -48,6 +48,75 @@ body {
   animation: butterfly-float 5s ease-in-out infinite;
 }
 
+.feature-card-reveal {
+  --feature-card-delay: 0ms;
+  animation: feature-card-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) var(--feature-card-delay) both;
+  will-change: opacity, transform;
+}
+
+.feature-card-marquee {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+
+.feature-card-track {
+  animation: feature-card-scroll 30s linear infinite;
+  width: max-content;
+}
+
+.ai-ops-track {
+  animation: ai-ops-scroll 18s linear infinite;
+  width: max-content;
+}
+
+.integration-marquee {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.integration-marquee-track {
+  animation: integration-scroll 32s linear infinite;
+  width: max-content;
+}
+
+.integration-marquee-reverse .integration-marquee-track {
+  animation-direction: reverse;
+  animation-duration: 38s;
+}
+
+.integration-marquee:hover .integration-marquee-track {
+  animation-play-state: paused;
+}
+
+.hero-title-shimmer {
+  background: linear-gradient(110deg, #020617 0%, #020617 38%, #34d399 48%, #f8fafc 52%, #020617 62%, #020617 100%);
+  background-clip: text;
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: hero-title-shimmer 5.8s ease-in-out infinite;
+}
+
+.feature-card-marquee:hover .feature-card-track {
+  animation-play-state: paused;
+}
+
+.feature-card-reveal::after {
+  background: linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.55) 42%, transparent 72%);
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-65%);
+  transition: opacity 220ms ease, transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.feature-card-reveal:hover::after {
+  opacity: 1;
+  transform: translateX(65%);
+}
+
 @keyframes butterfly-draw {
   to {
     stroke-dashoffset: 0;
@@ -62,6 +131,76 @@ body {
 
   50% {
     transform: translateY(-10px);
+  }
+}
+
+@keyframes feature-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes feature-card-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes ai-ops-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes integration-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes hero-title-shimmer {
+  0%,
+  35% {
+    background-position: 115% 0;
+  }
+
+  65%,
+  100% {
+    background-position: -115% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feature-card-reveal {
+    animation: none;
+  }
+
+  .feature-card-reveal::after {
+    display: none;
+  }
+
+  .feature-card-track {
+    animation: none;
+  }
+
+  .ai-ops-track {
+    animation: none;
+  }
+
+  .integration-marquee-track {
+    animation: none;
+  }
+
+  .hero-title-shimmer {
+    animation: none;
+    background: none;
+    color: #020617;
   }
 }
 

@@ -588,6 +588,7 @@ model ConsultingRequest {
   role        String?
   dataSources String?
   painPoints  String?
+  preferredMeetingTimes String?
   message     String?
   status      String   @default("NEW")
   source      String?  @default("consulting_page")

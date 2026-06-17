@@ -54,9 +54,8 @@ export async function POST(request: Request) {
         name,
         email,
         companyName: optionalText(record.companyName, 300),
-        role: optionalText(record.role, 200),
-        dataSources: stringList(record.dataSources),
         painPoints: stringList(record.painPoints),
+        preferredMeetingTimes: stringList(record.preferredMeetingTimes),
         message: optionalText(record.message, MAX_MESSAGE_LENGTH),
         source: optionalText(record.source, 100) ?? "consulting_page"
       }

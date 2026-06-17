@@ -1,13 +1,14 @@
 "use client";
 
 import {
+  CalendarDays,
   CheckCircle2,
   Languages,
   Send,
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,13 +36,13 @@ const consultingCopy: Record<CopyLocale, {
   email: string;
   emailPlaceholder: string;
   company: string;
-  role: string;
-  dataSources: string;
+  meetingTime: string;
+  meetingTimePlaceholder: string;
+  meetingTimeOption: string;
   businessProblems: string;
   notes: string;
   optional: string;
   choose: string;
-  sourceOptions: string[];
   problemOptions: string[];
   submit: string;
   submitting: string;
@@ -78,13 +79,13 @@ const consultingCopy: Record<CopyLocale, {
     email: "Email / WeChat",
     emailPlaceholder: "name@example.com or WeChat ID",
     company: "Company / team",
-    role: "Role",
-    dataSources: "Main data sources",
+    meetingTime: "Preferred meeting times",
+    meetingTimePlaceholder: "Choose date and time",
+    meetingTimeOption: "Option",
     businessProblems: "Problems to solve",
     notes: "Additional context",
     optional: "Optional",
     choose: "Select an option",
-    sourceOptions: ["Excel / CSV", "Database", "Google Analytics", "Stripe", "Shopify", "Mixpanel", "Other"],
     problemOptions: [
       "Daily / weekly report automation",
       "Revenue decline analysis",
@@ -131,13 +132,13 @@ const consultingCopy: Record<CopyLocale, {
     email: "邮箱 / 微信",
     emailPlaceholder: "邮箱或微信号",
     company: "公司 / 团队名称",
-    role: "角色",
-    dataSources: "团队目前主要数据来源",
+    meetingTime: "预约会议时间",
+    meetingTimePlaceholder: "选择日期和时间",
+    meetingTimeOption: "备选",
     businessProblems: "想解决的问题",
     notes: "补充说明",
     optional: "可选",
     choose: "请选择",
-    sourceOptions: ["Excel / CSV", "数据库", "Google Analytics", "Stripe", "Shopify", "Mixpanel", "其他"],
     problemOptions: [
       "日报/周报自动化",
       "收入下降分析",
@@ -173,8 +174,24 @@ export function ConsultingPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const meetingTimeInputs = useRef<Array<HTMLInputElement | null>>([]);
   const copy = consultingCopy[getCopyLocale(locale)];
   const isZh = getCopyLocale(locale) === "zh";
+
+  function openMeetingTimePicker(index: number) {
+    const input = meetingTimeInputs.current[index - 1];
+    if (!input) return;
+
+    input.focus();
+
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerInput.showPicker === "function") {
+      pickerInput.showPicker();
+      return;
+    }
+
+    pickerInput.click();
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -182,8 +199,10 @@ export function ConsultingPage() {
     setIsSubmitting(true);
 
     const formData = new FormData(event.currentTarget);
-    const dataSource = String(formData.get("dataSource") || "").trim();
     const problem = String(formData.get("problem") || "").trim();
+    const meetingTimes = [1, 2, 3]
+      .map((index) => String(formData.get(`meetingTime${index}`) || "").trim())
+      .filter(Boolean);
 
     try {
       const response = await fetch("/api/consulting-requests", {
@@ -193,9 +212,8 @@ export function ConsultingPage() {
           name: String(formData.get("name") || ""),
           email: String(formData.get("email") || ""),
           companyName: String(formData.get("companyName") || ""),
-          role: String(formData.get("role") || ""),
-          dataSources: dataSource ? [dataSource] : [],
           painPoints: problem ? [problem] : [],
+          preferredMeetingTimes: meetingTimes,
           message: String(formData.get("message") || ""),
           source: "consulting_page"
         })
@@ -299,18 +317,35 @@ export function ConsultingPage() {
                 </label>
 
                 <label className="grid gap-2">
-                  <FieldLabel label={copy.role} optional={copy.optional} />
-                  <Input name="role" placeholder={isZh ? "例如：创始人、运营负责人、增长负责人" : "Founder, operations, growth, etc."} />
-                </label>
-
-                <label className="grid gap-2">
-                  <FieldLabel label={copy.dataSources} optional={copy.optional} />
-                  <select name="dataSource" className="h-10 rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="">{copy.choose}</option>
-                    {copy.sourceOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
+                  <FieldLabel label={copy.meetingTime} optional={copy.optional} />
+                  <div className="grid gap-2">
+                    {[1, 2, 3].map((index) => (
+                      <div
+                        key={index}
+                        className="group relative cursor-pointer overflow-hidden rounded-xl border border-emerald-100/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fffb_62%,#f1fdf7_100%)] shadow-[0_7px_18px_rgba(15,23,42,0.045)] transition focus-within:border-emerald-300 focus-within:shadow-[0_10px_24px_rgba(16,185,129,0.13)]"
+                        onClick={() => openMeetingTimePicker(index)}
+                      >
+                        <span className="pointer-events-none absolute left-2.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_7px_18px_rgba(16,185,129,0.24)] ring-3 ring-emerald-50 transition group-focus-within:bg-emerald-500">
+                          <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-white text-[9px] font-semibold text-emerald-700 shadow-sm">
+                            {index}
+                          </span>
+                          <CalendarDays className="size-4" />
+                        </span>
+                        <Input
+                          ref={(node) => {
+                            meetingTimeInputs.current[index - 1] = node;
+                          }}
+                          name={`meetingTime${index}`}
+                          type="datetime-local"
+                          aria-label={`${copy.meetingTimePlaceholder} ${index}`}
+                          className="h-11 border-0 bg-transparent pl-16 pr-24 text-sm font-semibold text-slate-950 shadow-none outline-none ring-0 placeholder:text-slate-400 focus-visible:ring-0"
+                        />
+                        <span className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-full border border-white/80 bg-white/80 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm sm:inline">
+                          {copy.meetingTimeOption} {index}
+                        </span>
+                      </div>
                     ))}
-                  </select>
+                  </div>
                 </label>
 
                 <label className="grid gap-2">

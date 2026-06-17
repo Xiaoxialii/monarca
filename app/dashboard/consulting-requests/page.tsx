@@ -25,6 +25,19 @@ function parseList(value: string | null) {
   }
 }
 
+function parseListItems(value: string | null) {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+  } catch {
+    return value.trim() ? [value] : [];
+  }
+}
+
 function formatDate(value: Date) {
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -74,7 +87,7 @@ export default async function ConsultingRequestsPage() {
             <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  {["提交时间", "姓名", "邮箱 / 微信", "公司 / 团队名称", "角色", "数据来源", "想解决的问题", "补充说明", "状态"].map((header) => (
+                  {["提交时间", "姓名", "邮箱 / 微信", "公司 / 团队名称", "备选会议时间", "想解决的问题", "补充说明", "状态"].map((header) => (
                     <th key={header} className="border-b border-slate-200 px-4 py-3">{header}</th>
                   ))}
                 </tr>
@@ -86,8 +99,18 @@ export default async function ConsultingRequestsPage() {
                     <td className="border-b border-slate-100 px-4 py-3 font-medium text-slate-950">{request.name}</td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{request.email}</td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{request.companyName || "-"}</td>
-                    <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{request.role || "-"}</td>
-                    <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{parseList(request.dataSources)}</td>
+                    <td className="min-w-[220px] border-b border-slate-100 px-4 py-3 text-slate-700">
+                      {parseListItems(request.preferredMeetingTimes).length ? (
+                        <div className="space-y-1.5">
+                          {parseListItems(request.preferredMeetingTimes).slice(0, 3).map((time, index) => (
+                            <div key={`${time}-${index}`} className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                              <span className="grid size-4 place-items-center rounded-full bg-white text-[10px] font-semibold text-emerald-700">{index + 1}</span>
+                              {time}
+                            </div>
+                          ))}
+                        </div>
+                      ) : "-"}
+                    </td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{parseList(request.painPoints)}</td>
                     <td className="max-w-[320px] border-b border-slate-100 px-4 py-3 text-slate-700">
                       <span className="line-clamp-4 whitespace-pre-wrap">{request.message || "-"}</span>
@@ -100,7 +123,7 @@ export default async function ConsultingRequestsPage() {
                   </tr>
                 )) : (
                   <tr>
-                    <td className="px-4 py-10 text-center text-slate-500" colSpan={9}>
+                    <td className="px-4 py-10 text-center text-slate-500" colSpan={8}>
                       暂无咨询申请。
                     </td>
                   </tr>

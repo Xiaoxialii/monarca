@@ -21,4 +21,5 @@ Read this before every coding task. Keep it short. Use `docs/ERROR_MEMORY.md` on
 15. **Checkout flows must match current product intent.** Do not infer Stripe from a plan name; only explicitly payment-enabled plans should call Stripe. Evaluation, consulting, enterprise, and setup flows submit requests.
 16. **Locale first render must use request context.** Do not hard-code `useLocale("en")` on public entry pages; pass a server request locale from cookie, IP country, or `Accept-Language`, then let user preference override it.
 17. **Clerk passwordless must satisfy backend requirements invisibly.** If the product UX hides passwords but Clerk still requires `password`, generate a strong managed password in `signUp.create` and keep login passwordless.
-18. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.
+18. **Auth provider flags must cover every entry point.** If Google or another OAuth provider is disabled, signed-out navigation, custom pages, and Clerk modal helpers must all route through the same gated auth surface.
+19. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.

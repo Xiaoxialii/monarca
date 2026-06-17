@@ -54,7 +54,8 @@ const signInCopy = {
     next: "Next",
     brand: "Monarca AI",
     title: "Welcome back",
-    description: "Continue with Google, a one-time email code, or your account password."
+    description: "Continue with Google, a one-time email code, or your account password.",
+    passwordlessDescription: "Continue with a one-time email code or your account password."
   },
   zh: {
     language: "中文（简体）",
@@ -97,7 +98,8 @@ const signInCopy = {
     next: "下一步",
     brand: "蝴蝶效应",
     title: "欢迎回来",
-    description: "使用 Google、邮箱验证码或账号密码继续访问。"
+    description: "使用 Google、邮箱验证码或账号密码继续访问。",
+    passwordlessDescription: "使用邮箱验证码或账号密码继续访问。"
   }
 } as const;
 
@@ -112,6 +114,10 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   }
 
   return fallback;
+}
+
+function isGoogleAuthEnabled() {
+  return process.env.NEXT_PUBLIC_ENABLE_GOOGLE_AUTH !== "false";
 }
 
 function completeSignInRedirect(path: string) {
@@ -188,19 +194,24 @@ export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }
 
 function ClerkSignIn({ copy }: { copy: SignInCopy }) {
   const [mode, setMode] = useState<"code" | "password">("code");
+  const googleAuthEnabled = isGoogleAuthEnabled();
 
   return (
     <div className="grid min-h-[620px] grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(360px,0.86fr)_minmax(520px,560px)] lg:items-center lg:gap-20">
-      <SignInBrand copy={copy} />
+      <SignInBrand copy={copy} hideGoogle={googleAuthEnabled === false} />
       <div className="flex w-full min-w-0 flex-col items-center lg:items-end">
         <div className="w-full max-w-full rounded-lg border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_20px_50px_rgba(15,23,42,0.07)] sm:max-w-[560px] sm:p-8">
-          <GoogleSignInButton copy={copy} />
+          {googleAuthEnabled ? (
+            <>
+              <GoogleSignInButton copy={copy} />
 
-          <div className="my-5 flex items-center gap-5 text-sm text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            <span>{copy.divider}</span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
+              <div className="my-5 flex items-center gap-5 text-sm text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <span>{copy.divider}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          ) : null}
 
           <div className="my-5 grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
             <button
@@ -656,7 +667,7 @@ function FallbackSignIn({ copy }: { copy: SignInCopy }) {
   );
 }
 
-function SignInBrand({ copy }: { copy: SignInCopy }) {
+function SignInBrand({ copy, hideGoogle = false }: { copy: SignInCopy; hideGoogle?: boolean }) {
   return (
     <div className="w-full min-w-0">
       <Link href="/" className="mb-10 flex w-fit items-center" aria-label={copy.brand}>
@@ -666,7 +677,7 @@ function SignInBrand({ copy }: { copy: SignInCopy }) {
         {copy.title}
       </h1>
       <p className="mt-5 max-w-full text-lg leading-8 text-slate-700 sm:max-w-[430px]">
-        {copy.description}
+        {hideGoogle ? copy.passwordlessDescription : copy.description}
       </p>
     </div>
   );

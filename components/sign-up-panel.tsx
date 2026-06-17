@@ -135,6 +135,10 @@ function authRedirectPath(searchParams: { get: (key: string) => string | null } 
   return fallback;
 }
 
+function isGoogleAuthEnabled() {
+  return process.env.NEXT_PUBLIC_ENABLE_GOOGLE_AUTH !== "false";
+}
+
 function completeSignUpRedirect(path: string) {
   if (typeof window !== "undefined") {
     window.location.assign(path);
@@ -250,6 +254,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleRedirecting, setIsGoogleRedirecting] = useState(false);
   const [error, setError] = useState("");
+  const googleAuthEnabled = isGoogleAuthEnabled();
 
   useEffect(() => {
     setError("");
@@ -505,23 +510,27 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
             void createPasswordAccount();
           }}
         >
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void startGoogleSignUp()}
-            disabled={currentSignUpFetchStatus === "fetching" || isGoogleRedirecting}
-            aria-busy={isGoogleRedirecting}
-            className="h-12 w-full cursor-pointer select-none rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
-          >
-            <span className="text-xl font-semibold text-[#4285f4]">G</span>
-            {copy.continueWithGoogle}
-          </Button>
+          {googleAuthEnabled ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void startGoogleSignUp()}
+                disabled={currentSignUpFetchStatus === "fetching" || isGoogleRedirecting}
+                aria-busy={isGoogleRedirecting}
+                className="h-12 w-full cursor-pointer select-none rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
+              >
+                <span className="text-xl font-semibold text-[#4285f4]">G</span>
+                {copy.continueWithGoogle}
+              </Button>
 
-          <div className="flex items-center gap-5 py-1 text-sm text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            <span>{copy.divider}</span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
+              <div className="flex items-center gap-5 py-1 text-sm text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <span>{copy.divider}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          ) : null}
 
           <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1 text-sm font-medium text-slate-500">
             <button

@@ -882,3 +882,55 @@ When implementing Clerk passwordless UX, verify both frontend fields and Clerk b
 - `tests/mobile-sign-in.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`
+
+## Entry 031
+
+### Date
+2026-06-17
+
+### Area
+Auth provider configuration and OAuth fallback
+
+### Symptom
+- Google sign-in/sign-up redirected to a Google `401 deleted_client` authorization error.
+- The Clerk environment still exposed Google OAuth as an available product path after the configured Google OAuth client had been deleted.
+
+### Root cause
+The UI always rendered Google OAuth actions whenever Clerk was configured, but third-party OAuth provider readiness is controlled outside the app in Clerk and Google Cloud.
+
+### Fix
+Add an explicit `NEXT_PUBLIC_ENABLE_GOOGLE_AUTH` feature flag and hide Google sign-in/sign-up entry points when the provider is not ready. Keep email code, username, and password auth paths available.
+
+### Prevention rule
+Before exposing a third-party OAuth provider in auth UI, verify the provider is configured in Clerk and the upstream OAuth client is active; use a feature flag so a broken provider can be disabled without removing all Clerk auth.
+
+### Files changed
+- `components/sign-in-panel.tsx`
+- `components/sign-up-panel.tsx`
+- `.env.example`
+
+## Entry 032
+
+### Date
+2026-06-17
+
+### Area
+Auth provider entry points and Clerk modal bypass
+
+### Symptom
+- Google sign-in still reached a Google `401 deleted_client` page even though `NEXT_PUBLIC_ENABLE_GOOGLE_AUTH="false"` was set locally.
+- The custom sign-in/sign-up pages hid Google OAuth, but public navigation still opened Clerk's hosted modal, which could expose the broken Google provider.
+
+### Root cause
+Not every signed-out auth entry point used the same custom sign-in/sign-up pages. `AuthControls` used Clerk `SignInButton`/`SignUpButton` modals, bypassing the app-level Google OAuth feature flag.
+
+### Fix
+Route signed-out navigation controls to `/sign-in` and `/sign-up` instead of opening Clerk modals, so the custom auth UI and provider feature flags are applied consistently.
+
+### Prevention rule
+When disabling or gating an auth provider, audit all signed-out entry points, including navigation buttons and hosted modal helpers. They must route through the same custom auth surface or apply the same provider flag.
+
+### Files changed
+- `components/auth-shell.tsx`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`

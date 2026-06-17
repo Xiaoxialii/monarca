@@ -1,8 +1,9 @@
 "use client";
 
-import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
+import { Show, UserButton, useUser } from "@clerk/nextjs";
 import { useEffect } from "react";
 import { LogIn, UserPlus } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getCopyLocale, useLocale } from "@/lib/locale";
 
@@ -46,18 +47,18 @@ export function AuthControls() {
     <>
       <Show when="signed-out">
         <div className="flex items-center gap-2">
-          <SignInButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
-            <Button variant="outline" size="sm">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/sign-in">
               <LogIn />
               {copy.signIn}
-            </Button>
-          </SignInButton>
-          <SignUpButton mode="modal" fallbackRedirectUrl="/dashboard" forceRedirectUrl="/dashboard">
-            <Button size="sm">
+            </Link>
+          </Button>
+          <Button asChild size="sm">
+            <Link href="/sign-up">
               <UserPlus />
               {copy.signUp}
-            </Button>
-          </SignUpButton>
+            </Link>
+          </Button>
         </div>
       </Show>
       <Show when="signed-in">

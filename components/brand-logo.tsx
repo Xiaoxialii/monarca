@@ -31,13 +31,8 @@ export function BrandLogo({
       <ButterflyMark label={label} className={compact ? "h-full w-full" : "h-full min-h-8 w-auto"} />
       {!compact ? (
         label === "蝴蝶效应" ? (
-          <span className="grid leading-none">
-            <span className="whitespace-nowrap text-[1.45em] font-black tracking-normal">
-              蝴蝶效应
-            </span>
-            <span className="mt-1 whitespace-nowrap text-[0.82em] font-semibold tracking-[0.28em] text-slate-500">
-              数据自动化系统
-            </span>
+          <span className="whitespace-nowrap text-[1.45em] font-black leading-none tracking-normal">
+            蝴蝶效应
           </span>
         ) : (
           <span className="whitespace-nowrap text-[1.05em] font-semibold tracking-normal">

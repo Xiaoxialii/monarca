@@ -18,7 +18,7 @@ const signUpCopy = {
     privacy: "Privacy",
     terms: "Terms",
     emailCodeMode: "Email",
-    passwordMode: "Username",
+    passwordMode: "Username password",
     emailLabel: "Email",
     usernameLabel: "Username",
     passwordLabel: "Password",
@@ -32,12 +32,13 @@ const signUpCopy = {
     codeLabel: "Verification code",
     codePlaceholder: "Enter code",
     emailCodeIntro: "Enter your email and we will send a one-time code. No password required.",
+    signUpIntro: "Create an account with username and password.",
     continueWithGoogle: "Continue with Google",
     divider: "or",
     sendEmailCode: "Continue with email",
     sendingEmailCode: "Sending...",
-    createWithPassword: "Create with username",
-    creatingWithPassword: "Creating...",
+    createAccount: "Create account",
+    creatingAccount: "Creating...",
     createWithCode: "Create account",
     creatingWithCode: "Creating...",
     resendCode: "Resend code",
@@ -45,19 +46,15 @@ const signUpCopy = {
     sentCode: "Code sent to",
     missingEmail: "Enter your email.",
     missingUsername: "Enter your username.",
-    invalidUsernameLength: "Username must be between 4 and 64 characters long.",
+    invalidUsername: "Use 4-64 letters, numbers, dots, underscores, or hyphens.",
     missingPassword: "Enter your password.",
     shortPassword: "Password must be at least 8 characters.",
     passwordMismatch: "Passwords do not match.",
     missingCode: "Enter the verification code.",
-    codeUnavailable: "Email verification code sign-up is not enabled. Check the Clerk sign-up settings.",
-    passwordUnavailable: "Username and password sign-up is not enabled. Enable username sign-up in Clerk, then try again.",
+    signUpUnavailable: "Username and password sign-up is not available. Check the Clerk sign-up settings.",
     incompleteSignUp: "The code was verified, but Clerk still requires: {fields}. Make these fields optional in Clerk, or add them to this sign-up form.",
-    passwordIncompleteSignUp: "Clerk still requires: {fields}. Make email optional in Clerk to support username-only sign-up, or switch this form back to email + password.",
-    pendingVerification: "The code was accepted, but Clerk still needs verification for: {fields}.",
-    passwordPendingVerification: "Clerk still needs verification for: {fields}. Check the username/password sign-up settings in Clerk.",
+    pendingVerification: "Clerk still requires verification for: {fields}. Disable email verification for username/password sign-up, or use the Email tab.",
     incompleteStatus: "The code was accepted, but sign-up is not complete yet. Clerk status: {status}.",
-    passwordIncompleteStatus: "Sign-up is not complete yet. Clerk status: {status}.",
     googleUnavailable: "Google sign-up is not available right now.",
     signInPrompt: "Already have an account?",
     signInInstead: "Sign in",
@@ -87,12 +84,13 @@ const signUpCopy = {
     codeLabel: "验证码",
     codePlaceholder: "请输入验证码",
     emailCodeIntro: "输入邮箱，我们会发送一次性验证码，无需设置密码。",
+    signUpIntro: "使用用户名和密码创建账号。",
     continueWithGoogle: "使用 Google 继续",
     divider: "或",
     sendEmailCode: "使用邮箱继续",
     sendingEmailCode: "发送中...",
-    createWithPassword: "使用用户名创建账号",
-    creatingWithPassword: "创建中...",
+    createAccount: "创建账号",
+    creatingAccount: "创建中...",
     createWithCode: "创建账号",
     creatingWithCode: "创建中...",
     resendCode: "重新发送",
@@ -100,19 +98,15 @@ const signUpCopy = {
     sentCode: "验证码已发送至",
     missingEmail: "请输入邮箱。",
     missingUsername: "请输入用户名。",
-    invalidUsernameLength: "用户名长度需要在 4 到 64 个字符之间。",
+    invalidUsername: "用户名需要 4-64 位，只能包含字母、数字、点、下划线或连字符。",
     missingPassword: "请输入密码。",
     shortPassword: "密码至少需要 8 位。",
     passwordMismatch: "两次输入的密码不一致。",
     missingCode: "请输入验证码。",
-    codeUnavailable: "当前未启用邮箱验证码注册，请检查 Clerk 注册设置。",
-    passwordUnavailable: "当前 Clerk 后台没有开启用户名注册，请先在 Clerk 注册设置中启用 username。",
+    signUpUnavailable: "当前无法使用用户名密码注册，请检查 Clerk 注册设置。",
     incompleteSignUp: "验证码已通过，但 Clerk 注册还缺必填项：{fields}。请在 Clerk Dashboard 把这些字段改为 optional，或把注册页补上对应字段。",
-    passwordIncompleteSignUp: "Clerk 注册还缺必填项：{fields}。如果要支持只用用户名和密码注册，请在 Clerk 后台把邮箱改为 optional；否则需要把注册页改回邮箱 + 密码。",
-    pendingVerification: "验证码已通过，但 Clerk 还要求继续验证：{fields}。",
-    passwordPendingVerification: "Clerk 还要求继续验证：{fields}。请检查 Clerk 后台的用户名密码注册设置。",
+    pendingVerification: "Clerk 还要求继续验证：{fields}。用户名密码注册不发送验证码，请在 Clerk 关闭邮箱验证要求，或改用邮箱注册。",
     incompleteStatus: "验证码已通过，但注册还没有完成。Clerk 当前状态：{status}。",
-    passwordIncompleteStatus: "注册还没有完成。Clerk 当前状态：{status}。",
     googleUnavailable: "当前无法使用 Google 注册。",
     signInPrompt: "已有账号？",
     signInInstead: "登录",
@@ -145,20 +139,8 @@ function completeSignUpRedirect(path: string) {
   }
 }
 
-function createClerkManagedPassword() {
-  const randomBytes = new Uint8Array(16);
-
-  if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
-    window.crypto.getRandomValues(randomBytes);
-  } else {
-    for (let index = 0; index < randomBytes.length; index += 1) {
-      randomBytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  const token = Array.from(randomBytes, (byte) => byte.toString(36).padStart(2, "0")).join("");
-
-  return `Monarca!${token}Aa1`;
+function isValidUsername(username: string) {
+  return /^[a-zA-Z0-9._-]{4,64}$/.test(username);
 }
 
 export function SignUpPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
@@ -265,36 +247,16 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
       const clerkError = errorValue as { errors?: Array<{ code?: string; longMessage?: string; message?: string }> };
       const firstError = clerkError.errors?.[0];
       const clerkMessage = firstError?.longMessage || firstError?.message || "";
-      const errorCode = firstError?.code || "";
 
-      if (
-        mode === "password" &&
-        (errorCode.includes("form_param") ||
-          clerkMessage.toLowerCase().includes("username is not a valid parameter"))
-      ) {
-        return copy.passwordUnavailable;
-      }
-
-      if (
-        mode === "password" &&
-        clerkMessage.toLowerCase().includes("username must be between 4 and 64 characters")
-      ) {
-        return copy.invalidUsernameLength;
-      }
-
-      return clerkMessage || (mode === "password" ? copy.passwordUnavailable : copy.codeUnavailable);
+      return clerkMessage || copy.signUpUnavailable;
     }
 
-    return errorValue instanceof Error
-      ? errorValue.message
-      : mode === "password"
-        ? copy.passwordUnavailable
-        : copy.codeUnavailable;
+    return errorValue instanceof Error ? errorValue.message : copy.signUpUnavailable;
   }
 
   function getSignUpStateMessage(result: unknown) {
     if (!result || typeof result !== "object") {
-      return copy.codeUnavailable;
+      return copy.signUpUnavailable;
     }
 
     const signUpState = result as {
@@ -310,27 +272,18 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
     const unverifiedFields = signUpState.unverifiedFields || [];
 
     if (missingFields.length) {
-      return (mode === "password" ? copy.passwordIncompleteSignUp : copy.incompleteSignUp).replace(
-        "{fields}",
-        missingFields.join(", ")
-      );
+      return copy.incompleteSignUp.replace("{fields}", missingFields.join(", "));
     }
 
     if (unverifiedFields.length) {
-      return (mode === "password" ? copy.passwordPendingVerification : copy.pendingVerification).replace(
-        "{fields}",
-        unverifiedFields.join(", ")
-      );
+      return copy.pendingVerification.replace("{fields}", unverifiedFields.join(", "));
     }
 
     if (signUpState.status) {
-      return (mode === "password" ? copy.passwordIncompleteStatus : copy.incompleteStatus).replace(
-        "{status}",
-        signUpState.status
-      );
+      return copy.incompleteStatus.replace("{status}", signUpState.status);
     }
 
-    return copy.codeUnavailable;
+    return copy.signUpUnavailable;
   }
 
   function selectMode(nextMode: "email" | "password") {
@@ -370,7 +323,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
     }
   }
 
-  async function createAccount() {
+  async function createEmailCodeAccount() {
     if (!isLoaded) return;
 
     const trimmedEmail = emailAddress.trim();
@@ -385,8 +338,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
 
     try {
       const nextSignUp = await signUp.create({
-        emailAddress: trimmedEmail,
-        password: createClerkManagedPassword()
+        emailAddress: trimmedEmail
       });
 
       if (nextSignUp.status === "complete") {
@@ -405,7 +357,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
     }
   }
 
-  async function createPasswordAccount() {
+  async function createAccount() {
     if (!isLoaded) return;
 
     const trimmedUsername = username.trim();
@@ -415,8 +367,8 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
       return;
     }
 
-    if (trimmedUsername.length < 4 || trimmedUsername.length > 64) {
-      setError(copy.invalidUsernameLength);
+    if (!isValidUsername(trimmedUsername)) {
+      setError(copy.invalidUsername);
       return;
     }
 
@@ -503,11 +455,11 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
           onSubmit={(event) => {
             event.preventDefault();
             if (mode === "email") {
-              void createAccount();
+              void createEmailCodeAccount();
               return;
             }
 
-            void createPasswordAccount();
+            void createAccount();
           }}
         >
           {googleAuthEnabled ? (
@@ -554,28 +506,24 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
           </div>
 
           {mode === "email" ? (
-            <>
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="signup-email">
-                  {copy.emailLabel}
-                </label>
-                <Input
-                  id="signup-email"
-                  autoComplete="email"
-                  inputMode="email"
-                  type="email"
-                  value={emailAddress}
-                  onChange={(event) => setEmailAddress(event.target.value)}
-                  placeholder={copy.emailPlaceholder}
-                  className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
-                />
-              </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="signup-email">
+                {copy.emailLabel}
+              </label>
+              <Input
+                id="signup-email"
+                autoComplete="email"
+                inputMode="email"
+                type="email"
+                value={emailAddress}
+                onChange={(event) => setEmailAddress(event.target.value)}
+                placeholder={copy.emailPlaceholder}
+                className="h-12 rounded-md border-slate-200 bg-white text-sm shadow-none focus-visible:ring-slate-200"
+              />
+            </div>
+          ) : null}
 
-              <p className="px-1 text-sm leading-6 text-slate-500">
-                {copy.emailCodeIntro}
-              </p>
-            </>
-          ) : (
+          {mode === "password" ? (
             <>
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="signup-username">
@@ -643,7 +591,11 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
                 </div>
               </div>
             </>
-          )}
+          ) : null}
+
+          <p className="px-1 text-sm leading-6 text-slate-500">
+            {mode === "password" ? copy.signUpIntro : copy.emailCodeIntro}
+          </p>
 
           {error ? <p className="text-sm leading-6 text-red-600">{error}</p> : null}
 
@@ -654,10 +606,10 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
           >
             {isSubmitting
               ? mode === "password"
-                ? copy.creatingWithPassword
+                ? copy.creatingAccount
                 : copy.sendingEmailCode
               : mode === "password"
-                ? copy.createWithPassword
+                ? copy.createAccount
                 : copy.sendEmailCode}
             <ArrowRight />
           </Button>
@@ -696,7 +648,12 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
               <ArrowRight />
             </Button>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-              <Button type="button" variant="ghost" onClick={() => void createAccount()} className="rounded-full px-4 text-teal-700 hover:bg-teal-50 hover:text-teal-800">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void (mode === "password" ? createAccount() : createEmailCodeAccount())}
+                className="rounded-full px-4 text-teal-700 hover:bg-teal-50 hover:text-teal-800"
+              >
                 {copy.resendCode}
               </Button>
               <Button type="button" variant="ghost" onClick={resetIdentifier} className="rounded-full px-4 text-slate-600 hover:bg-slate-50 hover:text-slate-900">
@@ -730,7 +687,7 @@ function FallbackSignUp({ copy }: { copy: SignUpCopy }) {
               className="h-[52px] rounded-md border-slate-300 bg-white text-base shadow-none focus-visible:ring-1"
             />
             <p className="px-1 text-xs leading-5 text-slate-500">
-              {copy.emailCodeIntro}
+              {copy.signUpIntro}
             </p>
           </div>
         </div>

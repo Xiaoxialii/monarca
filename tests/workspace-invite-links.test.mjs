@@ -25,6 +25,9 @@ test("workspace share links invite recipients as viewers", () => {
   assert.match(joinPage, /\/api\/workspace\/invite-links\/accept/, "Join page should accept the invite after login");
   assert.match(joinPage, /redirect_url/, "Join page should preserve redirect through sign-in/sign-up");
   assert.match(sync, /workspaceInviteCookieName/, "Workspace sync should prefer the accepted invite workspace");
+  assert.match(sync, /where: \{ email \}[\s\S]*clerkUserId: clerkUser\.id/, "Workspace sync should claim an existing local user by email when Clerk id changed");
+  assert.match(sync, /const canUpdateEmail = !existingUserByEmail \|\| existingUserByEmail\.id === existingUserByClerkId\?\.id/, "Workspace sync should not overwrite an existing Clerk-id user with another user's email");
+  assert.match(sync, /\.\.\.\(canUpdateEmail \? \{ email \} : \{\}\)/, "Workspace sync should skip email updates that would violate the unique email constraint");
 });
 
 test("billing copy uses Professional and upgrades to Enterprise", () => {

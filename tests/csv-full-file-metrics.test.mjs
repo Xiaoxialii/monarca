@@ -36,6 +36,8 @@ test("report data changes invalidate stale report caches", () => {
   const uploadCompleteRoute = read("app/api/data-sources/upload/complete/route.ts");
   const rescanRoute = read("app/api/data-sources/[id]/rescan/route.ts");
   const reportRoute = read("app/api/dashboard/reports/route.ts");
+  const reportGenerateRoute = read("app/api/dashboard/reports/generate/route.ts");
+  const metricGeneration = read("lib/workspace-metric-generation.ts");
   const reportCache = read("lib/report-metric-cache.ts");
   const metricVisibility = read("lib/metric-visibility.ts");
   const dashboard = read("components/dashboard.tsx");
@@ -44,9 +46,30 @@ test("report data changes invalidate stale report caches", () => {
   assert.match(uploadCompleteRoute, /clearWorkspaceReportCaches/, "Signed uploads should clear stale DailyBriefing and report metric cache data");
   assert.match(rescanRoute, /clearWorkspaceReportCaches/, "Data source rescans should clear stale report caches");
   assert.match(reportRoute, /sourceSnapshotVersion/, "Report cache reads should be scoped to the latest schema snapshot version");
+  assert.match(reportRoute, /dataSourceId:\s*\{\s*in:\s*activeSourceIds\s*\}/, "Report loading should scope schema snapshots to currently connected data sources");
+  assert.match(reportGenerateRoute, /dataSourceId:\s*\{\s*in:\s*dataSources\.map/, "Report generation should execute against connected-source snapshots");
+  assert.match(reportGenerateRoute, /latestWorkspaceSnapshotVersion\(session\.workspace\.id,\s*activeSourceIds\)/, "Report generation cache lookup should use connected-source snapshot versions");
+  assert.match(metricGeneration, /dataSourceIds\?:\s*string\[\]/, "Metric generation should accept source-scoped training");
+  assert.match(metricGeneration, /id:\s*\{\s*in:\s*scopedDataSourceIds\s*\}/, "Metric generation should only load selected connected data sources when provided");
   assert.match(reportCache, /sourceSnapshotVersion/, "Report cache keys should include the schema snapshot version");
   assert.match(metricVisibility, /average\\s\*rating\\s\*share|averagerating\\s\*share/, "AverageRating Share should not be displayable");
   assert.match(dashboard, /reportModeDefaultDateRange[\s\S]*preset: "ALL"[\s\S]*useState<SelectedReportDateRange>\(\{ preset: "ALL" \}\)/, "Dashboard report API calls should default to full-data ALL range");
+});
+
+test("new data source training is scoped to the uploaded or rescanned source", () => {
+  const uploadRoute = read("app/api/data-sources/upload/route.ts");
+  const uploadCompleteRoute = read("app/api/data-sources/upload/complete/route.ts");
+  const rescanRoute = read("app/api/data-sources/[id]/rescan/route.ts");
+  const connectRoute = read("app/api/data-sources/connect/route.ts");
+  const introspectRoute = read("app/api/data-sources/introspect/route.ts");
+  const reportGenerateRoute = read("app/api/dashboard/reports/generate/route.ts");
+
+  assert.match(uploadRoute, /dataSourceIds:\s*\[result\.dataSource\.id\]/, "Direct upload should train only the uploaded data source");
+  assert.match(uploadCompleteRoute, /dataSourceIds:\s*\[result\.dataSource\.id\]/, "Signed upload completion should train only the uploaded data source");
+  assert.match(rescanRoute, /dataSourceIds:\s*\[updatedSource\.id\]/, "Rescan should train only the rescanned data source");
+  assert.match(connectRoute, /dataSourceIds:\s*\[dataSource\.id\]/, "Database connect should train only the connected source");
+  assert.match(introspectRoute, /dataSourceIds:\s*\[dataSource\.id\]/, "Introspection should train only the introspected source");
+  assert.match(reportGenerateRoute, /dataSourceIds:\s*dataSources\.map\(\(source\) => source\.id\)/, "Report auto-training should train only selected execution sources");
 });
 
 test("daily CSV date filtering treats YYYY-MM-DD as business date", () => {

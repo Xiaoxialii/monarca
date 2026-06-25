@@ -76,6 +76,10 @@ export async function createSupabaseSignedUpload(params: {
 }
 
 export async function readSupabaseObjectText(path: string) {
+  return (await readSupabaseObjectBuffer(path)).toString("utf8");
+}
+
+export async function readSupabaseObjectBuffer(path: string) {
   const config = supabaseStorageConfig();
 
   if (!config) {
@@ -91,7 +95,7 @@ export async function readSupabaseObjectText(path: string) {
     throw new Error(error?.message || "Uploaded file is empty or unavailable.");
   }
 
-  return await data.text();
+  return Buffer.from(await data.arrayBuffer());
 }
 
 export async function getSupabaseObjectInfo(path: string) {

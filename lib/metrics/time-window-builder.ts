@@ -33,6 +33,26 @@ function previousMonthSameDayWindow(date: string) {
   };
 }
 
+function resolveRangeEndingAtLatestDataDate(requestedRange: ReportDateRangeInput, latestDataDate?: string | null) {
+  if (requestedRange.preset === "ALL") {
+    return resolveReportDateRange({ preset: "ALL" });
+  }
+
+  if (requestedRange.preset === "CUSTOM") {
+    return resolveReportDateRange(requestedRange);
+  }
+
+  const endDate = latestDataDate ?? requestedRange.endDate;
+  if (!endDate) {
+    throw new Error("当前无法生成真实报告：未能从完整数据中识别最新业务日期。");
+  }
+
+  return resolveReportDateRange({
+    ...requestedRange,
+    endDate
+  });
+}
+
 export function reportMetricTimeWindow({
   reportMode,
   requestedRange,
@@ -43,10 +63,7 @@ export function reportMetricTimeWindow({
   latestDataDate?: string | null;
 }) {
   if (reportMode === "daily_brief") {
-    if (!latestDataDate) {
-      throw new Error("当前无法生成真实报告：未能从完整数据中识别最新业务日期。");
-    }
-    return resolveReportDateRange({ preset: "DAILY", startDate: latestDataDate, endDate: latestDataDate });
+    return resolveRangeEndingAtLatestDataDate(requestedRange, latestDataDate);
   }
 
   if (reportMode === "weekly_report") {
@@ -57,9 +74,13 @@ export function reportMetricTimeWindow({
   }
 
   if (reportMode === "custom_report") {
-    if (requestedRange.preset === "ALL" || !requestedRange.startDate || !requestedRange.endDate) {
+    if (requestedRange.preset === "ALL") {
+      return resolveReportDateRange({ preset: "ALL" });
+    }
+
+    if (!requestedRange.startDate || !requestedRange.endDate) {
       if (!latestDataDate) {
-        throw new Error("当前无法生成真实报告：未能从完整数据中识别最新业务日期。");
+        return resolveReportDateRange({ preset: "ALL" });
       }
       const previousMonth = previousMonthSameDayWindow(latestDataDate);
       return resolveReportDateRange({

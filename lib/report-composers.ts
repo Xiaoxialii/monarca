@@ -2663,7 +2663,7 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
 }) {
   const metricSnapshotModel = (prisma as PrismaClient & {
     metricSnapshot?: {
-      createMany: (args: { data: unknown[] }) => Promise<{ count: number }>;
+      createMany: (args: { data: unknown[]; skipDuplicates?: boolean }) => Promise<{ count: number }>;
     };
   }).metricSnapshot;
   const generatedAt = input.generatedAt ?? new Date();
@@ -2672,16 +2672,18 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
   const endDate = asDate(input.dateRange.endDate);
   const rows = input.metricResults
     .filter(isComputedMetric)
+    .filter((result) => typeof result.value === "number" && Number.isFinite(result.value))
     .map((result) => {
-      const metricName = String(result.metricName ?? "").trim();
+      const metricName = String(result.metricName ?? result.displayName ?? result.metricId ?? "metric").trim() || "metric";
+      const metricId = String(result.metricId ?? metricName).trim() || metricName;
 
       return {
         id: randomUUID(),
         workspaceId: input.workspaceId,
-        metricId: result.metricId ?? null,
+        metricId,
         metricName,
         displayName: result.displayName ?? null,
-        value: typeof result.value === "number" && Number.isFinite(result.value) ? result.value : null,
+        value: result.value as number,
         valueJson: metricValueJson(result) as never,
         unit: result.unit ?? null,
         scope: input.dateRange.preset,
@@ -2699,7 +2701,7 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
 
   if (!metricSnapshotModel || !rows.length) return { count: 0, snapshotDate: snapDate };
 
-  const result = await metricSnapshotModel.createMany({ data: rows });
+  const result = await metricSnapshotModel.createMany({ data: rows, skipDuplicates: true });
   return { count: result.count, snapshotDate: snapDate };
 }
 
@@ -3145,9 +3147,238 @@ export function composeSnapshotReport(input: ReportComposerInput) {
   };
 }
 
+function logisticsMetricId(metric: MetricResultLike) {
+  const record = metric as MetricResultLike & { registryMetricId?: string | null };
+  return String(record.registryMetricId ?? metric.metricName ?? metric.displayName ?? metric.metricId ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function hasLogisticsBranchKpiMetrics(input: ReportComposerInput) {
+  const ids = new Set(input.metricResults.map(logisticsMetricId));
+
+  return input.metricResults.some((metric) => metric.businessType === "logistics_service_kpi") ||
+    ids.has("total_kpi_score") ||
+    ids.has("first_contact_resolution_rate") ||
+    ids.has("unresolved_ticket_count_by_branch");
+}
+
+function metricResultById(metricResults: MetricResultLike[], metricId: string) {
+  const normalized = metricId.toLowerCase();
+  const displayNameMap: Record<string, string[]> = {
+    total_kpi_score: ["kpi_总分", "total_kpi_score", "total_kpi_score"],
+    kpi_score_change_vs_previous_day: ["kpi_日环比变化"],
+    national_rank: ["全国排名"],
+    province_rank: ["省区排名"],
+    problem_resolution_score: ["问题解决得分"],
+    problem_resolution_score_loss: ["问题解决失分"],
+    timeliness_score: ["时效达成得分"],
+    delivery_standard_score: ["投递规范得分"],
+    pickup_score: ["散件揽收得分"],
+    bonus_penalty_score: ["加减分"],
+    ticket_denominator_count: ["工单分母数"],
+    unresolved_ticket_count: ["一次性未解决工单数"],
+    first_contact_resolution_rate: ["一次性解决率"],
+    unresolved_ticket_rate: ["一次性未解决率"],
+    unresolved_ticket_count_by_ticket_type: ["按工单类型未解决数"],
+    unresolved_ticket_count_by_branch: ["按责任网点未解决数"],
+    unresolved_reason_count: ["按未解决原因统计"]
+  };
+
+  return metricResults.find((metric) => logisticsMetricId(metric) === normalized) ??
+    metricResults.find((metric) => [metric.metricName, metric.displayName]
+      .filter(Boolean)
+      .some((name) => displayNameMap[normalized]?.includes(String(name).toLowerCase().replace(/\s+/g, "_"))));
+}
+
+function metricValue(result: MetricResultLike | undefined) {
+  const value = result?.value ?? result?.currentValue;
+
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+
+  return null;
+}
+
+function logisticsValueText(value: unknown, unit?: string | null) {
+  if (value == null || value === "") return "当前数据缺少该字段，无法判断";
+  if (typeof value === "number") {
+    if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  return String(value);
+}
+
+function logisticsRows(result: MetricResultLike | undefined) {
+  return Array.isArray(result?.rows) ? result.rows.filter((row): row is Record<string, unknown> =>
+    Boolean(row && typeof row === "object" && !Array.isArray(row))
+  ) : [];
+}
+
+function firstRowLabel(row: Record<string, unknown>, fallback: string) {
+  const entry = Object.entries(row).find(([key, value]) =>
+    !/value|count|rate|current|previous/i.test(key) && typeof value !== "number" && String(value ?? "").trim()
+  );
+
+  return entry ? String(entry[1]) : fallback;
+}
+
+function firstRowValue(row: Record<string, unknown>) {
+  const entry = Object.entries(row).find(([key, value]) =>
+    /value|count|rate|current/i.test(key) && typeof value === "number"
+  );
+
+  return typeof entry?.[1] === "number" ? entry[1] : null;
+}
+
+function logisticsTopLabel(result: MetricResultLike | undefined, fallback: string) {
+  const row = logisticsRows(result)[0];
+  if (!row) return fallback;
+  const label = firstRowLabel(row, fallback);
+  const value = firstRowValue(row);
+
+  return value == null ? label : `${label}（${logisticsValueText(value)}）`;
+}
+
+function logisticsRecordCards(rows: Array<Record<string, unknown>>, type: string) {
+  return rows.slice(0, 10).map((row, index) => {
+    const label = firstRowLabel(row, `${type} ${index + 1}`);
+    const value = firstRowValue(row);
+    const evidence = Object.entries(row)
+      .slice(0, 4)
+      .map(([key, item]) => `${key}=${String(item ?? "-")}`)
+      .join("；");
+
+    return {
+      id: `${type.toLowerCase()}-${index}`,
+      title: label,
+      businessJudgment: value == null ? evidence : `${label} 当前值 ${logisticsValueText(value)}。`,
+      keyEvidence: evidence
+    };
+  });
+}
+
+function composeLogisticsBranchKpiReport(input: ReportComposerInput) {
+  if (input.reportDataAudit && !input.reportDataAudit.passed) {
+    return validationFailureReport(input);
+  }
+
+  const latestDataDate = input.reportDataAudit?.latestDataDate ??
+    latestTrendDate(input.trendMetrics)?.toISOString().slice(0, 10) ??
+    isoDate(snapshotDate({ timeConfig: input.timeConfig, dateRange: input.dateRange, generatedAt: input.generatedAt ?? new Date() }));
+  const result = (metricId: string) => metricResultById(input.metricResults, metricId);
+  const totalScore = metricValue(result("total_kpi_score"));
+  const rank = metricValue(result("national_rank"));
+  const provinceRank = metricValue(result("province_rank"));
+  const problemScore = metricValue(result("problem_resolution_score"));
+  const fcr = metricValue(result("first_contact_resolution_rate"));
+  const unresolved = metricValue(result("unresolved_ticket_count"));
+  const denominator = metricValue(result("ticket_denominator_count"));
+  const computedUnresolvedRate = typeof unresolved === "number" && typeof denominator === "number" && denominator > 0
+    ? unresolved / denominator
+    : null;
+  const computedFcr = typeof fcr === "number" ? fcr : computedUnresolvedRate == null ? null : 1 - computedUnresolvedRate;
+  const issueType = logisticsTopLabel(result("unresolved_ticket_count_by_ticket_type"), "当前数据缺少工单类型字段，无法判断");
+  const issueBranch = logisticsTopLabel(result("unresolved_ticket_count_by_branch"), "当前数据缺少责任网点字段，无法判断");
+  const issueReason = logisticsTopLabel(result("unresolved_reason_count"), "当前数据缺少未解决原因字段，无法判断");
+  const scoreLoss = metricValue(result("problem_resolution_score_loss"));
+
+  return {
+    reportMode: "custom_report" as const,
+    reportTimeMode: input.timeConfig?.hasTimeField === false ? "snapshot_report" as const : "monthly_business_review" as const,
+    reportType: "branch_kpi_resolution_diagnosis",
+    reportTitle: "网点 KPI 与一次性解决率诊断报告",
+    displayName: "网点 KPI 与一次性解决率诊断报告",
+    latestDataDate,
+    fullDataValidated: input.reportDataAudit ? input.reportDataAudit.passed && input.reportDataAudit.usesFullData : null,
+    kpiCards: [
+      { id: "total_kpi_score", title: "KPI 总分", currentValue: totalScore, unit: "分" },
+      { id: "rating", title: "评级", currentValue: metricValue(result("rating")) ?? "当前数据缺少评级字段，无法判断" },
+      { id: "national_rank", title: "全国排名", currentValue: rank, unit: "名" },
+      { id: "problem_resolution_score", title: "问题解决得分", currentValue: problemScore, unit: "分" },
+      { id: "first_contact_resolution_rate", title: "一次性解决率", currentValue: computedFcr, unit: "%" },
+      { id: "unresolved_ticket_count", title: "一次性未解决数", currentValue: unresolved, unit: "单" }
+    ],
+    executiveSummary: [
+      {
+        id: "logistics-summary-kpi",
+        title: "当前 KPI 表现",
+        businessJudgment: `最新数据日期 ${latestDataDate ?? "-"}；KPI 总分 ${logisticsValueText(totalScore)} 分，全国排名 ${logisticsValueText(rank)}，省区排名 ${logisticsValueText(provinceRank)}。`,
+        keyEvidence: `KPI 总分=${logisticsValueText(totalScore)}；全国排名=${logisticsValueText(rank)}；省区排名=${logisticsValueText(provinceRank)}。`
+      },
+      {
+        id: "logistics-summary-resolution",
+        title: "一次性解决率拖累判断",
+        businessJudgment: `工单分母 ${logisticsValueText(denominator)} 单，一次性未解决 ${logisticsValueText(unresolved)} 单，一次性解决率 ${logisticsValueText(computedFcr, "percent")}。`,
+        keyEvidence: `问题解决得分=${logisticsValueText(problemScore)}；问题解决失分=${logisticsValueText(scoreLoss)}。`
+      }
+    ],
+    kpiScoreBreakdown: [
+      result("pickup_score"),
+      result("timeliness_score"),
+      result("delivery_standard_score"),
+      result("problem_resolution_score"),
+      result("bonus_penalty_score")
+    ].filter(Boolean).map((item, index) => ({
+      id: `score-breakdown-${index}`,
+      title: String(item?.displayName ?? item?.metricName ?? ""),
+      businessJudgment: `${String(item?.displayName ?? item?.metricName ?? "")} 当前值 ${logisticsValueText(metricValue(item))}。`,
+      keyEvidence: String(item?.formula ?? "")
+    })),
+    firstContactResolutionAnalysis: [
+      {
+        id: "resolution-analysis",
+        title: "一次性解决率",
+        businessJudgment: `当前一次性解决率 ${logisticsValueText(computedFcr, "percent")}；默认阈值 85%。${typeof computedFcr === "number" ? (computedFcr < 0.85 ? "低于阈值，需要优先治理。" : "达到默认阈值。") : "当前数据缺少分母或未解决明细，无法判断是否达标。"}`,
+        keyEvidence: `分母=${logisticsValueText(denominator)}；未解决=${logisticsValueText(unresolved)}。`
+      }
+    ],
+    rootCauseByTicketType: logisticsRecordCards(logisticsRows(result("unresolved_ticket_count_by_ticket_type")), "TicketType"),
+    rootCauseByBranch: logisticsRecordCards(logisticsRows(result("unresolved_ticket_count_by_branch")), "Branch"),
+    unresolvedReasonAnalysis: logisticsRecordCards(logisticsRows(result("unresolved_reason_count")), "Reason"),
+    recommendedActions: [
+      {
+        id: "action-branch-type",
+        title: `优先治理 ${issueBranch}`,
+        businessJudgment: `未解决问题集中在 ${issueBranch}，重点工单类型为 ${issueType}。`,
+        recommendedAction: `对 ${issueBranch} 的 ${issueType} 建立每日复盘清单，核查处理轨迹、责任归属和客户回访结果。`,
+        keyEvidence: `责任网点=${issueBranch}；工单类型=${issueType}。`
+      },
+      {
+        id: "action-reason",
+        title: `处理 ${issueReason}`,
+        businessJudgment: `主要未解决原因是 ${issueReason}。`,
+        recommendedAction: `对 ${issueReason} 类工单设置关闭前证据补充和二次跟进机制，避免重复进线或二次工单。`,
+        keyEvidence: `未解决原因=${issueReason}。`
+      }
+    ],
+    evidenceTable: [
+      { label: "KPI 总分", value: logisticsValueText(totalScore) },
+      { label: "问题解决失分", value: logisticsValueText(scoreLoss) },
+      { label: "工单分母", value: logisticsValueText(denominator) },
+      { label: "未解决数", value: logisticsValueText(unresolved) },
+      { label: "一次性解决率", value: logisticsValueText(computedFcr, "percent") },
+      { label: "Top 工单类型", value: issueType },
+      { label: "Top 责任网点", value: issueBranch },
+      { label: "Top 未解决原因", value: issueReason }
+    ],
+    metricResults: input.metricResults,
+    trendMetrics: input.trendMetrics ?? [],
+    trendCharts: input.trendCharts ?? []
+  };
+}
+
 export function composeCustomReport(input: ReportComposerInput) {
   if (input.reportDataAudit && !input.reportDataAudit.passed) {
     return validationFailureReport(input);
+  }
+
+  if (hasLogisticsBranchKpiMetrics(input)) {
+    return composeLogisticsBranchKpiReport(input);
   }
 
   const isZh = input.locale === "zh";

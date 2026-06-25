@@ -22,4 +22,9 @@ Read this before every coding task. Keep it short. Use `docs/ERROR_MEMORY.md` on
 16. **Locale first render must use request context.** Do not hard-code `useLocale("en")` on public entry pages; pass a server request locale from cookie, IP country, or `Accept-Language`, then let user preference override it.
 17. **Clerk passwordless must satisfy backend requirements invisibly.** If the product UX hides passwords but Clerk still requires `password`, generate a strong managed password in `signUp.create` and keep login passwordless.
 18. **Auth provider flags must cover every entry point.** If Google or another OAuth provider is disabled, signed-out navigation, custom pages, and Clerk modal helpers must all route through the same gated auth surface.
-19. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.
+19. **External auth sync needs both provider id and email recovery.** If `clerkUserId` changes but email already exists locally, claim/update the existing email row instead of creating a duplicate.
+20. **No active source means no visible metrics.** Do not fall back to deleted-source snapshots or show active metric definitions when the workspace has no active connected data source.
+21. **Only update memory when it teaches reuse.** Append full memory only for reusable patterns; update this index only for high-frequency or high-impact prevention rules.
+22. **Field matching must be header-scoped.** Do not let dataset/table names override column header semantics; preserve canonical fields such as `order_date` and only map ambiguous or Chinese headers.
+23. **Report composers must match lineage metric keys.** Metric result `metricId` can be the database id; use lineage/registry metric ids or stable names when composing domain reports.
+24. **Report schema reads must prefer active sources.** Do not use the workspace latest snapshot as the primary report schema when it may belong to a deleted or disconnected source; prefer active connected source schemas and only use snapshots as scoped fallbacks.

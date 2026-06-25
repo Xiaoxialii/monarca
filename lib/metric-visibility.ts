@@ -18,7 +18,7 @@ export function sourceTableLabels(mappingJson: unknown) {
 
 export function metricBelongsToTables(metric: { mappingJson: unknown }, activeTableLabels: Set<string>) {
   if (activeTableLabels.size === 0) {
-    return true;
+    return false;
   }
 
   const labels = sourceTableLabels(metric.mappingJson);

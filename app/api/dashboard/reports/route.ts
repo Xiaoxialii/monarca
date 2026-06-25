@@ -1,41 +1,33 @@
+import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { isBusinessFacingMetricDefinition, isBusinessFacingMetricText } from "@/lib/metric-visibility";
 import { getReportEntitlementState } from "@/lib/report-entitlements";
-import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
-import { buildReportDataAudit } from "@/lib/report-data-audit";
-import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { dateRangeFromSearchParams, resolveReportDateRange, type DateRangePreset } from "@/lib/report-date-range";
-import { buildReportTimeArtifacts } from "@/lib/report-time-artifacts.mjs";
 import {
   composeReport,
   loadMetricSnapshots,
   normalizeReportMode,
   type ReportMode
 } from "@/lib/report-composers";
-import { calculateVerifiedMetrics } from "@/lib/metrics/metric-calculator";
 import { reportMetricTimeWindow } from "@/lib/metrics/time-window-builder";
-import { validateMetricConsistency } from "@/lib/metrics/metric-consistency-validator";
-import { registryFromMetricDefinitions } from "@/lib/metrics/metric-registry";
-import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import {
-  cacheIdentityFromPayload,
   getReportMetricCache,
-  reportMetricCacheKey,
-  type ReportMetricCachePayload,
-  upsertReportMetricCache
+  stableHash,
+  type ReportMetricCachePayload
 } from "@/lib/report-metric-cache";
-import { tablesFromSchemaJson, validationFromLineage } from "@/lib/metric-validation";
+import { tablesFromSchemaJson } from "@/lib/metric-validation";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { fileExtension, inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
+import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
+import { buildKpiAiReportJson } from "@/lib/kpi-ai-report";
+import { buildKpiFormulaBreakdowns } from "@/lib/kpi-formula-breakdown";
+import { SemanticLayerRuntime } from "@/lib/semantic-layer-runtime";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
-  return asRecord(metric.lineageJson).generatedFrom === "business_metric_registry";
 }
 
 function analysisReportFromSnapshot(snapshot: { schemaJson: unknown; qualityReport: unknown } | null) {
@@ -44,6 +36,294 @@ function analysisReportFromSnapshot(snapshot: { schemaJson: unknown; qualityRepo
   }
 
   return asRecord(snapshot.qualityReport).analysisReport ?? asRecord(snapshot.schemaJson).analysisReport ?? null;
+}
+
+function usableKpiAssetLibrary(value: unknown) {
+  const library = asRecord(value);
+  const count = library.total_kpi_count;
+
+  return typeof count === "number" && count > 0 ? value : null;
+}
+
+function kpiAssetLibraryFromSchemaPayload(schemaPayload: unknown, qualityReportPayload?: unknown) {
+  const schemaJson = asRecord(schemaPayload);
+  const qualityReport = asRecord(qualityReportPayload);
+  const semanticLayer = asRecord(schemaJson.semanticLayer);
+  const existingAssetLibrary = usableKpiAssetLibrary(semanticLayer.kpiAssetLibrary) ??
+    usableKpiAssetLibrary(schemaJson.kpiAssetLibrary) ??
+    usableKpiAssetLibrary(qualityReport.kpiAssetLibrary);
+
+  if (existingAssetLibrary) {
+    return existingAssetLibrary;
+  }
+
+  const tables = tablesFromSchemaJson(schemaPayload).map((table) => ({
+    name: table.name,
+    schema: table.schema ?? undefined,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      displayName: column.displayName ?? undefined,
+      semanticName: column.semanticName ?? undefined,
+      rawHeaderPath: column.rawHeaderPath,
+      type: column.type ?? "unknown",
+      nullable: column.nullable ?? true
+    }))
+  }));
+
+  if (tables.length === 0) {
+    return null;
+  }
+
+  try {
+    return usableKpiAssetLibrary(buildSemanticLayer(tables).kpiAssetLibrary);
+  } catch {
+    return null;
+  }
+}
+
+function inlineUploadBuffer(config: Record<string, unknown>) {
+  const encoded = typeof config.inlineFileBase64 === "string" ? config.inlineFileBase64 : null;
+
+  if (!encoded) {
+    return null;
+  }
+
+  try {
+    return Buffer.from(encoded, "base64");
+  } catch {
+    return null;
+  }
+}
+
+function kpiAssetLibraryFromSnapshot(snapshot: { schemaJson: unknown; qualityReport: unknown } | null) {
+  if (!snapshot) {
+    return null;
+  }
+
+  return kpiAssetLibraryFromSchemaPayload(snapshot.schemaJson, snapshot.qualityReport);
+}
+
+function enrichKpiAssetLibraryWithSampleValues(assetLibrary: unknown, tables: Array<{
+  name: string;
+  schema?: string;
+  sampleRows?: Array<Record<string, unknown>>;
+}>) {
+  const library = asRecord(assetLibrary);
+  const registry = Array.isArray(library.kpi_registry) ? library.kpi_registry : [];
+
+  if (registry.length === 0) {
+    return assetLibrary;
+  }
+
+  const sampleByTable = new Map<string, Record<string, unknown>>();
+
+  for (const table of tables) {
+    const sample = Array.isArray(table.sampleRows) ? table.sampleRows[0] : null;
+
+    if (!sample) continue;
+
+    sampleByTable.set(table.name, sample);
+    if (table.schema) sampleByTable.set(`${table.schema}.${table.name}`, sample);
+  }
+
+  return {
+    ...library,
+    kpi_registry: registry.map((item) => {
+      const kpi = asRecord(item);
+      const sourceColumns = Array.isArray(kpi.source_columns)
+        ? kpi.source_columns.filter((source): source is string => typeof source === "string")
+        : [];
+      let sampleValue: unknown = null;
+
+      for (const source of sourceColumns) {
+        const separatorIndex = source.lastIndexOf(".");
+        const tableName = separatorIndex >= 0 ? source.slice(0, separatorIndex) : "";
+        const fieldName = separatorIndex >= 0 ? source.slice(separatorIndex + 1) : source;
+        const sample = sampleByTable.get(tableName);
+        const value = sample?.[fieldName];
+
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          sampleValue = value;
+          break;
+        }
+      }
+
+      return sampleValue === null ? kpi : { ...kpi, sample_value: sampleValue };
+    })
+  };
+}
+
+function isoDateOnlyFromValue(value: unknown) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+  const direct = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (direct) {
+    const [, year, month, day] = direct;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
+}
+
+function dateColumnName(table: {
+  columns?: Array<{ name?: string; type?: string | null; displayName?: string | null; semanticName?: string | null }>;
+}) {
+  const columns = Array.isArray(table.columns) ? table.columns : [];
+  return columns.find((column) => /date|time/i.test(String(column.type ?? "")) || /日期|时间|date|day/i.test(`${column.name ?? ""} ${column.displayName ?? ""} ${column.semanticName ?? ""}`))?.name ?? null;
+}
+
+function availableDateRangeFromTables(tables: Array<{
+  name?: string;
+  columns?: Array<{ name?: string; type?: string | null; displayName?: string | null; semanticName?: string | null }>;
+  sampleRows?: Array<Record<string, unknown>>;
+}>) {
+  let dateField: string | null = null;
+  const dates: string[] = [];
+
+  for (const table of tables) {
+    const field = dateColumnName(table);
+    if (!field) continue;
+    dateField = dateField ?? field;
+    for (const row of Array.isArray(table.sampleRows) ? table.sampleRows : []) {
+      const date = isoDateOnlyFromValue(row[field]);
+      if (date) dates.push(date);
+    }
+  }
+
+  dates.sort();
+  return {
+    startDate: dates[0] ?? null,
+    endDate: dates.at(-1) ?? null,
+    latestDataDate: dates.at(-1) ?? null,
+    dateField
+  };
+}
+
+async function availableDateRangeFromActiveSource(source: {
+  name: string;
+  schemas: unknown;
+  config: unknown;
+} | null) {
+  if (!source) return null;
+
+  const config = asRecord(source.config);
+  const fileName = typeof config.fileName === "string" ? config.fileName : source.name;
+  const extension = fileExtension(fileName);
+  const storage = asRecord(config.storage);
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
+
+  try {
+    if (objectKey) {
+      const objectExtension = extension || fileExtension(objectKey);
+      const tables = objectExtension === "csv"
+        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
+      return availableDateRangeFromTables(tables);
+    }
+
+    const inlineBuffer = inlineUploadBuffer(config);
+
+    if (inlineBuffer) {
+      const tables = extension === "csv"
+        ? inferTablesFromCsvText(fileName, inlineBuffer.toString("utf8"))
+        : await inferTablesFromExcelBuffer(fileName, inlineBuffer);
+      return availableDateRangeFromTables(tables);
+    }
+
+    if (typeof config.storedFilePath === "string" && config.storedFilePath.trim()) {
+      const buffer = await readFile(config.storedFilePath);
+      const tables = extension === "csv"
+        ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
+        : await inferTablesFromExcelBuffer(fileName, buffer);
+      return availableDateRangeFromTables(tables);
+    }
+  } catch {
+    return null;
+  }
+
+  return availableDateRangeFromTables(tablesFromSchemaJson(source.schemas).map((table) => ({
+    name: table.name,
+    columns: table.columns,
+    sampleRows: Array.isArray((table as typeof table & { sampleRows?: unknown }).sampleRows)
+      ? (table as typeof table & { sampleRows: Array<Record<string, unknown>> }).sampleRows
+      : []
+  })));
+}
+
+async function kpiAssetLibraryFromActiveSource(source: {
+  name: string;
+  schemas: unknown;
+  config: unknown;
+} | null) {
+  if (!source) {
+    return null;
+  }
+
+  const fromStoredSchema = kpiAssetLibraryFromSchemaPayload(source.schemas);
+
+  if (fromStoredSchema) {
+    return fromStoredSchema;
+  }
+
+  const config = asRecord(source.config);
+  const fileName = typeof config.fileName === "string" ? config.fileName : source.name;
+  const extension = fileExtension(fileName);
+  const storage = asRecord(config.storage);
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
+
+  try {
+    if (objectKey) {
+      const objectExtension = extension || fileExtension(objectKey);
+      const tables = objectExtension === "csv"
+        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
+
+      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
+    }
+
+    const inlineBuffer = inlineUploadBuffer(config);
+
+    if (inlineBuffer) {
+      const tables = extension === "csv"
+        ? inferTablesFromCsvText(fileName, inlineBuffer.toString("utf8"))
+        : await inferTablesFromExcelBuffer(fileName, inlineBuffer);
+
+      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
+    }
+
+    if (typeof config.storedFilePath === "string" && config.storedFilePath.trim()) {
+      const buffer = await readFile(config.storedFilePath);
+      const tables = extension === "csv"
+        ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
+        : await inferTablesFromExcelBuffer(fileName, buffer);
+
+      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function briefingLocale(
@@ -79,6 +359,16 @@ function latestDataDateFromPayload(payload: unknown) {
   return null;
 }
 
+function isFailedGuardrailPayload(payload: unknown) {
+  const record = asRecord(payload);
+  const audit = asRecord(record.reportDataAudit);
+
+  return record.generatedFrom === "full_data_guardrail" ||
+    audit.passed === false ||
+    (Array.isArray(record.metricResults) && record.metricResults.length === 0 &&
+      Array.isArray(record.aggregationResults) && record.aggregationResults.length === 0);
+}
+
 function latestDataDateFromSnapshot(snapshot: { schemaJson: unknown; qualityReport: unknown } | null) {
   const qualityReport = asRecord(snapshot?.qualityReport);
   const schemaJson = asRecord(snapshot?.schemaJson);
@@ -97,10 +387,53 @@ function latestDataDateFromSnapshot(snapshot: { schemaJson: unknown; qualityRepo
   return null;
 }
 
+function availableDateRangeFromPayload(payload: unknown) {
+  const record = asRecord(payload);
+  const audit = asRecord(record.reportDataAudit);
+  const timeConfig = asRecord(record.timeConfig);
+  const dateRange = asRecord(record.dateRange);
+  const startDate = typeof audit.dateRangeStart === "string"
+    ? audit.dateRangeStart
+    : typeof audit.startDate === "string"
+      ? audit.startDate
+      : typeof timeConfig.startDate === "string"
+        ? timeConfig.startDate
+        : typeof dateRange.startDate === "string"
+          ? dateRange.startDate
+          : null;
+  const endDate = typeof audit.dateRangeEnd === "string"
+    ? audit.dateRangeEnd
+    : typeof audit.endDate === "string"
+      ? audit.endDate
+      : typeof timeConfig.endDate === "string"
+        ? timeConfig.endDate
+        : typeof dateRange.endDate === "string"
+          ? dateRange.endDate
+          : null;
+  const latestDataDate = typeof audit.latestDataDate === "string"
+    ? audit.latestDataDate
+    : typeof dateRange.latestDataDate === "string"
+      ? dateRange.latestDataDate
+      : endDate;
+  const dateField = typeof audit.dateField === "string"
+    ? audit.dateField
+    : typeof timeConfig.defaultTimeField === "string"
+      ? timeConfig.defaultTimeField
+      : typeof dateRange.dateField === "string"
+        ? dateRange.dateField
+        : null;
+
+  if (!startDate) {
+    return null;
+  }
+
+  return { startDate, endDate, latestDataDate, dateField };
+}
+
 function filterBriefingMetricResults<T extends { payloadJson?: unknown } | null>(
   briefing: T,
-  visibleMetricIds: Set<string>,
-  visibleMetricsById: Map<string, {
+  _visibleMetricIds: Set<string>,
+  _visibleMetricsById: Map<string, {
     id: string;
     name: string;
     formula: string;
@@ -126,102 +459,30 @@ function filterBriefingMetricResults<T extends { payloadJson?: unknown } | null>
       ...payloadJson,
       metricResults: metricResults.filter((result) => {
         const record = asRecord(result);
-        const metricId = typeof record.metricId === "string" ? record.metricId : "";
-        const metric = visibleMetricsById.get(metricId);
-
-        return Boolean(
-          metricId &&
-          visibleMetricIds.has(metricId) &&
-          isBusinessFacingMetricText([
-            typeof record.metricName === "string" ? record.metricName : undefined,
-            typeof record.displayName === "string" ? record.displayName : undefined,
-            typeof record.formula === "string" ? record.formula : undefined,
-            typeof record.metricCategory === "string" ? record.metricCategory : undefined,
-            typeof record.sourceDataset === "string" ? record.sourceDataset : undefined
-          ]) &&
-          (!metric || isBusinessFacingMetricDefinition(metric))
-        );
+        return isBusinessFacingMetricText([
+          typeof record.metricName === "string" ? record.metricName : undefined,
+          typeof record.displayName === "string" ? record.displayName : undefined,
+          typeof record.kpiName === "string" ? record.kpiName : undefined,
+          typeof record.formula === "string" ? record.formula : undefined,
+          typeof record.metricCategory === "string" ? record.metricCategory : undefined,
+          typeof record.sourceDataset === "string" ? record.sourceDataset : undefined
+        ]);
       })
     }
   } as T;
 }
 
-function uniqueTables(tables: ReturnType<typeof tablesFromSchemaJson>) {
-  const seen = new Set<string>();
-
-  return tables.filter((table) => {
-    const key = `${table.schema ?? ""}.${table.name}`.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function activeTableLabels(tables: Array<{ name: string; schema?: string | null }>) {
-  return new Set(tables.flatMap((table) => {
-    const labels = [table.name];
-    if (table.schema) labels.push(`${table.schema}.${table.name}`);
-    return labels;
-  }));
-}
-
-function metricBelongsToTables(metric: { formula: string }, tableLabels: Set<string>) {
-  const text = metric.formula.toLowerCase();
-  return Array.from(tableLabels).some((label) => text.includes(label.toLowerCase()));
-}
-
-async function latestWorkspaceSnapshotVersion(workspaceId: string) {
+async function latestWorkspaceSnapshotVersion(workspaceId: string, dataSourceIds: string[] = []) {
   const snapshot = await prisma.schemaSnapshot.findFirst({
-    where: { workspaceId },
+    where: {
+      workspaceId,
+      ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
+    },
     orderBy: { createdAt: "desc" },
     select: { version: true }
   });
 
   return snapshot?.version ?? null;
-}
-
-async function refreshReportMetricCache({
-  workspaceId,
-  locale,
-  dateRange,
-  reportMode,
-  sourceSnapshotVersion
-}: {
-  workspaceId: string;
-  locale: "zh" | "en";
-  dateRange: ReturnType<typeof resolveReportDateRange>;
-  reportMode: ReportMode;
-  sourceSnapshotVersion?: number | null;
-}) {
-  const payload = await buildDateRangedReportPayload({ workspaceId, locale, dateRange, reportMode });
-
-  if (!payload) return null;
-
-  const payloadRange = asRecord(payload.dateRange);
-  const cacheDateRange = resolveReportDateRange({
-    preset: (typeof payloadRange.preset === "string" ? payloadRange.preset : dateRange.preset) as DateRangePreset,
-    startDate: typeof payloadRange.startDate === "string" ? payloadRange.startDate : dateRange.startDate,
-    endDate: typeof payloadRange.endDate === "string" ? payloadRange.endDate : dateRange.endDate,
-    previousStartDate: typeof payloadRange.previousStartDate === "string"
-      ? payloadRange.previousStartDate
-      : dateRange.previousStart?.toISOString().slice(0, 10),
-    previousEndDate: typeof payloadRange.previousEndDate === "string"
-      ? payloadRange.previousEndDate
-      : dateRange.previousEnd?.toISOString().slice(0, 10)
-  });
-  const identity = cacheIdentityFromPayload({
-    workspaceId,
-    payload,
-    dateRange: cacheDateRange
-  });
-
-  await upsertReportMetricCache(prisma, {
-    ...identity,
-    payload,
-    sourceSnapshotVersion
-  });
-
-  return payload;
 }
 
 function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss" | "stale", cacheKey: string) {
@@ -236,11 +497,139 @@ function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss"
   };
 }
 
+function ensureAiReportPayload<T extends Record<string, unknown>>(payload: T): T {
+  const existingAiReport = asRecord(payload.aiReport);
+  const nestedDailyReport = asRecord(asRecord(payload.composedReports).daily_brief);
+  const hasDimensionComparisons =
+    Array.isArray(payload.dimensionComparisons) ||
+    Array.isArray(nestedDailyReport.dimensionComparisons);
+  const causalChainNodes = Array.isArray(asRecord(existingAiReport.causal_chain_analysis).chain_nodes)
+    ? asRecord(existingAiReport.causal_chain_analysis).chain_nodes as Array<Record<string, unknown>>
+    : [];
+  const requiredCausalStagesHaveData = ["问题解决率下降", "KPI总分下降"].every((stage) => {
+    const node = causalChainNodes.find((item) => String(item.stage ?? "") === stage);
+    if (!node) return false;
+    return node.status !== "missing" && (
+      node.value !== null && node.value !== undefined ||
+      node.score !== null && node.score !== undefined ||
+      node.rate !== null && node.rate !== undefined
+    );
+  });
+
+  const hasCurrentAnalysisShape =
+    (existingAiReport.analysisVersion === "ecommerce_object_attention_v1" ||
+      existingAiReport.analysisVersion === "metric_object_attention_v1") &&
+    Array.isArray(existingAiReport.driver_analysis) &&
+    Array.isArray(existingAiReport.causal_chains) &&
+    Boolean(existingAiReport.causal_chain_analysis && typeof existingAiReport.causal_chain_analysis === "object") &&
+    Array.isArray(asRecord(existingAiReport.causal_chain_analysis).chain_nodes) &&
+    requiredCausalStagesHaveData &&
+    Boolean(existingAiReport.insights && typeof existingAiReport.insights === "object") &&
+    Array.isArray(payload.formulaBreakdowns);
+
+  if (hasCurrentAnalysisShape && !hasDimensionComparisons) {
+    return payload;
+  }
+
+  const metricResults = Array.isArray(payload.metricResults) ? payload.metricResults as Array<Record<string, unknown>> : [];
+  const aggregationResults = Array.isArray(payload.aggregationResults) ? payload.aggregationResults as Array<Record<string, unknown>> : [];
+
+  if (metricResults.length === 0 && aggregationResults.length === 0) return payload;
+
+  return {
+    ...payload,
+    formulaBreakdowns: buildKpiFormulaBreakdowns(metricResults),
+    aiReport: buildKpiAiReportJson({
+      metricResults,
+      aggregationResults,
+      auditReport: asRecord(payload.reportDataAudit),
+      composedReport: payload
+    })
+  };
+}
+
+function metricResultHasExplicitValue(result: unknown) {
+  const record = asRecord(result);
+  const directValue = record.value ?? record.currentValue ?? record.score ?? record.rateValue;
+
+  if (directValue !== null && directValue !== undefined && !(typeof directValue === "number" && Number.isNaN(directValue))) {
+    return true;
+  }
+
+  const rows = Array.isArray(record.rows) ? record.rows : [];
+  return rows.some((row) => {
+    const rowRecord = asRecord(row);
+    const value = rowRecord.value ?? rowRecord.currentValue;
+    return value !== null && value !== undefined && !(typeof value === "number" && Number.isNaN(value));
+  });
+}
+
+function reportMetricPayloadHasValues(payload: ReportMetricCachePayload | null) {
+  const metricResults = Array.isArray(payload?.metricResults) ? payload.metricResults : [];
+
+  return metricResults.some(metricResultHasExplicitValue);
+}
+
+function arrayHasItems(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function reportMetricPayloadHasMetricArtifacts(payload: ReportMetricCachePayload) {
+  const finalMetricResults = Array.isArray(payload.final_metricResults) ? payload.final_metricResults : [];
+  const aggregationResults = Array.isArray(payload.aggregationResults) ? payload.aggregationResults : [];
+
+  return (
+    finalMetricResults.some(metricResultHasExplicitValue) ||
+    aggregationResults.some((result) => {
+      const record = asRecord(result);
+      return ["kpis", "metrics", "children", "items"].some((key) => arrayHasItems(record[key]));
+    }) ||
+    arrayHasItems(payload.formulaBreakdowns) ||
+    arrayHasItems(payload.formula_breakdowns)
+  );
+}
+
+function reportMetricPayloadHasReusableReport(payload: ReportMetricCachePayload | null, reportMode?: ReportMode) {
+  if (!payload) return false;
+  if (isFailedGuardrailPayload(payload)) return false;
+  if (reportMetricPayloadHasValues(payload)) return true;
+  void reportMode;
+
+  return reportMetricPayloadHasMetricArtifacts(payload);
+}
+
+function reportMetricCacheMissPayload(
+  dateRange: ReturnType<typeof reportMetricTimeWindow>,
+  cacheKey: string
+): ReportMetricCachePayload {
+  return withCacheMeta({
+    generatedAt: new Date().toISOString(),
+    dateRange: {
+      preset: dateRange.preset,
+      startDate: dateRange.startDate ?? null,
+      endDate: dateRange.endDate ?? null,
+      previousStartDate: dateRange.previousStart ? dateRange.previousStart.toISOString().slice(0, 10) : null,
+      previousEndDate: dateRange.previousEnd ? dateRange.previousEnd.toISOString().slice(0, 10) : null
+    },
+    metricResults: [],
+    verifiedMetrics: [],
+    final_metricResults: [],
+    aggregationResults: [],
+    trendMetrics: [],
+    trendCharts: [],
+    timeConfig: {
+      hasTimeField: true,
+      selectedRange: dateRange.preset,
+      startDate: dateRange.startDate ?? null,
+      endDate: dateRange.endDate ?? null
+    }
+  }, "miss", cacheKey);
+}
+
 function shouldBypassReportCache(payload: ReportMetricCachePayload | null, reportMode: ReportMode) {
   if (!payload) return false;
 
   const audit = asRecord(payload.reportDataAudit);
-  const dateRange = asRecord(payload.dateRange);
   const composedReports = asRecord(payload.composedReports);
   const nestedReport = asRecord(composedReports[reportMode]);
   const nestedAudit = asRecord(nestedReport.reportDataAudit);
@@ -264,16 +653,18 @@ function shouldBypassReportCache(payload: ReportMetricCachePayload | null, repor
 
   if (reportMode === "daily_brief") {
     const dailyReport = asRecord(composedReports.daily_brief ?? payload);
-    if (!Array.isArray(dailyReport.dimensionComparisons) || dailyReport.dimensionComparisons.length === 0) {
-      return true;
+    const hasLogisticsKpiReport =
+      Boolean(payload.aiReport && typeof payload.aiReport === "object") ||
+      Array.isArray(payload.formulaBreakdowns) ||
+      Array.isArray(payload.final_metricResults);
+    if (!hasLogisticsKpiReport) {
+      if (!Array.isArray(dailyReport.dimensionComparisons) || dailyReport.dimensionComparisons.length === 0) {
+        return true;
+      }
+      if (Number(dailyReport.keyFindingsVersion ?? 0) < 2) {
+        return true;
+      }
     }
-    if (Number(dailyReport.keyFindingsVersion ?? 0) < 2) {
-      return true;
-    }
-  }
-
-  if (reportMode === "daily_brief" && dateRange.preset === "ALL") {
-    return true;
   }
 
   if (reportMode === "weekly_report") {
@@ -297,6 +688,9 @@ function shouldBypassReportCache(payload: ReportMetricCachePayload | null, repor
   }
 
   if (reportMode === "custom_report") {
+    if (reportMetricPayloadHasReusableReport(payload, reportMode)) {
+      return false;
+    }
     const customReport = asRecord(composedReports.custom_report ?? payload);
     if (!Array.isArray(customReport.monthlyKpis) || customReport.monthlyKpis.length === 0) {
       return true;
@@ -360,280 +754,6 @@ function composeReportsFromPayload({
   ]));
 }
 
-function prewarmCommonReportMetricCaches({
-  workspaceId,
-  locale,
-  activePreset,
-  sourceSnapshotVersion
-}: {
-  workspaceId: string;
-  locale: "zh" | "en";
-  activePreset: string;
-  sourceSnapshotVersion?: number | null;
-}) {
-  void workspaceId;
-  void locale;
-  void activePreset;
-  void sourceSnapshotVersion;
-}
-
-async function buildDateRangedReportPayload({
-  workspaceId,
-  locale,
-  dateRange,
-  reportMode
-}: {
-  workspaceId: string;
-  locale: "zh" | "en";
-  dateRange: ReturnType<typeof resolveReportDateRange>;
-  reportMode: ReportMode;
-}) {
-  const dataSources = await prisma.dataSourceConnection.findMany({
-    where: { workspaceId, isActive: true, status: "CONNECTED" },
-    orderBy: { updatedAt: "desc" }
-  });
-
-  const snapshots = await prisma.schemaSnapshot.findMany({
-    where: {
-      workspaceId,
-      dataSourceId: { in: dataSources.map((source) => source.id) }
-    },
-    orderBy: { createdAt: "desc" }
-  });
-  const snapshotBySource = new Map<string, typeof snapshots[number]>();
-  for (const snapshot of snapshots) {
-    if (snapshot.dataSourceId && !snapshotBySource.has(snapshot.dataSourceId)) {
-      snapshotBySource.set(snapshot.dataSourceId, snapshot);
-    }
-  }
-
-  const contexts = dataSources.flatMap((dataSource) => {
-    const snapshot = snapshotBySource.get(dataSource.id);
-    return snapshot ? [{ dataSource, tables: tablesFromSchemaJson(snapshot.schemaJson), schemaJson: snapshot.schemaJson }] : [];
-  });
-
-  if (contexts.length === 0) return null;
-
-  const tables = uniqueTables(contexts.flatMap((context) => context.tables));
-  const semanticLayer = buildSemanticLayer(tables.map((table) => ({
-    name: table.name,
-    schema: table.schema ?? undefined,
-    columns: table.columns.map((column) => ({
-      name: column.name,
-      type: column.type ?? "unknown",
-      nullable: column.nullable ?? true
-    }))
-  })));
-  const preReportDataAudit = await buildReportDataAudit({
-    contexts,
-    reportType: reportMode
-  });
-
-  if (!preReportDataAudit.passed) {
-    return {
-      generatedAt: new Date().toISOString(),
-      locale,
-      dataSourceIds: dataSources.map((source) => source.id),
-      dataSourceName: dataSources.map((source) => source.name).join(locale === "zh" ? "、" : ", "),
-      dateRange: {
-        preset: dateRange.preset,
-        startDate: dateRange.startDate ?? null,
-        endDate: dateRange.endDate ?? null,
-        previousStartDate: dateRange.previousStart ? dateRange.previousStart.toISOString().slice(0, 10) : null,
-        previousEndDate: dateRange.previousEnd ? dateRange.previousEnd.toISOString().slice(0, 10) : null,
-        dateField: preReportDataAudit.dateField,
-        generatedAt: new Date().toISOString()
-      },
-      semanticLayer,
-      metricResults: [],
-      aggregationResults: [],
-      reportDataAudit: preReportDataAudit,
-      timeConfig: {
-        hasTimeField: Boolean(preReportDataAudit.dateField),
-        defaultTimeField: preReportDataAudit.dateField,
-        selectedRange: dateRange.preset,
-        startDate: dateRange.startDate ?? null,
-        endDate: dateRange.endDate ?? null
-      },
-      trendMetrics: [],
-      trendCharts: [],
-      structuredReport: {
-        coreSummary: locale === "zh" ? "当前报告未通过数据口径校验。" : "The report did not pass data-scope validation.",
-        generatedInsights: {
-          keyFindings: [],
-          businessRisks: [],
-          growthOpportunities: [],
-          recommendedActions: [],
-          dataLimitations: preReportDataAudit.failures.map((failure, index) => ({ id: `audit-${index}`, title: failure }))
-        }
-      }
-    };
-  }
-
-  const effectiveDateRange = reportMetricTimeWindow({
-    reportMode,
-    requestedRange: {
-      preset: dateRange.preset,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate
-    },
-    latestDataDate: preReportDataAudit.latestDataDate
-  });
-  const labels = activeTableLabels(tables);
-  let metrics = await prisma.metricDefinition.findMany({
-    where: { workspaceId, isActive: true },
-    orderBy: { createdAt: "asc" }
-  });
-  const hasRegistryMetrics = metrics.some((metric) => asRecord(metric.lineageJson).generatedFrom === "business_metric_registry");
-
-  if (!hasRegistryMetrics) {
-    await generateWorkspaceMetricsFromConnectedSources(prisma, {
-      workspaceId,
-      userId: null
-    });
-    metrics = await prisma.metricDefinition.findMany({
-      where: { workspaceId, isActive: true },
-      orderBy: { createdAt: "asc" }
-    });
-  }
-  const tableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
-  const tableScopedRegistryMetrics = tableScopedMetrics.filter(isBusinessMetricRegistryMetric);
-  const metricsForExecution = tableScopedRegistryMetrics.length > 0 ? tableScopedRegistryMetrics : tableScopedMetrics;
-  const executableMetrics = metricsForExecution
-    .filter((metric) =>
-      isBusinessFacingMetricDefinition(metric) &&
-      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
-    );
-
-  const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-  const consistency = tableScopedRegistryMetrics.length > 0
-    ? validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
-      reportType: reportType as "daily" | "weekly" | "custom",
-      metricRegistryId: executableMetricRegistryId,
-      definitions: executableMetrics.map((metric) => {
-        const lineage = asRecord(metric.lineageJson);
-        return {
-          metricId: String(lineage.metricId ?? metric.name),
-          businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
-          formula: metric.formula,
-          requiredFields: Array.isArray(lineage.requiredFields) ? lineage.requiredFields.filter((field): field is string => typeof field === "string") : []
-        };
-      })
-    })))
-    : { passed: true, failures: [] };
-
-  if (!consistency.passed) {
-    const failedAudit = await buildReportDataAudit({
-      contexts,
-      reportType: reportMode
-    });
-    return {
-      generatedAt: new Date().toISOString(),
-      locale,
-      dataSourceIds: dataSources.map((source) => source.id),
-      dataSourceName: dataSources.map((source) => source.name).join(locale === "zh" ? "、" : ", "),
-      dateRange: {
-        preset: effectiveDateRange.preset,
-        startDate: effectiveDateRange.startDate ?? null,
-        endDate: effectiveDateRange.endDate ?? null,
-        previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
-        previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null,
-        dateField: failedAudit.dateField,
-        generatedAt: new Date().toISOString()
-      },
-      semanticLayer,
-      metricRegistryId: null,
-      metricResults: [],
-      verifiedMetrics: [],
-      aggregationResults: [],
-      reportDataAudit: {
-        ...failedAudit,
-        passed: false,
-        failures: [...failedAudit.failures, ...consistency.failures]
-      },
-      timeConfig: {
-        hasTimeField: Boolean(failedAudit.dateField),
-        defaultTimeField: failedAudit.dateField,
-        selectedRange: effectiveDateRange.preset,
-        startDate: effectiveDateRange.startDate ?? null,
-        endDate: effectiveDateRange.endDate ?? null
-      },
-      trendMetrics: [],
-      trendCharts: [],
-      structuredReport: {
-        coreSummary: locale === "zh" ? "当前报告未通过指标一致性校验。" : "The report did not pass metric consistency validation.",
-        generatedInsights: {
-          keyFindings: [],
-          businessRisks: [],
-          growthOpportunities: [],
-          recommendedActions: [],
-          dataLimitations: consistency.failures.map((failure, index) => ({ id: `consistency-${index}`, title: failure }))
-        }
-      }
-    };
-  }
-
-  const { metricResults, verifiedMetrics, metricRegistryId } = await calculateVerifiedMetrics({ contexts, metrics: executableMetrics, dateRange: effectiveDateRange });
-  const aggregationResults = await buildAggregationResults({ contexts, metricResults, dateRange: effectiveDateRange });
-  const timeArtifacts = buildReportTimeArtifacts(aggregationResults, effectiveDateRange, locale);
-  const reportDataAudit = await buildReportDataAudit({
-    contexts,
-    reportType: reportMode,
-    metricDefinitions: executableMetrics,
-    dateRange: effectiveDateRange,
-    metricResults: metricResults as unknown as Array<Record<string, unknown>>,
-    aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
-    trendMetrics: timeArtifacts.trendMetrics as Array<Record<string, unknown>>
-  });
-  const effectiveTimeConfig = {
-    ...timeArtifacts.timeConfig,
-    hasTimeField: timeArtifacts.timeConfig.hasTimeField || Boolean(reportDataAudit.dateField),
-    defaultTimeField: timeArtifacts.timeConfig.defaultTimeField ?? reportDataAudit.dateField ?? null
-  };
-  const structuredReport = buildStructuredAiReport({
-    dataSourceCount: dataSources.length,
-    metricResults,
-    metrics: executableMetrics.map((metric) => ({
-      id: metric.id,
-      name: metric.name,
-      category: metric.category,
-      definition: metric.definition,
-      formula: metric.formula,
-      unit: metric.unit,
-      mappingJson: metric.mappingJson,
-      lineageJson: metric.lineageJson
-    })),
-    aggregationResults,
-    locale
-  });
-
-  return {
-    generatedAt: new Date().toISOString(),
-    locale,
-    dataSourceIds: dataSources.map((source) => source.id),
-    dataSourceName: dataSources.map((source) => source.name).join(locale === "zh" ? "、" : ", "),
-    dateRange: {
-      preset: effectiveDateRange.preset,
-      startDate: effectiveDateRange.startDate ?? null,
-      endDate: effectiveDateRange.endDate ?? null,
-      previousStartDate: effectiveDateRange.previousStart ? effectiveDateRange.previousStart.toISOString().slice(0, 10) : null,
-      previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null,
-      dateField: effectiveTimeConfig.defaultTimeField ?? null,
-      generatedAt: new Date().toISOString()
-    },
-    semanticLayer,
-    metricRegistryId,
-    verifiedMetrics,
-    metricResults,
-    aggregationResults,
-    reportDataAudit,
-    timeConfig: effectiveTimeConfig,
-    trendMetrics: timeArtifacts.trendMetrics,
-    trendCharts: timeArtifacts.trendCharts,
-    structuredReport
-  };
-}
-
 export async function GET(request: Request) {
   try {
     const session = await syncCurrentClerkUser();
@@ -645,7 +765,49 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const resolvedDateRange = resolveReportDateRange(dateRangeFromSearchParams(url.searchParams));
     const requestedReportMode = normalizeReportMode(url.searchParams.get("reportMode"));
-    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id);
+    const locale = session.user.locale === "zh" ? "zh" : "en";
+    const activeSource = await prisma.dataSourceConnection.findFirst({
+      where: {
+        workspaceId: session.workspace.id,
+        isActive: true,
+        status: "CONNECTED"
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      select: {
+        id: true,
+        name: true,
+        schemas: true,
+        config: true
+      }
+    });
+
+    if (!activeSource) {
+      return NextResponse.json({
+        workspaceId: session.workspace.id,
+        hasData: false,
+        hasConnectedDataSource: false,
+        status: "empty",
+        code: "NO_CONNECTED_DATA_SOURCE",
+        message: locale === "zh" ? "当前没有已连接的数据源。" : "No connected data source is currently available.",
+        briefing: null,
+        insights: [],
+        recommendations: [],
+        reportHistory: [],
+        requestedLocale: locale,
+        reportLocale: locale,
+        usedLocaleFallback: false,
+        reportEntitlement: null,
+        analysisReport: null,
+        kpiAssetLibrary: null,
+        availableDateRange: null
+      });
+    }
+
+    const activeSourceIds = [activeSource.id];
+    const cacheSemanticContext = await new SemanticLayerRuntime(prisma).resolveContext(session.workspace.id, activeSource.id);
+    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id, activeSourceIds);
     const briefing = await prisma.dailyBriefing.findFirst({
       where: {
         workspaceId: session.workspace.id
@@ -668,11 +830,19 @@ export async function GET(request: Request) {
         }
       }
     });
-    const selectedBriefing = briefing;
+    const selectedBriefing = briefing && !isFailedGuardrailPayload(briefing.payloadJson)
+      ? briefing
+      : null;
+    const selectedBriefingPayload = selectedBriefing
+      ? asRecord(selectedBriefing.payloadJson) as ReportMetricCachePayload
+      : null;
+    const selectedBriefingHasReusableReport = reportMetricPayloadHasReusableReport(selectedBriefingPayload, requestedReportMode);
+    const baseBriefing = selectedBriefingHasReusableReport ? selectedBriefing : null;
 
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
-        workspaceId: session.workspace.id
+        workspaceId: session.workspace.id,
+        dataSourceId: { in: activeSourceIds }
       },
       orderBy: {
         createdAt: "desc"
@@ -682,6 +852,164 @@ export async function GET(request: Request) {
         qualityReport: true
       }
     });
+    let availableDateRange: Awaited<ReturnType<typeof availableDateRangeFromActiveSource>> = null;
+    const cachedLatestDataDate = latestDataDateFromPayload(selectedBriefing?.payloadJson) ??
+      latestDataDateFromSnapshot(latestSnapshot);
+    const needsAvailableDateRangeForWindow = requestedReportMode !== "custom_report" ||
+      (
+        resolvedDateRange.preset !== "ALL" &&
+        (!resolvedDateRange.startDate || !resolvedDateRange.endDate)
+      );
+    if (!cachedLatestDataDate && needsAvailableDateRangeForWindow) {
+      availableDateRange = await availableDateRangeFromActiveSource(activeSource);
+    }
+    const latestDataDate = cachedLatestDataDate ??
+      availableDateRange?.latestDataDate ??
+      availableDateRange?.endDate ??
+      null;
+    const effectiveRequestDateRange = reportMetricTimeWindow({
+      reportMode: requestedReportMode,
+      requestedRange: {
+        preset: resolvedDateRange.preset,
+        startDate: resolvedDateRange.startDate,
+        endDate: resolvedDateRange.endDate,
+        previousStartDate: resolvedDateRange.previousStart ? resolvedDateRange.previousStart.toISOString().slice(0, 10) : undefined,
+        previousEndDate: resolvedDateRange.previousEnd ? resolvedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
+      },
+      latestDataDate
+    });
+    const cacheResult = await getReportMetricCache(prisma, {
+      workspaceId: session.workspace.id,
+      dateRange: {
+        preset: effectiveRequestDateRange.preset,
+        startDate: effectiveRequestDateRange.startDate,
+        endDate: effectiveRequestDateRange.endDate,
+        previousStartDate: effectiveRequestDateRange.previousStart ? effectiveRequestDateRange.previousStart.toISOString().slice(0, 10) : undefined,
+        previousEndDate: effectiveRequestDateRange.previousEnd ? effectiveRequestDateRange.previousEnd.toISOString().slice(0, 10) : undefined
+      },
+      sourceSnapshotVersion,
+      dataSourceIds: [cacheSemanticContext.dataSourceId],
+      domain: cacheSemanticContext.domain,
+      semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
+      semanticSchemaHash: cacheSemanticContext.schemaHash,
+      queryHash: stableHash({
+        reportMode: requestedReportMode,
+        dateRange: {
+          preset: effectiveRequestDateRange.preset,
+          startDate: effectiveRequestDateRange.startDate ?? null,
+          endDate: effectiveRequestDateRange.endDate ?? null
+        }
+      })
+    });
+    const reusableCachePayload = shouldBypassReportCache(cacheResult.payload, requestedReportMode) || !reportMetricPayloadHasReusableReport(cacheResult.payload, requestedReportMode)
+      ? null
+      : cacheResult.payload;
+    let rangedPayload: ReportMetricCachePayload | null = reusableCachePayload;
+
+    if (rangedPayload && cacheResult.status === "stale") {
+      rangedPayload = withCacheMeta(rangedPayload, "stale", cacheResult.cacheKey);
+    } else if (rangedPayload) {
+      rangedPayload = withCacheMeta(rangedPayload, "hit", cacheResult.cacheKey);
+    } else {
+      void Boolean(
+        resolvedDateRange.preset !== "ALL" ||
+        resolvedDateRange.startDate ||
+        resolvedDateRange.endDate ||
+        resolvedDateRange.previousStart ||
+        resolvedDateRange.previousEnd
+      );
+      rangedPayload = null;
+    }
+    availableDateRange = availableDateRange ?? availableDateRangeFromPayload(rangedPayload);
+    const rangedBriefing = rangedPayload
+      ? baseBriefing
+        ? {
+            ...baseBriefing,
+            payloadJson: ensureAiReportPayload({
+              ...asRecord(baseBriefing.payloadJson),
+              ...rangedPayload
+            })
+          }
+        : {
+            id: `computed-${requestedReportMode}-${rangedPayload.generatedAt}`,
+            workspaceId: session.workspace.id,
+            briefingDate: new Date(),
+            title: locale === "zh" ? "实时业务报告" : "Live business report",
+            summary: typeof asRecord(rangedPayload.structuredReport).coreSummary === "string"
+              ? String(asRecord(rangedPayload.structuredReport).coreSummary)
+              : locale === "zh"
+                ? "已基于当前数据源生成实时报告。"
+                : "Generated from the current data source.",
+            confidence: 0,
+            payloadJson: ensureAiReportPayload(rangedPayload),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            insights: []
+          }
+      : baseBriefing;
+    if (rangedPayload && reportMetricPayloadHasValues(rangedPayload)) {
+      const insights = baseBriefing?.insights ?? [];
+      const recommendations = insights.flatMap((insight) => insight.recommendations);
+      const kpiAssetLibrary = kpiAssetLibraryFromSnapshot(latestSnapshot);
+
+      return NextResponse.json({
+        workspaceId: session.workspace.id,
+        hasData: true,
+        hasConnectedDataSource: true,
+        briefing: rangedBriefing,
+        insights,
+        recommendations,
+        reportHistory: [],
+        requestedLocale: session.user.locale === "zh" ? "zh" : "en",
+        reportLocale: briefingLocale(baseBriefing),
+        usedLocaleFallback: false,
+        reportEntitlement: null,
+        analysisReport: analysisReportFromSnapshot(latestSnapshot),
+        kpiAssetLibrary,
+        availableDateRange
+      });
+    }
+
+    const requestedSpecificDateRange = effectiveRequestDateRange.preset !== "ALL";
+    if (requestedSpecificDateRange) {
+      availableDateRange = availableDateRange ?? await availableDateRangeFromActiveSource(activeSource);
+      const reportEntitlement = await getReportEntitlementState(session.workspace.id);
+      const missPayload = reportMetricCacheMissPayload(effectiveRequestDateRange, cacheResult.cacheKey);
+
+      return NextResponse.json({
+        workspaceId: session.workspace.id,
+        hasData: false,
+        hasConnectedDataSource: true,
+        status: "cache_miss",
+        code: "REPORT_RANGE_NOT_GENERATED",
+        message: locale === "zh"
+          ? "当前时间范围尚未生成报告。点击生成报告后，会按所选时间范围计算并缓存结果。"
+          : "No report has been generated for this time range. Generate the report to calculate and cache the selected range.",
+        briefing: {
+          id: `cache-miss-${requestedReportMode}-${cacheResult.cacheKey}`,
+          workspaceId: session.workspace.id,
+          briefingDate: new Date(),
+          title: locale === "zh" ? "当前时间范围尚未生成" : "Range not generated",
+          summary: "",
+          confidence: 0,
+          payloadJson: ensureAiReportPayload(missPayload),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          insights: []
+        },
+        insights: [],
+        recommendations: [],
+        reportHistory: [],
+        requestedLocale: session.user.locale === "zh" ? "zh" : "en",
+        reportLocale: locale,
+        usedLocaleFallback: false,
+        reportEntitlement,
+        analysisReport: analysisReportFromSnapshot(latestSnapshot),
+        kpiAssetLibrary: await kpiAssetLibraryFromActiveSource(activeSource) ?? kpiAssetLibraryFromSnapshot(latestSnapshot),
+        availableDateRange
+      });
+    }
+
     const metrics = await prisma.metricDefinition.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -699,103 +1027,7 @@ export async function GET(request: Request) {
     const businessMetrics = metrics.filter((metric) => isBusinessFacingMetricDefinition(metric));
     const visibleMetricIds = new Set(businessMetrics.map((metric) => metric.id));
     const visibleMetricsById = new Map(businessMetrics.map((metric) => [metric.id, metric]));
-    const locale = session.user.locale === "zh" ? "zh" : "en";
-    const latestDataDate = latestDataDateFromPayload(selectedBriefing?.payloadJson) ?? latestDataDateFromSnapshot(latestSnapshot);
-    const effectiveRequestDateRange = reportMetricTimeWindow({
-      reportMode: requestedReportMode,
-      requestedRange: {
-        preset: resolvedDateRange.preset,
-        startDate: resolvedDateRange.startDate,
-        endDate: resolvedDateRange.endDate,
-        previousStartDate: resolvedDateRange.previousStart ? resolvedDateRange.previousStart.toISOString().slice(0, 10) : undefined,
-        previousEndDate: resolvedDateRange.previousEnd ? resolvedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
-      },
-      latestDataDate
-    });
-    const cacheProbeKey = reportMetricCacheKey({
-      workspaceId: session.workspace.id,
-      dateRange: {
-        preset: effectiveRequestDateRange.preset,
-        startDate: effectiveRequestDateRange.startDate,
-        endDate: effectiveRequestDateRange.endDate,
-        previousStartDate: effectiveRequestDateRange.previousStart ? effectiveRequestDateRange.previousStart.toISOString().slice(0, 10) : undefined,
-        previousEndDate: effectiveRequestDateRange.previousEnd ? effectiveRequestDateRange.previousEnd.toISOString().slice(0, 10) : undefined
-      },
-      sourceSnapshotVersion
-    });
-    const cacheResult = await getReportMetricCache(prisma, {
-      workspaceId: session.workspace.id,
-      dateRange: {
-        preset: effectiveRequestDateRange.preset,
-        startDate: effectiveRequestDateRange.startDate,
-        endDate: effectiveRequestDateRange.endDate,
-        previousStartDate: effectiveRequestDateRange.previousStart ? effectiveRequestDateRange.previousStart.toISOString().slice(0, 10) : undefined,
-        previousEndDate: effectiveRequestDateRange.previousEnd ? effectiveRequestDateRange.previousEnd.toISOString().slice(0, 10) : undefined
-      },
-      sourceSnapshotVersion
-    });
-    const reusableCachePayload = shouldBypassReportCache(cacheResult.payload, requestedReportMode) ? null : cacheResult.payload;
-    let rangedPayload: ReportMetricCachePayload | null = reusableCachePayload;
-
-    if (rangedPayload && cacheResult.status === "stale") {
-      void refreshReportMetricCache({
-        workspaceId: session.workspace.id,
-        locale,
-        dateRange: effectiveRequestDateRange,
-        reportMode: requestedReportMode,
-        sourceSnapshotVersion
-      }).catch(() => null);
-      prewarmCommonReportMetricCaches({
-        workspaceId: session.workspace.id,
-        locale,
-        activePreset: effectiveRequestDateRange.preset,
-        sourceSnapshotVersion
-      });
-      rangedPayload = withCacheMeta(rangedPayload, "stale", cacheResult.cacheKey);
-    } else if (rangedPayload) {
-      rangedPayload = withCacheMeta(rangedPayload, "hit", cacheResult.cacheKey);
-    } else {
-      const freshPayload = await refreshReportMetricCache({
-        workspaceId: session.workspace.id,
-        locale,
-        dateRange: effectiveRequestDateRange,
-        reportMode: requestedReportMode,
-        sourceSnapshotVersion
-      });
-      rangedPayload = freshPayload ? withCacheMeta(freshPayload, "miss", cacheProbeKey) : null;
-      prewarmCommonReportMetricCaches({
-        workspaceId: session.workspace.id,
-        locale,
-        activePreset: effectiveRequestDateRange.preset,
-        sourceSnapshotVersion
-      });
-    }
-    const rangedBriefing = rangedPayload
-      ? selectedBriefing
-        ? {
-            ...selectedBriefing,
-            payloadJson: {
-              ...asRecord(selectedBriefing.payloadJson),
-              ...rangedPayload
-            }
-          }
-        : {
-            id: `computed-${requestedReportMode}-${rangedPayload.generatedAt}`,
-            workspaceId: session.workspace.id,
-            briefingDate: new Date(),
-            title: locale === "zh" ? "实时业务报告" : "Live business report",
-            summary: typeof asRecord(rangedPayload.structuredReport).coreSummary === "string"
-              ? String(asRecord(rangedPayload.structuredReport).coreSummary)
-              : locale === "zh"
-                ? "已基于当前数据源生成实时报告。"
-                : "Generated from the current data source.",
-            confidence: 0,
-            payloadJson: rangedPayload,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            insights: []
-          }
-      : selectedBriefing;
+    availableDateRange = availableDateRange ?? await availableDateRangeFromActiveSource(activeSource);
     const visibleBriefing = filterBriefingMetricResults(rangedBriefing, visibleMetricIds, visibleMetricsById);
     const metricSnapshots = await loadMetricSnapshots(prisma, session.workspace.id).catch(() => []);
     const visiblePayload = asRecord(visibleBriefing?.payloadJson);
@@ -826,10 +1058,10 @@ export async function GET(request: Request) {
     const briefingWithComposedReports = visibleBriefing
       ? {
           ...visibleBriefing,
-          payloadJson: {
+          payloadJson: ensureAiReportPayload({
             ...visiblePayload,
             composedReports
-          }
+          })
         }
       : visibleBriefing;
     const reportHistoryModel = (prisma as typeof prisma & {
@@ -855,22 +1087,26 @@ export async function GET(request: Request) {
           }
         }).catch(() => [])
       : [];
-    const insights = selectedBriefing?.insights ?? [];
+    const insights = baseBriefing?.insights ?? [];
     const recommendations = insights.flatMap((insight) => insight.recommendations);
     const reportEntitlement = await getReportEntitlementState(session.workspace.id);
-
+    const kpiAssetLibrary = await kpiAssetLibraryFromActiveSource(activeSource) ??
+      kpiAssetLibraryFromSnapshot(latestSnapshot);
     return NextResponse.json({
       workspaceId: session.workspace.id,
-      hasData: Boolean(selectedBriefing || insights.length || recommendations.length),
+      hasData: Boolean(briefingWithComposedReports || insights.length || recommendations.length),
+      hasConnectedDataSource: true,
       briefing: briefingWithComposedReports,
       insights,
       recommendations,
       reportHistory,
       requestedLocale: session.user.locale === "zh" ? "zh" : "en",
-      reportLocale: briefingLocale(selectedBriefing),
+      reportLocale: briefingLocale(baseBriefing),
       usedLocaleFallback: false,
       reportEntitlement,
-      analysisReport: analysisReportFromSnapshot(latestSnapshot)
+      analysisReport: analysisReportFromSnapshot(latestSnapshot),
+      kpiAssetLibrary,
+      availableDateRange
     });
   } catch (error) {
     return apiErrorResponse(error, "Failed to load report data");

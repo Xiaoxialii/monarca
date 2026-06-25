@@ -25,6 +25,19 @@ function uniqueEmails(...emails: Array<string | null>) {
   return Array.from(new Set(emails.filter((email): email is string => Boolean(email))));
 }
 
+const userWithMembershipsInclude = {
+  memberships: {
+    include: {
+      workspace: true
+    },
+    orderBy: [
+      { status: "asc" as const },
+      { joinedAt: "asc" as const },
+      { createdAt: "asc" as const }
+    ]
+  }
+};
+
 export async function syncCurrentClerkUser(options: { fallbackEmail?: string } = {}) {
   const { userId } = await auth();
 
@@ -52,32 +65,43 @@ export async function syncClerkUserById(
   const name = clerkUser.fullName ?? clerkUser.username ?? clerkEmail?.split("@")[0] ?? "New user";
   const avatarUrl = clerkUser.imageUrl || null;
 
-  const user = await prisma.user.upsert({
+  const existingUserByClerkId = await prisma.user.findUnique({
     where: { clerkUserId: clerkUser.id },
-    update: {
-      email,
-      name,
-      avatarUrl
-    },
-    create: {
-      clerkUserId: clerkUser.id,
-      email,
-      name,
-      avatarUrl
-    },
-    include: {
-      memberships: {
-        include: {
-          workspace: true
-        },
-        orderBy: [
-          { status: "asc" },
-          { joinedAt: "asc" },
-          { createdAt: "asc" }
-        ]
-      }
-    }
+    select: { id: true }
   });
+  const existingUserByEmail = existingUserByClerkId
+    ? await prisma.user.findUnique({
+      where: { email },
+      select: { id: true }
+    })
+    : null;
+  const canUpdateEmail = !existingUserByEmail || existingUserByEmail.id === existingUserByClerkId?.id;
+
+  const user = existingUserByClerkId
+    ? await prisma.user.update({
+      where: { id: existingUserByClerkId.id },
+      data: {
+        ...(canUpdateEmail ? { email } : {}),
+        name,
+        avatarUrl
+      },
+      include: userWithMembershipsInclude
+    })
+    : await prisma.user.upsert({
+      where: { email },
+      update: {
+        clerkUserId: clerkUser.id,
+        name,
+        avatarUrl
+      },
+      create: {
+        clerkUserId: clerkUser.id,
+        email,
+        name,
+        avatarUrl
+      },
+      include: userWithMembershipsInclude
+    });
 
   const cookieStore = await cookies().catch(() => null);
   const preferredWorkspaceId = cookieStore?.get(workspaceInviteCookieName)?.value ?? null;

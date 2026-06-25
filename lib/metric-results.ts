@@ -32,7 +32,12 @@ type ResultConfig = {
 
 export type MetricResultValue = {
   metricId: string;
+  registryMetricId?: string;
+  kpiId?: string;
   metricName: string;
+  kpiName?: string;
+  generatedFrom?: string;
+  source?: "registry" | "semantic" | "generic";
   displayName?: string;
   unit?: string | null;
   formula: string;
@@ -109,9 +114,12 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function metricLineage(metric: Pick<MetricDefinition, "name" | "category" | "formula" | "lineageJson">) {
+function metricLineage(metric: Pick<MetricDefinition, "name" | "category" | "formula" | "unit" | "lineageJson">) {
   const lineage = asRecord(metric.lineageJson);
   const metricType = typeof lineage.metricType === "string" ? lineage.metricType : "core_metric";
+  const metricDirection = lineage.metricDirection === "higher_is_better" || lineage.metricDirection === "lower_is_better" || lineage.metricDirection === "neutral"
+    ? lineage.metricDirection
+    : undefined;
   const validation = validationFromLineage(metric.lineageJson);
   const warning = typeof lineage.warning === "string"
     ? lineage.warning
@@ -134,8 +142,17 @@ function metricLineage(metric: Pick<MetricDefinition, "name" | "category" | "for
     /sample(_|\s)?size|confidence|impactscore|impact_score|dataqualityscore|data_quality_score/i.test(metric.name);
 
   return {
+    registryMetricId: typeof lineage.metricId === "string" ? lineage.metricId : undefined,
+    kpiId: typeof lineage.metricId === "string" ? lineage.metricId : undefined,
+    kpiName: typeof lineage.businessName === "string"
+      ? lineage.businessName
+      : typeof lineage.displayName === "string"
+        ? lineage.displayName
+        : metric.name,
+    generatedFrom: typeof lineage.generatedFrom === "string" ? lineage.generatedFrom : undefined,
     displayName: typeof lineage.displayName === "string" ? lineage.displayName : metric.name,
-    unit: typeof lineage.unit === "string" ? lineage.unit : undefined,
+    unit: typeof lineage.unit === "string" ? lineage.unit : metric.unit ?? undefined,
+    metricDirection: metricDirection as MetricResultValue["metricDirection"],
     metricType,
     metricCategory: typeof lineage.metricCategory === "string" ? lineage.metricCategory : metric.category,
     businessType: typeof lineage.businessType === "string" ? lineage.businessType : undefined,
@@ -293,7 +310,56 @@ function cleanMetricNumber(value: number | null, column?: SchemaColumn | null) {
   if (column && isRatingColumn(column) && (value < 0 || value > 5)) {
     return null;
   }
+  const rateScale = column ? rateScaleForColumn(column) : null;
+  if (rateScale && Math.abs(value) > 1) {
+    return value / rateScale;
+  }
   return value;
+}
+
+function compactMetricColumnText(column: SchemaColumn) {
+  return [
+    column.name,
+    column.displayName,
+    column.semanticName,
+    ...(Array.isArray(column.rawHeaderPath) ? column.rawHeaderPath : [])
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function compactMetricColumnLeaf(column: SchemaColumn) {
+  const rawHeaderPath = Array.isArray(column.rawHeaderPath) ? column.rawHeaderPath : [];
+  const leaf = rawHeaderPath[rawHeaderPath.length - 1] ?? column.displayName ?? column.semanticName ?? column.name;
+
+  return String(leaf)
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function rateScaleForColumn(column: SchemaColumn) {
+  const text = compactMetricColumnText(column);
+  const leaf = compactMetricColumnLeaf(column);
+
+  if (/^(分子|分母|得分|总分|最终得分|零分线|满分线|score|numerator|denominator)$/.test(leaf)) {
+    return null;
+  }
+
+  if (!/(率值|占比|得分率|rate|ratio|percent)/i.test(leaf)) {
+    return null;
+  }
+
+  if (/求助率|遗失破损率/.test(text)) {
+    return 10000;
+  }
+
+  return 100;
 }
 
 function singleFieldReference(tables: SchemaTable[], expression: string) {
@@ -504,7 +570,8 @@ function canComputeContext(context: MetricResultContext) {
         ? storage.key
         : null;
 
-  return typeof config.storedFilePath === "string" ||
+  return typeof config.inlineFileBase64 === "string" && config.inlineFileBase64.trim().length > 0 ||
+    typeof config.storedFilePath === "string" ||
     ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && Boolean(objectKey));
 }
 
@@ -936,8 +1003,40 @@ function conditionValue(row: Record<string, unknown>, tables: SchemaTable[], exp
   }
 }
 
-function aggregateRows(rows: Array<Record<string, unknown>>, tables: SchemaTable[], formula: string): number | string | null {
+type AggregateCache = Map<string, number | string | null>;
+
+type CsvPreparedMetricRows = {
+  rows: Array<Record<string, unknown>>;
+  previousRows: Array<Record<string, unknown>>;
+  dateColumnName: string | null;
+  hasTimeField: boolean;
+  currentAggregateCache: AggregateCache;
+  previousAggregateCache: AggregateCache;
+};
+
+function aggregateRows(
+  rows: Array<Record<string, unknown>>,
+  tables: SchemaTable[],
+  formula: string,
+  cache?: AggregateCache
+): number | string | null {
   const trimmed = formula.trim();
+
+  if (cache?.has(trimmed)) {
+    return cache.get(trimmed) ?? null;
+  }
+
+  const value = aggregateRowsUncached(rows, tables, trimmed, cache);
+  cache?.set(trimmed, value);
+  return value;
+}
+
+function aggregateRowsUncached(
+  rows: Array<Record<string, unknown>>,
+  tables: SchemaTable[],
+  trimmed: string,
+  cache?: AggregateCache
+): number | string | null {
   const topShareMatch = /^TOP_N_SHARE\s*\((.+?)\s+BY\s+(.+?),\s*(\d+)\s*\)$/i.exec(trimmed);
 
   if (topShareMatch) {
@@ -962,7 +1061,7 @@ function aggregateRows(rows: Array<Record<string, unknown>>, tables: SchemaTable
       .map((groupRows) => Number(aggregateRows(groupRows, tables, aggregateExpression)))
       .filter((value) => Number.isFinite(value))
       .sort((left, right) => right - left);
-    const total = Number(aggregateRows(rows, tables, aggregateExpression));
+    const total = Number(aggregateRows(rows, tables, aggregateExpression, cache));
 
     return total ? groupValues.slice(0, limit).reduce((sum, value) => sum + value, 0) / total : null;
   }
@@ -971,8 +1070,8 @@ function aggregateRows(rows: Array<Record<string, unknown>>, tables: SchemaTable
 
   if (safeDivideMatch) {
     const [numerator, denominator] = splitTopLevel(safeDivideMatch[1]);
-    const numeratorValue = Number(aggregateRows(rows, tables, numerator));
-    const denominatorValue = Number(aggregateRows(rows, tables, denominator));
+    const numeratorValue = Number(aggregateRows(rows, tables, numerator, cache));
+    const denominatorValue = Number(aggregateRows(rows, tables, denominator, cache));
     return denominatorValue ? numeratorValue / denominatorValue : null;
   }
 
@@ -1051,27 +1150,40 @@ function aggregateRows(rows: Array<Record<string, unknown>>, tables: SchemaTable
     return percentile(values, ratio);
   }
 
+  const additiveExpression = splitTopLevelOperator(trimmed, ["+", "-"]);
+  if (additiveExpression) {
+    const leftValue = aggregateRows(rows, tables, additiveExpression.left, cache);
+    const rightValue = aggregateRows(rows, tables, additiveExpression.right, cache);
+    const left = Number(leftValue);
+    const right = Number(rightValue);
+
+    if (!Number.isFinite(left) || !Number.isFinite(right)) {
+      return null;
+    }
+
+    return additiveExpression.operator === "+" ? left + right : left - right;
+  }
+
+  const multiplicativeExpression = splitTopLevelOperator(trimmed, ["*", "/"]);
+  if (multiplicativeExpression) {
+    const leftValue = aggregateRows(rows, tables, multiplicativeExpression.left, cache);
+    const rightValue = aggregateRows(rows, tables, multiplicativeExpression.right, cache);
+    const left = Number(leftValue);
+    const right = Number(rightValue);
+
+    if (!Number.isFinite(left) || !Number.isFinite(right)) {
+      return null;
+    }
+
+    if (multiplicativeExpression.operator === "/") {
+      return right ? left / right : null;
+    }
+
+    return left * right;
+  }
+
   const aggregateMatch = /^(SUM|AVG|MIN|MAX|STDDEV|COUNT)\s*\((.*)\)$/i.exec(trimmed);
   if (!aggregateMatch) {
-    const additiveExpression = splitTopLevelOperator(trimmed, ["+", "-"]);
-    if (additiveExpression) {
-      const left = Number(aggregateRows(rows, tables, additiveExpression.left));
-      const right = Number(aggregateRows(rows, tables, additiveExpression.right));
-      return additiveExpression.operator === "+" ? left + right : left - right;
-    }
-
-    const multiplicativeExpression = splitTopLevelOperator(trimmed, ["*", "/"]);
-    if (multiplicativeExpression) {
-      const left = Number(aggregateRows(rows, tables, multiplicativeExpression.left));
-      const right = Number(aggregateRows(rows, tables, multiplicativeExpression.right));
-
-      if (multiplicativeExpression.operator === "/") {
-        return right ? left / right : null;
-      }
-
-      return left * right;
-    }
-
     if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
       return Number(trimmed);
     }
@@ -1140,20 +1252,40 @@ function sentimentRateParts(formula: string) {
   };
 }
 
+async function prepareCsvMetricRows(
+  context: MetricResultContext,
+  metric: MetricDefinition,
+  dateRange?: ResolvedReportDateRange
+): Promise<CsvPreparedMetricRows> {
+  const sourceTable = sourceTableForFormula(context.tables, metric.formula);
+  const allRows = await rowsForCsvTable(context);
+  const dateColumn = findBusinessDateColumn(sourceTable.columns);
+
+  return {
+    rows: filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" }),
+    previousRows: filterRowsByPreviousReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" }),
+    dateColumnName: dateColumn?.name ?? null,
+    hasTimeField: Boolean(dateColumn),
+    currentAggregateCache: new Map(),
+    previousAggregateCache: new Map()
+  };
+}
+
 async function computeCsvMetricResult(
   context: MetricResultContext,
   metric: MetricDefinition,
   computedAt: string,
-  dateRange?: ResolvedReportDateRange
+  dateRange?: ResolvedReportDateRange,
+  preparedRows?: CsvPreparedMetricRows
 ): Promise<MetricResultValue> {
-  const sourceTable = sourceTableForFormula(context.tables, metric.formula);
-  const allRows = await rowsForCsvTable(context);
-  const dateColumn = findBusinessDateColumn(sourceTable.columns);
-  const rows = filterRowsByReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
-  const previousRows = filterRowsByPreviousReportDateRange(allRows, dateColumn?.name, dateRange ?? { preset: "ALL" });
+  const prepared = preparedRows ?? await prepareCsvMetricRows(context, metric, dateRange);
+  const { rows, previousRows, currentAggregateCache, previousAggregateCache } = prepared;
   const byMatch = /^(.+?)\s+BY\s+(.+)$/i.exec(metric.formula.trim());
 
   if (/^TOP_N_SHARE\s*\(/i.test(metric.formula.trim())) {
+    const value = aggregateRows(rows, context.tables, metric.formula, currentAggregateCache);
+    const previousValue = aggregateRows(previousRows, context.tables, metric.formula, previousAggregateCache);
+
     return {
       metricId: metric.id,
       metricName: metric.name,
@@ -1161,13 +1293,13 @@ async function computeCsvMetricResult(
       formula: metric.formula,
       status: "computed",
       scope: metricScope(metric),
-      value: aggregateRows(rows, context.tables, metric.formula),
-      ...comparisonValues(aggregateRows(rows, context.tables, metric.formula), aggregateRows(previousRows, context.tables, metric.formula)),
+      value,
+      ...comparisonValues(value, previousValue),
       dateRangePreset: dateRange?.preset,
       dateRangeStart: dateRange?.startDate ?? null,
       dateRangeEnd: dateRange?.endDate ?? null,
-      dateField: dateColumn?.name ?? null,
-      hasTimeField: Boolean(dateColumn),
+      dateField: prepared.dateColumnName,
+      hasTimeField: prepared.hasTimeField,
       computedAt
     };
   }
@@ -1227,14 +1359,14 @@ async function computeCsvMetricResult(
       dateRangePreset: dateRange?.preset,
       dateRangeStart: dateRange?.startDate ?? null,
       dateRangeEnd: dateRange?.endDate ?? null,
-      dateField: dateColumn?.name ?? null,
-      hasTimeField: Boolean(dateColumn),
+      dateField: prepared.dateColumnName,
+      hasTimeField: prepared.hasTimeField,
       computedAt
     };
   }
 
-  const value = aggregateRows(rows, context.tables, metric.formula);
-  const previousValue = aggregateRows(previousRows, context.tables, metric.formula);
+  const value = aggregateRows(rows, context.tables, metric.formula, currentAggregateCache);
+  const previousValue = aggregateRows(previousRows, context.tables, metric.formula, previousAggregateCache);
   const sampleSize = aggregateSampleSize(rows, context.tables, metric.formula);
 
   return {
@@ -1250,16 +1382,27 @@ async function computeCsvMetricResult(
     dateRangePreset: dateRange?.preset,
     dateRangeStart: dateRange?.startDate ?? null,
     dateRangeEnd: dateRange?.endDate ?? null,
-    dateField: dateColumn?.name ?? null,
-    hasTimeField: Boolean(dateColumn),
+    dateField: prepared.dateColumnName,
+    hasTimeField: prepared.hasTimeField,
     computedAt
   };
 }
 
-function isMetricAllowed(metric: Pick<MetricDefinition, "status" | "lineageJson">) {
+function isInvalidLogisticsSemanticRollup(metric: Pick<MetricDefinition, "name" | "formula" | "lineageJson">) {
+  const lineage = asRecord(metric.lineageJson);
+
+  return lineage.generatedFrom === "semantic_kpi_asset_library" &&
+    /branch_kpi_daily/i.test(metric.formula) &&
+    /\+/.test(metric.formula) &&
+    !/(kpi总分|核心模块总分)$/i.test(metric.name);
+}
+
+function isMetricAllowed(metric: Pick<MetricDefinition, "name" | "formula" | "status" | "lineageJson">) {
   const validation = validationFromLineage(metric.lineageJson);
 
-  return metric.status === MetricStatus.AI_READY && validation?.validation_status === "valid";
+  return metric.status === MetricStatus.AI_READY &&
+    validation?.validation_status === "valid" &&
+    !isInvalidLogisticsSemanticRollup(metric);
 }
 
 export async function computeMetricResults({
@@ -1373,6 +1516,14 @@ export async function computeMetricResultsForContexts({
 }): Promise<MetricResultValue[]> {
   const computedAt = new Date().toISOString();
   const results: MetricResultValue[] = [];
+  const csvPreparedRowsCache = new Map<string, Promise<CsvPreparedMetricRows>>();
+  const dateRangeKey = JSON.stringify({
+    preset: dateRange?.preset ?? "ALL",
+    startDate: dateRange?.startDate ?? null,
+    endDate: dateRange?.endDate ?? null,
+    previousStart: dateRange?.previousStart?.toISOString() ?? null,
+    previousEnd: dateRange?.previousEnd?.toISOString() ?? null
+  });
 
   for (const metric of metrics) {
     if (!isMetricAllowed(metric)) {
@@ -1415,7 +1566,16 @@ export async function computeMetricResultsForContexts({
         });
         results.push(result);
       } else if (context.dataSource.type === DataSourceType.CSV || context.dataSource.type === DataSourceType.EXCEL) {
-        results.push(await computeCsvMetricResult(context, metric, computedAt, dateRange));
+        const sourceTable = sourceTableForFormula(context.tables, metric.formula);
+        const cacheKey = `${context.dataSource.id}:${sourceTable.schema ?? ""}.${sourceTable.name}:${dateRangeKey}`;
+        let preparedRows = csvPreparedRowsCache.get(cacheKey);
+
+        if (!preparedRows) {
+          preparedRows = prepareCsvMetricRows(context, metric, dateRange);
+          csvPreparedRowsCache.set(cacheKey, preparedRows);
+        }
+
+        results.push(await computeCsvMetricResult(context, metric, computedAt, dateRange, await preparedRows));
       } else {
         results.push({
           metricId: metric.id,

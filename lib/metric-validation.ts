@@ -9,6 +9,9 @@ export type ValidationStatus = "valid" | "warning" | "invalid" | "needs_review" 
 
 export type SchemaColumn = {
   name: string;
+  displayName?: string | null;
+  semanticName?: string | null;
+  rawHeaderPath?: string[];
   type?: string | null;
   nullable?: boolean | null;
 };
@@ -17,6 +20,10 @@ export type SchemaTable = {
   name: string;
   schema?: string | null;
   columns: SchemaColumn[];
+  rowCount?: number | null;
+  rawHeaderRows?: string[][];
+  sampleRows?: Array<Record<string, unknown>>;
+  previewRows?: Array<Record<string, unknown>>;
 };
 
 export type MetricValidationResult = {
@@ -60,6 +67,18 @@ export function tablesFromSchemaJson(schemaJson: unknown): SchemaTable[] {
     return [{
       name,
       schema: typeof tableRecord?.schema === "string" ? tableRecord.schema : null,
+      rowCount: Number.isFinite(Number(tableRecord?.rowCount)) ? Number(tableRecord?.rowCount) : null,
+      rawHeaderRows: Array.isArray(tableRecord?.rawHeaderRows)
+        ? tableRecord.rawHeaderRows
+          .filter((row): row is unknown[] => Array.isArray(row))
+          .map((row) => row.map((cell) => String(cell ?? "")))
+        : undefined,
+      sampleRows: Array.isArray(tableRecord?.sampleRows)
+        ? tableRecord.sampleRows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)))
+        : undefined,
+      previewRows: Array.isArray(tableRecord?.previewRows)
+        ? tableRecord.previewRows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)))
+        : undefined,
       columns: columns.flatMap((column) => {
         const columnRecord = asRecord(column);
         const columnName = typeof columnRecord?.name === "string" ? columnRecord.name : "";
@@ -70,6 +89,9 @@ export function tablesFromSchemaJson(schemaJson: unknown): SchemaTable[] {
 
         return [{
           name: columnName,
+          displayName: typeof columnRecord?.displayName === "string" ? columnRecord.displayName : null,
+          semanticName: typeof columnRecord?.semanticName === "string" ? columnRecord.semanticName : null,
+          rawHeaderPath: Array.isArray(columnRecord?.rawHeaderPath) ? columnRecord.rawHeaderPath.filter((part): part is string => typeof part === "string") : undefined,
           type: typeof columnRecord?.type === "string" ? columnRecord.type : null,
           nullable: typeof columnRecord?.nullable === "boolean" ? columnRecord.nullable : null
         }];

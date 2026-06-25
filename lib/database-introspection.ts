@@ -17,6 +17,9 @@ export type DatabaseConnectionInput = {
 export type IntrospectedColumn = {
   name: string;
   type: string;
+  displayName?: string;
+  semanticName?: string;
+  rawHeaderPath?: string[];
   dataType?: string;
   columnType?: string;
   semanticType?: string;

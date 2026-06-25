@@ -73,6 +73,14 @@ function parseDate(value: unknown) {
     return value;
   }
 
+  if (typeof value === "number" && Number.isFinite(value) && value > 20_000 && value < 80_000) {
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const date = new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
+    return Number.isFinite(date.getTime())
+      ? new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+      : null;
+  }
+
   if (value == null) {
     return null;
   }
@@ -85,6 +93,12 @@ function parseDate(value: unknown) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (dateOnly) {
     const [, year, month, day] = dateOnly;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  const compactDate = /^(\d{4})(\d{2})(\d{2})$/.exec(text);
+  if (compactDate) {
+    const [, year, month, day] = compactDate;
     return new Date(Number(year), Number(month) - 1, Number(day));
   }
 

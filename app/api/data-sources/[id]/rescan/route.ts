@@ -159,7 +159,8 @@ export async function POST(
 
       const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(tx, {
         workspaceId: session.workspace.id,
-        userId: session.user.id
+        userId: session.user.id,
+        dataSourceIds: [updatedSource.id]
       });
 
       return { updatedSource, schemaSnapshot, generatedMetricCount: metricGeneration.generatedMetricCount };

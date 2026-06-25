@@ -1,7 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { readR2ObjectText } from "@/lib/r2-storage";
-import { getSupabaseObjectInfo, readSupabaseObjectText } from "@/lib/supabase-storage";
+import { canonicalUploadHeaders, excelRecordsFromBuffer, fileExtension } from "@/lib/file-upload-schema";
+import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
+import { getSupabaseObjectInfo, readSupabaseObjectBuffer, readSupabaseObjectText } from "@/lib/supabase-storage";
 
 type CsvRows = Array<Record<string, unknown>>;
 
@@ -47,7 +48,7 @@ function splitCsvLine(line: string) {
 
 export function csvRowsFromText(text: string) {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  const headers = lines[0] ? splitCsvLine(lines[0]).filter(Boolean) : [];
+  const headers = canonicalUploadHeaders(lines[0] ? splitCsvLine(lines[0]).filter(Boolean) : []);
 
   return lines.slice(1).map((line) => {
     const values = splitCsvLine(line);
@@ -55,22 +56,33 @@ export function csvRowsFromText(text: string) {
   });
 }
 
+export async function excelRowsFromBuffer(buffer: ArrayBuffer | Uint8Array | Buffer) {
+  return excelRecordsFromBuffer("uploaded.xlsx", buffer);
+}
+
 export async function readCsvRowsFromLocalFile(filePath: string) {
+  return readUploadRowsFromLocalFile(filePath);
+}
+
+async function readUploadRowsFromLocalFile(filePath: string, fileName?: string | null) {
   const resolved = path.resolve(filePath);
   const workspaceRoot = path.resolve(process.cwd());
   const relativePath = path.relative(workspaceRoot, resolved);
 
   if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    throw new Error("CSV file path is outside the workspace");
+    throw new Error("Uploaded file path is outside the workspace");
   }
 
   const fileStat = await stat(resolved);
-  const cacheKey = `local:${resolved}:${fileStat.mtimeMs}:${fileStat.size}`;
+  const extension = fileExtension(fileName || resolved);
+  const cacheKey = `local:${extension}:${resolved}:${fileStat.mtimeMs}:${fileStat.size}`;
   const cached = csvRowsCache.get(cacheKey);
 
   if (cached) return cached;
 
-  const rowsPromise = readFile(resolved, "utf8").then(csvRowsFromText);
+  const rowsPromise = extension === "xls" || extension === "xlsx"
+    ? readFile(resolved).then(excelRowsFromBuffer)
+    : readFile(resolved, "utf8").then(csvRowsFromText);
   while (csvRowsCache.size >= maxCachedCsvFiles) {
     const oldestKey = csvRowsCache.keys().next().value;
     if (!oldestKey) break;
@@ -82,10 +94,8 @@ export async function readCsvRowsFromLocalFile(filePath: string) {
 
 export async function readCsvRowsFromStorageConfig(config: Record<string, unknown>) {
   const storedFilePath = config.storedFilePath;
-
-  if (typeof storedFilePath === "string" && storedFilePath) {
-    return readCsvRowsFromLocalFile(storedFilePath);
-  }
+  const configuredFileName = typeof config.fileName === "string" ? config.fileName : null;
+  const extension = fileExtension(configuredFileName || "");
 
   const storage = asRecord(config.storage);
   const storageProvider = typeof config.storageProvider === "string" ? config.storageProvider : null;
@@ -98,12 +108,15 @@ export async function readCsvRowsFromStorageConfig(config: Record<string, unknow
         : null;
 
   if ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && objectKey) {
-    const cacheKey = `r2:${objectKey}`;
+    const objectExtension = extension || fileExtension(objectKey);
+    const cacheKey = `r2:${objectExtension}:${objectKey}`;
     const cached = csvRowsCache.get(cacheKey);
 
     if (cached) return cached;
 
-    const rowsPromise = readR2ObjectText(objectKey).then(csvRowsFromText);
+    const rowsPromise = objectExtension === "xls" || objectExtension === "xlsx"
+      ? readR2ObjectBuffer(objectKey).then(excelRowsFromBuffer)
+      : readR2ObjectText(objectKey).then(csvRowsFromText);
     while (csvRowsCache.size >= maxCachedCsvFiles) {
       const oldestKey = csvRowsCache.keys().next().value;
       if (!oldestKey) break;
@@ -111,6 +124,29 @@ export async function readCsvRowsFromStorageConfig(config: Record<string, unknow
     }
     csvRowsCache.set(cacheKey, rowsPromise);
     return rowsPromise;
+  }
+
+  if (typeof config.inlineFileBase64 === "string" && config.inlineFileBase64) {
+    const cacheKey = `inline:${extension}:${config.inlineFileBase64.length}:${String(config.fileSize ?? "")}`;
+    const cached = csvRowsCache.get(cacheKey);
+
+    if (cached) return cached;
+
+    const buffer = Buffer.from(config.inlineFileBase64, "base64");
+    const rowsPromise = extension === "xls" || extension === "xlsx"
+      ? excelRowsFromBuffer(buffer)
+      : Promise.resolve(csvRowsFromText(buffer.toString("utf8")));
+    while (csvRowsCache.size >= maxCachedCsvFiles) {
+      const oldestKey = csvRowsCache.keys().next().value;
+      if (!oldestKey) break;
+      csvRowsCache.delete(oldestKey);
+    }
+    csvRowsCache.set(cacheKey, rowsPromise);
+    return rowsPromise;
+  }
+
+  if (typeof storedFilePath === "string" && storedFilePath) {
+    return readUploadRowsFromLocalFile(storedFilePath, configuredFileName);
   }
 
   if (storage.provider === "supabase-storage" && typeof storage.path === "string" && storage.path) {
@@ -123,12 +159,15 @@ export async function readCsvRowsFromStorageConfig(config: Record<string, unknow
         : null,
       typeof config.fileSize === "number" ? config.fileSize : null
     ].filter(Boolean).join(":");
-    const cacheKey = `supabase:${storage.path}:${objectVersion}`;
+    const objectExtension = extension || fileExtension(storage.path);
+    const cacheKey = `supabase:${objectExtension}:${storage.path}:${objectVersion}`;
     const cached = csvRowsCache.get(cacheKey);
 
     if (cached) return cached;
 
-    const rowsPromise = readSupabaseObjectText(storage.path).then(csvRowsFromText);
+    const rowsPromise = objectExtension === "xls" || objectExtension === "xlsx"
+      ? readSupabaseObjectBuffer(storage.path).then(excelRowsFromBuffer)
+      : readSupabaseObjectText(storage.path).then(csvRowsFromText);
     while (csvRowsCache.size >= maxCachedCsvFiles) {
       const oldestKey = csvRowsCache.keys().next().value;
       if (!oldestKey) break;

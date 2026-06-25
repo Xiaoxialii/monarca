@@ -39,7 +39,8 @@ function publicConfig(configValue: unknown) {
         ? storage.key
         : null;
   const hasStoredFile = (typeof config.storedFilePath === "string" && Boolean(config.storedFilePath)) ||
-    ((config.storageProvider === "r2" || storage?.provider === "cloudflare-r2") && Boolean(objectKey));
+    ((config.storageProvider === "r2" || storage?.provider === "cloudflare-r2") && Boolean(objectKey)) ||
+    (typeof config.inlineFileBase64 === "string" && Boolean(config.inlineFileBase64));
 
   return {
     type: typeof config.type === "string" ? config.type : null,
@@ -109,6 +110,7 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
 export async function GET() {
   try {
     const session = await requireWorkspace();
+    const includeDeleted = true;
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -120,6 +122,7 @@ export async function GET() {
         name: true,
         provider: true,
         type: true,
+        isActive: true,
         status: true,
         connectionMode: true,
         authMethod: true,
@@ -127,16 +130,50 @@ export async function GET() {
         schemas: true,
         connectedAt: true,
         lastSyncAt: true,
-        createdAt: true
+        createdAt: true,
+        updatedAt: true
       },
       orderBy: {
         createdAt: "desc"
       }
     });
+    const deletedDataSources = includeDeleted
+      ? await prisma.dataSourceConnection.findMany({
+          where: {
+            workspaceId: session.workspace.id,
+            isActive: false,
+            status: ConnectionStatus.DISCONNECTED
+          },
+          select: {
+            id: true,
+            name: true,
+            provider: true,
+            type: true,
+            isActive: true,
+            status: true,
+            connectionMode: true,
+            authMethod: true,
+            config: true,
+            schemas: true,
+            connectedAt: true,
+            lastSyncAt: true,
+            createdAt: true,
+            updatedAt: true
+          },
+          orderBy: {
+            updatedAt: "desc"
+          },
+          take: 20
+        })
+      : [];
 
-    return NextResponse.json({
-      ok: true,
-      dataSources: dataSources.map((source) => ({
+    const publicDataSource = (source: typeof dataSources[number]) => {
+      const deletedAt = source.updatedAt?.toISOString() ?? null;
+      const retentionExpiresAt = source.isActive === false && source.updatedAt
+        ? new Date(source.updatedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+      return {
         id: source.id,
         name: source.name,
         provider: source.provider,
@@ -151,8 +188,21 @@ export async function GET() {
           null
         ),
         connectedAt: source.connectedAt?.toISOString() ?? null,
-        lastSyncAt: source.lastSyncAt?.toISOString() ?? null
-      }))
+        lastSyncAt: source.lastSyncAt?.toISOString() ?? null,
+        deletedAt: source.isActive === false ? deletedAt : null,
+        retentionExpiresAt
+      };
+    };
+
+    return NextResponse.json({
+      ok: true,
+      workspace: {
+        id: session.workspace.id,
+        name: session.workspace.name,
+        slug: session.workspace.slug
+      },
+      dataSources: dataSources.map(publicDataSource),
+      deletedDataSources: deletedDataSources.map(publicDataSource)
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);

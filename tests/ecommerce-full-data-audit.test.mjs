@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
@@ -117,6 +117,67 @@ test("CSV metric execution computes Average Rating from non-empty order-level ra
 
   assert.equal(rating.status, "computed");
   assert.equal(Number(rating.value).toFixed(4), "4.0400");
+});
+
+test("CSV metric execution supports additive aggregate rollup formulas", async () => {
+  const tmpRoot = join(process.cwd(), ".tmp");
+  mkdirSync(tmpRoot, { recursive: true });
+  const dir = mkdtempSync(join(tmpRoot, "monarca-csv-rollup-"));
+  const filePath = join(dir, "branch_kpi_daily.csv");
+  const text = "date,score_a,score_b\n2026-06-01,1,10\n2026-06-02,3,20\n";
+  writeFileSync(filePath, text);
+  const tables = inferTablesFromCsvText("branch_kpi_daily.csv", text);
+  const tableName = tables[0].name;
+  const [rollup] = await computeMetricResultsForContexts({
+    contexts: [{
+      dataSource: {
+        id: "csv-rollup-source",
+        name: "CSV - branch_kpi_daily.csv",
+        type: DataSourceType.CSV,
+        config: {
+          fileName: "branch_kpi_daily.csv",
+          fileSize: text.length,
+          storedFilePath: filePath
+        }
+      },
+      tables,
+      schemaJson: {
+        fileName: "branch_kpi_daily.csv",
+        tables
+      }
+    }],
+    dateRange: { preset: "ALL" },
+    metrics: [{
+      id: "score-rollup",
+      workspaceId: "workspace",
+      layer: MetricLayer.PRIMARY,
+      category: "Quality",
+      name: "Score Rollup",
+      definition: "Rollup of two score components",
+      formula: `AVG(${tableName}.score_a) + AVG(${tableName}.score_b)`,
+      expressionType: MetricExpressionType.CALCULATION,
+      unit: null,
+      window: null,
+      sourceMetricIds: null,
+      mappingJson: { sourceFields: [{ table: tableName, field: "score_a" }, { table: tableName, field: "score_b" }] },
+      lineageJson: {
+        validation: { validation_status: "valid", validation_errors: [], validation_warnings: [] },
+        metricType: "core_metric",
+        businessType: "logistics",
+        displayName: "Score Rollup"
+      },
+      isActive: true,
+      maintainerRole: MetricMaintainerRole.AI,
+      maintainerUserId: null,
+      status: MetricStatus.AI_READY,
+      tagsJson: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }]
+  });
+
+  assert.equal(rollup.status, "computed");
+  assert.equal(rollup.value, 17);
 });
 
 test("full-data audit blocks stale KPI results that do not match the full CSV aggregation", async (t) => {

@@ -175,6 +175,10 @@ async function streamToBuffer(stream: unknown) {
 }
 
 export async function readR2ObjectText(key: string) {
+  return (await readR2ObjectBuffer(key)).toString("utf8");
+}
+
+export async function readR2ObjectBuffer(key: string) {
   const config = r2Config();
 
   if (!config) {
@@ -192,7 +196,7 @@ export async function readR2ObjectText(key: string) {
     throw new Error("Uploaded file is empty or unavailable.");
   }
 
-  return (await streamToBuffer(response.Body)).toString("utf8");
+  return streamToBuffer(response.Body);
 }
 
 export async function storeUploadInR2(params: {

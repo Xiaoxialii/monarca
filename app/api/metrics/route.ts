@@ -20,6 +20,10 @@ function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
+  return asRecord(metric.lineageJson)?.generatedFrom === "business_metric_registry";
+}
+
 function mappingLabel(mappingJson: unknown) {
   const mapping = asRecord(mappingJson);
   const sourceFields = Array.isArray(mapping?.sourceFields) ? mapping.sourceFields : [];
@@ -66,9 +70,10 @@ export async function GET() {
       ]
     });
     let visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
+    let visibleRegistryMetrics = visibleMetrics.filter(isBusinessMetricRegistryMetric);
 
     if (
-      visibleMetrics.length === 0 &&
+      visibleRegistryMetrics.length === 0 &&
       (session.membership.role === WorkspaceRole.OWNER || session.membership.role === WorkspaceRole.ADMIN)
     ) {
       if (primarySnapshot) {
@@ -97,12 +102,14 @@ export async function GET() {
           ]
         });
         visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, refreshedTableLabels));
+        visibleRegistryMetrics = visibleMetrics.filter(isBusinessMetricRegistryMetric);
       }
     }
+    const displayMetrics = visibleRegistryMetrics.length > 0 ? visibleRegistryMetrics : visibleMetrics;
 
     return NextResponse.json({
       ok: true,
-      metrics: visibleMetrics.map((metric) => ({
+      metrics: displayMetrics.map((metric) => ({
         id: metric.id,
         layer: metric.layer,
         category: metric.category,

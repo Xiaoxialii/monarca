@@ -3,16 +3,22 @@ import { MetricExpressionType, MetricLayer, MetricMaintainerRole, MetricStatus, 
 import type { SchemaTable } from "@/lib/metric-validation";
 import { detectRegistryIndustry } from "@/lib/metrics/industry-detector";
 import { ecommerceMetricRegistryForTable, type BusinessMetricDefinition } from "@/lib/metrics/ecommerce-metrics";
+import {
+  logisticsBranchKpiResolutionRegistry,
+  missingLogisticsCoreMetrics
+} from "@/lib/metrics/logistics-branch-kpi-metrics";
+import type { LogisticsKpiOperatingSystem } from "@/lib/logistics-kpi-operating-system";
 
 type RegistryClient = PrismaClient | Prisma.TransactionClient;
 
 export type BusinessMetricRegistry = {
   metricRegistryId: string;
-  industry: "ecommerce" | "generic";
+  industry: "ecommerce" | "logistics_service_kpi" | "generic";
   version: number;
   sourceSignature: string;
   definitions: BusinessMetricDefinition[];
   missingCoreMetrics: Array<{ metricId: string; businessName: string; reason: string }>;
+  logisticsKpiOperatingSystem?: LogisticsKpiOperatingSystem | null;
 };
 
 function stableHash(value: unknown) {
@@ -75,15 +81,19 @@ function coreMissing(definitions: BusinessMetricDefinition[]) {
 }
 
 export function buildBusinessMetricRegistry({
-  tables
+  tables,
+  workspaceId
 }: {
   tables: SchemaTable[];
   semanticLayer?: unknown;
+  workspaceId?: string | null;
 }): BusinessMetricRegistry {
   const detection = detectRegistryIndustry(tables);
   const definitions = detection.industry === "ecommerce"
     ? tables.flatMap((table) => ecommerceMetricRegistryForTable(table))
-    : [];
+    : detection.industry === "logistics_service_kpi"
+      ? logisticsBranchKpiResolutionRegistry(tables)
+      : [];
   const source = sourceSignature(tables);
   const registryHash = stableHash({
     industry: detection.industry,
@@ -97,12 +107,18 @@ export function buildBusinessMetricRegistry({
   });
 
   return {
-    metricRegistryId: `${detection.industry}:${registryHash}`,
+    metricRegistryId: detection.industry === "logistics_service_kpi" && workspaceId
+      ? `logistics_branch_kpi_resolution:${workspaceId}`
+      : `${detection.industry}:${registryHash}`,
     industry: detection.industry,
     version: 1,
     sourceSignature: source,
     definitions,
-    missingCoreMetrics: detection.industry === "ecommerce" ? coreMissing(definitions) : []
+    missingCoreMetrics: detection.industry === "ecommerce"
+      ? coreMissing(definitions)
+      : detection.industry === "logistics_service_kpi"
+        ? missingLogisticsCoreMetrics(definitions)
+        : []
   };
 }
 
@@ -169,6 +185,17 @@ export async function upsertBusinessMetricRegistryDefinitions(
           priority: definition.priority,
           isEstimated: definition.isEstimated,
           allowedReports: definition.allowedReports,
+          logisticsKpiOperatingSystem: registry.logisticsKpiOperatingSystem
+            ? {
+                metricTreeGroups: registry.logisticsKpiOperatingSystem.metric_tree
+                  .filter((group) => group.metrics.some((metric) => metric.metric_key === definition.metricId))
+                  .map((group) => group.group),
+                scoringRules: registry.logisticsKpiOperatingSystem.scoring_model.rules
+                  .filter((rule) => rule.metrics.some((metric) => metric.metric_key === definition.metricId)),
+                impactModel: registry.logisticsKpiOperatingSystem.impact_model.metrics
+                  .find((metric) => metric.metric_key === definition.metricId) ?? null
+              }
+            : null,
           validation: {
             validation_status: "valid",
             validation_errors: [],
@@ -209,6 +236,17 @@ export async function upsertBusinessMetricRegistryDefinitions(
           priority: definition.priority,
           isEstimated: definition.isEstimated,
           allowedReports: definition.allowedReports,
+          logisticsKpiOperatingSystem: registry.logisticsKpiOperatingSystem
+            ? {
+                metricTreeGroups: registry.logisticsKpiOperatingSystem.metric_tree
+                  .filter((group) => group.metrics.some((metric) => metric.metric_key === definition.metricId))
+                  .map((group) => group.group),
+                scoringRules: registry.logisticsKpiOperatingSystem.scoring_model.rules
+                  .filter((rule) => rule.metrics.some((metric) => metric.metric_key === definition.metricId)),
+                impactModel: registry.logisticsKpiOperatingSystem.impact_model.metrics
+                  .find((metric) => metric.metric_key === definition.metricId) ?? null
+              }
+            : null,
           validation: {
             validation_status: "valid",
             validation_errors: [],

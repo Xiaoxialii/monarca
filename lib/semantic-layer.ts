@@ -24,6 +24,37 @@ type SemanticField = {
   confidence: number;
 };
 
+type KpiAssetCategory = "business_scale" | "efficiency" | "quality" | "experience";
+
+type KpiAsset = {
+  kpi_id: string;
+  kpi_name: string;
+  group_name?: string;
+  category: KpiAssetCategory;
+  definition: string;
+  direction: "higher_is_better" | "lower_is_better" | "unknown";
+  source_columns: string[];
+  formula: string;
+  unit?: string;
+  components?: Array<{
+    role: "numerator" | "denominator" | "rate" | "score" | "value";
+    source_column: string;
+    raw_header_path: string[];
+  }>;
+};
+
+type ExcludedKpiColumn = {
+  column: string;
+  reason: string;
+};
+
+type KpiAssetLibrary = {
+  total_kpi_count: number;
+  kpi_registry: KpiAsset[];
+  column_mapping: Record<string, string>;
+  excluded_columns: ExcludedKpiColumn[];
+};
+
 type BusinessEntity = {
   name: string;
   table: string;
@@ -55,6 +86,8 @@ type MetricDraft = {
   isEstimated?: boolean;
   requiresDeduplication?: boolean;
   warning?: string;
+  metricDirection?: "higher_is_better" | "lower_is_better" | "neutral";
+  priority?: number;
 };
 
 type SemanticLayerResult = {
@@ -62,6 +95,7 @@ type SemanticLayerResult = {
   entities: BusinessEntity[];
   metrics: MetricDraft[];
   metricGeneration?: MetricGenerationOutput;
+  kpiAssetLibrary: KpiAssetLibrary;
 };
 
 type SemanticTransaction = Prisma.TransactionClient | PrismaClient;
@@ -70,9 +104,27 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 }
 
+function normalizeReadableHeader(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function compactHeader(value: string) {
+  return normalizeReadableHeader(value).replace(/[^\p{L}\p{N}%]+/gu, "");
+}
+
 function metricDedupeKey(name: string) {
-  return normalize(name)
+  const normalized = normalize(name)
     .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const compact = compactHeader(name);
+  const baseKey = /[^\x00-\x7F]/.test(name) ? compact || normalized : normalized || compact || name.trim();
+
+  return baseKey
     .replace(/^(average|avg)_/, "avg_")
     .replace(/_average_/, "_avg_")
     .replace(/_polarity$/, "_sentiment_polarity")
@@ -113,7 +165,14 @@ function safeIdentifier(value: string) {
     .replace(/[^a-zA-Z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-  return normalized || "field";
+  if (normalized) return normalized;
+
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return `field_${hash.toString(36)}`;
 }
 
 function tableKey(table: IntrospectedTable) {
@@ -513,6 +572,517 @@ function metricDraftsFromIndustryGenerator(tables: IntrospectedTable[], semantic
   })));
 
   return { metricGeneration, metrics };
+}
+
+function stableKpiId(name: string) {
+  const compact = compactHeader(name);
+  const ascii = normalize(name).replace(/^_+|_+$/g, "");
+
+  if (/一次(?:性)?未解决|一次解决失败|首次处理失败|first.*resolution.*fail|unresolved/.test(compact)) {
+    return "first_contact_unresolved";
+  }
+  if (/催单|urge|chasing|escalation/.test(compact)) return "urge_order_count";
+  if (/回访未解决|followup.*unresolved/.test(compact)) return "followup_unresolved_count";
+  if (/二次工单|second.*ticket/.test(compact)) return "second_ticket_count";
+  if (/重复进线|repeat.*contact/.test(compact)) return "repeat_contact_count";
+  if (/问题解决得分|problem.*resolution.*score/.test(compact)) return "problem_resolution_score";
+  if (/时效.*得分|timeliness.*score/.test(compact)) return "timeliness_score";
+  if (/投递.*得分|delivery.*standard.*score/.test(compact)) return "delivery_standard_score";
+  if (/揽收.*得分|pickup.*score/.test(compact)) return "pickup_score";
+
+  return ascii || `kpi_${Array.from(compact).map((char) => char.codePointAt(0)?.toString(36) ?? "").join("_")}`;
+}
+
+function classifyKpiAssetCategory(name: string): KpiAssetCategory {
+  const compact = compactHeader(name);
+
+  if (/时间|时效|及时|响应|处理时长|解决时长|sla|timeliness|response|resolutiontime|speed/.test(compact)) {
+    return "efficiency";
+  }
+  if (/未解决|返工|重复|二次|回访未解决|失败|错误|合格|规范|质量|解决率|解决得分|unresolved|rework|repeat|second|failed|error|quality|resolution/.test(compact)) {
+    return "quality";
+  }
+  if (/满意|投诉|差评|客户体验|评价|csat|complaint|satisfaction|negative|rating/.test(compact)) {
+    return "experience";
+  }
+  return "business_scale";
+}
+
+function inferKpiDirection(name: string): KpiAsset["direction"] {
+  const compact = compactHeader(name);
+
+  if (/未解决|失败|错误|投诉|差评|取消|催单|二次|重复|失分|超时|unresolved|failed|error|complaint|cancel|urge|repeat|second|loss|timeout/.test(compact)) {
+    return "lower_is_better";
+  }
+  if (/排名|rank/.test(compact)) return "lower_is_better";
+  if (/率|分|得分|总分|完成|达成|合格|满意|解决|score|rate|completion|success|satisfaction|resolution/.test(compact)) {
+    return "higher_is_better";
+  }
+  return "unknown";
+}
+
+function isGroupHeaderColumn(name: string) {
+  const compact = compactHeader(name);
+  return /^(散件揽收|时效达成|投递规范|问题解决|加减分项|加减分)\d*$/.test(compact);
+}
+
+function kpiComponentRole(value: string): NonNullable<KpiAsset["components"]>[number]["role"] | null {
+  const compact = compactHeader(value);
+
+  if (/^(分子|numerator)$/.test(compact)) return "numerator";
+  if (/^(分母|denominator)$/.test(compact)) return "denominator";
+  if (/^(率值|ratevalue|rate|ratio)$/.test(compact)) return "rate";
+  if (/^(得分|分|score)$/.test(compact)) return "score";
+  return null;
+}
+
+function kpiWeightFromGroup(value?: string) {
+  if (!value) return null;
+  const match = /[(（]\s*(\d+(?:\.\d+)?)\s*[)）]/.exec(value);
+  return match ? Number(match[1]) : null;
+}
+
+function rawHeaderPath(column: IntrospectedTable["columns"][number]) {
+  const record = column as typeof column & { rawHeaderPath?: unknown; displayName?: unknown };
+  const path = Array.isArray(record.rawHeaderPath)
+    ? record.rawHeaderPath.filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    : [];
+  const displayName = typeof record.displayName === "string" && record.displayName.trim() ? record.displayName.trim() : column.name;
+
+  return path.length ? path : [displayName];
+}
+
+function kpiAssetDisplayName(column: IntrospectedTable["columns"][number]) {
+  const record = column as typeof column & { displayName?: unknown };
+  return typeof record.displayName === "string" && record.displayName.trim() ? record.displayName.trim() : column.name;
+}
+
+function kpiColumnClassification(name: string): { kind: "business_kpi" | "derived" | "structural" | "group_header"; reason: string } {
+  const compact = compactHeader(name);
+  const ascii = normalize(name);
+
+  if (!compact) {
+    return { kind: "structural", reason: "空列名或不可识别列名，不作为业务 KPI。" };
+  }
+
+  if (/[（(]\s*\d+(?:\.\d+)?\s*[)）]/.test(name)) {
+    return { kind: "business_kpi", reason: "该列包含 KPI 权重，属于一级或二级业务指标。" };
+  }
+
+  if (/(^|_)(numerator|denominator|zero_line|max_line|full_score_line|intermediate)($|_)/.test(ascii) ||
+      /(分子|分母|零分线|满分线|中间计算字段)$/.test(compact) ||
+      /^(分子|分母|零分线|满分线|中间计算字段)$/.test(compact)) {
+    return { kind: "derived", reason: "计算辅助字段用于推导指标，不进入业务 KPI 资产库。" };
+  }
+
+  if (/^(区间|kpi总分|全国排名|省区排名|进步排名|业务量|签收量|日均业务量|日均签收量)$/.test(compact) ||
+      /(全国排名|省区排名|进步排名)$/.test(compact)) {
+    return { kind: "business_kpi", reason: "该列是业务排名、汇总或规模指标，可用于报表监控。" };
+  }
+
+  if (/^(订单量|ordercount|ordervolume)$/.test(compact)) {
+    return { kind: "business_kpi", reason: "该列是指标组下的业务规模字段，可用于分组订单量展示。" };
+  }
+
+  if (/^(责任量|responsibilityvolume|responsibilitycount)$/.test(compact)) {
+    return { kind: "business_kpi", reason: "该列是嵌套 KPI 下的责任量组件，可用于下钻解释。" };
+  }
+
+  if (/^(率值|占比)$/.test(compact)) {
+    return { kind: "business_kpi", reason: "该列是宽表中的指标结果值，可直接进入 KPI 展示。" };
+  }
+
+  if (isGroupHeaderColumn(name)) {
+    return { kind: "group_header", reason: "分组表头用于组织指标，不是可计算业务 KPI。" };
+  }
+
+  if (/(率|分|得分|总分|比率|完成率|时效率|合格率)$/.test(compact) ||
+      /(sla|complaint.*rate|delivery.*rate|success.*rate|completion.*rate|score|rate|ratio)$/i.test(name)) {
+    return { kind: "business_kpi", reason: "该列描述业务表现、比率或得分，可跨报表复用。" };
+  }
+
+  if (/(投诉率|妥投率|解决率|未解决率|及时率|达成率|取消率|完结率|满意度|准确率|规范率)/.test(compact)) {
+    return { kind: "business_kpi", reason: "该列是管理关注的运营表现指标。" };
+  }
+
+  return { kind: "structural", reason: "该列更像维度、标签或原始业务字段，不计入业务 KPI。" };
+}
+
+function kpiFormulaForColumn(table: string, column: string, name: string) {
+  const reference = `${table}.${safeIdentifier(column)}`;
+  const compact = compactHeader(name);
+
+  if (/排名|rank/i.test(name) || /排名/.test(compact)) return `AVG(${reference})`;
+  if (/率|比率|rate|ratio/i.test(name) || /率|比率/.test(compact)) return `AVG(${reference})`;
+  if (/分|得分|总分|score/i.test(name) || /分|得分|总分/.test(compact)) return `AVG(${reference})`;
+  return `SUM(${reference})`;
+}
+
+function groupBaseName(name: string) {
+  return name.replace(/[（(]\s*-?\d+(?:\.\d+)?\s*[)）]/g, "").trim();
+}
+
+function isGroupedHeaderScaffoldLeaf(name: string) {
+  const compact = compactHeader(name);
+  return /^(分子|分母|中间计算字段)$/.test(compact);
+}
+
+function isSummaryGroupedHeader(name: string) {
+  const compact = compactHeader(name);
+  return /^(kpi总分|核心模块总分)$/.test(compact);
+}
+
+function isFixedLogisticsKpiGroup(name: string | undefined) {
+  const compact = compactHeader(name ?? "");
+  return /^(散件揽收|时效达成|投递规范|问题解决|加减分项)$/.test(compact);
+}
+
+function groupedHeaderLeafUnit(path: string[]) {
+  const text = path.join(" ");
+  const leaf = compactHeader(path[path.length - 1] ?? "");
+
+  if (/求助率|遗失破损率/.test(text) && /^(率值)$/.test(leaf)) return "basis_points";
+  if (/^(得分|总分|最终得分|申诉率减分|总减分)$/.test(leaf)) return "score";
+  if (/^(率值|占比|得分率|零分线|满分线)$/.test(leaf)) return "percent";
+  if (/^(责任量|订单量|业务量|签收量|日均业务量|日均签收量)$/.test(leaf)) return "number";
+
+  return undefined;
+}
+
+function groupedHeaderAssetName(path: string[]) {
+  const leaf = path[path.length - 1] ?? "";
+  const parentParts = path.slice(1, -1).map(groupBaseName).filter(Boolean);
+  const parent = parentParts.join(" / ");
+  const group = groupBaseName(path[0] ?? "");
+  const compactLeaf = compactHeader(leaf);
+
+  if (path.length === 2 && isSummaryGroupedHeader(group) && /^(总分|score|totalscore)$/.test(compactLeaf)) {
+    return group;
+  }
+
+  if (/^(订单量|ordercount|ordervolume)$/.test(compactLeaf) && group) {
+    return `${group} ${leaf}`;
+  }
+
+  if (!parent) return groupBaseName(leaf);
+
+  if (/^(率值|得分|占比|总分|最终得分|零分线|满分线|责任量)$/.test(compactLeaf)) {
+    return `${parent} ${leaf}`;
+  }
+
+  return groupBaseName(leaf);
+}
+
+function groupedHeaderAssetId(group: string | undefined, path: string[]) {
+  const name = [groupBaseName(group ?? ""), ...path.slice(1).map(groupBaseName)].filter(Boolean).join("_");
+  return stableKpiId(name);
+}
+
+function groupedHeaderComponentRole(leaf: string): NonNullable<KpiAsset["components"]>[number]["role"] {
+  const explicit = kpiComponentRole(leaf);
+  if (explicit) return explicit;
+
+  const compact = compactHeader(leaf);
+  if (/率|占比|ratio|rate/i.test(leaf) || /率|占比/.test(compact)) return "rate";
+  if (/分|得分|减分|score/i.test(leaf) || /分|得分|减分/.test(compact)) return "score";
+  return "value";
+}
+
+function groupedHeaderRollupName(path: string[]) {
+  return groupBaseName(path[path.length - 1] ?? "");
+}
+
+function groupedHeaderRollupId(path: string[]) {
+  return stableKpiId(path.map(groupBaseName).filter(Boolean).join("_"));
+}
+
+function groupedHeaderRollupFormula(tableName: string, columns: Array<{ column: string; name: string }>) {
+  return columns
+    .map((column) => kpiFormulaForColumn(tableName, column.column, column.name))
+    .join(" + ");
+}
+
+function kpiExpressionType(name: string) {
+  const compact = compactHeader(name);
+  return /率|比率|rate|ratio/i.test(name) || /率|比率/.test(compact)
+    ? MetricExpressionType.RATE
+    : MetricExpressionType.AGGREGATE;
+}
+
+function buildGroupedHeaderKpiAssets(table: IntrospectedTable, tableName: string) {
+  const assetsByKey = new Map<string, KpiAsset>();
+  const rollupsByKey = new Map<string, {
+    path: string[];
+    group: string | undefined;
+    columns: Array<{
+      column: string;
+      leaf: string;
+      path: string[];
+    }>;
+  }>();
+  const excluded: ExcludedKpiColumn[] = [];
+
+  for (const column of table.columns) {
+    const path = rawHeaderPath(column);
+
+    if (path.length < 2) {
+      const rawName = kpiAssetDisplayName(column);
+      const classification = kpiColumnClassification(rawName);
+
+      if (classification.kind === "business_kpi" && !/^区间$/.test(compactHeader(rawName))) {
+        const assetId = stableKpiId(rawName);
+        const key = `|${assetId}|${rawName}`;
+
+        assetsByKey.set(key, {
+          kpi_id: assetId,
+          kpi_name: rawName,
+          category: classifyKpiAssetCategory(rawName),
+          definition: `${rawName} 是从 Excel 顶层字段识别出的可复用业务 KPI。`,
+          direction: inferKpiDirection(rawName),
+          source_columns: [`${tableName}.${column.name}`],
+          formula: kpiFormulaForColumn(tableName, column.name, rawName),
+          components: [{
+            role: groupedHeaderComponentRole(rawName),
+            source_column: column.name,
+            raw_header_path: path.length ? path : [rawName]
+          }]
+        });
+      } else if (rawName) {
+        excluded.push({
+          column: rawName,
+          reason: classification.reason
+        });
+      }
+
+      continue;
+    }
+
+    const group = path[0];
+    const leaf = path[path.length - 1];
+    const metricName = path.length > 2 ? path[path.length - 2] : leaf;
+    const classification = kpiColumnClassification(leaf);
+    const isScaffoldLeaf = isGroupedHeaderScaffoldLeaf(leaf);
+
+    if (leaf && classification.kind === "business_kpi" && !isScaffoldLeaf && !isFixedLogisticsKpiGroup(group)) {
+      for (let index = 1; index < path.length; index += 1) {
+        const rollupPath = path.slice(0, index);
+        const rollupName = groupedHeaderRollupName(rollupPath);
+
+        if (!rollupName) {
+          continue;
+        }
+
+        if (index === 1 && isSummaryGroupedHeader(rollupName)) {
+          continue;
+        }
+
+        const rollupKey = `${group ?? ""}|${groupedHeaderRollupId(rollupPath)}|${rollupName}`;
+        const existing = rollupsByKey.get(rollupKey);
+        const nextColumn = {
+          column: column.name,
+          leaf,
+          path
+        };
+
+        if (existing) {
+          existing.columns.push(nextColumn);
+        } else {
+          rollupsByKey.set(rollupKey, {
+            path: rollupPath,
+            group,
+            columns: [nextColumn]
+          });
+        }
+      }
+    }
+
+    if (
+      !leaf ||
+      classification.kind === "structural" ||
+      classification.kind === "group_header" ||
+      isScaffoldLeaf
+    ) {
+      excluded.push({
+        column: kpiAssetDisplayName(column),
+        reason: classification.reason
+      });
+      continue;
+    }
+
+    const assetName = groupedHeaderAssetName(path);
+    const assetId = groupedHeaderAssetId(group, path);
+    const key = `${group ?? ""}|${assetId}|${assetName}`;
+    const weight = kpiWeightFromGroup(metricName) ?? kpiWeightFromGroup(path[1]);
+
+    assetsByKey.set(key, {
+      kpi_id: assetId,
+      kpi_name: assetName,
+      group_name: group,
+      category: classifyKpiAssetCategory(`${group ?? ""} ${assetName}`),
+      definition: weight
+        ? `${assetName} 属于「${group}」指标组，权重 ${weight} 分，可跨日报、周报、月报和看板复用。`
+        : `${assetName} 是从 Excel 分组表头识别出的可复用业务 KPI。`,
+      direction: inferKpiDirection(assetName),
+      source_columns: [`${tableName}.${column.name}`],
+      formula: kpiFormulaForColumn(tableName, column.name, assetName),
+      unit: groupedHeaderLeafUnit(path),
+      components: [{
+        role: groupedHeaderComponentRole(leaf),
+        source_column: column.name,
+        raw_header_path: path
+      }]
+    });
+  }
+
+  for (const [key, rollup] of rollupsByKey) {
+    if (assetsByKey.has(key) || rollup.columns.length === 0) {
+      continue;
+    }
+
+    const assetName = groupedHeaderRollupName(rollup.path);
+    const assetId = groupedHeaderRollupId(rollup.path);
+    const weight = kpiWeightFromGroup(rollup.path[rollup.path.length - 1]) ?? kpiWeightFromGroup(rollup.group);
+    const sourceColumns = rollup.columns.map((column) => `${tableName}.${column.column}`);
+
+    assetsByKey.set(key, {
+      kpi_id: assetId,
+      kpi_name: assetName,
+      group_name: rollup.group,
+      category: classifyKpiAssetCategory(`${rollup.group ?? ""} ${assetName}`),
+      definition: weight
+        ? `${assetName} 是从 Excel 多级表头识别出的汇总 KPI，权重 ${weight} 分。`
+        : `${assetName} 是从 Excel 多级表头识别出的一级或二级汇总 KPI。`,
+      direction: inferKpiDirection(assetName),
+      source_columns: Array.from(new Set(sourceColumns)),
+      formula: groupedHeaderRollupFormula(tableName, rollup.columns.map((column) => ({
+        column: column.column,
+        name: `${assetName} ${column.leaf}`
+      }))),
+      components: rollup.columns.map((column) => ({
+        role: groupedHeaderComponentRole(column.leaf),
+        source_column: column.column,
+        raw_header_path: column.path
+      }))
+    });
+  }
+
+  return {
+    assets: Array.from(assetsByKey.values()),
+    excluded
+  };
+}
+
+function buildKpiAssetLibrary(tables: IntrospectedTable[]): KpiAssetLibrary {
+  const registryById = new Map<string, KpiAsset>();
+  const columnMapping: Record<string, string> = {};
+  const excludedColumns: ExcludedKpiColumn[] = [];
+
+  for (const table of tables) {
+    const tableName = tableKey(table);
+    const grouped = buildGroupedHeaderKpiAssets(table, tableName);
+
+    if (grouped.assets.length > 0) {
+      for (const asset of grouped.assets) {
+        const key = `${asset.group_name ?? ""}|${asset.kpi_id}|${asset.kpi_name}`;
+        registryById.set(key, asset);
+        for (const component of asset.components ?? []) {
+          columnMapping[component.raw_header_path.join(" / ")] = asset.kpi_id;
+          columnMapping[component.source_column] = asset.kpi_id;
+        }
+      }
+      excludedColumns.push(...grouped.excluded);
+      continue;
+    }
+
+    for (const column of table.columns) {
+      const rawName = kpiAssetDisplayName(column);
+      const classification = kpiColumnClassification(rawName);
+
+      if (classification.kind !== "business_kpi") {
+        excludedColumns.push({
+          column: rawName,
+          reason: classification.reason
+        });
+        continue;
+      }
+
+      const kpiId = stableKpiId(rawName);
+      columnMapping[rawName] = kpiId;
+      columnMapping[column.name] = kpiId;
+
+      const existing = registryById.get(kpiId);
+      if (existing) {
+        registryById.set(kpiId, {
+          ...existing,
+          source_columns: Array.from(new Set([...existing.source_columns, `${tableName}.${column.name}`]))
+        });
+        continue;
+      }
+
+      registryById.set(kpiId, {
+        kpi_id: kpiId,
+        kpi_name: rawName,
+        category: classifyKpiAssetCategory(rawName),
+        definition: `${rawName} 是可跨日报、周报、月报和看板复用的业务 KPI。`,
+        direction: inferKpiDirection(rawName),
+        source_columns: [`${tableName}.${column.name}`],
+        formula: kpiFormulaForColumn(tableName, column.name, rawName)
+      });
+    }
+  }
+
+  const kpiRegistry = Array.from(registryById.values());
+
+  return {
+    total_kpi_count: kpiRegistry.length,
+    kpi_registry: kpiRegistry,
+    column_mapping: columnMapping,
+    excluded_columns: excludedColumns
+  };
+}
+
+function metricDraftsFromKpiAssetLibrary(kpiAssetLibrary: KpiAssetLibrary, semanticFields: SemanticField[]): MetricDraft[] {
+  return kpiAssetLibrary.kpi_registry.map((asset): MetricDraft => {
+    const sourceFields = asset.source_columns.flatMap((reference) => {
+      const separatorIndex = reference.lastIndexOf(".");
+      const table = separatorIndex >= 0 ? reference.slice(0, separatorIndex) : "";
+      const rawField = separatorIndex >= 0 ? reference.slice(separatorIndex + 1) : reference;
+      const safeField = safeIdentifier(rawField);
+      const existing = semanticFields.find((field) => field.table === table && field.field === safeField);
+
+      return existing ? [existing] : [{
+        table,
+        field: safeField,
+        displayField: rawField,
+        dataType: null,
+        semanticType: "business_kpi_column",
+        businessMeaning: asset.definition,
+        confidence: 0.88
+      }];
+    });
+
+    return {
+      layer: MetricLayer.PRIMARY,
+      category: asset.category,
+      name: asset.kpi_name,
+      definition: asset.definition,
+      formula: asset.formula,
+      expressionType: kpiExpressionType(asset.kpi_name),
+      unit: asset.unit ?? (/率|ratio|rate|percent/i.test(asset.kpi_name) ? "percent" : /分|score/i.test(asset.kpi_name) ? "score" : undefined),
+      sourceFields,
+      tags: ["Semantic KPI Asset", asset.category, asset.direction],
+      status: MetricStatus.AI_READY,
+      confidence: 0.88,
+      riskLevel: "low",
+      displayName: asset.kpi_name,
+      metricType: "core_metric",
+      metricCategory: asset.category,
+      businessType: "semantic_kpi_asset",
+      isBenchmarkMetric: false,
+      metricDirection: asset.direction === "unknown" ? "neutral" : asset.direction,
+      priority: 10
+    };
+  });
 }
 
 export function createMetricDrafts(fields: SemanticField[]): MetricDraft[] {
@@ -1081,7 +1651,8 @@ export function createMetricDrafts(fields: SemanticField[]): MetricDraft[] {
 }
 
 export function buildSemanticLayer(tables: IntrospectedTable[]): SemanticLayerResult {
-  const fields = tables.flatMap((table) => {
+  const kpiAssetLibrary = buildKpiAssetLibrary(tables);
+  const inferredFields = tables.flatMap((table) => {
     const key = tableKey(table);
 
     return table.columns.flatMap((column) => {
@@ -1100,11 +1671,39 @@ export function buildSemanticLayer(tables: IntrospectedTable[]): SemanticLayerRe
       }];
     });
   });
+  const existingFieldKeys = new Set(inferredFields.map((field) => `${field.table}.${field.field}`));
+  const kpiFields = kpiAssetLibrary.kpi_registry.flatMap((asset) =>
+    asset.source_columns.flatMap((reference) => {
+      const separatorIndex = reference.lastIndexOf(".");
+      const table = separatorIndex >= 0 ? reference.slice(0, separatorIndex) : "";
+      const rawField = separatorIndex >= 0 ? reference.slice(separatorIndex + 1) : reference;
+      const field = safeIdentifier(rawField);
+      const key = `${table}.${field}`;
+
+      if (existingFieldKeys.has(key)) {
+        return [];
+      }
+
+      existingFieldKeys.add(key);
+      return [{
+        table,
+        field,
+        displayField: rawField,
+        dataType: null,
+        semanticType: "business_kpi_column",
+        businessMeaning: asset.definition,
+        confidence: 0.88
+      }];
+    })
+  );
+  const fields = [...inferredFields, ...kpiFields];
 
   const entities = inferBusinessEntities(tables, fields);
-  const { metricGeneration, metrics } = metricDraftsFromIndustryGenerator(tables, fields);
+  const { metricGeneration, metrics: generatedMetrics } = metricDraftsFromIndustryGenerator(tables, fields);
+  const kpiAssetMetrics = metricDraftsFromKpiAssetLibrary(kpiAssetLibrary, fields);
+  const metrics = dedupeMetricDrafts(kpiAssetMetrics.length > 0 ? kpiAssetMetrics : generatedMetrics);
 
-  return { fields, entities, metrics, metricGeneration };
+  return { fields, entities, metrics, metricGeneration, kpiAssetLibrary };
 }
 
 export async function generateSemanticMetrics(
@@ -1112,11 +1711,13 @@ export async function generateSemanticMetrics(
   {
     workspaceId,
     userId,
-    semanticLayer
+    semanticLayer,
+    deactivateStale = true
   }: {
     workspaceId: string;
     userId?: string | null;
     semanticLayer: SemanticLayerResult;
+    deactivateStale?: boolean;
   }
 ) {
   const dedupedMetrics = dedupeMetricDrafts(semanticLayer.metrics);
@@ -1127,19 +1728,21 @@ export async function generateSemanticMetrics(
     return 0;
   }
 
-  await tx.metricDefinition.updateMany({
-    where: {
-      workspaceId,
-      maintainerRole: MetricMaintainerRole.AI,
-      isActive: true,
-      name: {
-        notIn: currentMetricNames
+  if (deactivateStale) {
+    await tx.metricDefinition.updateMany({
+      where: {
+        workspaceId,
+        maintainerRole: MetricMaintainerRole.AI,
+        isActive: true,
+        name: {
+          notIn: currentMetricNames
+        }
+      },
+      data: {
+        isActive: false
       }
-    },
-    data: {
-      isActive: false
-    }
-  });
+    });
+  }
 
   const existingAiMetrics = await tx.metricDefinition.findMany({
     where: {
@@ -1204,14 +1807,20 @@ export async function generateSemanticMetrics(
           sourceFields: metric.sourceFields
         },
         lineageJson: {
-          generatedFrom: "schema_semantic_detection",
+          generatedFrom: metric.businessType === "semantic_kpi_asset" ? "semantic_kpi_asset_library" : "schema_semantic_detection",
+          metricId: metricDedupeKey(metric.name),
           semanticTypes: metric.sourceFields.map((field) => field.semanticType),
           confidence: metric.confidence ?? null,
           riskLevel: metric.riskLevel ?? null,
           displayName: metric.displayName ?? metric.name,
+          unit: metric.unit ?? null,
           metricType: metric.metricType ?? "core_metric",
           metricCategory: metric.metricCategory ?? metric.category,
           businessType: metric.businessType ?? null,
+          metricDirection: metric.metricDirection ?? null,
+          priority: metric.priority ?? null,
+          isCoreMetric: metric.metricType === "core_metric",
+          isBusinessMetric: true,
           sourceDataset: metric.sourceDataset ?? metric.sourceFields[0]?.table ?? null,
           isBenchmarkMetric: metric.isBenchmarkMetric ?? false,
           isEstimated: metric.isEstimated ?? false,
@@ -1237,14 +1846,20 @@ export async function generateSemanticMetrics(
           sourceFields: metric.sourceFields
         },
         lineageJson: {
-          generatedFrom: "schema_semantic_detection",
+          generatedFrom: metric.businessType === "semantic_kpi_asset" ? "semantic_kpi_asset_library" : "schema_semantic_detection",
+          metricId: metricDedupeKey(metric.name),
           semanticTypes: metric.sourceFields.map((field) => field.semanticType),
           confidence: metric.confidence ?? null,
           riskLevel: metric.riskLevel ?? null,
           displayName: metric.displayName ?? metric.name,
+          unit: metric.unit ?? null,
           metricType: metric.metricType ?? "core_metric",
           metricCategory: metric.metricCategory ?? metric.category,
           businessType: metric.businessType ?? null,
+          metricDirection: metric.metricDirection ?? null,
+          priority: metric.priority ?? null,
+          isCoreMetric: metric.metricType === "core_metric",
+          isBusinessMetric: true,
           sourceDataset: metric.sourceDataset ?? metric.sourceFields[0]?.table ?? null,
           isBenchmarkMetric: metric.isBenchmarkMetric ?? false,
           isEstimated: metric.isEstimated ?? false,

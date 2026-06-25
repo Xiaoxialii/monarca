@@ -1,10 +1,14 @@
+import { readFile } from "node:fs/promises";
 import { ConnectionStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import { buildSemanticLayer, generateSemanticMetrics } from "@/lib/semantic-layer";
 import { validateWorkspaceMetrics } from "@/lib/metric-validation";
+import { fileExtension, inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
+import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import {
   buildBusinessMetricRegistry,
   upsertBusinessMetricRegistryDefinitions
 } from "@/lib/metrics/metric-registry";
+import { compileLogisticsKpiOperatingSystem } from "@/lib/logistics-kpi-operating-system";
 
 type MetricGenerationClient = PrismaClient | Prisma.TransactionClient;
 
@@ -29,6 +33,15 @@ export function tablesFromWorkspaceSchema(schemaJson: unknown) {
     return [{
       name,
       schema: typeof tableRecord.schema === "string" ? tableRecord.schema : undefined,
+      rowCount: Number.isFinite(Number(tableRecord.rowCount)) ? Number(tableRecord.rowCount) : undefined,
+      rawHeaderRows: Array.isArray(tableRecord.rawHeaderRows)
+        ? tableRecord.rawHeaderRows
+          .filter((row): row is unknown[] => Array.isArray(row))
+          .map((row) => row.map((cell) => String(cell ?? "")))
+        : undefined,
+      sampleRows: Array.isArray(tableRecord.sampleRows)
+        ? tableRecord.sampleRows.filter((row): row is Record<string, unknown> => Boolean(asRecord(row)))
+        : undefined,
       columns: columns.flatMap((column) => {
         const columnRecord = asRecord(column);
         const columnName = typeof columnRecord.name === "string" ? columnRecord.name : "";
@@ -39,6 +52,9 @@ export function tablesFromWorkspaceSchema(schemaJson: unknown) {
 
         return [{
           name: columnName,
+          displayName: typeof columnRecord.displayName === "string" ? columnRecord.displayName : undefined,
+          semanticName: typeof columnRecord.semanticName === "string" ? columnRecord.semanticName : undefined,
+          rawHeaderPath: Array.isArray(columnRecord.rawHeaderPath) ? columnRecord.rawHeaderPath.filter((part): part is string => typeof part === "string") : undefined,
           type: typeof columnRecord.type === "string" ? columnRecord.type : "unknown",
           nullable: typeof columnRecord.nullable === "boolean" ? columnRecord.nullable : true
         }];
@@ -66,15 +82,129 @@ function uniqueTables(tables: ReturnType<typeof tablesFromWorkspaceSchema>) {
   });
 }
 
-export async function getConnectedWorkspaceSchemaContext(client: MetricGenerationClient, workspaceId: string) {
+function tableHasSnapshotRows(table: { sampleRows?: unknown }) {
+  return Array.isArray(table.sampleRows) && table.sampleRows.length > 0;
+}
+
+function tablesHaveSnapshotRows(tables: Array<{ sampleRows?: unknown }>) {
+  return tables.some(tableHasSnapshotRows);
+}
+
+function sourceHasConnectedFile(source: { config: unknown }) {
+  const config = asRecord(source.config);
+  const storage = asRecord(config.storage);
+  const storageProvider = typeof config.storageProvider === "string" ? config.storageProvider : null;
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
+
+  return typeof config.inlineFileBase64 === "string" && config.inlineFileBase64.trim().length > 0 ||
+    typeof config.storedFilePath === "string" && config.storedFilePath.trim().length > 0 ||
+    ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && Boolean(objectKey));
+}
+
+function normalizeUploadTables(tables: Awaited<ReturnType<typeof inferTablesFromExcelBuffer>>) {
+  return tables.map((table) => ({
+    name: table.name,
+    schema: undefined,
+    rowCount: table.rowCount,
+    rawHeaderRows: table.rawHeaderRows,
+    sampleRows: table.sampleRows,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      displayName: column.displayName,
+      semanticName: column.semanticName,
+      rawHeaderPath: column.rawHeaderPath,
+      type: column.type,
+      nullable: column.nullable
+    }))
+  }));
+}
+
+function inlineUploadBuffer(config: Record<string, unknown>) {
+  const encoded = typeof config.inlineFileBase64 === "string" ? config.inlineFileBase64 : null;
+
+  if (!encoded) {
+    return null;
+  }
+
+  try {
+    return Buffer.from(encoded, "base64");
+  } catch {
+    return null;
+  }
+}
+
+export async function tablesFromConnectedDataSourceFile(source: {
+  name: string;
+  config: unknown;
+}) {
+  const config = asRecord(source.config);
+  const fileName = typeof config.fileName === "string" ? config.fileName : source.name;
+  const extension = fileExtension(fileName);
+
+  const storage = asRecord(config.storage);
+  const storageProvider = typeof config.storageProvider === "string" ? config.storageProvider : null;
+  const objectKey = typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+      : null;
+
+  if ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && objectKey) {
+    const objectExtension = extension || fileExtension(objectKey);
+    const tables = objectExtension === "csv"
+      ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+      : inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
+    return normalizeUploadTables(await tables);
+  }
+
+  const inlineBuffer = inlineUploadBuffer(config);
+
+  if (inlineBuffer) {
+    const tables = extension === "csv"
+      ? inferTablesFromCsvText(fileName, inlineBuffer.toString("utf8"))
+      : inferTablesFromExcelBuffer(fileName, inlineBuffer);
+    return normalizeUploadTables(await tables);
+  }
+
+  if (typeof config.storedFilePath === "string" && config.storedFilePath.trim()) {
+    const buffer = await readFile(config.storedFilePath);
+    const tables = extension === "csv"
+      ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
+      : inferTablesFromExcelBuffer(fileName, buffer);
+    return normalizeUploadTables(await tables);
+  }
+
+  return null;
+}
+
+export async function getConnectedWorkspaceSchemaContext(
+  client: MetricGenerationClient,
+  workspaceId: string,
+  options: { dataSourceIds?: string[] } = {}
+) {
+  const scopedDataSourceIds = [...new Set(options.dataSourceIds ?? [])].filter(Boolean);
   const dataSources = await client.dataSourceConnection.findMany({
     where: {
       workspaceId,
       isActive: true,
-      status: ConnectionStatus.CONNECTED
+      status: ConnectionStatus.CONNECTED,
+      ...(scopedDataSourceIds.length ? { id: { in: scopedDataSourceIds } } : {})
     },
     select: {
-      id: true
+      id: true,
+      name: true,
+      config: true
+    },
+    orderBy: {
+      updatedAt: "desc"
     }
   });
   const snapshots = dataSources.length > 0
@@ -98,25 +228,21 @@ export async function getConnectedWorkspaceSchemaContext(client: MetricGeneratio
     }
   }
 
-  let selectedSnapshots = Array.from(snapshotBySource.values());
+  const selectedSnapshots = Array.from(snapshotBySource.values());
+  const tablesBySource = await Promise.all(dataSources.map(async (source) => {
+    const snapshot = snapshotBySource.get(source.id);
+    const snapshotTables = snapshot ? tablesFromWorkspaceSchema(snapshot.schemaJson) : [];
+    const fileTables = sourceHasConnectedFile(source)
+      ? await tablesFromConnectedDataSourceFile(source).catch(() => null)
+      : null;
 
-  if (selectedSnapshots.length === 0) {
-    const latestSnapshot = await client.schemaSnapshot.findFirst({
-      where: {
-        workspaceId
-      },
-      orderBy: {
-        version: "desc"
-      }
-    });
-
-    selectedSnapshots = latestSnapshot ? [latestSnapshot] : [];
-  }
+    return fileTables?.length ? fileTables : snapshotTables;
+  }));
 
   return {
     primarySnapshot: selectedSnapshots[0] ?? null,
     snapshots: selectedSnapshots,
-    tables: uniqueTables(selectedSnapshots.flatMap((snapshot) => tablesFromWorkspaceSchema(snapshot.schemaJson)))
+    tables: uniqueTables(tablesBySource.flat())
   };
 }
 
@@ -124,13 +250,15 @@ export async function generateWorkspaceMetricsFromConnectedSources(
   client: MetricGenerationClient,
   {
     workspaceId,
-    userId
+    userId,
+    dataSourceIds
   }: {
     workspaceId: string;
     userId?: string | null;
+    dataSourceIds?: string[];
   }
 ) {
-  const context = await getConnectedWorkspaceSchemaContext(client, workspaceId);
+  const context = await getConnectedWorkspaceSchemaContext(client, workspaceId, { dataSourceIds });
 
   if (!context.primarySnapshot) {
     return {
@@ -144,19 +272,36 @@ export async function generateWorkspaceMetricsFromConnectedSources(
   const semanticLayer = buildSemanticLayer(context.tables);
   const metricRegistry = buildBusinessMetricRegistry({
     tables: context.tables,
-    semanticLayer
+    semanticLayer,
+    workspaceId
   });
-  const generatedMetricCount = metricRegistry.definitions.length > 0
+  const logisticsKpiOperatingSystem = metricRegistry.industry === "logistics_service_kpi"
+    ? compileLogisticsKpiOperatingSystem({
+        schema_snapshot: context.primarySnapshot.schemaJson,
+        semantic_metrics: semanticLayer.metrics,
+        business_metric_registry: metricRegistry.definitions,
+        raw_excel_sample: [],
+        workspace_id: workspaceId
+      })
+    : null;
+  const finalizedMetricRegistry = {
+    ...metricRegistry,
+    logisticsKpiOperatingSystem
+  };
+  const registryMetricCount = finalizedMetricRegistry.definitions.length > 0
     ? await upsertBusinessMetricRegistryDefinitions(client, {
         workspaceId,
         userId,
-        registry: metricRegistry
+        registry: finalizedMetricRegistry
       })
-    : await generateSemanticMetrics(client, {
-        workspaceId,
-        userId,
-        semanticLayer
-      });
+    : 0;
+  const semanticMetricCount = await generateSemanticMetrics(client, {
+    workspaceId,
+    userId,
+    semanticLayer,
+    deactivateStale: registryMetricCount === 0
+  });
+  const generatedMetricCount = registryMetricCount + semanticMetricCount;
   const validationResults = await validateWorkspaceMetrics(client, {
     workspaceId,
     tables: context.tables
@@ -170,16 +315,23 @@ export async function generateWorkspaceMetricsFromConnectedSources(
       schemaJson: {
         ...asRecord(context.primarySnapshot.schemaJson),
         semanticLayer,
-        metricRegistry
+        metricRegistry: finalizedMetricRegistry,
+        logisticsKpiOperatingSystem
       },
       qualityReport: {
         ...asRecord(context.primarySnapshot.qualityReport),
         semanticFieldCount: semanticLayer.fields.length,
         businessEntityCount: semanticLayer.entities.length,
         generatedMetricCount,
-        metricRegistryId: metricRegistry.metricRegistryId,
-        detectedIndustry: metricRegistry.industry,
-        missingCoreMetrics: metricRegistry.missingCoreMetrics
+        metricRegistryId: finalizedMetricRegistry.metricRegistryId,
+        detectedIndustry: finalizedMetricRegistry.industry,
+        workspaceType: finalizedMetricRegistry.industry === "logistics_service_kpi" ? "logistics_service_kpi" : undefined,
+        industry: finalizedMetricRegistry.industry === "logistics_service_kpi"
+          ? "logistics / express_delivery / service_operations"
+          : finalizedMetricRegistry.industry,
+        analysisDomain: finalizedMetricRegistry.industry === "logistics_service_kpi" ? "branch_kpi_and_ticket_resolution" : undefined,
+        missingCoreMetrics: finalizedMetricRegistry.missingCoreMetrics,
+        logisticsKpiOperatingSystem
       }
     }
   });
@@ -187,7 +339,8 @@ export async function generateWorkspaceMetricsFromConnectedSources(
   return {
     ...context,
     semanticLayer,
-    metricRegistry,
+    metricRegistry: finalizedMetricRegistry,
+    logisticsKpiOperatingSystem,
     generatedMetricCount,
     validationResults
   };

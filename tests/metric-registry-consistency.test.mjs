@@ -21,6 +21,7 @@ const { inferTablesFromCsvText } = jiti("./lib/file-upload-schema.ts");
 const { buildBusinessMetricRegistry } = jiti("./lib/metrics/metric-registry.ts");
 const { validateMetricConsistency } = jiti("./lib/metrics/metric-consistency-validator.ts");
 const { reportMetricTimeWindow } = jiti("./lib/metrics/time-window-builder.ts");
+const { buildKpiOrchestrationPlan, metricsForKpiExecution } = jiti("./lib/kpi-orchestration.ts");
 
 const june10Path = "/Users/apple/Downloads/ecommerce_dataset_2026_jan_to_jun10_83561_rows.csv";
 
@@ -100,6 +101,55 @@ test("daily weekly and custom reports validate against the same metric registry"
   assert.match(broken.failures.join(" "), /指标一致性校验/);
 });
 
+test("ecommerce execution prefers business registry metrics over semantic fallback metrics", (t) => {
+  const registry = registryForJune10(t);
+  if (!registry) return;
+  const tables = inferTablesFromCsvText(
+    "ecommerce_dataset_2026_jan_to_jun10_83561_rows.csv",
+    readFileSync(june10Path, "utf8")
+  );
+  const registryMetrics = registry.definitions.slice(0, 3).map((definition) => ({
+    id: `registry-${definition.metricId}`,
+    name: definition.businessName,
+    formula: definition.formula,
+    lineageJson: {
+      generatedFrom: "business_metric_registry",
+      metricRegistryId: registry.metricRegistryId,
+      metricId: definition.metricId,
+      businessType: registry.industry
+    }
+  }));
+  const semanticMetric = {
+    id: "semantic-discount-rate",
+    name: "discount_rate",
+    formula: "AVG(ecommerce_dataset_2026_jan_to_jun10_83561_rows.discount_rate)",
+    lineageJson: {
+      generatedFrom: "semantic_kpi_asset_library",
+      businessType: "semantic_kpi_asset"
+    }
+  };
+  const plan = buildKpiOrchestrationPlan({
+    dataSources: [{
+      id: "source-ecommerce",
+      name: "CSV - ecommerce_dataset_2026_jan_to_jun10_83561_rows.csv",
+      type: "CSV",
+      updatedAt: new Date()
+    }],
+    tables,
+    metrics: [...registryMetrics, semanticMetric]
+  });
+  const selected = metricsForKpiExecution({
+    industry: plan.industry,
+    metricGenerationPath: plan.metric_generation_path,
+    metrics: [...registryMetrics, semanticMetric]
+  });
+
+  assert.equal(plan.industry, "ecommerce");
+  assert.equal(plan.metric_generation_path, "business_metric_registry");
+  assert.equal(selected.length, registryMetrics.length);
+  assert.equal(selected.some((metric) => metric.id === "semantic-discount-rate"), false);
+});
+
 test("report modes change only time windows, not metric definitions", () => {
   const latestDataDate = "2026-06-10";
   const daily = reportMetricTimeWindow({
@@ -130,13 +180,19 @@ test("report modes change only time windows, not metric definitions", () => {
   assert.equal(custom.endDate, "2026-06-10");
 });
 
-test("monthly report defaults to previous month same-day comparison", () => {
-  const monthly = reportMetricTimeWindow({
+test("custom report preserves ALL and only defaults missing custom dates to monthly comparison", () => {
+  const all = reportMetricTimeWindow({
     reportMode: "custom_report",
     requestedRange: { preset: "ALL" },
     latestDataDate: "2026-06-09"
   });
+  const monthly = reportMetricTimeWindow({
+    reportMode: "custom_report",
+    requestedRange: { preset: "CUSTOM" },
+    latestDataDate: "2026-06-09"
+  });
 
+  assert.equal(all.preset, "ALL");
   assert.equal(monthly.preset, "CUSTOM");
   assert.equal(monthly.startDate, "2026-06-01");
   assert.equal(monthly.endDate, "2026-06-09");
@@ -146,12 +202,20 @@ test("monthly report defaults to previous month same-day comparison", () => {
 
 test("report execution only prioritizes registry metrics scoped to active tables", () => {
   const generateRoute = readFileSync(join(process.cwd(), "app/api/dashboard/reports/generate/route.ts"), "utf8");
-  const reportRoute = readFileSync(join(process.cwd(), "app/api/dashboard/reports/route.ts"), "utf8");
+  const metricsRoute = readFileSync(join(process.cwd(), "app/api/metrics/route.ts"), "utf8");
+  const metricVisibility = readFileSync(join(process.cwd(), "lib/metric-visibility.ts"), "utf8");
+  const metricGeneration = readFileSync(join(process.cwd(), "lib/workspace-metric-generation.ts"), "utf8");
 
-  for (const source of [generateRoute, reportRoute]) {
-    assert.match(source, /tableScopedMetrics\s*=\s*metrics\.filter\(\(metric\) => metricBelongsToTables\(metric, labels\)\)/);
-    assert.match(source, /tableScopedRegistryMetrics\s*=\s*tableScopedMetrics\.filter\(isBusinessMetricRegistryMetric\)/);
-    assert.match(source, /metricsForExecution\s*=\s*tableScopedRegistryMetrics\.length > 0 \? tableScopedRegistryMetrics : tableScopedMetrics/);
-    assert.doesNotMatch(source, /metricsForExecution\s*=\s*registryMetrics\.length > 0 \? registryMetrics : metrics/);
-  }
+  assert.match(generateRoute, /tableScopedMetrics\s*=\s*metrics\.filter\(\(metric\) => metricBelongsToTables\(metric, labels\)\)/);
+  assert.match(generateRoute, /tableScopedRegistryMetrics\s*=\s*tableScopedMetrics\.filter\(isBusinessMetricRegistryMetric\)/);
+  assert.match(generateRoute, /executableMetrics\s*=\s*tableScopedMetrics\.filter\(\(metric\) =>/);
+  assert.match(generateRoute, /metrics:\s*executableMetrics/);
+  assert.doesNotMatch(generateRoute, /metricsForExecution\s*=\s*registryMetrics\.length > 0 \? registryMetrics : metrics/);
+
+  assert.match(metricsRoute, /visibleRegistryMetrics\s*=\s*visibleMetrics\.filter\(isBusinessMetricRegistryMetric\)/);
+  assert.match(metricsRoute, /visibleRegistryMetrics\.length === 0/);
+  assert.match(metricsRoute, /displayMetrics\s*=\s*visibleRegistryMetrics\.length > 0 \? visibleRegistryMetrics : visibleMetrics/);
+
+  assert.match(metricVisibility, /activeTableLabels\.size === 0[\s\S]*return false/, "No connected active tables should make every metric hidden");
+  assert.doesNotMatch(metricGeneration, /const latestSnapshot = await client\.schemaSnapshot\.findFirst/, "Metric generation must not fall back to deleted-source snapshots");
 });

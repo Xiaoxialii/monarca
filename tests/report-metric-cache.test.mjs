@@ -36,6 +36,26 @@ test("cache key includes workspace, metric, date field, range and filters", () =
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, filters: { channel: "web" } }));
 });
 
+test("cache key is bound to semantic source, domain and snapshot", () => {
+  const base = {
+    workspaceId: "workspace-a",
+    metricIds: ["orders", "gmv"],
+    dataSourceIds: ["source-ecommerce"],
+    dateField: "order_date",
+    dateRange: { preset: "ALL" },
+    domain: "ecommerce",
+    semanticSnapshotVersion: "3",
+    semanticSchemaHash: "schema-hash-a",
+    queryHash: "query-hash-a"
+  };
+
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dataSourceIds: ["source-logistics"] }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, domain: "logistics" }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, semanticSnapshotVersion: "4" }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, semanticSchemaHash: "schema-hash-b" }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, queryHash: "query-hash-b" }));
+});
+
 test("cache staleAt is later than generated time", () => {
   const now = new Date("2026-06-07T00:00:00.000Z");
   assert.ok(staleAtForRange({ preset: "7D" }, now).getTime() > now.getTime());

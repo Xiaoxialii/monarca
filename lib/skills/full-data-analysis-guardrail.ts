@@ -14,6 +14,7 @@ export type FullDataAnalysisGuardrailContext = {
   latestDataDate?: string | null;
   storedFilePath?: string | null;
   storageObjectKey?: string | null;
+  inlineFileAvailable?: boolean | null;
   isDatabaseSource?: boolean | null;
   businessFieldMap?: Record<string, string> | null;
   detectedIndustry?: string | null;
@@ -105,6 +106,7 @@ function analysisSource(context: FullDataAnalysisGuardrailContext) {
   if (context.isDatabaseSource) return "DATABASE_QUERY";
   if (context.storedFilePath) return "STORED_FILE_PATH";
   if (context.storageObjectKey) return "STORAGE_OBJECT";
+  if (context.inlineFileAvailable) return "INLINE_FILE";
   if (context.metricSource) return String(context.metricSource);
   return "UNKNOWN";
 }
@@ -114,7 +116,9 @@ function dataScope(context: FullDataAnalysisGuardrailContext): FullDataAnalysisD
   if (context.isDatabaseSource) return "FULL_DATA";
   const rowsUsed = Number(context.rowsUsed ?? 0);
   const expected = Number(context.expectedFullRows ?? 0);
-  if (!context.storedFilePath && !context.storageObjectKey) return rowsUsed > 0 ? "SAMPLE_ONLY" : "UNKNOWN";
+  if (!context.storedFilePath && !context.storageObjectKey && !context.inlineFileAvailable) {
+    return rowsUsed > 0 ? "SAMPLE_ONLY" : "UNKNOWN";
+  }
   if (expected > 0 && rowsUsed > 0 && rowsUsed < expected) return "PARTIAL_DATA";
   if (rowsUsed > 0) return "FULL_DATA";
   return "UNKNOWN";
@@ -145,9 +149,9 @@ export function validateFullDataAnalysisContext(
     requiredFixes.push("读取完整文件或完整数据库查询结果后重新计算 KPI。");
   }
 
-  if (!context.isDatabaseSource && !context.storedFilePath && !context.storageObjectKey) {
-    blockingIssues.push("CSV / Excel 数据源缺少 storedFilePath 或 storageObjectKey，当前只能读取样本数据。");
-    requiredFixes.push("保存上传文件路径或真实存储对象 key，并基于完整文件重新生成报告。");
+  if (!context.isDatabaseSource && !context.storedFilePath && !context.storageObjectKey && !context.inlineFileAvailable) {
+    blockingIssues.push("CSV / Excel 数据源缺少 storedFilePath、storageObjectKey 或 inlineFileBase64，当前只能读取样本数据。");
+    requiredFixes.push("保存上传文件路径、真实存储对象 key 或完整 inline 文件，并基于完整文件重新生成报告。");
   }
 
   if (isDailyReport(context.reportType) && context.fullDataAvailable === false) {

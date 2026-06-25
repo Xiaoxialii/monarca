@@ -258,6 +258,112 @@ Run report generation before responding when needed, persist source selection, a
 ### Prevention rule
 Before changing report APIs, verify read and generate paths produce compatible payloads, refresh uses current source state, and cache keys include report mode and date range.
 
+## Entry 010
+
+### Date
+2026-06-18
+
+### Area
+Uploaded file schema inference / semantic field matching
+
+### Symptom
+- Chinese logistics headers in a table named `branch_kpi_daily` were all mapped to `branch_name`.
+- Existing ecommerce fixtures stopped detecting `order_date` because broad date mapping collapsed canonical English fields into `date`.
+
+### Root cause
+Header semantic matching mixed table or dataset names into the same search text as the column header, and mapped broad tokens before preserving known canonical field names.
+
+### Fix
+Keep semantic header matching scoped to the actual column header. Preserve canonical English fields such as `order_date`, `net_sales`, and logistics canonical fields before applying fuzzy Chinese/English mappings.
+
+### Prevention rule
+When changing upload schema inference, test both new domain-specific Chinese headers and existing canonical English fixtures. Never let table names dominate per-column semantic detection.
+
+### Files changed
+- `lib/file-upload-schema.ts`
+- `tests/logistics-branch-kpi-registry.test.mjs`
+- `tests/metric-registry-consistency.test.mjs`
+
+## Entry 012
+
+### Date
+2026-06-18
+
+### Area
+Domain report composition / logistics metrics
+
+### Symptom
+- Logistics report evidence table and KPI cards showed `当前数据缺少该字段，无法判断`.
+- Metric execution had already computed values such as ticket denominator, unresolved count, top ticket type, and top branch.
+- Headers like `问题解决(30)` were mapped to `30`, and `时效达成(20)` was treated as a date because of the `time` substring in `timeliness_score`.
+
+### Root cause
+The report composer matched business metrics through `metricResult.metricId`, but metric execution stores the database metric definition id there. The stable business key was only in metric lineage and was not exposed as a result field. Header detection also applied broad `time` matching and required `得分` for problem-resolution headers.
+
+### Fix
+Expose `registryMetricId` from metric lineage into metric results, match domain report metrics by registry key/stable names, compute first-contact-resolution rate from denominator and unresolved counts when cross-table rate metrics are skipped, and tighten header detection for date/time plus `问题解决(30)` style fields.
+
+### Prevention rule
+Before adding a domain-specific report composer, verify the metric result shape with real payloads and match on stable lineage keys, not database ids. Test Chinese headers with scoring parentheses and English words containing `time` that are not dates.
+
+### Files changed
+- `lib/metric-results.ts`
+- `lib/report-composers.ts`
+- `lib/file-upload-schema.ts`
+
+## Entry 010
+
+### Date
+2026-06-18
+
+### Area
+Metric visibility after data-source deletion
+
+## Entry 013
+
+### Date
+2026-06-19
+
+### Area
+Report schema source selection / KPI asset visibility
+
+### Symptom
+- The report page showed `共 0 个 KPI` even though an active Excel data source existed.
+- The active data source had been uploaded after the parser fix, but the report API still read the workspace latest `schemaSnapshot`.
+- That latest snapshot belonged to a deleted/disconnected source and lacked `rawHeaderPath` plus `kpiAssetLibrary`.
+
+### Root cause
+The report read path treated the newest workspace snapshot as the report schema source without scoping it to the active connected data source. When source deletion or re-upload changed active sources, stale snapshots could still drive report-side semantic assets.
+
+### Fix
+Prefer the active connected data source schema for report KPI assets. If that schema lacks a usable KPI asset library, recover it from the active source's original stored file or R2 object. Use workspace snapshots only as a fallback.
+
+### Prevention rule
+Before reading schema-derived report assets, resolve the current active connected source first. Never let a deleted or disconnected source snapshot decide visible KPI assets for the current workspace.
+
+### Files changed
+- `app/api/dashboard/reports/route.ts`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`
+
+### Symptom
+- Data sources showed 0 connected, but the metric definition table still displayed metrics from a deleted CSV source.
+- Metric generation could reuse the latest historical schema snapshot even when no active data source remained.
+
+### Root cause
+Metric visibility treated an empty active-table set as allowing all metrics, and workspace metric generation fell back to the latest workspace snapshot instead of requiring snapshots from active connected data sources.
+
+### Fix
+When active table labels are empty, hide all metrics. Build metric generation context only from active connected data sources and do not fall back to deleted-source snapshots.
+
+### Prevention rule
+Before changing metric list, metric generation, or data-source deletion logic, verify the 0-active-source state returns no visible metrics and cannot regenerate metrics from deleted snapshots.
+
+### Files changed
+- `lib/metric-visibility.ts`
+- `lib/workspace-metric-generation.ts`
+- `tests/metric-registry-consistency.test.mjs`
+
 ### Files changed
 - `app/api/dashboard/reports/**`
 - `app/api/reports/**`
@@ -932,5 +1038,32 @@ When disabling or gating an auth provider, audit all signed-out entry points, in
 
 ### Files changed
 - `components/auth-shell.tsx`
+- `docs/ERROR_MEMORY_INDEX.md`
+- `docs/ERROR_MEMORY.md`
+
+## Entry 033
+
+### Date
+2026-06-17
+
+### Area
+Auth / Clerk user sync and workspace continuity
+
+### Symptom
+- Dashboard pages loaded, but authenticated APIs such as `/api/data-sources`, `/api/dashboard/reports`, `/api/user/locale`, and `/api/user/sync` returned 400/500 locally.
+- Prisma reported `Unique constraint failed on the fields: (email)` during `prisma.user.upsert()`.
+
+### Root cause
+The sync path used `clerkUserId` as the only upsert key while `email` is also unique. If a local user already existed for the same email but Clerk supplied a different user id, the create branch attempted to insert a duplicate email instead of claiming the existing user.
+
+### Fix
+Sync first by `clerkUserId`; if there is no match, upsert by normalized `email` and update `clerkUserId` on the existing local user. Preserve memberships and workspaces by updating the existing row instead of creating a duplicate.
+
+### Prevention rule
+When syncing external identity providers into a local user table with both provider id and email uniqueness, handle provider-id rotation or environment changes by claiming the existing email row. Do not rely on provider id upsert alone.
+
+### Files changed
+- `lib/clerk-user-sync.ts`
+- `tests/workspace-invite-links.test.mjs`
 - `docs/ERROR_MEMORY_INDEX.md`
 - `docs/ERROR_MEMORY.md`

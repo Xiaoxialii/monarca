@@ -14,6 +14,7 @@ dist/
 # private uploaded data
 .data/
 .data-source-uploads/
+.tmp/
 
 # env
 .env

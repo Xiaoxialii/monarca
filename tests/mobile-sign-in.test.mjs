@@ -9,19 +9,19 @@ function read(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("auth keeps password and email-code flows with mobile-safe redirects", () => {
+test("auth keeps Clerk username password flows with mobile-safe redirects", () => {
   const signInPanel = read("components/sign-in-panel.tsx");
   const signUpPanel = read("components/sign-up-panel.tsx");
 
-  assert.match(signInPanel, /function PasswordSignIn/, "Sign-in should keep username/password login");
-  assert.match(signInPanel, /type="password"/, "Sign-in should render a password input");
-  assert.match(signUpPanel, /type=\{showPassword \? "text" : "password"\}/, "Sign-up should keep password inputs");
-  assert.match(signUpPanel, /username: trimmedUsername/, "Sign-up should keep username/password account creation");
+  assert.match(signInPanel, /function PasswordSignIn/, "Sign-in should expose Clerk password login");
+  assert.match(signInPanel, /identifier: trimmedIdentifier,[\s\S]*password/, "Sign-in should pass email or username identifiers directly to Clerk");
+  assert.match(signUpPanel, /type=\{showPassword \? "text" : "password"\}/, "Sign-up should render password inputs");
   assert.match(
     signUpPanel,
-    /password: createClerkManagedPassword\(\)/,
-    "Email-code sign-up should satisfy Clerk password-required settings without showing a password field in that flow"
+    /signUp\.create\(\{\s*username: trimmedUsername,\s*password\s*\}\)/,
+    "Username/password sign-up should pass username and password directly to Clerk"
   );
+  assert.doesNotMatch(signUpPanel, /usernameToInternalEmail/, "Auth should not map usernames to synthetic email addresses");
   assert.match(
     signInPanel,
     /function completeSignInRedirect\(path: string\)/,

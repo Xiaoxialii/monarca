@@ -659,7 +659,7 @@ function signalToneClass(tone: (typeof businessCaseSignals)[number]["tone"]) {
 function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?: boolean; isZh?: boolean }) {
   const labels = {
     case: isZh ? "业务案例" : "Business case",
-    title: isZh ? "我赚了多少？" : "How much did we earn?",
+    title: isZh ? "哪些问题正在拖累利润？" : "What issues are dragging profit?",
     live: isZh ? "AI 实时判断" : "AI live judgment",
     signals: isZh ? "渠道信号" : "Channel signals",
     window: isZh ? "7 天窗口" : "7-day window",

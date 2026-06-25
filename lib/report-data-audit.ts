@@ -173,7 +173,7 @@ function mergeDataScope(current: ReportDataAudit["dataScope"] | null, next: Repo
 function expectedRowsFromContext(context: AuditContext) {
   return context.tables.reduce((max, table) => {
     const schemaTable = schemaTables(context.schemaJson).find((item) => normalize(String(item.name ?? "")) === normalize(table.name));
-    const rowCount = Number(schemaTable?.rowCount ?? asRecord(table).rowCount);
+    const rowCount = Number(asRecord(table).rowCount ?? schemaTable?.rowCount);
     return Number.isFinite(rowCount) && rowCount > max ? rowCount : max;
   }, 0);
 }
@@ -185,6 +185,10 @@ function storageObjectKey(config: Record<string, unknown>) {
 
 function storedFilePath(config: Record<string, unknown>) {
   return typeof config.storedFilePath === "string" ? config.storedFilePath : null;
+}
+
+function inlineFileAvailable(config: Record<string, unknown>) {
+  return typeof config.inlineFileBase64 === "string" && config.inlineFileBase64.trim().length > 0;
 }
 
 function auditScopeFromGuardrail(scope: FullDataAnalysisGuardrailResult["dataScope"], isDatabaseSource: boolean): ReportDataAudit["dataScope"] {
@@ -210,6 +214,21 @@ function dateRangeFromRows(rows: Array<Record<string, unknown>>, table: SchemaTa
     dateRangeStart: dates[0] ?? null,
     dateRangeEnd: dates.at(-1) ?? null,
     latestDataDate: dates.at(-1) ?? null
+  };
+}
+
+function dateRangeFromRowsAnyTable(rows: Array<Record<string, unknown>>, tables: SchemaTable[]) {
+  for (const table of tables) {
+    const range = dateRangeFromRows(rows, table);
+
+    if (range.dateField && (range.dateRangeStart || range.latestDataDate)) {
+      return { table, range };
+    }
+  }
+
+  return {
+    table: tables[0] ?? null,
+    range: { dateField: null, dateRangeStart: null, dateRangeEnd: null, latestDataDate: null }
   };
 }
 
@@ -512,6 +531,7 @@ export async function buildReportDataAudit(input: {
   let fullContextCount = 0;
   let firstStoredFilePath: string | null = null;
   let firstStorageObjectKey: string | null = null;
+  let hasInlineFile = false;
   let hasDatabaseSource = false;
   let ecommerceFullDataMetrics: ReportDataAudit["ecommerceFullDataMetrics"] = null;
   let ecommerceDailyDataMetrics: ReportDataAudit["ecommerceFullDataMetrics"] = null;
@@ -528,6 +548,7 @@ export async function buildReportDataAudit(input: {
     sampleRowsCount = (sampleRowsCount ?? 0) + schemaSampleRowsCount(context.schemaJson);
     firstStoredFilePath = firstStoredFilePath ?? storedFilePath(config);
     firstStorageObjectKey = firstStorageObjectKey ?? storageObjectKey(config);
+    hasInlineFile = hasInlineFile || inlineFileAvailable(config);
 
     if (context.dataSource.type === DataSourceType.POSTGRESQL || context.dataSource.type === DataSourceType.MYSQL) {
       hasDatabaseSource = true;
@@ -546,44 +567,45 @@ export async function buildReportDataAudit(input: {
       fullContextCount += 1;
       dataScope = mergeDataScope(dataScope, "full_file");
       totalRows = (totalRows ?? 0) + rows.length;
-      const range = dateRangeFromRows(rows, firstTable);
+      const { table: rangeTable, range } = dateRangeFromRowsAnyTable(rows, context.tables);
+      const metricTable = rangeTable ?? firstTable;
       dateField = dateField ?? range.dateField;
       if (range.dateRangeStart && (!dateRangeStart || range.dateRangeStart < dateRangeStart)) {
         dateRangeStart = range.dateRangeStart;
       }
       if (range.latestDataDate && (!latestDataDate || range.latestDataDate > latestDataDate)) {
         latestDataDate = range.latestDataDate;
-        dailyRows = rowsOnBusinessDate(rows, firstTable, latestDataDate);
+        dailyRows = rowsOnBusinessDate(rows, metricTable, latestDataDate);
       } else if (range.latestDataDate && latestDataDate && range.latestDataDate === latestDataDate) {
-        dailyRows = (dailyRows ?? 0) + rowsOnBusinessDate(rows, firstTable, latestDataDate);
+        dailyRows = (dailyRows ?? 0) + rowsOnBusinessDate(rows, metricTable, latestDataDate);
       }
       if (isEcommerce) {
         ecommerceFullDataMetrics = mergeEcommerceMetrics(
           ecommerceFullDataMetrics,
-          ecommerceMetricsFromRows(rows, firstTable, range.latestDataDate)
+          ecommerceMetricsFromRows(rows, metricTable, range.latestDataDate)
         );
-        const dailyMetricRows = rowsForBusinessDate(rows, firstTable, range.latestDataDate);
+        const dailyMetricRows = rowsForBusinessDate(rows, metricTable, range.latestDataDate);
         if (dailyMetricRows.length) {
           ecommerceDailyDataMetrics = mergeEcommerceMetrics(
             ecommerceDailyDataMetrics,
-            ecommerceMetricsFromRows(dailyMetricRows, firstTable, range.latestDataDate)
+            ecommerceMetricsFromRows(dailyMetricRows, metricTable, range.latestDataDate)
           );
         }
         const weeklyStart = range.latestDataDate ? addDays(range.latestDataDate, -6) : null;
-        const weeklyMetricRows = rowsForBusinessDateRange(rows, firstTable, weeklyStart, range.latestDataDate);
+        const weeklyMetricRows = rowsForBusinessDateRange(rows, metricTable, weeklyStart, range.latestDataDate);
         if (weeklyMetricRows.length) {
           weeklyRows = (weeklyRows ?? 0) + weeklyMetricRows.length;
           ecommerceWeeklyDataMetrics = mergeEcommerceMetrics(
             ecommerceWeeklyDataMetrics,
-            ecommerceMetricsFromRows(weeklyMetricRows, firstTable, range.latestDataDate)
+            ecommerceMetricsFromRows(weeklyMetricRows, metricTable, range.latestDataDate)
           );
         }
-        const monthlyMetricRows = rowsForBusinessDateRange(rows, firstTable, requestedMetricRange.start, requestedMetricRange.end);
+        const monthlyMetricRows = rowsForBusinessDateRange(rows, metricTable, requestedMetricRange.start, requestedMetricRange.end);
         if (monthlyMetricRows.length) {
           monthlyRows = (monthlyRows ?? 0) + monthlyMetricRows.length;
           ecommerceMonthlyDataMetrics = mergeEcommerceMetrics(
             ecommerceMonthlyDataMetrics,
-            ecommerceMetricsFromRows(monthlyMetricRows, firstTable, requestedMetricRange.end ?? range.latestDataDate)
+            ecommerceMetricsFromRows(monthlyMetricRows, metricTable, requestedMetricRange.end ?? range.latestDataDate)
           );
         }
       }
@@ -657,6 +679,7 @@ export async function buildReportDataAudit(input: {
     latestDataDate,
     storedFilePath: firstStoredFilePath,
     storageObjectKey: firstStorageObjectKey,
+    inlineFileAvailable: hasInlineFile,
     isDatabaseSource: hasDatabaseSource,
     businessFieldMap,
     detectedIndustry: isEcommerce ? "ecommerce" : aggregationBusinessTypes.includes("app_market") ? "app_market" : "generic"

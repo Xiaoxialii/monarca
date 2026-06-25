@@ -4,9 +4,9 @@ import { ReportGenerationJobStatus, WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildAggregationResults } from "@/lib/analytics/aggregation-engine";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { type MetricResultValue } from "@/lib/metric-results";
+import { type MetricResultContext, type MetricResultValue } from "@/lib/metric-results";
 import { normalizeReportDateRange, resolveReportDateRange, type ReportDateRangeInput } from "@/lib/report-date-range";
-import { cacheIdentityFromPayload, upsertReportMetricCache } from "@/lib/report-metric-cache";
+import { cacheIdentityFromPayload, getReportMetricCache, stableHash, upsertReportMetricCache } from "@/lib/report-metric-cache";
 import {
   markReportGenerationFailed,
   markReportGenerationSucceeded,
@@ -19,6 +19,7 @@ import { buildReportTimeArtifacts } from "@/lib/report-time-artifacts.mjs";
 import { buildReportPrompt } from "@/lib/report-generation/report-prompt-builder";
 import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
 import { buildReportDataAudit } from "@/lib/report-data-audit";
+import { buildKpiAiReportJson } from "@/lib/kpi-ai-report";
 import {
   composeReport,
   loadMetricSnapshots,
@@ -45,7 +46,16 @@ import { calculateVerifiedMetrics } from "@/lib/metrics/metric-calculator";
 import { reportMetricTimeWindow } from "@/lib/metrics/time-window-builder";
 import { validateMetricConsistency } from "@/lib/metrics/metric-consistency-validator";
 import { registryFromMetricDefinitions } from "@/lib/metrics/metric-registry";
-import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import {
+  buildKpiOrchestrationPlan,
+  markKpiExecutionStep,
+  metricsForKpiExecution,
+  selectKpiExecutionDataSources
+} from "@/lib/kpi-orchestration";
+import { generateWorkspaceMetricsFromConnectedSources, tablesFromConnectedDataSourceFile } from "@/lib/workspace-metric-generation";
+import { buildReportSpec } from "@/lib/report-spec";
+import { buildKpiRuntimeApiResponse } from "@/lib/kpi-runtime";
+import { SemanticLayerRuntime } from "@/lib/semantic-layer-runtime";
 
 export const maxDuration = 60;
 
@@ -57,10 +67,225 @@ function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
   return asRecord(metric.lineageJson).generatedFrom === "business_metric_registry";
 }
 
+async function latestWorkspaceSnapshotVersion(workspaceId: string, dataSourceIds: string[] = []) {
+  const snapshot = await prisma.schemaSnapshot.findFirst({
+    where: {
+      workspaceId,
+      ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
+    },
+    orderBy: { createdAt: "desc" },
+    select: { version: true }
+  });
+
+  return snapshot?.version ?? null;
+}
+
+async function latestCachedReportDataDate(workspaceId: string) {
+  const cache = await prisma.reportMetricCache.findFirst({
+    where: { workspaceId },
+    orderBy: { generatedAt: "desc" },
+    select: { payloadJson: true, endDate: true }
+  });
+  const payload = asRecord(cache?.payloadJson);
+  const audit = asRecord(payload.reportDataAudit);
+  const dateRange = asRecord(payload.dateRange);
+  const timeConfig = asRecord(payload.timeConfig);
+  const candidates = [
+    audit.latestDataDate,
+    audit.dateRangeEnd,
+    dateRange.latestDataDate,
+    dateRange.endDate,
+    timeConfig.endDate,
+    cache?.endDate ? cache.endDate.toISOString().slice(0, 10) : null
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+type FinalMetricResultSource = "registry" | "semantic" | "generic";
+
+function metricResultSource(result: MetricResultValue): FinalMetricResultSource {
+  if (result.generatedFrom === "business_metric_registry") return "registry";
+  if (result.generatedFrom === "semantic_kpi_asset_library" || result.businessType === "semantic_kpi_asset") return "semantic";
+  return "generic";
+}
+
+function normalizeKpiMergeKey(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[\s\-]+/g, "_")
+    .replace(/[()（）/]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (
+    normalized.includes("unresolved_ticket_count") ||
+    normalized.includes("unresolved_tickets") ||
+    normalized.includes("未解决工单数") ||
+    normalized.includes("一次性未解决")
+  ) {
+    return "unresolved_ticket_count";
+  }
+
+  if (normalized.includes("problem_resolution_score") || normalized.includes("问题解决")) {
+    return normalized.includes("loss") || normalized.includes("失分")
+      ? "problem_resolution_score_loss"
+      : "problem_resolution_score";
+  }
+
+  return normalized;
+}
+
+function metricResultMergeKey(result: MetricResultValue) {
+  const explicitId = result.kpiId || result.registryMetricId;
+
+  if (explicitId) {
+    return normalizeKpiMergeKey(explicitId);
+  }
+
+  return normalizeKpiMergeKey([
+    result.kpiName,
+    result.displayName,
+    result.metricName
+  ].filter(Boolean).join(" "));
+}
+
+function metricResultSourceRank(source: FinalMetricResultSource) {
+  if (source === "registry") return 0;
+  if (source === "semantic") return 1;
+  return 2;
+}
+
+function mergeFinalMetricResults(results: MetricResultValue[]) {
+  const ordered = [...results].sort((left, right) => {
+    const sourceDelta = metricResultSourceRank(metricResultSource(left)) - metricResultSourceRank(metricResultSource(right));
+    if (sourceDelta !== 0) return sourceDelta;
+    const leftPriority = typeof left.priority === "number" ? left.priority : 999;
+    const rightPriority = typeof right.priority === "number" ? right.priority : 999;
+    return leftPriority - rightPriority;
+  });
+  const merged = new Map<string, MetricResultValue>();
+
+  for (const result of ordered) {
+    const source = metricResultSource(result);
+    const key = metricResultMergeKey(result);
+
+    if (!key || merged.has(key)) {
+      continue;
+    }
+
+    merged.set(key, {
+      ...result,
+      source,
+      kpiId: result.kpiId ?? result.registryMetricId ?? key,
+      kpiName: result.kpiName ?? result.displayName ?? result.metricName
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
+function finalMetricResultsView(results: MetricResultValue[]) {
+  return results.map((result) => {
+    const current = Number(result.currentValue ?? result.value);
+    const previous = Number(result.previousValue);
+    const changePct = typeof result.changePercent === "number"
+      ? result.changePercent
+      : typeof result.percentChange === "number"
+        ? result.percentChange
+        : Number.isFinite(current) && Number.isFinite(previous) && previous !== 0
+          ? (current - previous) / Math.abs(previous)
+          : null;
+    const metricDirection = result.metricDirection ?? "neutral";
+    const direction = changePct == null || Math.abs(changePct) < 0.01
+      ? "stable"
+      : metricDirection === "lower_is_better"
+        ? changePct < 0 ? "improve" : "deteriorate"
+        : changePct > 0 ? "improve" : "deteriorate";
+
+    return {
+      kpi_id: result.kpiId ?? result.registryMetricId ?? metricResultMergeKey(result),
+      kpi_name: result.kpiName ?? result.displayName ?? result.metricName,
+      source: metricResultSource(result),
+      today: Number.isFinite(current) ? current : null,
+      yesterday: Number.isFinite(previous) ? previous : null,
+      change_pct: changePct,
+      direction
+    };
+  });
+}
+
 function startOfToday() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
   return date;
+}
+
+function metricResultHasExplicitValue(result: unknown) {
+  const record = asRecord(result);
+  const directValue = record.value ?? record.currentValue ?? record.score ?? record.rateValue;
+
+  if (directValue !== null && directValue !== undefined && !(typeof directValue === "number" && Number.isNaN(directValue))) {
+    return true;
+  }
+
+  const rows = Array.isArray(record.rows) ? record.rows : [];
+  return rows.some((row) => {
+    const rowRecord = asRecord(row);
+    const value = rowRecord.value ?? rowRecord.currentValue;
+    return value !== null && value !== undefined && !(typeof value === "number" && Number.isNaN(value));
+  });
+}
+
+function reportMetricPayloadHasValues(payload: Record<string, unknown> | null | undefined) {
+  const metricResults = Array.isArray(payload?.metricResults) ? payload.metricResults : [];
+
+  return metricResults.some(metricResultHasExplicitValue);
+}
+
+function arrayHasItems(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function reportMetricPayloadHasMetricArtifacts(payload: Record<string, unknown>) {
+  const finalMetricResults = Array.isArray(payload.final_metricResults) ? payload.final_metricResults : [];
+  const aggregationResults = Array.isArray(payload.aggregationResults) ? payload.aggregationResults : [];
+
+  return (
+    finalMetricResults.some(metricResultHasExplicitValue) ||
+    aggregationResults.some((result) => {
+      const record = asRecord(result);
+      return ["kpis", "metrics", "children", "items"].some((key) => arrayHasItems(record[key]));
+    }) ||
+    arrayHasItems(payload.formulaBreakdowns) ||
+    arrayHasItems(payload.formula_breakdowns)
+  );
+}
+
+function isFailedGuardrailPayload(payload: Record<string, unknown> | null | undefined) {
+  if (!payload) return false;
+
+  const generatedFrom = typeof payload.generatedFrom === "string" ? payload.generatedFrom : "";
+  const reportDataAudit = asRecord(payload.reportDataAudit);
+  const failures = Array.isArray(reportDataAudit.failures) ? reportDataAudit.failures : [];
+  const passed = reportDataAudit.passed;
+
+  return generatedFrom === "full_data_guardrail" || passed === false || failures.length > 0;
+}
+
+function reportMetricPayloadHasReusableReport(payload: Record<string, unknown> | null | undefined, reportMode?: ReportMode) {
+  if (!payload) return false;
+  if (isFailedGuardrailPayload(payload)) return false;
+  if (reportMetricPayloadHasValues(payload)) return true;
+  void reportMode;
+
+  return reportMetricPayloadHasMetricArtifacts(payload);
 }
 
 function normalizeReportLocale(value: unknown): ReportLocale | null {
@@ -126,6 +351,64 @@ function uniqueTables(tables: ReturnType<typeof tablesFromSchemaJson>) {
     seen.add(key);
     return true;
   });
+}
+
+function tableHasSnapshotRows(table: { sampleRows?: unknown; previewRows?: unknown }) {
+  return (
+    (Array.isArray(table.sampleRows) && table.sampleRows.length > 0) ||
+    (Array.isArray(table.previewRows) && table.previewRows.length > 0)
+  );
+}
+
+function tablesHaveSnapshotRows(tables: Array<{ sampleRows?: unknown; previewRows?: unknown }>) {
+  return tables.some(tableHasSnapshotRows);
+}
+
+function storageObjectKeyFromConfig(configValue: unknown) {
+  const config = asRecord(configValue);
+  const storage = asRecord(config.storage);
+
+  return typeof config.objectKey === "string" && config.objectKey
+    ? config.objectKey
+    : typeof config.storagePath === "string" && config.storagePath
+      ? config.storagePath
+      : typeof storage.key === "string" && storage.key
+        ? storage.key
+        : null;
+}
+
+function isFileDataSourceType(type: unknown) {
+  return type === "EXCEL" || type === "CSV";
+}
+
+function hasPersistedFileData(source: { config: unknown }) {
+  const config = asRecord(source.config);
+  const hasInlineFile = typeof config.inlineFileBase64 === "string" && config.inlineFileBase64.trim().length > 0;
+  const hasLocalPath = typeof config.storedFilePath === "string" && config.storedFilePath.trim().length > 0;
+
+  return hasInlineFile || hasLocalPath || Boolean(storageObjectKeyFromConfig(config));
+}
+
+function unavailableFileDataMessage(dataSource: {
+  name: string;
+  type?: unknown;
+  config: unknown;
+}, fileReadError: unknown) {
+  const config = asRecord(dataSource.config);
+  const hasLocalPath = typeof config.storedFilePath === "string" && config.storedFilePath.trim();
+  const hasCloudObject = Boolean(storageObjectKeyFromConfig(config));
+  const hasInlineFile = typeof config.inlineFileBase64 === "string" && config.inlineFileBase64.trim();
+  const readError = fileReadError instanceof Error ? fileReadError.message : null;
+
+  if (isFileDataSourceType(dataSource.type) && hasLocalPath && !hasCloudObject && !hasInlineFile) {
+    return `数据源「${dataSource.name}」的原始文件只保存在本机路径，线上环境无法读取。请重新上传该 Excel/CSV，让文件写入云存储后再生成报表。`;
+  }
+
+  if (isFileDataSourceType(dataSource.type) && readError) {
+    return `数据源「${dataSource.name}」的原始文件读取失败：${readError}`;
+  }
+
+  return `数据源「${dataSource.name}」没有可用于计算的完整行数据。请重新上传或恢复数据源后再生成报表。`;
 }
 
 type ReportLocale = "en" | "zh";
@@ -204,7 +487,7 @@ async function runReportGenerationJob(input: {
       data: { status: ReportGenerationJobStatus.RUNNING, startedAt: new Date() }
     });
 
-    const dataSources = await prisma.dataSourceConnection.findMany({
+    const activeDataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: input.workspaceId,
         isActive: true,
@@ -212,6 +495,7 @@ async function runReportGenerationJob(input: {
       },
       orderBy: { updatedAt: "desc" }
     });
+    const dataSources = selectKpiExecutionDataSources(activeDataSources);
 
     if (dataSources.length === 0) {
       throw new Error("No connected data source found for metric result execution");
@@ -232,51 +516,129 @@ async function runReportGenerationJob(input: {
       }
     }
 
-    const contexts = dataSources.flatMap((dataSource) => {
+    const contextCandidates = await Promise.all(dataSources.map(async (dataSource) => {
       const snapshot = snapshotBySource.get(dataSource.id);
-      return snapshot ? [{
+
+      if (!snapshot) return null;
+
+      const snapshotTables = tablesFromSchemaJson(snapshot.schemaJson);
+      let fileReadError: unknown = null;
+      const fileTables = isFileDataSourceType(dataSource.type) && hasPersistedFileData(dataSource)
+        ? await tablesFromConnectedDataSourceFile(dataSource).catch((error) => {
+            fileReadError = error;
+            return null;
+          })
+        : null;
+      const tablesForContext = (fileTables?.length ? fileTables : snapshotTables) as MetricResultContext["tables"];
+      const dataUnavailableReason = isFileDataSourceType(dataSource.type) && !tablesHaveSnapshotRows(tablesForContext)
+        ? unavailableFileDataMessage(dataSource, fileReadError)
+        : null;
+
+      return {
         dataSource,
-        tables: tablesFromSchemaJson(snapshot.schemaJson),
-        schemaJson: snapshot.schemaJson
-      }] : [];
-    });
+        tables: tablesForContext,
+        schemaJson: snapshot.schemaJson,
+        dataUnavailableReason
+      };
+    }));
+    const contexts: MetricResultContext[] = [];
+    const dataUnavailableReasons: string[] = [];
+    for (const context of contextCandidates) {
+      if (context) {
+        contexts.push(context);
+        if (context.dataUnavailableReason) {
+          dataUnavailableReasons.push(context.dataUnavailableReason);
+        }
+      }
+    }
 
     if (contexts.length === 0) {
       throw new Error("No schema snapshot found for connected data sources");
     }
 
+    if (contexts.every((context) => !tablesHaveSnapshotRows(context.tables)) && dataUnavailableReasons.length > 0) {
+      throw new Error(dataUnavailableReasons[0]);
+    }
+
     const latestSnapshot = snapshots[0];
     const tables = uniqueTables(contexts.flatMap((context) => context.tables));
-
-    await validateWorkspaceMetrics(prisma, {
-      workspaceId: input.workspaceId,
-      tables
-    });
 
     let metrics = await prisma.metricDefinition.findMany({
       where: { workspaceId: input.workspaceId, isActive: true },
       orderBy: { createdAt: "asc" }
     });
-    const hasRegistryMetrics = metrics.some((metric) => asRecord(metric.lineageJson).generatedFrom === "business_metric_registry");
-
-    if (!hasRegistryMetrics) {
-      await generateWorkspaceMetricsFromConnectedSources(prisma, {
-        workspaceId: input.workspaceId,
-        userId: input.userId
-      });
-      metrics = await prisma.metricDefinition.findMany({
-      where: { workspaceId: input.workspaceId, isActive: true },
-      orderBy: { createdAt: "asc" }
-    });
-  }
-    const labels = activeTableLabels(tables);
-    const tableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
-    const tableScopedRegistryMetrics = tableScopedMetrics.filter(isBusinessMetricRegistryMetric);
-    const metricsForExecution = tableScopedRegistryMetrics.length > 0 ? tableScopedRegistryMetrics : tableScopedMetrics;
-    const executableMetrics = metricsForExecution.filter((metric) =>
+    let validatedMetrics = metrics.filter((metric) =>
       isBusinessFacingMetricDefinition(metric) &&
       validationFromLineage(metric.lineageJson)?.validation_status === "valid"
     );
+
+    if (validatedMetrics.length === 0) {
+      await generateWorkspaceMetricsFromConnectedSources(prisma, {
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        dataSourceIds: dataSources.map((source) => source.id)
+      });
+
+      metrics = await prisma.metricDefinition.findMany({
+        where: { workspaceId: input.workspaceId, isActive: true },
+        orderBy: { createdAt: "asc" }
+      });
+      validatedMetrics = metrics.filter((metric) =>
+        isBusinessFacingMetricDefinition(metric) &&
+        validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+      );
+    }
+
+    const labels = activeTableLabels(tables);
+    const tableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
+    const tableScopedRegistryMetrics = tableScopedMetrics.filter(isBusinessMetricRegistryMetric);
+    const tableScopedValidatedMetrics = tableScopedMetrics.filter((metric) =>
+      isBusinessFacingMetricDefinition(metric) &&
+      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+    );
+
+    if (validatedMetrics.length > 0 && tableScopedValidatedMetrics.length === 0) {
+      await validateWorkspaceMetrics(prisma, {
+        workspaceId: input.workspaceId,
+        tables
+      });
+
+      metrics = await prisma.metricDefinition.findMany({
+        where: { workspaceId: input.workspaceId, isActive: true },
+        orderBy: { createdAt: "asc" }
+      });
+    }
+
+    const refreshedTableScopedMetrics = metrics.filter((metric) => metricBelongsToTables(metric, labels));
+    const refreshedTableScopedRegistryMetrics = refreshedTableScopedMetrics.filter(isBusinessMetricRegistryMetric);
+    const refreshedValidatedMetrics = refreshedTableScopedMetrics.filter((metric) =>
+      isBusinessFacingMetricDefinition(metric) &&
+      validationFromLineage(metric.lineageJson)?.validation_status === "valid"
+    );
+    const effectiveTableScopedRegistryMetrics = refreshedTableScopedRegistryMetrics.length > 0
+      ? refreshedTableScopedRegistryMetrics
+      : tableScopedRegistryMetrics;
+    const effectiveValidatedMetrics = refreshedValidatedMetrics.length > 0
+      ? refreshedValidatedMetrics
+      : tableScopedValidatedMetrics;
+    let orchestrationPlan = buildKpiOrchestrationPlan({
+      dataSources: activeDataSources,
+      tables,
+      metrics: effectiveValidatedMetrics
+    });
+    const executableMetrics = metricsForKpiExecution({
+      industry: orchestrationPlan.industry,
+      metricGenerationPath: orchestrationPlan.metric_generation_path,
+      metrics: effectiveValidatedMetrics
+    });
+    const semanticRuntime = new SemanticLayerRuntime(prisma);
+    const semanticContext = semanticRuntime.createContext({
+      workspaceId: input.workspaceId,
+      dataSource: dataSources[0],
+      schemaSnapshot: latestSnapshot,
+      tables,
+      metrics: executableMetrics
+    });
     const preReportDataAudit = await buildReportDataAudit({
       contexts,
       reportType: input.reportMode
@@ -295,6 +657,17 @@ async function runReportGenerationJob(input: {
     });
 
     if (!preReportDataAudit.passed) {
+      throw new Error(
+        preReportDataAudit.failures[0] ??
+        (input.reportLocale === "zh"
+          ? "当前报告未通过数据口径校验。请确认数据源包含完整可计算行数据后再生成。"
+          : "The report did not pass data-scope validation. Confirm the data source contains full computable rows before regenerating.")
+      );
+    }
+
+    const shouldPersistFailedAuditReport = false;
+
+    if (shouldPersistFailedAuditReport && !preReportDataAudit.passed) {
       const structuredReport = {
         coreSummary: input.reportLocale === "zh" ? "当前报告未通过数据口径校验。" : "The report did not pass data-scope validation.",
         generatedInsights: {
@@ -354,6 +727,7 @@ async function runReportGenerationJob(input: {
         dateRange: selectedDateRange,
         dataSourceIds: dataSources.map((source) => source.id),
         dataSourceName: dataSources.map((source) => source.name).join(input.reportLocale === "zh" ? "、" : ", "),
+        kpiOrchestrationPlan: orchestrationPlan,
         metricRegistryId: registryFromMetricDefinitions(executableMetrics),
         fullSummary: summary,
         metricResults: [],
@@ -445,6 +819,7 @@ async function runReportGenerationJob(input: {
             reportMode: effectiveReportMode,
             reportTimeMode,
             validationStatus: "failed",
+            kpiOrchestrationPlan: orchestrationPlan,
             blockingIssues: preReportDataAudit.failures
           }
         }
@@ -453,11 +828,12 @@ async function runReportGenerationJob(input: {
         ok: true,
         computedMetricCount: 0,
         generatedAt: payloadJson.generatedAt,
-        reportId: reportHistory?.id ?? briefing.id
+        reportId: reportHistory?.id ?? briefing.id,
+        payload: payloadJson
       };
     }
     const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
-    if (tableScopedRegistryMetrics.length > 0) {
+    if (effectiveTableScopedRegistryMetrics.length > 0) {
       const consistency = validateMetricConsistency(["daily", "weekly", "custom"].map((reportType) => ({
         reportType: reportType as "daily" | "weekly" | "custom",
         metricRegistryId: executableMetricRegistryId,
@@ -477,11 +853,21 @@ async function runReportGenerationJob(input: {
       }
     }
 
-    const { metricResults, metricRegistryId } = await calculateVerifiedMetrics({
-      contexts,
-      metrics: executableMetrics,
-      dateRange: effectiveDateRange
-    });
+    const { metricResults: rawMetricResults, metricRegistryId } = await semanticRuntime.runQuery(
+      {
+        domain: semanticContext.domain,
+        metricIds: executableMetrics.map((metric) => metric.id)
+      },
+      semanticContext,
+      () => calculateVerifiedMetrics({
+        contexts,
+        metrics: executableMetrics,
+        dateRange: effectiveDateRange
+      })
+    );
+    orchestrationPlan = markKpiExecutionStep(orchestrationPlan, "metrics_computed");
+    const metricResults = mergeFinalMetricResults(rawMetricResults);
+    const finalMetricResults = finalMetricResultsView(metricResults);
     const displayableMetricResults = metricResults.filter((result) => hasDisplayableMetricResult(result));
     const metricResultGroups = groupMetricResultsByType(metricResults);
     const aggregationResults = await buildAggregationResults({
@@ -489,6 +875,17 @@ async function runReportGenerationJob(input: {
       metricResults,
       dateRange: effectiveDateRange
     });
+    semanticRuntime.validateNoCrossDomainLeak({ metricResults, aggregationResults }, semanticContext);
+    orchestrationPlan = markKpiExecutionStep(orchestrationPlan, "aggregation_completed");
+    if (!reportMetricPayloadHasReusableReport({
+      metricResults,
+      final_metricResults: finalMetricResults,
+      aggregationResults
+    }, input.reportMode)) {
+      throw new Error(input.reportLocale === "zh"
+        ? "当前数据源没有生成可展示的业务指标。请确认原始文件可读取、日期范围包含数据，并重新生成报表。"
+        : "The current data source did not produce displayable business metrics. Confirm the source file is readable and the selected date range contains rows, then regenerate the report.");
+    }
     const reportTimeArtifacts = buildReportTimeArtifacts(aggregationResults, effectiveDateRange, input.reportLocale);
     const reportDataAudit = await buildReportDataAudit({
       contexts,
@@ -499,6 +896,7 @@ async function runReportGenerationJob(input: {
       aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
       trendMetrics: reportTimeArtifacts.trendMetrics as Array<Record<string, unknown>>
     });
+    orchestrationPlan = markKpiExecutionStep(orchestrationPlan, "consistency_checked");
     const effectiveTimeConfig = {
       ...reportTimeArtifacts.timeConfig,
       hasTimeField: reportTimeArtifacts.timeConfig.hasTimeField || Boolean(reportDataAudit.dateField),
@@ -520,6 +918,27 @@ async function runReportGenerationJob(input: {
       aggregationResults,
       locale: input.reportLocale
     });
+    orchestrationPlan = markKpiExecutionStep(orchestrationPlan, "ai_invoked");
+    const snapshotSchema = asRecord(latestSnapshot.schemaJson);
+    const snapshotMetricRegistry = asRecord(snapshotSchema.metricRegistry);
+    const logisticsKpiOperatingSystem = asRecord(snapshotSchema.logisticsKpiOperatingSystem);
+    const reportSpec = buildReportSpec({
+      schemaSnapshot: latestSnapshot.schemaJson,
+      domain: String(snapshotMetricRegistry.industry ?? metricResults.find((metric) => metric.businessType)?.businessType ?? "generic"),
+      metricResults,
+      domainRegistry: executableMetrics.map((metric) => {
+        const lineage = asRecord(metric.lineageJson);
+        return {
+          metricId: String(lineage.metricId ?? metric.name),
+          businessName: String(lineage.businessName ?? lineage.displayName ?? metric.name),
+          displayName: String(lineage.displayName ?? metric.name),
+          priority: typeof lineage.priority === "number" ? lineage.priority : null,
+          category: metric.category
+        };
+      }),
+      scoringModel: asRecord(logisticsKpiOperatingSystem.scoring_model),
+      impactModel: asRecord(logisticsKpiOperatingSystem.impact_model)
+    });
     const composedReport = composeReport({
       workspaceId: input.workspaceId,
       requestedReportMode: input.reportMode,
@@ -530,7 +949,7 @@ async function runReportGenerationJob(input: {
       aggregationResults,
       trendMetrics: reportTimeArtifacts.trendMetrics,
       trendCharts: reportTimeArtifacts.trendCharts,
-      timeConfig: reportTimeArtifacts.timeConfig,
+      timeConfig: effectiveTimeConfig,
       dateRange: {
         preset: effectiveDateRange.preset,
         startDate: effectiveDateRange.startDate ?? null,
@@ -539,6 +958,12 @@ async function runReportGenerationJob(input: {
         previousEndDate: effectiveDateRange.previousEnd ? effectiveDateRange.previousEnd.toISOString().slice(0, 10) : null
       },
       locale: input.reportLocale
+    });
+    const aiReport = buildKpiAiReportJson({
+      metricResults: metricResults as unknown as Array<Record<string, unknown>>,
+      aggregationResults: aggregationResults as unknown as Array<Record<string, unknown>>,
+      auditReport: reportDataAudit as unknown as Record<string, unknown>,
+      composedReport: composedReport as unknown as Record<string, unknown>
     });
     const metricSnapshotResult = await saveMetricSnapshots(prisma, {
       workspaceId: input.workspaceId,
@@ -576,12 +1001,16 @@ async function runReportGenerationJob(input: {
       requestedReportMode: input.reportMode,
       reportTimeMode,
       metricRegistryId,
+      semanticContext: semanticContext.trace,
       generatedAt: new Date().toISOString(),
       dateRange: selectedDateRange,
       dataSourceIds: dataSources.map((source) => source.id),
       dataSourceName: dataSources.map((source) => source.name).join(input.reportLocale === "zh" ? "、" : ", "),
+      kpiOrchestrationPlan: markKpiExecutionStep(orchestrationPlan, "report_generated"),
       fullSummary,
       metricResults,
+      final_metricResults: finalMetricResults,
+      aiReport,
       verifiedMetrics: metricResults,
       metricResultGroups,
       aggregationResults,
@@ -589,6 +1018,7 @@ async function runReportGenerationJob(input: {
       timeConfig: effectiveTimeConfig,
       trendMetrics: reportTimeArtifacts.trendMetrics,
       trendCharts: reportTimeArtifacts.trendCharts,
+      reportSpec,
       structuredReport,
       composedReports: {
         [effectiveReportMode]: composedReport
@@ -607,7 +1037,18 @@ async function runReportGenerationJob(input: {
     await upsertReportMetricCache(prisma, {
       ...cacheIdentity,
       payload: payloadJson,
-      sourceSnapshotVersion: latestSnapshot.version
+      sourceSnapshotVersion: latestSnapshot.version,
+      domain: semanticContext.domain,
+      semanticSnapshotVersion: semanticContext.snapshotVersion,
+      semanticSchemaHash: semanticContext.schemaHash,
+      queryHash: stableHash({
+        reportMode: input.reportMode,
+        dateRange: {
+          preset: effectiveDateRange.preset,
+          startDate: effectiveDateRange.startDate ?? null,
+          endDate: effectiveDateRange.endDate ?? null
+        }
+      })
     });
     const reportHistoryModel = (prisma as typeof prisma & {
       reportHistory?: {
@@ -656,17 +1097,18 @@ async function runReportGenerationJob(input: {
         payloadJson: payloadJson as never
       }
     });
+    const reportId = reportHistory?.id ?? briefing?.id ?? input.jobId;
 
     await markReportGenerationSucceeded({
       logId: input.generationLogId,
       workspaceId: input.workspaceId,
-      reportId: reportHistory?.id ?? briefing.id
+      reportId
     });
 
     await prisma.reportGenerationJob.update({
       where: { id: input.jobId },
       data: {
-        reportId: reportHistory?.id ?? briefing.id,
+        reportId,
         status: ReportGenerationJobStatus.COMPLETED,
         completedAt: new Date(),
         metadata: {
@@ -674,7 +1116,8 @@ async function runReportGenerationJob(input: {
           generatedAt: payloadJson.generatedAt,
           reportMode: effectiveReportMode,
           reportTimeMode,
-          briefingId: briefing.id,
+          kpiOrchestrationPlan: payloadJson.kpiOrchestrationPlan,
+          briefingId: briefing?.id ?? null,
           reportHistoryId: reportHistory?.id ?? null
         }
       }
@@ -683,7 +1126,8 @@ async function runReportGenerationJob(input: {
       ok: true,
       computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
       generatedAt: payloadJson.generatedAt,
-      reportId: reportHistory?.id ?? briefing.id
+      reportId,
+      payload: payloadJson
     };
   } catch (error) {
     await markReportGenerationFailed({
@@ -727,13 +1171,116 @@ export async function POST(request: Request) {
     const requestedLocale = normalizeReportLocale(payloadRecord.locale);
     const reportLocale: ReportLocale = requestedLocale ?? (session.user.locale === "zh" ? "zh" : "en");
     const reportMode = normalizeReportMode(payloadRecord.reportMode);
+    const connectedDataSources = await prisma.dataSourceConnection.findMany({
+      where: {
+        workspaceId: session.workspace.id,
+        isActive: true,
+        status: "CONNECTED"
+      },
+      select: { id: true }
+    });
+    if (connectedDataSources.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        async: false,
+        status: "empty",
+        code: "NO_CONNECTED_DATA_SOURCE",
+        computedMetricCount: 0,
+        generatedAt: null,
+        message: reportLocale === "zh" ? "当前没有已连接的数据源。" : "No connected data source is currently available.",
+        report: null,
+        metrics: {
+          metricResults: [],
+          final_metricResults: [],
+          count: 0
+        },
+        aggregation: {
+          aggregationResults: [],
+          count: 0
+        },
+        ai_insights: null,
+        metadata: {
+          jobId: null,
+          reportId: null,
+          generatedAt: null,
+          reportMode,
+          requestedReportMode: reportMode,
+          dateRange: null,
+          dataSourceIds: [],
+          dataSourceName: null,
+          metricRegistryId: null,
+          kpiOrchestrationPlan: null,
+          cache: null,
+          message: reportLocale === "zh" ? "当前没有已连接的数据源。" : "No connected data source is currently available."
+        }
+      });
+    }
     const requestedDateRange = payloadRecord.dateRange
       ? normalizeReportDateRange(payloadRecord.dateRange)
       : defaultDateRangeForReportMode(reportMode);
     const resolvedDateRange = resolveReportDateRange(requestedDateRange);
-    if (requestedLocale && requestedLocale !== session.user.locale) {
-      await prisma.user.update({
-        where: { id: session.user.id },
+    const activeSourceIds = connectedDataSources.map((source) => source.id);
+    const cacheSemanticContext = await new SemanticLayerRuntime(prisma).resolveContext(session.workspace.id, activeSourceIds[0]);
+    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id, activeSourceIds);
+    const latestDataDate = await latestCachedReportDataDate(session.workspace.id) ?? resolvedDateRange.endDate;
+    const effectiveCachedDateRange = reportMetricTimeWindow({
+      reportMode,
+      requestedRange: {
+        preset: resolvedDateRange.preset,
+        startDate: resolvedDateRange.startDate,
+        endDate: resolvedDateRange.endDate,
+        previousStartDate: resolvedDateRange.previousStart ? resolvedDateRange.previousStart.toISOString().slice(0, 10) : undefined,
+        previousEndDate: resolvedDateRange.previousEnd ? resolvedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
+      },
+      latestDataDate
+    });
+    const cachedReport = await getReportMetricCache(prisma, {
+      workspaceId: session.workspace.id,
+      dateRange: {
+        preset: effectiveCachedDateRange.preset,
+        startDate: effectiveCachedDateRange.startDate,
+        endDate: effectiveCachedDateRange.endDate,
+        previousStartDate: effectiveCachedDateRange.previousStart ? effectiveCachedDateRange.previousStart.toISOString().slice(0, 10) : undefined,
+        previousEndDate: effectiveCachedDateRange.previousEnd ? effectiveCachedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
+      },
+      sourceSnapshotVersion,
+      dataSourceIds: [cacheSemanticContext.dataSourceId],
+      domain: cacheSemanticContext.domain,
+      semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
+      semanticSchemaHash: cacheSemanticContext.schemaHash,
+      queryHash: stableHash({
+        reportMode,
+        dateRange: {
+          preset: effectiveCachedDateRange.preset,
+          startDate: effectiveCachedDateRange.startDate ?? null,
+          endDate: effectiveCachedDateRange.endDate ?? null
+        }
+      })
+    });
+    const cachedMetricCount = Array.isArray(cachedReport.payload?.metricResults)
+      ? cachedReport.payload.metricResults.length
+      : 0;
+    const forceRefresh = asRecord(payloadRecord.execution_flags).forceRefresh === true || payloadRecord.forceRefresh === true;
+    if (!forceRefresh && cachedReport.payload && cachedReport.status === "hit" && reportMetricPayloadHasReusableReport(cachedReport.payload, reportMode)) {
+      const runtime = buildKpiRuntimeApiResponse({
+        status: "cached",
+        payload: cachedReport.payload,
+        computedMetricCount: cachedMetricCount,
+        message: reportLocale === "zh" ? "已使用缓存报告。" : "Using cached report."
+      });
+      return NextResponse.json({
+        ok: true,
+        async: false,
+	        cached: true,
+	        computedMetricCount: cachedMetricCount,
+	        generatedAt: cachedReport.payload.generatedAt,
+	        message: reportLocale === "zh" ? "已使用缓存报告。" : "Using cached report.",
+	        ...runtime
+	      });
+	    }
+	    if (requestedLocale && requestedLocale !== session.user.locale) {
+	      await prisma.user.update({
+	        where: { id: session.user.id },
         data: { locale: requestedLocale }
       });
     }
@@ -777,28 +1324,43 @@ export async function POST(request: Request) {
     });
 
     if (!generationResult.ok) {
+      const message = generationResult.message ?? (reportLocale === "zh" ? "报告生成失败。" : "Failed to generate report.");
+      const runtime = buildKpiRuntimeApiResponse({
+        status: "failed",
+        jobId: generationJob.id,
+        message
+      });
       return NextResponse.json(
         {
           ok: false,
           async: false,
           jobId: generationJob.id,
-          status: "failed",
-          message: generationResult.message ?? (reportLocale === "zh" ? "报告生成失败。" : "Failed to generate report.")
+          message,
+          ...runtime
         },
         { status: 500 }
       );
     }
+
+    const runtime = buildKpiRuntimeApiResponse({
+      status: "completed",
+      payload: generationResult.payload,
+      jobId: generationJob.id,
+      reportId: generationResult.reportId,
+      computedMetricCount: generationResult.computedMetricCount ?? 0,
+      message: reportLocale === "zh" ? "报告已生成。" : "Report generated."
+    });
 
     return NextResponse.json(
       {
         ok: true,
         async: false,
         jobId: generationJob.id,
-        status: "completed",
         computedMetricCount: generationResult.computedMetricCount ?? 0,
         generatedAt: generationResult.generatedAt,
         reportId: generationResult.reportId,
-        message: reportLocale === "zh" ? "报告已生成。" : "Report generated."
+        message: reportLocale === "zh" ? "报告已生成。" : "Report generated.",
+        ...runtime
       }
     );
 

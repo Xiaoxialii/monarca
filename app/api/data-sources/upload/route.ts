@@ -21,17 +21,30 @@ import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 export const runtime = "nodejs";
 
 const MAX_FILE_NAME_LENGTH = 180;
+const INLINE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
 
 function publicTables(tables: Array<{
   name: string;
   rowCount?: number;
-  columns: Array<{ name: string; type?: string; nullable?: boolean }>;
-}>) {
+    columns: Array<{
+      name: string;
+      displayName?: string;
+      semanticName?: string;
+      rawHeaderPath?: string[];
+      type?: string;
+      nullable?: boolean;
+    }>;
+    rawHeaderRows?: string[][];
+  }>) {
   return tables.map((table) => ({
     name: table.name,
     rowCount: table.rowCount,
+    rawHeaderRows: table.rawHeaderRows,
     columns: table.columns.map((column) => ({
       name: column.name,
+      displayName: column.displayName,
+      semanticName: column.semanticName,
+      rawHeaderPath: column.rawHeaderPath,
       type: column.type ?? "unknown",
       nullable: column.nullable
     }))
@@ -206,6 +219,14 @@ export async function POST(request: Request) {
     let storedFile: Awaited<ReturnType<typeof storeUploadInR2>> = null;
     let localStoredFile: Awaited<ReturnType<typeof storeUploadLocally>> | null = null;
     let storageWarning: string | null = null;
+    const inlineStoredFile = file.size <= INLINE_UPLOAD_MAX_BYTES
+      ? {
+        inlineFileBase64: Buffer.from(await file.arrayBuffer()).toString("base64"),
+        inlineFileName: file.name,
+        inlineMimeType: file.type || null,
+        inlineFileSize: file.size
+      }
+      : null;
 
     try {
       localStoredFile = await storeUploadLocally({
@@ -230,10 +251,30 @@ export async function POST(request: Request) {
             fileSize: file.size,
             mimeType: file.type || null,
             extension,
+            ...(inlineStoredFile ?? {}),
             storedFilePath: localStoredFile.path,
             storage: {
               provider: localStoredFile.provider,
               path: localStoredFile.path
+            }
+          }
+        }
+      });
+    } else if (inlineStoredFile) {
+      await prisma.dataSourceConnection.update({
+        where: {
+          id: result.dataSource.id
+        },
+        data: {
+          isActive: true,
+          config: {
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type || null,
+            extension,
+            ...inlineStoredFile,
+            storage: {
+              provider: "inline-database"
             }
           }
         }
@@ -263,6 +304,7 @@ export async function POST(request: Request) {
               fileSize: file.size,
               mimeType: file.type || null,
               extension,
+              ...(inlineStoredFile ?? {}),
               storedFilePath: localStoredFile?.path ?? null,
               storageProvider: "r2",
               storageBucket: storedFile.bucket,
@@ -280,7 +322,8 @@ export async function POST(request: Request) {
 
       await generateWorkspaceMetricsFromConnectedSources(prisma, {
         workspaceId: session.workspace.id,
-        userId: session.user.id
+        userId: session.user.id,
+        dataSourceIds: [result.dataSource.id]
       });
     })().catch((backgroundError) => {
       console.error("Failed to finish post-upload storage or metric generation", backgroundError);

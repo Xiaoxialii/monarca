@@ -104,7 +104,8 @@ export async function POST(request: Request) {
 
     await generateWorkspaceMetricsFromConnectedSources(prisma, {
       workspaceId: session.workspace.id,
-      userId: session.user.id
+      userId: session.user.id,
+      dataSourceIds: [dataSource.id]
     });
 
     return NextResponse.json({

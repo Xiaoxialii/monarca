@@ -31,6 +31,10 @@ type CacheIdentityInput = {
   dateRange: Pick<ReportDateRangeInput, "preset" | "startDate" | "endDate" | "previousStartDate" | "previousEndDate">;
   filters?: unknown;
   sourceSnapshotVersion?: number | null;
+  domain?: string | null;
+  semanticSnapshotVersion?: string | null;
+  semanticSchemaHash?: string | null;
+  queryHash?: string | null;
 };
 
 export function stableHash(value: unknown) {
@@ -75,7 +79,11 @@ export function reportMetricCacheKey(input: CacheIdentityInput) {
     previousStartDate: input.dateRange.previousStartDate ?? null,
     previousEndDate: input.dateRange.previousEndDate ?? null,
     filters: input.filters ?? null,
-    sourceSnapshotVersion: input.sourceSnapshotVersion ?? null
+    sourceSnapshotVersion: input.sourceSnapshotVersion ?? null,
+    domain: input.domain ?? null,
+    semanticSnapshotVersion: input.semanticSnapshotVersion ?? null,
+    semanticSchemaHash: input.semanticSchemaHash ?? null,
+    queryHash: input.queryHash ?? null
   });
 }
 
@@ -120,7 +128,16 @@ export function cacheIdentityFromPayload({
       endDate: dateRange.endDate,
       previousStartDate: dateRange.previousStart ? dateRange.previousStart.toISOString().slice(0, 10) : undefined,
       previousEndDate: dateRange.previousEnd ? dateRange.previousEnd.toISOString().slice(0, 10) : undefined
-    }
+    },
+    domain: typeof payload.semanticContext === "object" && payload.semanticContext && !Array.isArray(payload.semanticContext)
+      ? String((payload.semanticContext as Record<string, unknown>).domain ?? "")
+      : null,
+    semanticSnapshotVersion: typeof payload.semanticContext === "object" && payload.semanticContext && !Array.isArray(payload.semanticContext)
+      ? String((payload.semanticContext as Record<string, unknown>).snapshotVersion ?? "")
+      : null,
+    semanticSchemaHash: typeof payload.semanticContext === "object" && payload.semanticContext && !Array.isArray(payload.semanticContext)
+      ? String((payload.semanticContext as Record<string, unknown>).schemaHash ?? "")
+      : null
   };
 }
 
@@ -133,17 +150,21 @@ export async function getReportMetricCache(
   const exactCache = await prisma.reportMetricCache.findUnique({
     where: { cacheKey }
   });
-  const cache = exactCache ?? await prisma.reportMetricCache.findFirst({
+  const versionMatchedCache = exactCache ?? await prisma.reportMetricCache.findFirst({
     where: {
       workspaceId: input.workspaceId,
       dateRangePreset: input.dateRange.preset,
       startDate: input.dateRange.startDate ? new Date(input.dateRange.startDate) : null,
       endDate: input.dateRange.endDate ? new Date(input.dateRange.endDate) : null,
       filtersHash: stableHash(input.filters ?? null),
-      sourceSnapshotVersion: input.sourceSnapshotVersion ?? null
+      sourceSnapshotVersion: input.sourceSnapshotVersion ?? null,
+      dataSourceIds: input.dataSourceIds && input.dataSourceIds.length > 0
+        ? { equals: [...input.dataSourceIds].sort() as unknown as Prisma.InputJsonValue }
+        : undefined
     },
     orderBy: { generatedAt: "desc" }
   });
+  const cache = versionMatchedCache;
 
   if (!cache) {
     return { cacheKey, payload: null, cache: null, status: "miss" as const };
@@ -173,7 +194,7 @@ export async function upsertReportMetricCache(
   const cacheKey = reportMetricCacheKey(input);
   const data = {
     workspaceId: input.workspaceId,
-    dataSourceIds: input.dataSourceIds ?? [],
+    dataSourceIds: [...(input.dataSourceIds ?? [])].sort(),
     metricIds: input.metricIds ?? [],
     dateField: input.dateField ?? null,
     dateRangePreset: input.dateRange.preset,

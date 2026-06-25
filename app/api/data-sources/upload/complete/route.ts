@@ -6,11 +6,11 @@ import {
   billingLocaleFromRequest,
   requireCanConnectDataSource
 } from "@/lib/billing/entitlements";
-import { fileExtension, inferTablesFromCsvText, tableNameFromFile } from "@/lib/file-upload-schema";
+import { fileExtension, inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
-import { isWorkspaceUploadKey, readR2ObjectText } from "@/lib/r2-storage";
+import { isWorkspaceUploadKey, readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -37,13 +37,25 @@ function toNumber(value: unknown) {
 function publicTables(tables: Array<{
   name: string;
   rowCount?: number;
-  columns: Array<{ name: string; type?: string; nullable?: boolean }>;
-}>) {
+    columns: Array<{
+      name: string;
+      displayName?: string;
+      semanticName?: string;
+      rawHeaderPath?: string[];
+      type?: string;
+      nullable?: boolean;
+    }>;
+    rawHeaderRows?: string[][];
+  }>) {
   return tables.map((table) => ({
     name: table.name,
     rowCount: table.rowCount,
+    rawHeaderRows: table.rawHeaderRows,
     columns: table.columns.map((column) => ({
       name: column.name,
+      displayName: column.displayName,
+      semanticName: column.semanticName,
+      rawHeaderPath: column.rawHeaderPath,
       type: column.type ?? "unknown",
       nullable: column.nullable
     }))
@@ -151,7 +163,7 @@ export async function POST(request: Request) {
 
     const tables = isCsv
       ? inferTablesFromCsvText(fileName, await readR2ObjectText(key))
-      : [{ name: tableNameFromFile(fileName), columns: [] }];
+      : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(key));
     const scannedAt = new Date().toISOString();
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const provider = isCsv ? "CSV" : "Excel";
@@ -246,7 +258,8 @@ export async function POST(request: Request) {
 
     void generateWorkspaceMetricsFromConnectedSources(prisma, {
       workspaceId: session.workspace.id,
-      userId: session.user.id
+      userId: session.user.id,
+      dataSourceIds: [result.dataSource.id]
     }).catch((metricGenerationError) => {
       console.error("Failed to generate metrics after direct upload", metricGenerationError);
     });

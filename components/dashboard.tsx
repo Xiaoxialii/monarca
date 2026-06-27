@@ -448,11 +448,12 @@ const dashboardCopy = {
         { name: "PostgreSQL", type: "Database", kind: "database" },
         { name: "MySQL", type: "Database", kind: "database" },
         { name: "Excel / CSV", type: "File upload", kind: "file" },
-        { name: "Snowflake", type: "Data warehouse", kind: "warehouse" },
-        { name: "BigQuery", type: "Data warehouse", kind: "warehouse" },
-        { name: "Google Analytics", type: "Analytics", kind: "app" },
-        { name: "Stripe", type: "Revenue", kind: "app" }
-      ],
+	        { name: "Snowflake", type: "Data warehouse", kind: "warehouse" },
+	        { name: "BigQuery", type: "Data warehouse", kind: "warehouse" },
+	        { name: "Google Analytics", type: "Analytics", kind: "app" },
+	        { name: "Shopify", type: "Ecommerce", kind: "app" },
+	        { name: "Stripe", type: "Revenue", kind: "app" }
+	      ],
       server: "Server",
       serverPlaceholder: "server.database.windows.net or host\\instance",
       database: "Database",
@@ -1137,11 +1138,12 @@ const dashboardCopy = {
         { name: "PostgreSQL", type: "数据库", kind: "database" },
         { name: "MySQL", type: "数据库", kind: "database" },
         { name: "Excel / CSV", type: "文件上传", kind: "file" },
-        { name: "Snowflake", type: "数据仓库", kind: "warehouse" },
-        { name: "BigQuery", type: "数据仓库", kind: "warehouse" },
-        { name: "Google Analytics", type: "分析工具", kind: "app" },
-        { name: "Stripe", type: "收入系统", kind: "app" }
-      ],
+	        { name: "Snowflake", type: "数据仓库", kind: "warehouse" },
+	        { name: "BigQuery", type: "数据仓库", kind: "warehouse" },
+	        { name: "Google Analytics", type: "分析工具", kind: "app" },
+	        { name: "Shopify", type: "电商平台", kind: "app" },
+	        { name: "Stripe", type: "收入系统", kind: "app" }
+	      ],
       server: "服务器",
       serverPlaceholder: "server.database.windows.net 或 host\\instance",
       database: "数据库",
@@ -5272,9 +5274,10 @@ function ConnectorPanel({
       columns: Array<{ name: string; type: string; primaryKey?: boolean; foreignKey?: boolean }>;
     }>;
   } | null>(null);
-  const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
-  const isFileSource = selectedSource.kind === "file";
-  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
+	  const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
+	  const isFileSource = selectedSource.kind === "file";
+	  const isShopifySource = selectedSource.name === "Shopify";
+	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL"
     ? "postgresql"
     : selectedSource.name === "MySQL"
@@ -5288,8 +5291,26 @@ function ConnectorPanel({
   const databaseHostPreview = databaseHost || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
   const databaseNamePreview = databaseName || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
   const isSupportedDatabase = databaseType !== null;
-  const showWizard = connectionPage || wizardStarted;
-  const connectPageHref = `/dashboard/import-data/connect?source=${encodeURIComponent(selectedSource.name)}`;
+	  const showWizard = connectionPage || wizardStarted;
+	  const connectPageHref = `/dashboard/import-data/connect?source=${encodeURIComponent(selectedSource.name)}`;
+	  const startShopifyConnection = () => {
+	    const input = window.prompt(isZh ? "请输入 Shopify 店铺域名，例如 xxx.myshopify.com" : "Enter your Shopify shop domain, e.g. xxx.myshopify.com");
+	    const shop = input?.trim();
+
+	    if (!shop) {
+	      return;
+	    }
+
+	    window.location.href = `/api/connectors/shopify/start?shop=${encodeURIComponent(shop)}`;
+	  };
+	  const startSelectedSourceConnection = () => {
+	    if (isShopifySource) {
+	      startShopifyConnection();
+	      return;
+	    }
+
+	    window.location.href = connectPageHref;
+	  };
   const addSelectedSource = (source: ConnectedSourceRow) => {
     onAddConnectedSource(source);
     window.dispatchEvent(new Event("monarca-data-sources-updated"));
@@ -5716,12 +5737,10 @@ function ConnectorPanel({
                 <p className="text-xs font-medium text-muted-foreground">
                   {copy.connectors.sourcePicker}
                 </p>
-                <Button asChild type="button" size="sm" className="h-8 rounded-full">
-                  <a href={connectPageHref}>
-                    {copy.connectors.connectAction}
-                    <ArrowRight />
-                  </a>
-                </Button>
+	                <Button type="button" size="sm" className="h-8 rounded-full" onClick={startSelectedSourceConnection}>
+	                  {copy.connectors.connectAction}
+	                  <ArrowRight />
+	                </Button>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {copy.connectors.sources.map((source, index) => (
@@ -5772,8 +5791,22 @@ function ConnectorPanel({
               </div>
             </div>
             <div className="space-y-4 p-4">
-              {isFileSource ? (
-                <div className="rounded-lg border border-dashed bg-secondary/25 p-5 text-center">
+	              {isShopifySource ? (
+	                <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-5">
+	                  <div className="flex items-start gap-3">
+	                    <Database className="mt-1 size-6 text-emerald-800" />
+	                    <div>
+	                      <p className="text-sm font-semibold">{isZh ? "连接 Shopify 店铺" : "Connect Shopify store"}</p>
+	                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+	                        {isZh
+	                          ? "输入 myshopify.com 店铺域名后，将跳转到 Shopify 授权页面。授权成功后只保存加密 token 和连接元数据。"
+	                          : "Enter your myshopify.com domain to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata."}
+	                      </p>
+	                    </div>
+	                  </div>
+	                </div>
+	              ) : isFileSource ? (
+	                <div className="rounded-lg border border-dashed bg-secondary/25 p-5 text-center">
                   <FileText className="mx-auto size-8 text-emerald-800" />
                   <p className="mt-3 text-sm font-semibold">{copy.connectors.fileUpload}</p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
@@ -5884,7 +5917,7 @@ function ConnectorPanel({
                 </div>
               )}
 
-              {!isFileSource ? (
+	              {!isFileSource && !isShopifySource ? (
                 <div>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">{copy.connectors.mode}</p>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -5905,7 +5938,7 @@ function ConnectorPanel({
                 </div>
               ) : null}
 
-              {!isFileSource ? (
+	              {!isFileSource && !isShopifySource ? (
                 <div>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
                     {copy.connectors.authentication}
@@ -5928,7 +5961,7 @@ function ConnectorPanel({
                 </div>
               ) : null}
 
-              {!isFileSource ? (
+	              {!isFileSource && !isShopifySource ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
@@ -5999,7 +6032,21 @@ function ConnectorPanel({
               <Badge variant="secondary">{selectedSource.type}</Badge>
             </div>
             <div className="space-y-2 rounded-lg border border-dashed bg-secondary/25 p-3">
-              {isFileSource ? (
+	              {isShopifySource ? (
+	                <>
+	                  {[
+	                    `${isZh ? "类型" : "Type"}: Shopify`,
+	                    `${isZh ? "授权方式" : "Auth"}: OAuth`,
+	                    `${isZh ? "数据口径" : "Schema"}: ecommerce_canonical_v1`,
+	                    `${isZh ? "Token 存储" : "Token storage"}: ${isZh ? "加密保存" : "encrypted"}`
+	                  ].map((row) => (
+	                    <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
+	                      <span className="size-1.5 rounded-full bg-emerald-700/70" aria-hidden="true" />
+	                      {row}
+	                    </div>
+	                  ))}
+	                </>
+	              ) : isFileSource ? (
                 <>
                   {[
                     `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
@@ -6064,7 +6111,12 @@ function ConnectorPanel({
               </div>
             ) : null}
             <div className="mt-3 grid gap-2">
-              {isFileSource ? (
+	              {isShopifySource ? (
+	                <Button type="button" size="sm" onClick={startShopifyConnection}>
+	                  {isZh ? "连接 Shopify" : "Connect Shopify"}
+	                  <ArrowRight />
+	                </Button>
+	              ) : isFileSource ? (
                 uploadedFileSource ? (
                   <Button asChild type="button" size="sm">
                     <a href="/dashboard/import-data">
@@ -8003,6 +8055,12 @@ function analysisReportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
   if (range === "ALL") return "全量分析";
   if (range === "CUSTOM") return "自定义分析";
   return reportTimeRangeLabel(range, locale);
+}
+
+function analysisReportModeForRange(range: ReportTimeRange) {
+  if (range === "TODAY") return "daily_brief";
+  if (range === "7D") return "weekly_report";
+  return "custom_report";
 }
 
 function comparisonCurrentRangeLabel(range: ReportTimeRange, locale: Locale) {
@@ -14464,12 +14522,20 @@ function ReportGeneratedPanel({
     summary: string;
     confidence?: number | null;
     createdAt?: string;
-    payloadJson?: {
-      generatedAt?: string;
-      dataSourceName?: string;
-      structuredReport?: StructuredReportViewData;
-    } | null;
-  };
+	    payloadJson?: {
+	      generatedAt?: string;
+	      dataSourceName?: string;
+	      structuredReport?: StructuredReportViewData;
+	      reportDataAudit?: {
+	        totalRows?: number | null;
+	        expectedFullRows?: number | null;
+	        dailyRows?: number | null;
+	        rowsUsedForMetrics?: number | null;
+	        dateField?: string | null;
+	        latestDataDate?: string | null;
+	      } | null;
+	    } | null;
+	  };
   metricResults: ReportMetricEvidenceResult[];
   locale?: Locale;
 }) {
@@ -14477,9 +14543,15 @@ function ReportGeneratedPanel({
     .filter((result) => result.status === "computed")
     .filter(hasDisplayableMetricResult)
     .filter(isBusinessReportMetricResult);
-  const failedResults = metricResults.filter((result) => result.status === "failed");
-  const narrative = buildReportNarrative(computedResults);
-  const structuredReport = briefing.payloadJson?.structuredReport;
+	  const failedResults = metricResults.filter((result) => result.status === "failed");
+	  const narrative = buildReportNarrative(computedResults);
+	  const structuredReport = briefing.payloadJson?.structuredReport;
+	  const reportDataAudit = briefing.payloadJson?.reportDataAudit;
+	  const totalSourceRows = reportDataAudit?.totalRows ?? reportDataAudit?.expectedFullRows ?? null;
+	  const dailyAnalysisRows = reportDataAudit?.dailyRows ?? reportDataAudit?.rowsUsedForMetrics ?? null;
+	  const dateFilterText = reportDataAudit?.dateField
+	    ? `${reportDataAudit.dateField}${reportDataAudit.latestDataDate ? ` = ${reportDataAudit.latestDataDate}` : ""}`
+	    : null;
 
   return (
     <div className="grid gap-3">
@@ -14559,13 +14631,29 @@ function ReportGeneratedPanel({
         </>
       )}
 
-      {failedResults.length > 0 ? (
-        <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
-          <CardContent className="p-4 text-sm text-amber-900">
-            {failedResults.length} 个指标计算失败，已从本次报告中排除
-          </CardContent>
-        </Card>
-      ) : null}
+	      {failedResults.length > 0 ? (
+	        <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
+	          <CardContent className="grid gap-3 p-4 text-sm text-amber-900">
+	            <p>{failedResults.length} 个指标计算失败，已从本次报告中排除</p>
+	            {reportDataAudit ? (
+	              <div className="grid gap-2 rounded-lg border border-amber-200/80 bg-white/65 p-3 text-xs leading-5 text-amber-950 sm:grid-cols-3">
+	                <p>
+	                  <span className="font-semibold">数据源总行数</span>
+	                  <span className="ml-2">{totalSourceRows ?? "未知"}</span>
+	                </p>
+	                <p>
+	                  <span className="font-semibold">日报分析行数</span>
+	                  <span className="ml-2">{dailyAnalysisRows ?? "未知"}</span>
+	                </p>
+	                <p>
+	                  <span className="font-semibold">日期过滤</span>
+	                  <span className="ml-2">{dateFilterText ?? "未识别"}</span>
+	                </p>
+	              </div>
+	            ) : null}
+	          </CardContent>
+	        </Card>
+	      ) : null}
     </div>
   );
 }
@@ -15145,6 +15233,13 @@ function ReportsPage({
 }) {
   const isZh = locale === "zh";
   type AnalysisReportData = {
+    reportRunId?: string | null;
+    primaryDataSourceId?: string | null;
+    dataSourceIds?: string[];
+    reportMode?: string;
+    sourceSnapshotVersion?: number | null;
+    reportRun?: Record<string, unknown> | null;
+    reportScope?: Record<string, unknown> | null;
     hasConnectedDataSource?: boolean;
     status?: string;
     code?: string;
@@ -15192,7 +15287,7 @@ function ReportsPage({
 	    if (isLoadingConnectedSources) return null;
 	    setIsLoading(true);
 	    try {
-	      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=daily_brief`, { cache: "no-store" });
+	      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=${analysisReportModeForRange(dateRange.preset)}`, { cache: "no-store" });
 	      const payload = await response.json().catch(() => null) as AnalysisReportData | null;
 	      if (response.ok) {
 	        analysisReportsPageDataCache = payload;
@@ -15225,7 +15320,7 @@ function ReportsPage({
 	        body: JSON.stringify({
 	          locale,
 	          userRequested: true,
-	          reportMode: "daily_brief",
+	          reportMode: analysisReportModeForRange(dateRange.preset),
 	          dateRange,
 	          idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
 	        })
@@ -15267,6 +15362,7 @@ function ReportsPage({
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
 	  const generatedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
 	  const isAnalysisCacheMiss = reportData?.briefing?.payloadJson?.cache?.status === "miss";
+	  const shouldShowEmptyAnalysisState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
 	  const entitlement = reportData?.reportEntitlement;
 	  const entitlementText = reportEntitlementMessage(entitlement, locale);
 	  const latestPayloadAudit = reportData?.briefing?.payloadJson?.reportDataAudit;
@@ -15379,7 +15475,14 @@ function ReportsPage({
         ) : null}
       </div>
 
-      {!effectiveHasConnectedDatabase ? (
+      {isLoadingConnectedSources ? (
+        <Card className="border bg-white shadow-sm">
+          <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
+            <RefreshCw className="size-4 animate-spin" />
+            {isZh ? "正在加载数据源状态..." : "Loading data source status..."}
+          </CardContent>
+        </Card>
+      ) : shouldShowEmptyAnalysisState ? (
         <NoConnectedAnalysisDataNotice locale={locale} />
       ) : isLoading ? (
         <Card className="border bg-white shadow-sm">
@@ -15419,6 +15522,13 @@ function ReportPage({
 }) {
   const isZh = locale === "zh";
   type LegacyReportData = {
+    reportRunId?: string | null;
+    primaryDataSourceId?: string | null;
+    dataSourceIds?: string[];
+    reportMode?: string;
+    sourceSnapshotVersion?: number | null;
+    reportRun?: Record<string, unknown> | null;
+    reportScope?: Record<string, unknown> | null;
     hasConnectedDataSource?: boolean;
     status?: string;
     code?: string;

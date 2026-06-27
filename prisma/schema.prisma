@@ -22,6 +22,7 @@ enum DataSourceType {
   CSV
   GOOGLE_ANALYTICS
   STRIPE
+  ECOMMERCE_PLATFORM
 }
 
 enum ConnectionStatus {
@@ -156,6 +157,8 @@ model User {
   assignedTickets  SupportTicket[]    @relation("TicketAssignee")
   submittedTickets SupportTicket[]   @relation("TicketSubmitter")
   paymentOrders     PaymentOrder[]
+  generatedReportRuns ReportRun[]    @relation("ReportRunGenerator")
+  oauthStates         OAuthState[]
 }
 
 model Workspace {
@@ -180,7 +183,10 @@ model Workspace {
   reportMetricCaches ReportMetricCache[]
   metricSnapshots   MetricSnapshot[]
   reportHistory     ReportHistory[]
+  reportRuns        ReportRun[]
   inviteLinks       WorkspaceInviteLink[]
+  oauthStates       OAuthState[]
+  ecommerceConnectorAccounts EcommerceConnectorAccount[]
 }
 
 model WorkspaceMember {
@@ -238,8 +244,53 @@ model DataSourceConnection {
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   schemaSnapshots SchemaSnapshot[]
   stats           DataSourceStats[]
+  primaryReportRuns ReportRun[]      @relation("ReportRunPrimaryDataSource")
+  ecommerceConnectorAccounts EcommerceConnectorAccount[]
 
   @@index([workspaceId, status])
+}
+
+model OAuthState {
+  id           String    @id @default(cuid())
+  stateHash    String    @unique
+  provider     String
+  workspaceId  String
+  userId       String?
+  shopDomain   String
+  redirectUri  String
+  scopes       String
+  nonce        String
+  expiresAt    DateTime
+  usedAt       DateTime?
+  metadataJson Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, provider])
+  @@index([provider, shopDomain])
+  @@index([expiresAt])
+}
+
+model EcommerceConnectorAccount {
+  id                   String                @id @default(cuid())
+  workspaceId          String
+  dataSourceId         String?
+  provider             String
+  shopDomain           String
+  encryptedAccessToken String
+  scopes               String
+  status               String                @default("connected")
+  lastSyncedAt         DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource           DataSourceConnection? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, provider, shopDomain])
+  @@index([workspaceId, dataSourceId])
+  @@index([workspaceId, provider])
 }
 
 model DataSourceStats {
@@ -269,6 +320,7 @@ model SchemaSnapshot {
   createdAt     DateTime              @default(now())
   workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   dataSource    DataSourceConnection? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  reportRuns    ReportRun[]
 
   @@unique([workspaceId, version])
 }
@@ -467,6 +519,41 @@ model ReportMetricCache {
 
   @@index([workspaceId, dateRangePreset, startDate, endDate])
   @@index([workspaceId, refreshStatus, staleAt])
+}
+
+model ReportRun {
+  id                      String                @id @default(cuid())
+  workspaceId             String
+  generatedByUserId       String?
+  primaryDataSourceId     String?
+  dataSourceIds           Json
+  reportMode              String
+  dateRangeStart          DateTime?
+  dateRangeEnd            DateTime?
+  sourceSnapshotVersion   Int?
+  schemaSnapshotId        String?
+  semanticSnapshotVersion String?
+  semanticSchemaHash      String?
+  domain                  String?
+  cacheKey                String
+  status                  String                @default("completed")
+  payloadJson             Json
+  composedReportJson      Json?
+  briefingPayloadJson     Json?
+  reportHistoryId         String?
+  dailyBriefingId         String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  workspace               Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  generatedByUser         User?                 @relation("ReportRunGenerator", fields: [generatedByUserId], references: [id], onDelete: SetNull)
+  primaryDataSource       DataSourceConnection? @relation("ReportRunPrimaryDataSource", fields: [primaryDataSourceId], references: [id], onDelete: SetNull)
+  schemaSnapshot          SchemaSnapshot?       @relation(fields: [schemaSnapshotId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, cacheKey])
+  @@index([workspaceId, primaryDataSourceId])
+  @@index([workspaceId, reportMode])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, sourceSnapshotVersion])
 }
 
 model MetricSnapshot {

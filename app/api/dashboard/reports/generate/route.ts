@@ -8,6 +8,12 @@ import { type MetricResultContext, type MetricResultValue } from "@/lib/metric-r
 import { normalizeReportDateRange, resolveReportDateRange, type ReportDateRangeInput } from "@/lib/report-date-range";
 import { cacheIdentityFromPayload, getReportMetricCache, stableHash, upsertReportMetricCache } from "@/lib/report-metric-cache";
 import {
+  attachReportRunMetadata,
+  findCompletedReportRun,
+  reportRunScopeMetadata,
+  upsertCompletedReportRun
+} from "@/lib/report-runs";
+import {
   markReportGenerationFailed,
   markReportGenerationSucceeded,
   ReportAccessError,
@@ -67,17 +73,15 @@ function isBusinessMetricRegistryMetric(metric: { lineageJson: unknown }) {
   return asRecord(metric.lineageJson).generatedFrom === "business_metric_registry";
 }
 
-async function latestWorkspaceSnapshotVersion(workspaceId: string, dataSourceIds: string[] = []) {
-  const snapshot = await prisma.schemaSnapshot.findFirst({
+async function latestWorkspaceSnapshotMeta(workspaceId: string, dataSourceIds: string[] = []) {
+  return prisma.schemaSnapshot.findFirst({
     where: {
       workspaceId,
       ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
     },
     orderBy: { createdAt: "desc" },
-    select: { version: true }
+    select: { id: true, version: true }
   });
-
-  return snapshot?.version ?? null;
 }
 
 async function latestCachedReportDataDate(workspaceId: string) {
@@ -755,7 +759,7 @@ async function runReportGenerationJob(input: {
         dateRange: effectiveDateRange
       });
 
-      await upsertReportMetricCache(prisma, {
+      const reportCache = await upsertReportMetricCache(prisma, {
         ...cacheIdentity,
         payload: payloadJson,
         sourceSnapshotVersion: latestSnapshot.version
@@ -802,22 +806,43 @@ async function runReportGenerationJob(input: {
           payloadJson: payloadJson as never
         }
       });
+      const reportRun = await upsertCompletedReportRun(prisma, {
+        workspaceId: input.workspaceId,
+        generatedByUserId: input.userId,
+        primaryDataSourceId: dataSources[0]?.id ?? null,
+        dataSourceIds: dataSources.map((source) => source.id),
+        reportMode: effectiveReportMode,
+        dateRange: effectiveDateRange,
+        sourceSnapshotVersion: latestSnapshot.version,
+        schemaSnapshotId: latestSnapshot.id,
+        semanticSnapshotVersion: semanticContext.snapshotVersion,
+        semanticSchemaHash: semanticContext.schemaHash,
+        domain: semanticContext.domain,
+        cacheKey: reportCache.cacheKey,
+        payload: payloadJson,
+        composedReport,
+        briefingPayload: payloadJson,
+        reportHistoryId: reportHistory?.id ?? null,
+        dailyBriefingId: briefing.id
+      });
 
       await markReportGenerationSucceeded({
         logId: input.generationLogId,
         workspaceId: input.workspaceId,
-        reportId: reportHistory?.id ?? briefing.id
+        reportId: reportRun.id
       });
       await prisma.reportGenerationJob.update({
         where: { id: input.jobId },
         data: {
-          reportId: reportHistory?.id ?? briefing.id,
+          reportId: reportRun.id,
           status: ReportGenerationJobStatus.COMPLETED,
           completedAt: new Date(),
           metadata: {
             generatedAt: payloadJson.generatedAt,
             reportMode: effectiveReportMode,
             reportTimeMode,
+            reportRunId: reportRun.id,
+            cacheKey: reportCache.cacheKey,
             validationStatus: "failed",
             kpiOrchestrationPlan: orchestrationPlan,
             blockingIssues: preReportDataAudit.failures
@@ -828,8 +853,9 @@ async function runReportGenerationJob(input: {
         ok: true,
         computedMetricCount: 0,
         generatedAt: payloadJson.generatedAt,
-        reportId: reportHistory?.id ?? briefing.id,
-        payload: payloadJson
+        reportId: reportRun.id,
+        reportRunId: reportRun.id,
+        payload: attachReportRunMetadata(payloadJson, reportRun)
       };
     }
     const executableMetricRegistryId = registryFromMetricDefinitions(executableMetrics);
@@ -1034,7 +1060,7 @@ async function runReportGenerationJob(input: {
         dateRange: effectiveDateRange
       });
 
-    await upsertReportMetricCache(prisma, {
+    const reportCache = await upsertReportMetricCache(prisma, {
       ...cacheIdentity,
       payload: payloadJson,
       sourceSnapshotVersion: latestSnapshot.version,
@@ -1097,7 +1123,26 @@ async function runReportGenerationJob(input: {
         payloadJson: payloadJson as never
       }
     });
-    const reportId = reportHistory?.id ?? briefing?.id ?? input.jobId;
+    const reportRun = await upsertCompletedReportRun(prisma, {
+      workspaceId: input.workspaceId,
+      generatedByUserId: input.userId,
+      primaryDataSourceId: dataSources[0]?.id ?? null,
+      dataSourceIds: dataSources.map((source) => source.id),
+      reportMode: effectiveReportMode,
+      dateRange: effectiveDateRange,
+      sourceSnapshotVersion: latestSnapshot.version,
+      schemaSnapshotId: latestSnapshot.id,
+      semanticSnapshotVersion: semanticContext.snapshotVersion,
+      semanticSchemaHash: semanticContext.schemaHash,
+      domain: semanticContext.domain,
+      cacheKey: reportCache.cacheKey,
+      payload: payloadJson,
+      composedReport,
+      briefingPayload: payloadJson,
+      reportHistoryId: reportHistory?.id ?? null,
+      dailyBriefingId: briefing?.id ?? null
+    });
+    const reportId = reportRun.id;
 
     await markReportGenerationSucceeded({
       logId: input.generationLogId,
@@ -1116,6 +1161,8 @@ async function runReportGenerationJob(input: {
           generatedAt: payloadJson.generatedAt,
           reportMode: effectiveReportMode,
           reportTimeMode,
+          reportRunId: reportRun.id,
+          cacheKey: reportCache.cacheKey,
           kpiOrchestrationPlan: payloadJson.kpiOrchestrationPlan,
           briefingId: briefing?.id ?? null,
           reportHistoryId: reportHistory?.id ?? null
@@ -1127,7 +1174,8 @@ async function runReportGenerationJob(input: {
       computedMetricCount: displayableMetricResults.filter((result) => result.status === "computed").length,
       generatedAt: payloadJson.generatedAt,
       reportId,
-      payload: payloadJson
+      reportRunId: reportRun.id,
+      payload: attachReportRunMetadata(payloadJson, reportRun)
     };
   } catch (error) {
     await markReportGenerationFailed({
@@ -1177,7 +1225,7 @@ export async function POST(request: Request) {
         isActive: true,
         status: "CONNECTED"
       },
-      select: { id: true }
+      orderBy: { updatedAt: "desc" }
     });
     if (connectedDataSources.length === 0) {
       return NextResponse.json({
@@ -1215,13 +1263,26 @@ export async function POST(request: Request) {
         }
       });
     }
+    const selectedDataSources = selectKpiExecutionDataSources(connectedDataSources);
+    if (selectedDataSources.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        async: false,
+        status: "empty",
+        code: "NO_SELECTED_DATA_SOURCE",
+        computedMetricCount: 0,
+        generatedAt: null,
+        message: reportLocale === "zh" ? "当前没有可执行的数据源。" : "No executable data source is currently available."
+      });
+    }
     const requestedDateRange = payloadRecord.dateRange
       ? normalizeReportDateRange(payloadRecord.dateRange)
       : defaultDateRangeForReportMode(reportMode);
     const resolvedDateRange = resolveReportDateRange(requestedDateRange);
-    const activeSourceIds = connectedDataSources.map((source) => source.id);
+    const activeSourceIds = selectedDataSources.map((source) => source.id);
     const cacheSemanticContext = await new SemanticLayerRuntime(prisma).resolveContext(session.workspace.id, activeSourceIds[0]);
-    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id, activeSourceIds);
+    const sourceSnapshot = await latestWorkspaceSnapshotMeta(session.workspace.id, activeSourceIds);
+    const sourceSnapshotVersion = sourceSnapshot?.version ?? null;
     const latestDataDate = await latestCachedReportDataDate(session.workspace.id) ?? resolvedDateRange.endDate;
     const effectiveCachedDateRange = reportMetricTimeWindow({
       reportMode,
@@ -1244,7 +1305,7 @@ export async function POST(request: Request) {
         previousEndDate: effectiveCachedDateRange.previousEnd ? effectiveCachedDateRange.previousEnd.toISOString().slice(0, 10) : undefined
       },
       sourceSnapshotVersion,
-      dataSourceIds: [cacheSemanticContext.dataSourceId],
+      dataSourceIds: activeSourceIds,
       domain: cacheSemanticContext.domain,
       semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
       semanticSchemaHash: cacheSemanticContext.schemaHash,
@@ -1261,10 +1322,59 @@ export async function POST(request: Request) {
       ? cachedReport.payload.metricResults.length
       : 0;
     const forceRefresh = asRecord(payloadRecord.execution_flags).forceRefresh === true || payloadRecord.forceRefresh === true;
-    if (!forceRefresh && cachedReport.payload && cachedReport.status === "hit" && reportMetricPayloadHasReusableReport(cachedReport.payload, reportMode)) {
+    const reportRunScope = {
+      workspaceId: session.workspace.id,
+      generatedByUserId: session.user.id,
+      primaryDataSourceId: cacheSemanticContext.dataSourceId,
+      dataSourceIds: activeSourceIds,
+      reportMode,
+      dateRange: effectiveCachedDateRange,
+      sourceSnapshotVersion,
+      schemaSnapshotId: sourceSnapshot?.id ?? null,
+      semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
+      semanticSchemaHash: cacheSemanticContext.schemaHash,
+      domain: cacheSemanticContext.domain,
+      cacheKey: cachedReport.cacheKey
+    };
+    const existingReportRun = !forceRefresh
+      ? await findCompletedReportRun(prisma, reportRunScope)
+      : null;
+
+    if (existingReportRun) {
+      const payload = attachReportRunMetadata(asRecord(existingReportRun.payloadJson), existingReportRun);
       const runtime = buildKpiRuntimeApiResponse({
         status: "cached",
+        payload,
+        reportId: existingReportRun.id,
+        computedMetricCount: Array.isArray(payload.metricResults) ? payload.metricResults.length : 0,
+        message: reportLocale === "zh" ? "已使用已生成报告。" : "Using existing report run."
+      });
+      return NextResponse.json({
+        ok: true,
+        async: false,
+        cached: true,
+        reportRunId: existingReportRun.id,
+        reportId: existingReportRun.id,
+        computedMetricCount: Array.isArray(payload.metricResults) ? payload.metricResults.length : 0,
+        generatedAt: payload.generatedAt,
+        message: reportLocale === "zh" ? "已使用已生成报告。" : "Using existing report run.",
+        reportScope: reportRunScopeMetadata(reportRunScope),
+        ...runtime
+      });
+    }
+
+    if (!forceRefresh && cachedReport.payload && cachedReport.status === "hit" && reportMetricPayloadHasReusableReport(cachedReport.payload, reportMode)) {
+      const reportRun = await upsertCompletedReportRun(prisma, {
+        ...reportRunScope,
         payload: cachedReport.payload,
+        composedReport: asRecord(cachedReport.payload.composedReports)[reportMode] ?? cachedReport.payload,
+        briefingPayload: cachedReport.payload
+      });
+      const payload = attachReportRunMetadata(asRecord(cachedReport.payload), reportRun);
+      const runtime = buildKpiRuntimeApiResponse({
+        status: "cached",
+        payload,
+        reportId: reportRun.id,
         computedMetricCount: cachedMetricCount,
         message: reportLocale === "zh" ? "已使用缓存报告。" : "Using cached report."
       });
@@ -1272,9 +1382,12 @@ export async function POST(request: Request) {
         ok: true,
         async: false,
 	        cached: true,
+	        reportRunId: reportRun.id,
+	        reportId: reportRun.id,
 	        computedMetricCount: cachedMetricCount,
-	        generatedAt: cachedReport.payload.generatedAt,
+	        generatedAt: payload.generatedAt,
 	        message: reportLocale === "zh" ? "已使用缓存报告。" : "Using cached report.",
+	        reportScope: reportRunScopeMetadata(reportRunScope),
 	        ...runtime
 	      });
 	    }

@@ -18,6 +18,13 @@ import {
   stableHash,
   type ReportMetricCachePayload
 } from "@/lib/report-metric-cache";
+import {
+  attachReportRunMetadata,
+  findCompletedReportRun,
+  reportRunApiMetadata,
+  reportRunScopeMetadata,
+  upsertCompletedReportRun
+} from "@/lib/report-runs";
 import { tablesFromSchemaJson } from "@/lib/metric-validation";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { fileExtension, inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
@@ -25,6 +32,7 @@ import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildKpiAiReportJson } from "@/lib/kpi-ai-report";
 import { buildKpiFormulaBreakdowns } from "@/lib/kpi-formula-breakdown";
 import { SemanticLayerRuntime } from "@/lib/semantic-layer-runtime";
+import { selectKpiExecutionDataSources } from "@/lib/kpi-orchestration";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -326,39 +334,6 @@ async function kpiAssetLibraryFromActiveSource(source: {
   return null;
 }
 
-function briefingLocale(
-  briefing: Awaited<ReturnType<typeof prisma.dailyBriefing.findFirst>>
-) {
-  if (!briefing) {
-    return null;
-  }
-
-  const payloadJson = asRecord(briefing.payloadJson);
-  const locale = payloadJson.locale;
-
-  return locale === "zh" || locale === "en" ? locale : null;
-}
-
-function latestDataDateFromPayload(payload: unknown) {
-  const record = asRecord(payload);
-  const audit = asRecord(record.reportDataAudit);
-  const composedReports = asRecord(record.composedReports);
-  const dailyAudit = asRecord(asRecord(composedReports.daily_brief).reportDataAudit);
-  const snapshotAudit = asRecord(asRecord(composedReports.snapshot_report).reportDataAudit);
-  const candidates = [
-    audit.latestDataDate,
-    dailyAudit.latestDataDate,
-    snapshotAudit.latestDataDate,
-    record.latestDataDate
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  }
-
-  return null;
-}
-
 function isFailedGuardrailPayload(payload: unknown) {
   const record = asRecord(payload);
   const audit = asRecord(record.reportDataAudit);
@@ -472,17 +447,15 @@ function filterBriefingMetricResults<T extends { payloadJson?: unknown } | null>
   } as T;
 }
 
-async function latestWorkspaceSnapshotVersion(workspaceId: string, dataSourceIds: string[] = []) {
-  const snapshot = await prisma.schemaSnapshot.findFirst({
+async function latestWorkspaceSnapshotMeta(workspaceId: string, dataSourceIds: string[] = []) {
+  return prisma.schemaSnapshot.findFirst({
     where: {
       workspaceId,
       ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
     },
     orderBy: { createdAt: "desc" },
-    select: { version: true }
+    select: { id: true, version: true }
   });
-
-  return snapshot?.version ?? null;
 }
 
 function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss" | "stale", cacheKey: string) {
@@ -766,7 +739,7 @@ export async function GET(request: Request) {
     const resolvedDateRange = resolveReportDateRange(dateRangeFromSearchParams(url.searchParams));
     const requestedReportMode = normalizeReportMode(url.searchParams.get("reportMode"));
     const locale = session.user.locale === "zh" ? "zh" : "en";
-    const activeSource = await prisma.dataSourceConnection.findFirst({
+    const activeDataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
         isActive: true,
@@ -774,14 +747,10 @@ export async function GET(request: Request) {
       },
       orderBy: {
         updatedAt: "desc"
-      },
-      select: {
-        id: true,
-        name: true,
-        schemas: true,
-        config: true
       }
     });
+    const dataSources = selectKpiExecutionDataSources(activeDataSources);
+    const activeSource = dataSources[0] ?? null;
 
     if (!activeSource) {
       return NextResponse.json({
@@ -805,39 +774,10 @@ export async function GET(request: Request) {
       });
     }
 
-    const activeSourceIds = [activeSource.id];
+    const activeSourceIds = dataSources.map((source) => source.id);
     const cacheSemanticContext = await new SemanticLayerRuntime(prisma).resolveContext(session.workspace.id, activeSource.id);
-    const sourceSnapshotVersion = await latestWorkspaceSnapshotVersion(session.workspace.id, activeSourceIds);
-    const briefing = await prisma.dailyBriefing.findFirst({
-      where: {
-        workspaceId: session.workspace.id
-      },
-      orderBy: {
-        briefingDate: "desc"
-      },
-      include: {
-        insights: {
-          orderBy: {
-            createdAt: "desc"
-          },
-          include: {
-            recommendations: {
-              orderBy: {
-                createdAt: "desc"
-              }
-            }
-          }
-        }
-      }
-    });
-    const selectedBriefing = briefing && !isFailedGuardrailPayload(briefing.payloadJson)
-      ? briefing
-      : null;
-    const selectedBriefingPayload = selectedBriefing
-      ? asRecord(selectedBriefing.payloadJson) as ReportMetricCachePayload
-      : null;
-    const selectedBriefingHasReusableReport = reportMetricPayloadHasReusableReport(selectedBriefingPayload, requestedReportMode);
-    const baseBriefing = selectedBriefingHasReusableReport ? selectedBriefing : null;
+    const sourceSnapshot = await latestWorkspaceSnapshotMeta(session.workspace.id, activeSourceIds);
+    const sourceSnapshotVersion = sourceSnapshot?.version ?? null;
 
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
@@ -848,13 +788,14 @@ export async function GET(request: Request) {
         createdAt: "desc"
       },
       select: {
+        id: true,
+        version: true,
         schemaJson: true,
         qualityReport: true
       }
     });
     let availableDateRange: Awaited<ReturnType<typeof availableDateRangeFromActiveSource>> = null;
-    const cachedLatestDataDate = latestDataDateFromPayload(selectedBriefing?.payloadJson) ??
-      latestDataDateFromSnapshot(latestSnapshot);
+    const cachedLatestDataDate = latestDataDateFromSnapshot(latestSnapshot);
     const needsAvailableDateRangeForWindow = requestedReportMode !== "custom_report" ||
       (
         resolvedDateRange.preset !== "ALL" &&
@@ -888,7 +829,7 @@ export async function GET(request: Request) {
         previousEndDate: effectiveRequestDateRange.previousEnd ? effectiveRequestDateRange.previousEnd.toISOString().slice(0, 10) : undefined
       },
       sourceSnapshotVersion,
-      dataSourceIds: [cacheSemanticContext.dataSourceId],
+      dataSourceIds: activeSourceIds,
       domain: cacheSemanticContext.domain,
       semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
       semanticSchemaHash: cacheSemanticContext.schemaHash,
@@ -904,7 +845,32 @@ export async function GET(request: Request) {
     const reusableCachePayload = shouldBypassReportCache(cacheResult.payload, requestedReportMode) || !reportMetricPayloadHasReusableReport(cacheResult.payload, requestedReportMode)
       ? null
       : cacheResult.payload;
-    let rangedPayload: ReportMetricCachePayload | null = reusableCachePayload;
+    const reportRunScope = {
+      workspaceId: session.workspace.id,
+      generatedByUserId: session.user.id,
+      primaryDataSourceId: cacheSemanticContext.dataSourceId,
+      dataSourceIds: activeSourceIds,
+      reportMode: requestedReportMode,
+      dateRange: effectiveRequestDateRange,
+      sourceSnapshotVersion,
+      schemaSnapshotId: sourceSnapshot?.id ?? latestSnapshot?.id ?? null,
+      semanticSnapshotVersion: cacheSemanticContext.snapshotVersion,
+      semanticSchemaHash: cacheSemanticContext.schemaHash,
+      domain: cacheSemanticContext.domain,
+      cacheKey: cacheResult.cacheKey
+    };
+    const existingReportRun = await findCompletedReportRun(prisma, reportRunScope);
+    const reportRun = existingReportRun ?? (reusableCachePayload
+      ? await upsertCompletedReportRun(prisma, {
+          ...reportRunScope,
+          payload: reusableCachePayload,
+          composedReport: asRecord(reusableCachePayload.composedReports)[requestedReportMode] ?? reusableCachePayload,
+          briefingPayload: reusableCachePayload
+        })
+      : null);
+    let rangedPayload: ReportMetricCachePayload | null = reportRun
+      ? attachReportRunMetadata(asRecord(reportRun.payloadJson), reportRun) as ReportMetricCachePayload
+      : null;
 
     if (rangedPayload && cacheResult.status === "stale") {
       rangedPayload = withCacheMeta(rangedPayload, "stale", cacheResult.cacheKey);
@@ -922,38 +888,37 @@ export async function GET(request: Request) {
     }
     availableDateRange = availableDateRange ?? availableDateRangeFromPayload(rangedPayload);
     const rangedBriefing = rangedPayload
-      ? baseBriefing
-        ? {
-            ...baseBriefing,
-            payloadJson: ensureAiReportPayload({
-              ...asRecord(baseBriefing.payloadJson),
-              ...rangedPayload
-            })
-          }
-        : {
-            id: `computed-${requestedReportMode}-${rangedPayload.generatedAt}`,
-            workspaceId: session.workspace.id,
-            briefingDate: new Date(),
-            title: locale === "zh" ? "实时业务报告" : "Live business report",
-            summary: typeof asRecord(rangedPayload.structuredReport).coreSummary === "string"
-              ? String(asRecord(rangedPayload.structuredReport).coreSummary)
-              : locale === "zh"
-                ? "已基于当前数据源生成实时报告。"
-                : "Generated from the current data source.",
-            confidence: 0,
-            payloadJson: ensureAiReportPayload(rangedPayload),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            insights: []
-          }
-      : baseBriefing;
+      ? {
+          id: reportRun?.id ?? `computed-${requestedReportMode}-${rangedPayload.generatedAt}`,
+          workspaceId: session.workspace.id,
+          briefingDate: reportRun?.createdAt ?? new Date(),
+          title: locale === "zh" ? "实时业务报告" : "Live business report",
+          summary: typeof asRecord(rangedPayload.structuredReport).coreSummary === "string"
+            ? String(asRecord(rangedPayload.structuredReport).coreSummary)
+            : locale === "zh"
+              ? "已基于当前数据源生成实时报告。"
+              : "Generated from the current data source.",
+          confidence: 0,
+          payloadJson: ensureAiReportPayload(rangedPayload),
+          createdAt: reportRun?.createdAt ?? new Date(),
+          updatedAt: reportRun?.updatedAt ?? new Date(),
+          insights: []
+        }
+      : null;
     if (rangedPayload && reportMetricPayloadHasValues(rangedPayload)) {
-      const insights = baseBriefing?.insights ?? [];
-      const recommendations = insights.flatMap((insight) => insight.recommendations);
+      const insights: never[] = [];
+      const recommendations: never[] = [];
       const kpiAssetLibrary = kpiAssetLibraryFromSnapshot(latestSnapshot);
 
       return NextResponse.json({
         workspaceId: session.workspace.id,
+        reportRunId: reportRun?.id ?? null,
+        reportRun: reportRun ? reportRunApiMetadata(reportRun) : null,
+        reportScope: reportRunScopeMetadata(reportRunScope),
+        primaryDataSourceId: reportRun?.primaryDataSourceId ?? reportRunScope.primaryDataSourceId,
+        dataSourceIds: activeSourceIds,
+        reportMode: requestedReportMode,
+        sourceSnapshotVersion,
         hasData: true,
         hasConnectedDataSource: true,
         briefing: rangedBriefing,
@@ -961,7 +926,7 @@ export async function GET(request: Request) {
         recommendations,
         reportHistory: [],
         requestedLocale: session.user.locale === "zh" ? "zh" : "en",
-        reportLocale: briefingLocale(baseBriefing),
+        reportLocale: locale,
         usedLocaleFallback: false,
         reportEntitlement: null,
         analysisReport: analysisReportFromSnapshot(latestSnapshot),
@@ -970,14 +935,20 @@ export async function GET(request: Request) {
       });
     }
 
-    const requestedSpecificDateRange = effectiveRequestDateRange.preset !== "ALL";
-    if (requestedSpecificDateRange) {
+    if (!rangedPayload) {
       availableDateRange = availableDateRange ?? await availableDateRangeFromActiveSource(activeSource);
       const reportEntitlement = await getReportEntitlementState(session.workspace.id);
       const missPayload = reportMetricCacheMissPayload(effectiveRequestDateRange, cacheResult.cacheKey);
 
       return NextResponse.json({
         workspaceId: session.workspace.id,
+        reportRunId: null,
+        reportRun: null,
+        reportScope: reportRunScopeMetadata(reportRunScope),
+        primaryDataSourceId: reportRunScope.primaryDataSourceId,
+        dataSourceIds: activeSourceIds,
+        reportMode: requestedReportMode,
+        sourceSnapshotVersion,
         hasData: false,
         hasConnectedDataSource: true,
         status: "cache_miss",
@@ -1087,13 +1058,20 @@ export async function GET(request: Request) {
           }
         }).catch(() => [])
       : [];
-    const insights = baseBriefing?.insights ?? [];
-    const recommendations = insights.flatMap((insight) => insight.recommendations);
+    const insights: never[] = [];
+    const recommendations: never[] = [];
     const reportEntitlement = await getReportEntitlementState(session.workspace.id);
     const kpiAssetLibrary = await kpiAssetLibraryFromActiveSource(activeSource) ??
       kpiAssetLibraryFromSnapshot(latestSnapshot);
     return NextResponse.json({
       workspaceId: session.workspace.id,
+      reportRunId: reportRun?.id ?? null,
+      reportRun: reportRun ? reportRunApiMetadata(reportRun) : null,
+      reportScope: reportRunScopeMetadata(reportRunScope),
+      primaryDataSourceId: reportRun?.primaryDataSourceId ?? reportRunScope.primaryDataSourceId,
+      dataSourceIds: activeSourceIds,
+      reportMode: requestedReportMode,
+      sourceSnapshotVersion,
       hasData: Boolean(briefingWithComposedReports || insights.length || recommendations.length),
       hasConnectedDataSource: true,
       briefing: briefingWithComposedReports,
@@ -1101,7 +1079,7 @@ export async function GET(request: Request) {
       recommendations,
       reportHistory,
       requestedLocale: session.user.locale === "zh" ? "zh" : "en",
-      reportLocale: briefingLocale(baseBriefing),
+      reportLocale: locale,
       usedLocaleFallback: false,
       reportEntitlement,
       analysisReport: analysisReportFromSnapshot(latestSnapshot),

@@ -48,12 +48,13 @@ test("report data changes invalidate stale report caches", () => {
   assert.match(reportRoute, /sourceSnapshotVersion/, "Report cache reads should be scoped to the latest schema snapshot version");
   assert.match(reportRoute, /dataSourceId:\s*\{\s*in:\s*activeSourceIds\s*\}/, "Report loading should scope schema snapshots to currently connected data sources");
   assert.match(reportGenerateRoute, /dataSourceId:\s*\{\s*in:\s*dataSources\.map/, "Report generation should execute against connected-source snapshots");
-  assert.match(reportGenerateRoute, /latestWorkspaceSnapshotVersion\(session\.workspace\.id,\s*activeSourceIds\)/, "Report generation cache lookup should use connected-source snapshot versions");
+  assert.match(reportGenerateRoute, /latestWorkspaceSnapshotMeta\(session\.workspace\.id,\s*activeSourceIds\)/, "Report generation cache lookup should use connected-source snapshot metadata");
   assert.match(metricGeneration, /dataSourceIds\?:\s*string\[\]/, "Metric generation should accept source-scoped training");
   assert.match(metricGeneration, /id:\s*\{\s*in:\s*scopedDataSourceIds\s*\}/, "Metric generation should only load selected connected data sources when provided");
   assert.match(reportCache, /sourceSnapshotVersion/, "Report cache keys should include the schema snapshot version");
   assert.match(metricVisibility, /average\\s\*rating\\s\*share|averagerating\\s\*share/, "AverageRating Share should not be displayable");
-  assert.match(dashboard, /reportModeDefaultDateRange[\s\S]*preset: "ALL"[\s\S]*useState<SelectedReportDateRange>\(\{ preset: "ALL" \}\)/, "Dashboard report API calls should default to full-data ALL range");
+  assert.match(dashboard, /selectedAnalysisDateRange[\s\S]*useState<SelectedReportDateRange>\(\{ preset: "ALL" \}\)/, "Dashboard analysis report API calls should default to full-data ALL range");
+  assert.match(dashboard, /function analysisReportModeForRange[\s\S]*TODAY[\s\S]*daily_brief[\s\S]*7D[\s\S]*weekly_report[\s\S]*custom_report/, "Dashboard analysis report API calls should map report mode from the selected range");
 });
 
 test("new data source training is scoped to the uploaded or rescanned source", () => {

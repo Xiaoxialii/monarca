@@ -76,6 +76,18 @@ import {
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 
+type DataSourceType = "oauth" | "credentials" | "file";
+type DataSourceAuthMode = "oauth" | "api_key" | "file_upload";
+
+type DataSourceDefinition = {
+  name: string;
+  provider: string;
+  type: string;
+  kind: "database" | "warehouse" | "file" | "app";
+  dataSourceType: DataSourceType;
+  authMode: DataSourceAuthMode;
+};
+
 const dashboardCopy = {
   en: {
     navItems: [
@@ -444,16 +456,16 @@ const dashboardCopy = {
       source: "Selected source",
       sourcePicker: "Data source",
       sources: [
-        { name: "SQL Server", type: "Database", kind: "database" },
-        { name: "PostgreSQL", type: "Database", kind: "database" },
-        { name: "MySQL", type: "Database", kind: "database" },
-        { name: "Excel / CSV", type: "File upload", kind: "file" },
-	        { name: "Snowflake", type: "Data warehouse", kind: "warehouse" },
-	        { name: "BigQuery", type: "Data warehouse", kind: "warehouse" },
-	        { name: "Google Analytics", type: "Analytics", kind: "app" },
-	        { name: "Shopify", type: "Ecommerce", kind: "app" },
-	        { name: "Stripe", type: "Revenue", kind: "app" }
-	      ],
+        { name: "SQL Server", provider: "sql_server", type: "Database", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "PostgreSQL", provider: "postgresql", type: "Database", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "MySQL", provider: "mysql", type: "Database", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "Excel / CSV", provider: "excel_csv", type: "File upload", kind: "file", dataSourceType: "file", authMode: "file_upload" },
+        { name: "Snowflake", provider: "snowflake", type: "Data warehouse", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "BigQuery", provider: "bigquery", type: "Data warehouse", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "Google Analytics", provider: "google_analytics", type: "Analytics", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Shopify", provider: "shopify", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Stripe", provider: "stripe", type: "Revenue", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
+      ] satisfies DataSourceDefinition[],
       server: "Server",
       serverPlaceholder: "server.database.windows.net or host\\instance",
       database: "Database",
@@ -1134,16 +1146,16 @@ const dashboardCopy = {
       source: "当前数据源",
       sourcePicker: "数据源",
       sources: [
-        { name: "SQL Server", type: "数据库", kind: "database" },
-        { name: "PostgreSQL", type: "数据库", kind: "database" },
-        { name: "MySQL", type: "数据库", kind: "database" },
-        { name: "Excel / CSV", type: "文件上传", kind: "file" },
-	        { name: "Snowflake", type: "数据仓库", kind: "warehouse" },
-	        { name: "BigQuery", type: "数据仓库", kind: "warehouse" },
-	        { name: "Google Analytics", type: "分析工具", kind: "app" },
-	        { name: "Shopify", type: "电商平台", kind: "app" },
-	        { name: "Stripe", type: "收入系统", kind: "app" }
-	      ],
+        { name: "SQL Server", provider: "sql_server", type: "数据库", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "PostgreSQL", provider: "postgresql", type: "数据库", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "MySQL", provider: "mysql", type: "数据库", kind: "database", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "Excel / CSV", provider: "excel_csv", type: "文件上传", kind: "file", dataSourceType: "file", authMode: "file_upload" },
+        { name: "Snowflake", provider: "snowflake", type: "数据仓库", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "BigQuery", provider: "bigquery", type: "数据仓库", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
+        { name: "Google Analytics", provider: "google_analytics", type: "分析工具", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Shopify", provider: "shopify", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Stripe", provider: "stripe", type: "收入系统", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
+      ] satisfies DataSourceDefinition[],
       server: "服务器",
       serverPlaceholder: "server.database.windows.net 或 host\\instance",
       database: "数据库",
@@ -5275,8 +5287,9 @@ function ConnectorPanel({
     }>;
   } | null>(null);
 	  const selectedSource = copy.connectors.sources[selectedSourceIndex] ?? copy.connectors.sources[0];
-	  const isFileSource = selectedSource.kind === "file";
-	  const isShopifySource = selectedSource.name === "Shopify";
+	  const isFileSource = selectedSource.authMode === "file_upload";
+	  const isOAuthSource = selectedSource.authMode === "oauth";
+	  const isShopifySource = selectedSource.provider === "shopify";
 	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL"
     ? "postgresql"
@@ -5293,24 +5306,31 @@ function ConnectorPanel({
   const isSupportedDatabase = databaseType !== null;
 	  const showWizard = connectionPage || wizardStarted;
 	  const connectPageHref = `/dashboard/import-data/connect?source=${encodeURIComponent(selectedSource.name)}`;
-	  const startShopifyConnection = () => {
-	    const input = window.prompt(isZh ? "请输入 Shopify 店铺域名，例如 xxx.myshopify.com" : "Enter your Shopify shop domain, e.g. xxx.myshopify.com");
-	    const shop = input?.trim();
+	  const connectDataSource = (source: DataSourceDefinition) => {
+	    if (source.authMode === "oauth") {
+	      if (source.provider === "shopify") {
+	        window.location.href = "/api/connectors/shopify/start";
+	        return;
+	      }
 
-	    if (!shop) {
+	      setConnectionResult({
+	        ok: false,
+	        message: isZh
+	          ? `${source.name} OAuth 接入尚未启用。`
+	          : `${source.name} OAuth is not enabled yet.`
+	      });
+	      setWizardStarted(true);
 	      return;
 	    }
 
-	    window.location.href = `/api/connectors/shopify/start?shop=${encodeURIComponent(shop)}`;
-	  };
-	  const startSelectedSourceConnection = () => {
-	    if (isShopifySource) {
-	      startShopifyConnection();
+	    if (source.authMode === "file_upload") {
+	      window.location.href = connectPageHref;
 	      return;
 	    }
 
 	    window.location.href = connectPageHref;
 	  };
+	  const startSelectedSourceConnection = () => connectDataSource(selectedSource);
   const addSelectedSource = (source: ConnectedSourceRow) => {
     onAddConnectedSource(source);
     window.dispatchEvent(new Event("monarca-data-sources-updated"));
@@ -5791,16 +5811,24 @@ function ConnectorPanel({
               </div>
             </div>
             <div className="space-y-4 p-4">
-	              {isShopifySource ? (
+	              {isOAuthSource ? (
 	                <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-5">
 	                  <div className="flex items-start gap-3">
 	                    <Database className="mt-1 size-6 text-emerald-800" />
 	                    <div>
-	                      <p className="text-sm font-semibold">{isZh ? "连接 Shopify 店铺" : "Connect Shopify store"}</p>
+	                      <p className="text-sm font-semibold">
+	                        {isShopifySource
+	                          ? (isZh ? "连接 Shopify" : "Connect Shopify")
+	                          : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
+	                      </p>
 	                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-	                        {isZh
-	                          ? "输入 myshopify.com 店铺域名后，将跳转到 Shopify 授权页面。授权成功后只保存加密 token 和连接元数据。"
-	                          : "Enter your myshopify.com domain to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata."}
+	                        {isShopifySource
+	                          ? (isZh
+	                              ? "点击按钮后将跳转到 Shopify OAuth 授权页面。授权成功后只保存加密 token 和连接元数据。"
+	                              : "Click the button to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata.")
+	                          : (isZh
+	                              ? "该数据源将通过 OAuth 授权连接，不需要在 Monarca 输入 API key。"
+	                              : "This source uses OAuth. You do not enter API keys in Monarca.")}
 	                      </p>
 	                    </div>
 	                  </div>
@@ -5917,7 +5945,7 @@ function ConnectorPanel({
                 </div>
               )}
 
-	              {!isFileSource && !isShopifySource ? (
+	              {!isFileSource && !isOAuthSource ? (
                 <div>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">{copy.connectors.mode}</p>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -5938,7 +5966,7 @@ function ConnectorPanel({
                 </div>
               ) : null}
 
-	              {!isFileSource && !isShopifySource ? (
+	              {!isFileSource && !isOAuthSource ? (
                 <div>
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
                     {copy.connectors.authentication}
@@ -5961,7 +5989,7 @@ function ConnectorPanel({
                 </div>
               ) : null}
 
-	              {!isFileSource && !isShopifySource ? (
+	              {!isFileSource && !isOAuthSource ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
@@ -6032,12 +6060,14 @@ function ConnectorPanel({
               <Badge variant="secondary">{selectedSource.type}</Badge>
             </div>
             <div className="space-y-2 rounded-lg border border-dashed bg-secondary/25 p-3">
-	              {isShopifySource ? (
+	              {isOAuthSource ? (
 	                <>
 	                  {[
-	                    `${isZh ? "类型" : "Type"}: Shopify`,
+	                    `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
 	                    `${isZh ? "授权方式" : "Auth"}: OAuth`,
-	                    `${isZh ? "数据口径" : "Schema"}: ecommerce_canonical_v1`,
+	                    isShopifySource
+	                      ? `${isZh ? "数据口径" : "Schema"}: ecommerce_canonical_v1`
+	                      : `${isZh ? "状态" : "Status"}: ${isZh ? "待接入" : "not enabled"}`,
 	                    `${isZh ? "Token 存储" : "Token storage"}: ${isZh ? "加密保存" : "encrypted"}`
 	                  ].map((row) => (
 	                    <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -6111,9 +6141,11 @@ function ConnectorPanel({
               </div>
             ) : null}
             <div className="mt-3 grid gap-2">
-	              {isShopifySource ? (
-	                <Button type="button" size="sm" onClick={startShopifyConnection}>
-	                  {isZh ? "连接 Shopify" : "Connect Shopify"}
+	              {isOAuthSource ? (
+	                <Button type="button" size="sm" onClick={() => connectDataSource(selectedSource)}>
+	                  {isShopifySource
+	                    ? (isZh ? "连接 Shopify" : "Connect Shopify")
+	                    : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                  <ArrowRight />
 	                </Button>
 	              ) : isFileSource ? (

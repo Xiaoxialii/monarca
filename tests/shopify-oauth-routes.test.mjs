@@ -12,6 +12,8 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   const startRoute = read("app/api/connectors/shopify/start/route.ts");
   const callbackRoute = read("app/api/connectors/shopify/callback/route.ts");
   const statusRoute = read("app/api/connectors/shopify/status/route.ts");
+  const fetchRoute = read("app/api/connectors/shopify/fetch/route.ts");
+  const graphQLClient = read("lib/ecommerce-connectors/providers/shopify-graphql.ts");
 
   assert.match(schema, /ECOMMERCE_PLATFORM/, "DataSourceType should include ecommerce platform sources");
   assert.match(schema, /model OAuthState \{[\s\S]*stateHash\s+String\s+@unique/, "OAuthState should store a state hash");
@@ -42,4 +44,14 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
 
   assert.match(statusRoute, /workspaceId: session\.workspace\.id/, "Status should be workspace scoped");
   assert.doesNotMatch(statusRoute, /encryptedAccessToken|accessToken/, "Status response should not expose tokens");
+
+  assert.match(graphQLClient, /X-Shopify-Access-Token/, "GraphQL client should authenticate with Shopify access token header");
+  assert.match(graphQLClient, /shopifyApiVersion\(\)/, "GraphQL client should use a fixed configured Shopify API version");
+  assert.match(fetchRoute, /decryptConnectorToken\(account\.encryptedAccessToken\)/, "Fetch route should decrypt token only in memory");
+  assert.match(fetchRoute, /workspaceId: session\.workspace\.id/, "Fetch route should be workspace scoped");
+  assert.match(fetchRoute, /orders\(first: \$first/, "Fetch route should read orders");
+  assert.match(fetchRoute, /products\(first: \$first/, "Fetch route should read products");
+  assert.match(fetchRoute, /customers\(first: \$first/, "Fetch route should read customers");
+  assert.doesNotMatch(fetchRoute, /prisma\.\w+\.(create|update|upsert|delete)|R2|manifest|generateWorkspaceMetrics|report/i, "Fetch route must not write data, generate artifacts, metrics, or reports");
+  assert.doesNotMatch(fetchRoute, /accessToken[^,\n]*NextResponse|encryptedAccessToken[^,\n]*NextResponse/, "Fetch route must not return tokens");
 });

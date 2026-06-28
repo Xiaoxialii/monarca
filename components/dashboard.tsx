@@ -1514,8 +1514,9 @@ type ConnectedSourceRow = {
     database?: string | null;
     ssl?: boolean | null;
     fileName?: string | null;
-    fileSize?: number | null;
+  fileSize?: number | null;
     extension?: string | null;
+    shopDomain?: string | null;
   } | null;
   schema?: {
     tableCount?: number | null;
@@ -3633,6 +3634,19 @@ function SettingsConnectedSourcesPanel({
   const [expandedSourceIds, setExpandedSourceIds] = useState<string[]>([]);
   const [expandedTableKeys, setExpandedTableKeys] = useState<string[]>([]);
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
+  const [fetchingShopifySourceId, setFetchingShopifySourceId] = useState<string | null>(null);
+  const [shopifyFetchResults, setShopifyFetchResults] = useState<Record<string, {
+    ok: boolean;
+    message: string;
+    shopDomain?: string | null;
+    fetchedAt?: string | null;
+    counts?: {
+      orders: number;
+      products: number;
+      customers: number;
+    };
+    sampleOrderNames?: string[];
+  }>>({});
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const connectedCountLabel = isLoadingConnectedSources
     ? (isZh ? "加载中" : "Loading")
@@ -3656,6 +3670,8 @@ function SettingsConnectedSourcesPanel({
         hideSchema: "收起结构",
         rescan: "更新数据源",
         rescanning: "更新中",
+        fetchShopify: "拉取 Shopify 数据",
+        fetchingShopify: "拉取中",
         recentScan: "最近扫描",
         noTables: "暂未读取到表结构",
         fieldNullable: "可为空",
@@ -3688,6 +3704,8 @@ function SettingsConnectedSourcesPanel({
         hideSchema: "Hide schema",
         rescan: "Update source",
         rescanning: "Updating",
+        fetchShopify: "Fetch Shopify Data",
+        fetchingShopify: "Fetching",
         recentScan: "Last scan",
         noTables: "No tables found yet",
         fieldNullable: "nullable",
@@ -3740,6 +3758,59 @@ function SettingsConnectedSourcesPanel({
     }
   };
 
+  const fetchShopifyData = async (sourceId: string) => {
+    setFetchingShopifySourceId(sourceId);
+
+    try {
+      const response = await fetch("/api/connectors/shopify/fetch");
+      const payload = await response.json().catch(() => null) as {
+        orders?: Array<{ name?: string | null }>;
+        products?: unknown[];
+        customers?: unknown[];
+        meta?: {
+          shopDomain?: string | null;
+          fetchedAt?: string | null;
+        };
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload) {
+        throw new Error(payload?.message || (isZh ? "Shopify 数据拉取失败" : "Shopify fetch failed"));
+      }
+
+      setShopifyFetchResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: true,
+          message: isZh ? "Shopify 数据拉取成功" : "Shopify data fetched",
+          shopDomain: payload.meta?.shopDomain ?? null,
+          fetchedAt: payload.meta?.fetchedAt ?? null,
+          counts: {
+            orders: payload.orders?.length ?? 0,
+            products: payload.products?.length ?? 0,
+            customers: payload.customers?.length ?? 0
+          },
+          sampleOrderNames: (payload.orders ?? [])
+            .map((order) => order.name)
+            .filter((name): name is string => Boolean(name))
+            .slice(0, 5)
+        }
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "Shopify 数据拉取失败" : "Shopify fetch failed";
+
+      setShopifyFetchResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: false,
+          message
+        }
+      }));
+    } finally {
+      setFetchingShopifySourceId(null);
+    }
+  };
+
   return (
     <div className="grid gap-4">
     <Card className="overflow-hidden bg-white shadow-sm">
@@ -3783,6 +3854,8 @@ function SettingsConnectedSourcesPanel({
               const isExpanded = expandedSourceIds.includes(source.id);
               const tables = source.schema?.tables ?? [];
               const scannedAt = source.schema?.scannedAt ?? source.lastSyncAt;
+              const isShopifySource = source.provider === "shopify";
+              const shopifyFetchResult = shopifyFetchResults[source.id];
 
               return (
                 <div key={source.id} className="rounded-lg border bg-secondary/10 p-4">
@@ -3809,16 +3882,30 @@ function SettingsConnectedSourcesPanel({
                             {source.provider} · {sourceTypeLabel(copy, source)}
                           </span>
                           <span className="rounded-full bg-white px-2.5 py-1">
-                            {labels.host}: {source.config?.host ?? "—"}
+                            {isShopifySource ? "Shop" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : (source.config?.host ?? "—")}
                           </span>
+                          {!isShopifySource ? (
                           <span className="rounded-full bg-white px-2.5 py-1">
                             {labels.database}: {source.config?.database ?? "—"}
                           </span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      {isShopifySource ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={fetchingShopifySourceId === source.id}
+                          onClick={() => void fetchShopifyData(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", fetchingShopifySourceId === source.id && "animate-spin")} />
+                          {fetchingShopifySourceId === source.id ? labels.fetchingShopify : labels.fetchShopify}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="outline"
@@ -3849,6 +3936,32 @@ function SettingsConnectedSourcesPanel({
                       </Button>
                     </div>
                   </div>
+
+                  {shopifyFetchResult ? (
+                    <div
+                      className={cn(
+                        "mt-4 rounded-lg border px-3 py-2 text-xs",
+                        shopifyFetchResult.ok
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                          : "border-rose-200 bg-rose-50 text-rose-800"
+                      )}
+                    >
+                      <p className="font-semibold">{shopifyFetchResult.message}</p>
+                      {shopifyFetchResult.ok && shopifyFetchResult.counts ? (
+                        <div className="mt-1.5 space-y-1 text-muted-foreground">
+                          <p>
+                            {shopifyFetchResult.shopDomain ?? source.config?.shopDomain ?? source.name} · {formatRelativeSourceDate(shopifyFetchResult.fetchedAt ?? null, isZh)}
+                          </p>
+                          <p>
+                            Orders: {shopifyFetchResult.counts.orders} · Products: {shopifyFetchResult.counts.products} · Customers: {shopifyFetchResult.counts.customers}
+                          </p>
+                          {shopifyFetchResult.sampleOrderNames?.length ? (
+                            <p>Orders sample: {shopifyFetchResult.sampleOrderNames.join(", ")}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {isExpanded ? (
                     <div className="mt-4 rounded-lg border bg-white p-3">

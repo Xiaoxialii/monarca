@@ -78,6 +78,27 @@ export function encryptConnectorToken(token: string) {
   ].join(":");
 }
 
+export function decryptConnectorToken(encryptedToken: string) {
+  const [version, ivValue, tagValue, encryptedValue] = encryptedToken.split(":");
+
+  if (version !== "v1" || !ivValue || !tagValue || !encryptedValue) {
+    throw new ShopifyConnectorError("Invalid encrypted connector token.", "INVALID_ENCRYPTED_CONNECTOR_TOKEN", 500);
+  }
+
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    encryptionKey(),
+    Buffer.from(ivValue, "base64url")
+  );
+
+  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, "base64url")),
+    decipher.final()
+  ]).toString("utf8");
+}
+
 export function hashOAuthState(stateToken: string) {
   return crypto.createHash("sha256").update(stateToken).digest("hex");
 }

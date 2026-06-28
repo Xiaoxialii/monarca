@@ -51,6 +51,7 @@ function publicConfig(configValue: unknown) {
     fileName: typeof config.fileName === "string" ? config.fileName : null,
     fileSize: toNumber(config.fileSize),
     extension: typeof config.extension === "string" ? config.extension : null,
+    shopDomain: typeof config.shopDomain === "string" ? config.shopDomain : null,
     hasStoredFile
   };
 }

@@ -187,6 +187,8 @@ model Workspace {
   inviteLinks       WorkspaceInviteLink[]
   oauthStates       OAuthState[]
   ecommerceConnectorAccounts EcommerceConnectorAccount[]
+  ecommerceSyncRuns EcommerceSyncRun[]
+  ecommerceSyncArtifacts EcommerceSyncArtifact[]
 }
 
 model WorkspaceMember {
@@ -246,6 +248,8 @@ model DataSourceConnection {
   stats           DataSourceStats[]
   primaryReportRuns ReportRun[]      @relation("ReportRunPrimaryDataSource")
   ecommerceConnectorAccounts EcommerceConnectorAccount[]
+  ecommerceSyncRuns EcommerceSyncRun[]
+  ecommerceSyncArtifacts EcommerceSyncArtifact[]
 
   @@index([workspaceId, status])
 }
@@ -287,10 +291,68 @@ model EcommerceConnectorAccount {
   updatedAt            DateTime              @updatedAt
   workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   dataSource           DataSourceConnection? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  syncRuns             EcommerceSyncRun[]
+  syncArtifacts        EcommerceSyncArtifact[]
 
   @@unique([workspaceId, provider, shopDomain])
   @@index([workspaceId, dataSourceId])
   @@index([workspaceId, provider])
+}
+
+model EcommerceSyncRun {
+  id                 String                    @id @default(cuid())
+  workspaceId        String
+  dataSourceId       String
+  connectorAccountId String
+  provider           String
+  shopDomain         String
+  syncRunId          String                    @unique
+  idempotencyKey     String
+  status             String                    @default("running")
+  syncWindowStart    DateTime?
+  syncWindowEnd      DateTime?
+  cursorJson         Json?
+  rowsPulled         Int                       @default(0)
+  rowsNormalized     Int                       @default(0)
+  rowsRejected       Int                       @default(0)
+  manifestKey        String?
+  errorMessage       String?
+  startedAt          DateTime                  @default(now())
+  finishedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource         DataSourceConnection      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  connectorAccount   EcommerceConnectorAccount @relation(fields: [connectorAccountId], references: [id], onDelete: Cascade)
+  artifacts          EcommerceSyncArtifact[]
+
+  @@unique([workspaceId, dataSourceId, provider, shopDomain, idempotencyKey])
+  @@index([workspaceId, dataSourceId, provider])
+  @@index([connectorAccountId, startedAt])
+}
+
+model EcommerceSyncArtifact {
+  id                 String                    @id @default(cuid())
+  workspaceId        String
+  dataSourceId       String
+  connectorAccountId String
+  syncRunId          String
+  provider           String
+  shopDomain         String
+  artifactType       String
+  tableName          String?
+  artifactKey        String
+  checksum           String
+  rowCount           Int                       @default(0)
+  createdAt          DateTime                  @default(now())
+  workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource         DataSourceConnection      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  connectorAccount   EcommerceConnectorAccount @relation(fields: [connectorAccountId], references: [id], onDelete: Cascade)
+  syncRun            EcommerceSyncRun          @relation(fields: [syncRunId], references: [syncRunId], onDelete: Cascade)
+
+  @@index([workspaceId, dataSourceId, provider])
+  @@index([syncRunId])
+  @@unique([syncRunId, artifactKey])
 }
 
 model DataSourceStats {

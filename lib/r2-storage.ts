@@ -199,6 +199,38 @@ export async function readR2ObjectBuffer(key: string) {
   return streamToBuffer(response.Body);
 }
 
+export async function writeR2ObjectText(params: {
+  key: string;
+  body: string;
+  contentType?: string;
+  metadata?: Record<string, string>;
+}) {
+  const config = r2Config();
+
+  if (!config) {
+    throw new Error("R2 storage is not configured.");
+  }
+
+  const body = Buffer.from(params.body, "utf8");
+
+  await r2Client(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: params.key,
+      Body: body,
+      ContentLength: body.length,
+      ContentType: params.contentType ?? "application/json",
+      Metadata: params.metadata
+    })
+  );
+
+  return {
+    bucket: config.bucket,
+    endpoint: config.endpoint,
+    key: params.key
+  };
+}
+
 export async function storeUploadInR2(params: {
   workspaceId: string;
   dataSourceId: string;

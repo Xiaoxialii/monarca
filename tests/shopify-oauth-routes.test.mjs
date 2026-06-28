@@ -27,6 +27,10 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(helper, /updateMany\([\s\S]*usedAt: null[\s\S]*expiresAt: \{ gt: now \}/, "State consumption should be conditional");
   assert.match(helper, /createCipheriv\("aes-256-gcm"/, "Access token should be encrypted");
   assert.match(helper, /timingSafeEqual/, "HMAC verification should use constant-time comparison");
+  assert.match(helper, /REQUIRED_SHOPIFY_SCOPES = \["read_orders", "read_products", "read_customers"\]/, "Shopify OAuth should declare required Admin API data scopes");
+  assert.match(helper, /function parseShopifyScopes/, "Shopify scopes should be normalized before authorization");
+  assert.match(helper, /split\(\/\[\\s,\]\+\//, "Shopify scopes should accept comma or whitespace separated env values");
+  assert.match(helper, /assertRequiredShopifyScopes\(scopes\)/, "Shopify env validation should require orders, products, and customers scopes");
 
   assert.match(startRoute, /syncCurrentClerkUser\(\)/, "Start route should require Clerk user/workspace");
   assert.match(startRoute, /normalizeShopDomain\(url\.searchParams\.get\("shop"\)\)/, "Start route should normalize shop domain");
@@ -37,6 +41,8 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(callbackRoute, /verifyShopifyCallbackHmac\(url, clientSecret\)/, "Callback should verify hmac before state consumption");
   assert.match(callbackRoute, /verifyAndConsumeOAuthState\(/, "Callback should verify and consume OAuth state");
   assert.match(callbackRoute, /exchangeShopifyCodeForToken\(/, "Callback should exchange code for token");
+  assert.match(callbackRoute, /assertRequiredShopifyScopes\(token\.scope\)/, "Callback should reject tokens missing required Shopify scopes");
+  assert.match(callbackRoute, /formatShopifyScopes\(token\.scope\)/, "Callback should persist Shopify's normalized granted scopes");
   assert.match(callbackRoute, /encryptConnectorToken\(token\.accessToken\)/, "Callback should encrypt token before storing");
   assert.match(callbackRoute, /DataSourceType\.ECOMMERCE_PLATFORM/, "Callback should create an ecommerce platform data source");
   assert.doesNotMatch(callbackRoute, /workspaceId\s*=\s*url\.searchParams|get\("workspaceId"\)/, "Callback must not trust workspaceId from query");

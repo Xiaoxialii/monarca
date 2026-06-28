@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 
 export const SHOPIFY_PROVIDER = "shopify";
+export const REQUIRED_SHOPIFY_SCOPES = ["read_orders", "read_products", "read_customers"] as const;
 
 export class ShopifyConnectorError extends Error {
   constructor(message: string, public readonly code: string, public readonly status = 400) {
@@ -25,16 +26,57 @@ export function normalizeShopDomain(input: string | null | undefined) {
   return domain;
 }
 
+export function parseShopifyScopes(input: string | null | undefined) {
+  const scopes = String(input ?? "")
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim().replace(/^["'\[]+|["'\]]+$/g, "").toLowerCase())
+    .filter(Boolean);
+  const uniqueScopes = Array.from(new Set(scopes));
+
+  if (uniqueScopes.length === 0) {
+    throw new ShopifyConnectorError("Missing SHOPIFY_SCOPES.", "MISSING_SHOPIFY_SCOPES", 500);
+  }
+
+  const invalidScope = uniqueScopes.find((scope) => !/^[a-z][a-z0-9_]*$/.test(scope));
+  if (invalidScope) {
+    throw new ShopifyConnectorError(`Invalid Shopify scope: ${invalidScope}.`, "INVALID_SHOPIFY_SCOPES", 500);
+  }
+
+  return uniqueScopes;
+}
+
+export function formatShopifyScopes(input: string | string[] | null | undefined) {
+  return parseShopifyScopes(Array.isArray(input) ? input.join(",") : input).join(",");
+}
+
+export function missingRequiredShopifyScopes(grantedScopes: string | string[]) {
+  const granted = new Set(Array.isArray(grantedScopes) ? grantedScopes : parseShopifyScopes(grantedScopes));
+
+  return REQUIRED_SHOPIFY_SCOPES.filter((scope) => !granted.has(scope));
+}
+
+export function assertRequiredShopifyScopes(grantedScopes: string | string[]) {
+  const missing = missingRequiredShopifyScopes(grantedScopes);
+
+  if (missing.length > 0) {
+    throw new ShopifyConnectorError(
+      `Shopify did not grant required Admin API scopes: ${missing.join(", ")}.`,
+      "SHOPIFY_SCOPES_NOT_GRANTED",
+      400
+    );
+  }
+}
+
 export function requiredShopifyEnv() {
   const clientId = process.env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_API_KEY;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
   const redirectUri = process.env.SHOPIFY_REDIRECT_URI;
-  const scopes = process.env.SHOPIFY_SCOPES;
+  const scopes = formatShopifyScopes(process.env.SHOPIFY_SCOPES);
 
   if (!clientId) throw new ShopifyConnectorError("Missing SHOPIFY_CLIENT_ID.", "MISSING_SHOPIFY_CLIENT_ID", 500);
   if (!clientSecret) throw new ShopifyConnectorError("Missing SHOPIFY_CLIENT_SECRET.", "MISSING_SHOPIFY_CLIENT_SECRET", 500);
   if (!redirectUri) throw new ShopifyConnectorError("Missing SHOPIFY_REDIRECT_URI.", "MISSING_SHOPIFY_REDIRECT_URI", 500);
-  if (!scopes) throw new ShopifyConnectorError("Missing SHOPIFY_SCOPES.", "MISSING_SHOPIFY_SCOPES", 500);
+  assertRequiredShopifyScopes(scopes);
 
   return { clientId, clientSecret, redirectUri, scopes };
 }

@@ -3,8 +3,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   SHOPIFY_PROVIDER,
+  assertRequiredShopifyScopes,
   encryptConnectorToken,
   exchangeShopifyCodeForToken,
+  formatShopifyScopes,
   normalizeShopDomain,
   publicShopifyError,
   requiredShopifyEnv,
@@ -58,8 +60,9 @@ export async function GET(request: Request) {
       clientId,
       clientSecret
     });
+    assertRequiredShopifyScopes(token.scope);
     const encryptedAccessToken = encryptConnectorToken(token.accessToken);
-    const scopes = token.scope || state.scopes;
+    const scopes = formatShopifyScopes(token.scope);
 
     await prisma.$transaction(async (tx) => {
       const account = await tx.ecommerceConnectorAccount.upsert({

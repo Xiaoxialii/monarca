@@ -3635,6 +3635,7 @@ function SettingsConnectedSourcesPanel({
   const [expandedTableKeys, setExpandedTableKeys] = useState<string[]>([]);
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
   const [fetchingShopifySourceId, setFetchingShopifySourceId] = useState<string | null>(null);
+  const [syncingShopifySourceId, setSyncingShopifySourceId] = useState<string | null>(null);
   const [shopifyFetchResults, setShopifyFetchResults] = useState<Record<string, {
     ok: boolean;
     message: string;
@@ -3646,6 +3647,16 @@ function SettingsConnectedSourcesPanel({
       customers: number;
     };
     sampleOrderNames?: string[];
+  }>>({});
+  const [shopifySyncResults, setShopifySyncResults] = useState<Record<string, {
+    ok: boolean;
+    message: string;
+    syncRunId?: string | null;
+    manifestKey?: string | null;
+    duplicateOrdersDetected?: number;
+    testOrdersFiltered?: number;
+    cancelledOrdersFiltered?: number;
+    currencyMismatch?: boolean;
   }>>({});
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const connectedCountLabel = isLoadingConnectedSources
@@ -3672,6 +3683,8 @@ function SettingsConnectedSourcesPanel({
         rescanning: "更新中",
         fetchShopify: "拉取 Shopify 数据",
         fetchingShopify: "拉取中",
+        syncShopify: "同步 Shopify",
+        syncingShopify: "同步中",
         recentScan: "最近扫描",
         noTables: "暂未读取到表结构",
         fieldNullable: "可为空",
@@ -3706,6 +3719,8 @@ function SettingsConnectedSourcesPanel({
         rescanning: "Updating",
         fetchShopify: "Fetch Shopify Data",
         fetchingShopify: "Fetching",
+        syncShopify: "Sync Shopify",
+        syncingShopify: "Syncing",
         recentScan: "Last scan",
         noTables: "No tables found yet",
         fieldNullable: "nullable",
@@ -3811,6 +3826,74 @@ function SettingsConnectedSourcesPanel({
     }
   };
 
+  const syncShopifyData = async (sourceId: string) => {
+    setSyncingShopifySourceId(sourceId);
+
+    try {
+      const response = await fetch("/api/connectors/shopify/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataSourceId: sourceId })
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        reused?: boolean;
+        syncRunId?: string | null;
+        manifest?: {
+          manifest_key?: string | null;
+          guardrailReport?: {
+            duplicateOrdersDetected?: number;
+            testOrdersFiltered?: number;
+            cancelledOrdersFiltered?: number;
+            currencyMismatch?: boolean;
+          };
+        };
+        manifestKey?: string | null;
+        guardrailReport?: {
+          duplicateOrdersDetected?: number;
+          testOrdersFiltered?: number;
+          cancelledOrdersFiltered?: number;
+          currencyMismatch?: boolean;
+        };
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "Shopify 同步失败" : "Shopify sync failed"));
+      }
+
+      const guardrailReport = payload.guardrailReport ?? payload.manifest?.guardrailReport;
+
+      setShopifySyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: true,
+          message: payload.reused
+            ? (isZh ? "已复用现有 Shopify 同步结果" : "Reused existing Shopify sync")
+            : (isZh ? "Shopify 同步完成" : "Shopify sync completed"),
+          syncRunId: payload.syncRunId ?? null,
+          manifestKey: payload.manifestKey ?? payload.manifest?.manifest_key ?? null,
+          duplicateOrdersDetected: guardrailReport?.duplicateOrdersDetected ?? 0,
+          testOrdersFiltered: guardrailReport?.testOrdersFiltered ?? 0,
+          cancelledOrdersFiltered: guardrailReport?.cancelledOrdersFiltered ?? 0,
+          currencyMismatch: Boolean(guardrailReport?.currencyMismatch)
+        }
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "Shopify 同步失败" : "Shopify sync failed";
+
+      setShopifySyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: false,
+          message
+        }
+      }));
+    } finally {
+      setSyncingShopifySourceId(null);
+    }
+  };
+
   return (
     <div className="grid gap-4">
     <Card className="overflow-hidden bg-white shadow-sm">
@@ -3856,6 +3939,7 @@ function SettingsConnectedSourcesPanel({
               const scannedAt = source.schema?.scannedAt ?? source.lastSyncAt;
               const isShopifySource = source.provider === "shopify";
               const shopifyFetchResult = shopifyFetchResults[source.id];
+              const shopifySyncResult = shopifySyncResults[source.id];
 
               return (
                 <div key={source.id} className="rounded-lg border bg-secondary/10 p-4">
@@ -3894,6 +3978,18 @@ function SettingsConnectedSourcesPanel({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      {isShopifySource ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={syncingShopifySourceId === source.id}
+                          onClick={() => void syncShopifyData(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", syncingShopifySourceId === source.id && "animate-spin")} />
+                          {syncingShopifySourceId === source.id ? labels.syncingShopify : labels.syncShopify}
+                        </Button>
+                      ) : null}
                       {isShopifySource ? (
                         <Button
                           type="button"
@@ -3957,6 +4053,31 @@ function SettingsConnectedSourcesPanel({
                           </p>
                           {shopifyFetchResult.sampleOrderNames?.length ? (
                             <p>Orders sample: {shopifyFetchResult.sampleOrderNames.join(", ")}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {shopifySyncResult ? (
+                    <div
+                      className={cn(
+                        "mt-4 rounded-lg border px-3 py-2 text-xs",
+                        shopifySyncResult.ok
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                          : "border-rose-200 bg-rose-50 text-rose-800"
+                      )}
+                    >
+                      <p className="font-semibold">{shopifySyncResult.message}</p>
+                      {shopifySyncResult.ok ? (
+                        <div className="mt-1.5 space-y-1 text-muted-foreground">
+                          <p>syncRunId: {shopifySyncResult.syncRunId ?? "—"}</p>
+                          <p>manifest: {shopifySyncResult.manifestKey ?? "—"}</p>
+                          <p>
+                            duplicate orders: {shopifySyncResult.duplicateOrdersDetected ?? 0} · test filtered: {shopifySyncResult.testOrdersFiltered ?? 0} · cancelled filtered: {shopifySyncResult.cancelledOrdersFiltered ?? 0}
+                          </p>
+                          {shopifySyncResult.currencyMismatch ? (
+                            <p>{isZh ? "检测到多币种，销售额聚合会被标记为受限。" : "Multiple currencies detected; revenue aggregation is marked limited."}</p>
                           ) : null}
                         </div>
                       ) : null}

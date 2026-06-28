@@ -10,20 +10,45 @@ type ShopifyGraphQLError = {
 type ShopifyGraphQLResponse<T> = {
   data?: T;
   errors?: ShopifyGraphQLError[];
+  extensions?: {
+    cost?: {
+      throttleStatus?: {
+        maximumAvailable?: number;
+        currentlyAvailable?: number;
+        restoreRate?: number;
+      };
+    };
+  };
 };
 
-type PageInfo = {
+export type PageInfo = {
   hasNextPage?: boolean;
   endCursor?: string | null;
 };
 
-type Connection<T> = {
+export type Connection<T> = {
   edges?: Array<{ node?: T | null; cursor?: string | null } | null>;
   pageInfo?: PageInfo | null;
 };
 
+export type ShopifyPaginationResult<T> = {
+  nodes: T[];
+  pageCount: number;
+  completed: boolean;
+  lastCursor: string | null;
+};
+
 export class ShopifyGraphQLClient {
   private readonly endpoint: string;
+  readonly stats = {
+    rateLimitRetries: 0,
+    networkRetries: 0,
+    throttleSnapshots: [] as Array<{
+      maximumAvailable?: number;
+      currentlyAvailable?: number;
+      restoreRate?: number;
+    }>
+  };
 
   constructor(private readonly input: { shopDomain: string; accessToken: string; apiVersion?: string }) {
     const apiVersion = input.apiVersion ?? shopifyApiVersion();
@@ -50,6 +75,7 @@ export class ShopifyGraphQLClient {
 
       if (!response) {
         if (attempt < maxAttempts) {
+          this.stats.networkRetries += 1;
           await wait(backoffMs(attempt));
           continue;
         }
@@ -58,6 +84,7 @@ export class ShopifyGraphQLClient {
 
       const retryAfterMs = retryAfter(response);
       if ((response.status === 429 || response.status === 503) && attempt < maxAttempts) {
+        this.stats.rateLimitRetries += 1;
         await wait(retryAfterMs ?? backoffMs(attempt));
         continue;
       }
@@ -80,6 +107,7 @@ export class ShopifyGraphQLClient {
       if (payload.errors?.length) {
         const isThrottled = payload.errors.some((error) => error.extensions?.code === "THROTTLED");
         if (isThrottled && attempt < maxAttempts) {
+          this.stats.rateLimitRetries += 1;
           await wait(backoffMs(attempt));
           continue;
         }
@@ -93,6 +121,10 @@ export class ShopifyGraphQLClient {
 
       if (!payload.data) {
         throw new ShopifyConnectorError("Shopify GraphQL response did not include data.", "SHOPIFY_GRAPHQL_EMPTY_DATA", 502);
+      }
+
+      if (payload.extensions?.cost?.throttleStatus) {
+        this.stats.throttleSnapshots.push(payload.extensions.cost.throttleStatus);
       }
 
       return payload.data;
@@ -109,10 +141,22 @@ export class ShopifyGraphQLClient {
     variables: Record<string, unknown> = {},
     maxNodes = 50
   ): Promise<T[]> {
+    return (await this.fetchConnectionWithPageInfo<T>(query, connectionKey, variables, maxNodes)).nodes;
+  }
+
+  async fetchConnectionWithPageInfo<T>(
+    query: string,
+    connectionKey: string,
+    variables: Record<string, unknown> = {},
+    maxNodes = 50
+  ): Promise<ShopifyPaginationResult<T>> {
     const nodes: T[] = [];
     let cursor: string | null = null;
+    let pageCount = 0;
+    let completed = true;
 
     while (nodes.length < maxNodes) {
+      pageCount += 1;
       const data: Record<string, Connection<T> | undefined> = await this.fetchGraphQL<Record<string, Connection<T> | undefined>>(query, {
         ...variables,
         first: Math.min(50, maxNodes - nodes.length),
@@ -133,7 +177,16 @@ export class ShopifyGraphQLClient {
       cursor = connection.pageInfo.endCursor;
     }
 
-    return nodes;
+    if (nodes.length >= maxNodes) {
+      completed = false;
+    }
+
+    return {
+      nodes,
+      pageCount,
+      completed,
+      lastCursor: cursor
+    };
   }
 }
 

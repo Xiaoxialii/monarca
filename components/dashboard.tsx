@@ -5273,6 +5273,7 @@ function ConnectorPanel({
   const [isConnectingDatabase, setIsConnectingDatabase] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [uploadedFileSource, setUploadedFileSource] = useState<ConnectedSourceRow | null>(null);
+  const [shopifyShopDomain, setShopifyShopDomain] = useState("");
   const [connectionResult, setConnectionResult] = useState<{
     ok: boolean;
     message: string;
@@ -5303,13 +5304,28 @@ function ConnectorPanel({
   const isZh = copy.connectors.title === "连接数据源";
   const databaseHostPreview = databaseHost || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
   const databaseNamePreview = databaseName || (isZh ? "服务器预设 / 未配置" : "Server preset / not configured");
-  const isSupportedDatabase = databaseType !== null;
+	  const isSupportedDatabase = databaseType !== null;
 	  const showWizard = connectionPage || wizardStarted;
 	  const connectPageHref = `/dashboard/import-data/connect?source=${encodeURIComponent(selectedSource.name)}`;
+	  const normalizeShopifyShopInput = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+	  const isValidShopifyShopDomain = (value: string) => /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(value);
 	  const connectDataSource = (source: DataSourceDefinition) => {
 	    if (source.authMode === "oauth") {
 	      if (source.provider === "shopify") {
-	        window.location.href = "/api/connectors/shopify/start";
+	        const shopDomain = normalizeShopifyShopInput(shopifyShopDomain);
+
+	        if (!isValidShopifyShopDomain(shopDomain)) {
+	          setConnectionResult({
+	            ok: false,
+	            message: isZh
+	              ? "请输入有效的 Shopify 店铺域名，例如 your-store.myshopify.com。不能使用 admin.shopify.com、localhost 或空值。"
+	              : "Enter a valid Shopify store domain, for example your-store.myshopify.com. admin.shopify.com, localhost, and empty values are not allowed."
+	          });
+	          setWizardStarted(true);
+	          return;
+	        }
+
+	        window.location.href = `/api/connectors/shopify/start?shop=${encodeURIComponent(shopDomain)}`;
 	        return;
 	      }
 
@@ -5330,7 +5346,15 @@ function ConnectorPanel({
 
 	    window.location.href = connectPageHref;
 	  };
-	  const startSelectedSourceConnection = () => connectDataSource(selectedSource);
+	  const startSelectedSourceConnection = () => {
+	    if (selectedSource.provider === "shopify") {
+	      setWizardStarted(true);
+	      setConnectionResult(null);
+	      return;
+	    }
+
+	    connectDataSource(selectedSource);
+	  };
   const addSelectedSource = (source: ConnectedSourceRow) => {
     onAddConnectedSource(source);
     window.dispatchEvent(new Event("monarca-data-sources-updated"));
@@ -5734,6 +5758,7 @@ function ConnectorPanel({
     setSelectedFile(null);
     setUploadedFileSource(null);
     setDatabasePort("");
+    setShopifyShopDomain("");
   }, [selectedSource.name]);
 
   return (
@@ -5824,12 +5849,35 @@ function ConnectorPanel({
 	                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
 	                        {isShopifySource
 	                          ? (isZh
-	                              ? "点击按钮后将跳转到 Shopify OAuth 授权页面。授权成功后只保存加密 token 和连接元数据。"
-	                              : "Click the button to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata.")
+	                              ? "输入你自己的 myshopify.com 店铺域名后，将跳转到 Shopify OAuth 授权页面。授权成功后只保存加密 token 和连接元数据。"
+	                              : "Enter your own myshopify.com store domain to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata.")
 	                          : (isZh
 	                              ? "该数据源将通过 OAuth 授权连接，不需要在 Monarca 输入 API key。"
 	                              : "This source uses OAuth. You do not enter API keys in Monarca.")}
 	                      </p>
+	                      {isShopifySource ? (
+	                        <label className="mt-4 block">
+	                          <span className="mb-1.5 block text-xs font-medium text-emerald-950">
+	                            {isZh ? "你的 Shopify 店铺" : "Your Shopify store"}
+	                          </span>
+	                          <Input
+	                            value={shopifyShopDomain}
+	                            onChange={(event) => {
+	                              setShopifyShopDomain(event.target.value);
+	                              resetConnectionResult();
+	                            }}
+	                            placeholder="your-store.myshopify.com"
+	                            autoCapitalize="none"
+	                            autoCorrect="off"
+	                            spellCheck={false}
+	                          />
+	                          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+	                            {isZh
+	                              ? "只允许 *.myshopify.com。不要输入 admin.shopify.com、localhost、API key 或 token。"
+	                              : "Only *.myshopify.com is allowed. Do not enter admin.shopify.com, localhost, API keys, or tokens."}
+	                          </p>
+	                        </label>
+	                      ) : null}
 	                    </div>
 	                  </div>
 	                </div>
@@ -6030,6 +6078,7 @@ function ConnectorPanel({
                 </div>
               </div>
 
+              {!isOAuthSource ? (
               <div className="rounded-lg border bg-secondary/20 p-3">
                 <p className="text-sm font-semibold">{copy.connectors.advanced}</p>
                 <label className="mt-3 block">
@@ -6043,6 +6092,7 @@ function ConnectorPanel({
                   />
                 </label>
               </div>
+              ) : null}
             </div>
               </>
             ) : null}

@@ -13,8 +13,7 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const requestedShop = url.searchParams.get("shop") || process.env.SHOPIFY_DEFAULT_SHOP_DOMAIN || process.env.NEXT_PUBLIC_SHOPIFY_DEFAULT_SHOP_DOMAIN;
-    const shopDomain = normalizeShopDomain(requestedShop);
+    const shopDomain = normalizeShopDomain(url.searchParams.get("shop"));
     const { clientId, redirectUri, scopes } = requiredShopifyEnv();
     const state = await createOAuthState({
       provider: SHOPIFY_PROVIDER,

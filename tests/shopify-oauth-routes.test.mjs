@@ -28,6 +28,7 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
 
   assert.match(startRoute, /syncCurrentClerkUser\(\)/, "Start route should require Clerk user/workspace");
   assert.match(startRoute, /normalizeShopDomain\(url\.searchParams\.get\("shop"\)\)/, "Start route should normalize shop domain");
+  assert.doesNotMatch(startRoute, /SHOPIFY_DEFAULT_SHOP_DOMAIN|NEXT_PUBLIC_SHOPIFY_DEFAULT_SHOP_DOMAIN|\|\|\s*process\.env/, "Start route must not use a default or fallback Shopify shop");
   assert.match(startRoute, /createOAuthState\(/, "Start route should create a persisted OAuth state");
   assert.doesNotMatch(startRoute, /workspaceId.*searchParams\.set|searchParams\.set\("workspaceId"/, "Start route should not put workspaceId in OAuth URL");
 

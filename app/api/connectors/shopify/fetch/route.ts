@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import {
   SHOPIFY_PROVIDER,
   decryptConnectorToken,
+  isShopifyProtectedDataAccessError,
+  protectedShopifyDataAccessError,
   publicShopifyError,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
@@ -70,6 +72,40 @@ const CUSTOMERS_QUERY = `
   }
 `;
 
+async function fetchOptionalConnection<T>(
+  input: {
+    client: ShopifyGraphQLClient;
+    query: string;
+    connectionKey: string;
+    resource: string;
+    maxNodes?: number;
+  }
+): Promise<{ nodes: T[]; warning?: { code: string; resource: string; message: string } }> {
+  try {
+    return {
+      nodes: await input.client.fetchConnection<T>(
+        input.query,
+        input.connectionKey,
+        {},
+        input.maxNodes ?? 10
+      )
+    };
+  } catch (error) {
+    if (isShopifyProtectedDataAccessError(error)) {
+      return {
+        nodes: [],
+        warning: {
+          code: "SHOPIFY_PROTECTED_CUSTOMER_DATA_REQUIRED",
+          resource: input.resource,
+          message: protectedShopifyDataAccessError(input.resource).message
+        }
+      };
+    }
+
+    throw error;
+  }
+}
+
 export async function GET() {
   try {
     const session = await requireWorkspace();
@@ -96,16 +132,37 @@ export async function GET() {
       accessToken,
       apiVersion
     });
-    const [orders, products, customers] = await Promise.all([
-      client.fetchConnection(ORDERS_QUERY, "orders", {}, 10),
-      client.fetchConnection(PRODUCTS_QUERY, "products", {}, 10),
-      client.fetchConnection(CUSTOMERS_QUERY, "customers", {}, 10)
+    const [ordersResult, productsResult, customersResult] = await Promise.all([
+      fetchOptionalConnection({ client, query: ORDERS_QUERY, connectionKey: "orders", resource: "Order" }),
+      fetchOptionalConnection({ client, query: PRODUCTS_QUERY, connectionKey: "products", resource: "Product" }),
+      fetchOptionalConnection({ client, query: CUSTOMERS_QUERY, connectionKey: "customers", resource: "Customer" })
     ]);
+    const warnings = [ordersResult.warning, productsResult.warning, customersResult.warning].filter(Boolean);
+
+    if (ordersResult.warning) {
+      const publicError = protectedShopifyDataAccessError("Order");
+
+      return NextResponse.json(
+        {
+          ok: false,
+          code: publicError.code,
+          message: publicError.message,
+          warnings,
+          meta: {
+            shopDomain: account.shopDomain,
+            fetchedAt: new Date().toISOString(),
+            apiVersion
+          }
+        },
+        { status: publicError.status }
+      );
+    }
 
     return NextResponse.json({
-      orders,
-      products,
-      customers,
+      orders: ordersResult.nodes,
+      products: productsResult.nodes,
+      customers: customersResult.nodes,
+      warnings,
       meta: {
         shopDomain: account.shopDomain,
         fetchedAt: new Date().toISOString(),

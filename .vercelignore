@@ -27,3 +27,4 @@ pnpm-debug.log*
 test-results/
 tsconfig.tsbuildinfo
 .DS_Store
+tmp-shopify-*.json

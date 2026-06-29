@@ -3647,6 +3647,7 @@ function SettingsConnectedSourcesPanel({
       customers: number;
     };
     sampleOrderNames?: string[];
+    warnings?: string[];
   }>>({});
   const [shopifySyncResults, setShopifySyncResults] = useState<Record<string, {
     ok: boolean;
@@ -3657,6 +3658,10 @@ function SettingsConnectedSourcesPanel({
     testOrdersFiltered?: number;
     cancelledOrdersFiltered?: number;
     currencyMismatch?: boolean;
+    dataMode?: "FULL" | "FALLBACK" | string | null;
+    confidenceScore?: number | null;
+    estimationUsed?: boolean;
+    missingFields?: string[];
   }>>({});
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const connectedCountLabel = isLoadingConnectedSources
@@ -3786,7 +3791,12 @@ function SettingsConnectedSourcesPanel({
           shopDomain?: string | null;
           fetchedAt?: string | null;
         };
+        warnings?: Array<{ message?: string | null }>;
         message?: string;
+        dataMode?: "FULL" | "FALLBACK" | string | null;
+        confidenceScore?: number | null;
+        estimationUsed?: boolean;
+        missingFields?: string[];
       } | null;
 
       if (!response.ok || !payload) {
@@ -3808,7 +3818,10 @@ function SettingsConnectedSourcesPanel({
           sampleOrderNames: (payload.orders ?? [])
             .map((order) => order.name)
             .filter((name): name is string => Boolean(name))
-            .slice(0, 5)
+            .slice(0, 5),
+          warnings: (payload.warnings ?? [])
+            .map((warning) => warning.message)
+            .filter((message): message is string => Boolean(message))
         }
       }));
     } catch (error) {
@@ -3855,6 +3868,10 @@ function SettingsConnectedSourcesPanel({
           cancelledOrdersFiltered?: number;
           currencyMismatch?: boolean;
         };
+        dataMode?: "FULL" | "FALLBACK" | string | null;
+        confidenceScore?: number | null;
+        estimationUsed?: boolean;
+        missingFields?: string[];
         message?: string;
       } | null;
 
@@ -3876,7 +3893,11 @@ function SettingsConnectedSourcesPanel({
           duplicateOrdersDetected: guardrailReport?.duplicateOrdersDetected ?? 0,
           testOrdersFiltered: guardrailReport?.testOrdersFiltered ?? 0,
           cancelledOrdersFiltered: guardrailReport?.cancelledOrdersFiltered ?? 0,
-          currencyMismatch: Boolean(guardrailReport?.currencyMismatch)
+          currencyMismatch: Boolean(guardrailReport?.currencyMismatch),
+          dataMode: payload.dataMode ?? null,
+          confidenceScore: payload.confidenceScore ?? null,
+          estimationUsed: Boolean(payload.estimationUsed),
+          missingFields: payload.missingFields ?? []
         }
       }));
     } catch (error) {
@@ -4054,6 +4075,9 @@ function SettingsConnectedSourcesPanel({
                           {shopifyFetchResult.sampleOrderNames?.length ? (
                             <p>Orders sample: {shopifyFetchResult.sampleOrderNames.join(", ")}</p>
                           ) : null}
+                          {shopifyFetchResult.warnings?.map((warning) => (
+                            <p key={warning}>{warning}</p>
+                          ))}
                         </div>
                       ) : null}
                     </div>
@@ -4076,6 +4100,19 @@ function SettingsConnectedSourcesPanel({
                           <p>
                             duplicate orders: {shopifySyncResult.duplicateOrdersDetected ?? 0} · test filtered: {shopifySyncResult.testOrdersFiltered ?? 0} · cancelled filtered: {shopifySyncResult.cancelledOrdersFiltered ?? 0}
                           </p>
+                          {shopifySyncResult.dataMode ? (
+                            <p>
+                              {shopifySyncResult.dataMode === "FALLBACK"
+                                ? (isZh ? "Data Quality: Partial ⚠ 部分指标因 Shopify API 限制使用估算。" : "Data Quality: Partial ⚠ Some metrics are estimated due to Shopify API limitations.")
+                                : (isZh ? "Data Quality: Full ✔" : "Data Quality: Full ✔")}
+                            </p>
+                          ) : null}
+                          {shopifySyncResult.confidenceScore != null ? (
+                            <p>confidence: {Math.round(shopifySyncResult.confidenceScore * 100)}%</p>
+                          ) : null}
+                          {shopifySyncResult.missingFields?.length ? (
+                            <p>missing: {shopifySyncResult.missingFields.join(", ")}</p>
+                          ) : null}
                           {shopifySyncResult.currencyMismatch ? (
                             <p>{isZh ? "检测到多币种，销售额聚合会被标记为受限。" : "Multiple currencies detected; revenue aggregation is marked limited."}</p>
                           ) : null}

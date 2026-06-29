@@ -33,3 +33,6 @@ pnpm-debug.log*
 # clerk configuration (can include secrets)
 /.clerk/
 .vercel
+
+# local Shopify CLI production binding
+shopify.app.production.toml

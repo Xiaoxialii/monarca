@@ -31,6 +31,9 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(helper, /function parseShopifyScopes/, "Shopify scopes should be normalized before authorization");
   assert.match(helper, /split\(\/\[\\s,\]\+\//, "Shopify scopes should accept comma or whitespace separated env values");
   assert.match(helper, /assertRequiredShopifyScopes\(scopes\)/, "Shopify env validation should require orders, products, and customers scopes");
+  assert.match(helper, /function isShopifyProtectedDataAccessError/, "Shopify connector should classify protected customer data access errors");
+  assert.match(helper, /SHOPIFY_PROTECTED_CUSTOMER_DATA_REQUIRED/, "Shopify connector should expose a stable protected data access error code");
+  assert.match(helper, /Shopify plan upgrade OR enable Protected Customer Data Access/, "Protected data access errors should explain the required remediation");
 
   assert.match(startRoute, /syncCurrentClerkUser\(\)/, "Start route should require Clerk user/workspace");
   assert.match(startRoute, /normalizeShopDomain\(url\.searchParams\.get\("shop"\)\)/, "Start route should normalize shop domain");
@@ -58,6 +61,8 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(fetchRoute, /orders\(first: \$first/, "Fetch route should read orders");
   assert.match(fetchRoute, /products\(first: \$first/, "Fetch route should read products");
   assert.match(fetchRoute, /customers\(first: \$first/, "Fetch route should read customers");
+  assert.match(fetchRoute, /fetchOptionalConnection/, "Fetch route should allow protected optional resources to degrade with warnings");
+  assert.match(fetchRoute, /warnings/, "Fetch route should return protected data access warnings");
   assert.doesNotMatch(fetchRoute, /prisma\.\w+\.(create|update|upsert|delete)|R2|manifest|generateWorkspaceMetrics|report/i, "Fetch route must not write data, generate artifacts, metrics, or reports");
   assert.doesNotMatch(fetchRoute, /accessToken[^,\n]*NextResponse|encryptedAccessToken[^,\n]*NextResponse/, "Fetch route must not return tokens");
 });

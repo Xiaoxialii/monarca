@@ -1,0 +1,19 @@
+name = "Monarca"
+client_id = "REPLACE_WITH_PRODUCTION_SHOPIFY_CLIENT_ID"
+application_url = "https://www.monarcadata.com/"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,read_products,read_customers,read_fulfillments,write_draft_orders,write_orders"
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://www.monarcadata.com/api/connectors/shopify/callback",
+]
+
+[webhooks]
+api_version = "2025-10"
+
+[app_preferences]
+url = "https://www.monarcadata.com/dashboard/import-data"

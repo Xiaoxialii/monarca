@@ -1,10 +1,18 @@
 import crypto from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { ConnectionStatus } from "@prisma/client";
+import {
+  detectShopifyDataMode,
+  fetchShopifyFallbackOrderCount,
+  runShopifyAnalytics,
+  type ShopifyAnalyticsOutput,
+  type ShopifyDataMode
+} from "@/lib/analytics/shopify-dual-mode-engine";
 import { writeR2ObjectText } from "@/lib/r2-storage";
 import {
   SHOPIFY_PROVIDER,
   decryptConnectorToken,
+  isShopifyProtectedDataAccessError,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
@@ -35,6 +43,7 @@ type ShopifyProduct = {
         id?: string | null;
         sku?: string | null;
         title?: string | null;
+        price?: string | number | null;
       } | null;
     } | null>;
   } | null;
@@ -90,6 +99,11 @@ type ShopifySyncManifest = {
   detected_currency_list: string[];
   multi_currency_detected: boolean;
   aggregation_blocked: boolean;
+  data_mode: ShopifyDataMode;
+  confidence_score: number;
+  missing_fields: string[];
+  estimation_used: boolean;
+  analytics: ShopifyAnalyticsOutput;
   sync_started_at: string;
   sync_finished_at: string;
   sync_window_start: string;
@@ -170,7 +184,7 @@ const PRODUCTS_QUERY = `
           updatedAt
           variants(first: 50) {
             edges {
-              node { id sku title }
+              node { id sku title price }
             }
           }
         }
@@ -279,12 +293,51 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       accessToken,
       apiVersion: shopifyApiVersion()
     });
+    const dataMode = await detectShopifyDataMode(client);
+    const customerWarnings: string[] = [];
+    const missingFields: string[] = [];
     const orderQuery = `updated_at:>=${syncWindowStart.toISOString()}`;
-    const [ordersPage, productsPage, customersPage] = await Promise.all([
-      client.fetchConnectionWithPageInfo<ShopifyGuardrailOrder>(ORDERS_QUERY, "orders", { query: orderQuery }, MAX_RESOURCE_NODES),
-      client.fetchConnectionWithPageInfo<ShopifyProduct>(PRODUCTS_QUERY, "products", {}, MAX_RESOURCE_NODES),
-      client.fetchConnectionWithPageInfo<ShopifyCustomer>(CUSTOMERS_QUERY, "customers", {}, MAX_RESOURCE_NODES)
-    ]);
+    const productsPage = await client.fetchConnectionWithPageInfo<ShopifyProduct>(PRODUCTS_QUERY, "products", {}, MAX_RESOURCE_NODES);
+    const fallbackOrderCount = dataMode === "FALLBACK" ? await fetchShopifyFallbackOrderCount(client) : null;
+    const ordersPage = dataMode === "FULL"
+      ? await client.fetchConnectionWithPageInfo<ShopifyGuardrailOrder>(ORDERS_QUERY, "orders", { query: orderQuery }, MAX_RESOURCE_NODES)
+      : {
+          nodes: [] as ShopifyGuardrailOrder[],
+          pageCount: 0,
+          completed: true,
+          lastCursor: null
+        };
+    if (dataMode === "FALLBACK") {
+      missingFields.push("orders", "lineItems", "refunds");
+    }
+    const customersPage = dataMode === "FULL"
+      ? await client
+          .fetchConnectionWithPageInfo<ShopifyCustomer>(CUSTOMERS_QUERY, "customers", {}, MAX_RESOURCE_NODES)
+          .catch((error) => {
+            if (isShopifyProtectedDataAccessError(error)) {
+              customerWarnings.push("This Shopify store does not allow Customer API access due to plan restrictions. Customer metrics are omitted.");
+              missingFields.push("customers");
+
+              return {
+                nodes: [] as ShopifyCustomer[],
+                pageCount: 0,
+                completed: true,
+                lastCursor: null
+              };
+            }
+
+            throw error;
+          })
+      : {
+          nodes: [] as ShopifyCustomer[],
+          pageCount: 0,
+          completed: true,
+          lastCursor: null
+        };
+    if (dataMode === "FALLBACK") {
+      customerWarnings.push("Data Quality: Partial. Some metrics are estimated due to Shopify API limitations.");
+      missingFields.push("customers");
+    }
     const guardrails = runShopifyGuardrails({
       workspaceId: input.workspaceId,
       orders: ordersPage.nodes,
@@ -298,6 +351,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       },
       rateLimitRetries: client.stats.rateLimitRetries
     });
+    guardrails.guardrailReport.warnings.push(...customerWarnings);
     const canonical = normalizeShopifyRecords({
       workspaceId: input.workspaceId,
       dataSourceId: account.dataSourceId,
@@ -307,6 +361,15 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       orders: guardrails.ordersForNormalization,
       products: productsPage.nodes,
       customers: customersPage.nodes
+    });
+    const analytics = runShopifyAnalytics({
+      mode: dataMode,
+      orders: ordersPage.nodes,
+      products: productsPage.nodes,
+      customers: customersPage.nodes,
+      fallbackOrderCount,
+      defaultAov: 75,
+      missingFields
     });
     const deduped = dedupeCanonicalArtifact(canonical);
     const baseKey = `workspaces/${input.workspaceId}/connectors/shopify/${account.dataSourceId}/${syncRunId}`;
@@ -340,6 +403,11 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       detected_currency_list: guardrails.guardrailReport.currencyList,
       multi_currency_detected: guardrails.guardrailReport.currencyMismatch,
       aggregation_blocked: guardrails.guardrailReport.aggregationBlocked,
+      data_mode: analytics.mode,
+      confidence_score: analytics.confidence,
+      missing_fields: analytics.missingFields,
+      estimation_used: analytics.estimation_used,
+      analytics,
       sync_started_at: syncRun.startedAt.toISOString(),
       sync_finished_at: new Date().toISOString(),
       sync_window_start: syncWindowStart.toISOString(),
@@ -405,7 +473,12 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
             guardrailReport: guardrails.guardrailReport,
             duplicateCount: deduped.duplicateCounts,
             manifestKey: manifest.manifest_key,
-            syncRunId
+            syncRunId,
+            dataMode: analytics.mode,
+            confidenceScore: analytics.confidence,
+            missingFields: analytics.missingFields,
+            estimationUsed: analytics.estimation_used,
+            analytics
           } as Prisma.InputJsonValue
         }
       });
@@ -448,7 +521,12 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
             latestBusinessDate,
             checksum: manifest.checksum,
             schemaSnapshotId: snapshot.id,
-            guardrailReport: guardrails.guardrailReport
+            guardrailReport: guardrails.guardrailReport,
+            dataMode: analytics.mode,
+            confidenceScore: analytics.confidence,
+            missingFields: analytics.missingFields,
+            estimationUsed: analytics.estimation_used,
+            analytics
           } as Prisma.InputJsonValue
         }
       });
@@ -460,7 +538,12 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       syncRunId,
       status: "success",
       manifest,
-      guardrailReport: guardrails.guardrailReport
+      guardrailReport: guardrails.guardrailReport,
+      dataMode: analytics.mode,
+      confidenceScore: analytics.confidence,
+      missingFields: analytics.missingFields,
+      estimationUsed: analytics.estimation_used,
+      analytics
     };
   } catch (error) {
     await prisma.ecommerceSyncRun.update({
@@ -680,6 +763,11 @@ function buildSchemaSnapshotJson(manifest: ShopifySyncManifest, artifacts: Recor
     manifestKey: manifest.manifest_key,
     syncRunId: manifest.sync_run_id,
     checksum: manifest.checksum,
+    dataMode: manifest.data_mode,
+    confidenceScore: manifest.confidence_score,
+    missingFields: manifest.missing_fields,
+    estimationUsed: manifest.estimation_used,
+    analytics: manifest.analytics,
     tables: Object.entries(artifacts).map(([name, artifact]) => ({
       name,
       rowCount: artifact.rowCount,

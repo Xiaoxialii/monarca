@@ -67,6 +67,24 @@ export function assertRequiredShopifyScopes(grantedScopes: string | string[]) {
   }
 }
 
+export function isShopifyProtectedDataAccessError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+
+  return normalized.includes("protected-customer-data")
+    || normalized.includes("not approved to access the order object")
+    || normalized.includes("not approved to access the customer object")
+    || normalized.includes("not approved to access the draftorder object");
+}
+
+export function protectedShopifyDataAccessError(resource = "Order") {
+  return new ShopifyConnectorError(
+    `This Shopify store does not allow ${resource} API access due to plan restrictions. Required: Shopify plan upgrade OR enable Protected Customer Data Access.`,
+    "SHOPIFY_PROTECTED_CUSTOMER_DATA_REQUIRED",
+    403
+  );
+}
+
 export function requiredShopifyEnv() {
   const clientId = process.env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_API_KEY;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;

@@ -19,7 +19,11 @@ function localeFromCountry(countryCode: string | null): Locale | null {
 }
 
 export default clerkMiddleware(async (auth, request) => {
-  if (isProtectedRoute(request)) {
+  const allowLocalDecisionReportFallback =
+    process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true" &&
+    request.nextUrl.pathname === "/api/dashboard/ecommerce/decision-report";
+
+  if (isProtectedRoute(request) && !allowLocalDecisionReportFallback) {
     await auth.protect({
       unauthenticatedUrl: new URL("/sign-in", request.url).toString()
     });

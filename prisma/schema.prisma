@@ -23,6 +23,7 @@ enum DataSourceType {
   GOOGLE_ANALYTICS
   STRIPE
   ECOMMERCE_PLATFORM
+  ADS_PLATFORM
 }
 
 enum ConnectionStatus {
@@ -189,6 +190,32 @@ model Workspace {
   ecommerceConnectorAccounts EcommerceConnectorAccount[]
   ecommerceSyncRuns EcommerceSyncRun[]
   ecommerceSyncArtifacts EcommerceSyncArtifact[]
+  semanticMappingMemories SemanticMappingMemory[]
+}
+
+model SemanticMappingMemory {
+  id                       String   @id @default(cuid())
+  workspaceId              String
+  fieldName                String
+  normalizedFieldName      String
+  platform                 String   @default("*")
+  mappedConcept            String
+  embeddingVector          Json
+  confidenceScore          Float    @default(0)
+  usageCount               Int      @default(0)
+  userFeedbackScore        Float    @default(0)
+  embeddingSimilarityWeight Float   @default(0.32)
+  metadataJson             Json?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  lastSeenAt               DateTime @default(now())
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, normalizedFieldName, mappedConcept])
+  @@index([workspaceId, platform])
+  @@index([workspaceId, normalizedFieldName])
+  @@index([workspaceId, mappedConcept])
+  @@index([lastSeenAt])
 }
 
 model WorkspaceMember {

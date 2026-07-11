@@ -1,4 +1,4 @@
-import { ConnectionStatus, DataSourceType, WorkspaceRole } from "@prisma/client";
+import { ConnectionStatus, DataSourceType, Prisma, WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -17,11 +17,17 @@ import { fileExtension, inferTablesFromUploadFile } from "@/lib/file-upload-sche
 import { storeUploadLocally } from "@/lib/local-upload-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
+import { csvRowsFromText, excelRowsFromBuffer } from "@/lib/csv-upload-rows";
+import { runUnifiedIngestionPipeline } from "@/lib/ingestion/unified-ingestion-engine";
+import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
+import type { CanonicalDataset } from "@/lib/semantic/types";
+import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_NAME_LENGTH = 180;
 const INLINE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
+const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
 
 function publicTables(tables: Array<{
   name: string;
@@ -49,6 +55,76 @@ function publicTables(tables: Array<{
       nullable: column.nullable
     }))
   }));
+}
+
+async function buildUnifiedUploadIngestionSummary(input: {
+  workspaceId: string;
+  source: "csv" | "excel";
+  rows: Array<Record<string, unknown>>;
+  fileName: string;
+}): Promise<{ summary: Record<string, unknown>; canonicalDataset: CanonicalDataset | null }> {
+  if (!input.rows.length) {
+    return {
+      summary: {
+        status: "empty",
+        source: input.source,
+        sampledRows: 0,
+        message: "No rows available for unified ingestion."
+      },
+      canonicalDataset: null
+    };
+  }
+
+  try {
+    const sampledRows = input.rows.slice(0, MAX_UNIFIED_INGESTION_SAMPLE_ROWS);
+    const result = await runUnifiedIngestionPipeline({
+      source: input.source,
+      workspace_id: input.workspaceId,
+      payload: sampledRows,
+      metadata: {
+        fileName: input.fileName,
+        sampledRows: sampledRows.length,
+        totalParsedRows: input.rows.length,
+        samplingStrategy: "first_n_rows"
+      },
+      memory: new PrismaSemanticMemoryStore(prisma, { workspaceId: input.workspaceId })
+    });
+
+    return {
+      summary: {
+        status: "ready",
+        source: result.source,
+        sampledRows: sampledRows.length,
+        totalParsedRows: input.rows.length,
+        detectedSchema: result.detected_schema,
+        semantic: result.semantic,
+        canonical: {
+          schemaVersion: result.canonical_data.schema_version,
+          rowCounts: Object.fromEntries(
+            Object.entries(result.canonical_data.tables).map(([tableName, rows]) => [tableName, rows?.length ?? 0])
+          ),
+          validation: result.canonical_data.metadata.validation,
+          dedupe: result.canonical_data.metadata.dedupe,
+          mappingConfidence: result.canonical_data.metadata.mapping_confidence,
+          unknownFieldCount: result.canonical_data.metadata.unknown_fields.length
+        },
+        metrics: result.metrics,
+        learning: result.learning,
+        audit: result.metadata.audit
+      },
+      canonicalDataset: result.canonical_data
+    };
+  } catch (error) {
+    return {
+      summary: {
+        status: "failed",
+        source: input.source,
+        sampledRows: Math.min(input.rows.length, MAX_UNIFIED_INGESTION_SAMPLE_ROWS),
+        message: error instanceof Error ? error.message : "Unified ingestion failed."
+      },
+      canonicalDataset: null
+    };
+  }
 }
 
 function uploadErrorMessage(error: unknown) {
@@ -129,6 +205,10 @@ export async function POST(request: Request) {
     }
 
     const tables = await inferTablesFromUploadFile(file);
+    const uploadedBuffer = Buffer.from(await file.arrayBuffer());
+    const uploadRows = isCsv
+      ? csvRowsFromText(uploadedBuffer.toString("utf8"))
+      : await excelRowsFromBuffer(uploadedBuffer);
     const scannedAt = new Date().toISOString();
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const provider = isCsv ? "CSV" : "Excel";
@@ -136,19 +216,30 @@ export async function POST(request: Request) {
     const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
     const analysisReport = generateUniversalDataAnalysisReport(schemaTables);
+    const unifiedIngestionResult = await buildUnifiedUploadIngestionSummary({
+      workspaceId: session.workspace.id,
+      source: isCsv ? "csv" : "excel",
+      rows: uploadRows,
+      fileName: file.name
+    });
+    const unifiedIngestion = unifiedIngestionResult.summary;
     const snapshotSchemaPayload = {
       scannedAt,
       fileName: file.name,
       fileSize: file.size,
       tables: schemaTables,
       semanticLayer,
+      unifiedIngestion,
       analysisReport
     };
     const publicSchemaPayload = {
       scannedAt,
       fileName: file.name,
       fileSize: file.size,
-      tables: schemaTables
+      tables: schemaTables,
+      semanticLayer,
+      unifiedIngestion,
+      analysisReport
     };
 
     const result = await prisma.$transaction(async (tx) => {
@@ -170,11 +261,24 @@ export async function POST(request: Request) {
             mimeType: file.type || null,
             extension
           },
-          schemas: publicSchemaPayload,
+          schemas: publicSchemaPayload as Prisma.InputJsonValue,
           connectedAt: new Date(),
           lastSyncAt: new Date()
         }
       });
+
+      const canonicalSchemaJson = unifiedIngestionResult.canonicalDataset
+        ? await writeCanonicalDatasetArtifacts({
+          workspaceId: session.workspace.id,
+          dataSourceId: dataSource.id,
+          sourceProvider: provider.toLowerCase(),
+          fileName: file.name,
+          canonicalDataset: unifiedIngestionResult.canonicalDataset,
+          manifest: {
+            dataMode: "upload_unified_canonical"
+          }
+        })
+        : null;
 
       const latestSnapshot = await tx.schemaSnapshot.findFirst({
         where: {
@@ -194,17 +298,24 @@ export async function POST(request: Request) {
           dataSourceId: dataSource.id,
           version: (latestSnapshot?.version ?? 0) + 1,
           status: ConnectionStatus.CONNECTED,
-          schemaJson: {
-            sourceId: dataSource.id,
-            ...snapshotSchemaPayload
-          },
+          schemaJson: (canonicalSchemaJson
+            ? {
+              sourceId: dataSource.id,
+              rawUploadSchema: snapshotSchemaPayload,
+              ...canonicalSchemaJson
+            }
+            : {
+              sourceId: dataSource.id,
+              ...snapshotSchemaPayload
+            }) as Prisma.InputJsonValue,
           qualityReport: {
             tableCount: tables.length,
             columnCount,
             semanticFieldCount: semanticLayer.fields.length,
             businessEntityCount: semanticLayer.entities.length,
             generatedMetricCount: semanticLayer.metrics.length,
-            analysisReport
+            analysisReport,
+            canonicalArtifactBacked: Boolean(canonicalSchemaJson)
           }
         }
       });
@@ -355,7 +466,8 @@ export async function POST(request: Request) {
           tableCount: tables.length,
           columnCount,
           scannedAt,
-          tables: schemaTables
+          tables: schemaTables,
+          unifiedIngestion
         },
         connectedAt: result.dataSource.connectedAt?.toISOString() ?? null,
         lastSyncAt: result.dataSource.lastSyncAt?.toISOString() ?? null

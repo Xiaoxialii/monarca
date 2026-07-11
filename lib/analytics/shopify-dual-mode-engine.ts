@@ -100,14 +100,6 @@ const MODE_PROBE_QUERY = `
   }
 `;
 
-const ORDERS_COUNT_QUERY = `
-  query ShopifyOrdersCount {
-    ordersCount(query: "status:any") {
-      count
-    }
-  }
-`;
-
 export async function detectShopifyDataMode(client: ShopifyDualModeClient): Promise<ShopifyDataMode> {
   try {
     await client.fetchGraphQL(MODE_PROBE_QUERY);
@@ -122,25 +114,11 @@ export async function detectShopifyDataMode(client: ShopifyDualModeClient): Prom
   }
 }
 
-export async function fetchShopifyFallbackOrderCount(client: ShopifyDualModeClient): Promise<number | null> {
-  try {
-    const data = await client.fetchGraphQL<{ ordersCount?: { count?: number | string | null } | null }>(ORDERS_COUNT_QUERY);
-    const count = numberValue(data.ordersCount?.count);
-
-    return Number.isFinite(count) ? count : null;
-  } catch {
-    return null;
-  }
-}
-
 export function runShopifyAnalytics(input: {
   mode: ShopifyDataMode;
   orders?: ShopifyAnalyticsOrder[];
   products?: ShopifyAnalyticsProduct[];
   customers?: ShopifyAnalyticsCustomer[];
-  fallbackOrderCount?: number | null;
-  historicalAov?: number | null;
-  defaultAov?: number | null;
   costBySku?: Record<string, number>;
   missingFields?: string[];
 }): ShopifyAnalyticsOutput {
@@ -205,15 +183,9 @@ function runFullAnalytics(input: {
 
 function runFallbackAnalytics(input: {
   products?: ShopifyAnalyticsProduct[];
-  fallbackOrderCount?: number | null;
-  historicalAov?: number | null;
-  defaultAov?: number | null;
   missingFields?: string[];
 }): ShopifyAnalyticsOutput {
   const products = input.products ?? [];
-  const orderCount = Math.max(0, Math.round(numberValue(input.fallbackOrderCount)));
-  const aov = positiveNumber(input.historicalAov) ?? positiveNumber(input.defaultAov) ?? estimateAovFromProducts(products) ?? 75;
-  const estimatedRevenue = orderCount * aov;
   const missingFields = Array.from(new Set([
     "orders",
     "lineItems",
@@ -225,17 +197,17 @@ function runFallbackAnalytics(input: {
   return {
     mode: "FALLBACK",
     metrics: {
-      revenue: estimatedRevenue,
-      orders: orderCount,
-      aov,
+      revenue: 0,
+      orders: 0,
+      aov: 0,
       skuInsights: fallbackSkuInsights(products),
       refundRate: undefined,
       profit: null
     },
-    confidence: orderCount > 0 ? 0.55 : 0.35,
+    confidence: 0.35,
     missingFields,
     data_quality: "partial",
-    estimation_used: true
+    estimation_used: false
   };
 }
 
@@ -251,19 +223,6 @@ function fallbackSkuInsights(products: ShopifyAnalyticsProduct[]) {
   });
 }
 
-function estimateAovFromProducts(products: ShopifyAnalyticsProduct[]) {
-  const prices = products
-    .flatMap((product) => product.variants?.edges?.map((edge) => numberValue(edge?.node?.price)) ?? [])
-    .filter((price) => price > 0)
-    .slice(0, 25);
-
-  if (!prices.length) return null;
-
-  const averageProductPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-
-  return Math.max(averageProductPrice, 25);
-}
-
 function isAccessBlocked(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const normalized = message.toLowerCase();
@@ -271,12 +230,6 @@ function isAccessBlocked(error: unknown) {
   return normalized.includes("access denied")
     || normalized.includes("protected-customer-data")
     || normalized.includes("not approved to access");
-}
-
-function positiveNumber(value: unknown) {
-  const number = numberValue(value);
-
-  return number > 0 ? number : null;
 }
 
 function numberValue(value: unknown) {

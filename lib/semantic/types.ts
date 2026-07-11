@@ -1,0 +1,126 @@
+export type CanonicalConcept =
+  | "revenue"
+  | "order_id"
+  | "order_date"
+  | "sku"
+  | "product_name"
+  | "product_id"
+  | "customer_id"
+  | "email_hash"
+  | "country"
+  | "ad_spend"
+  | "campaign_id"
+  | "adset_id"
+  | "ad_id"
+  | "impressions"
+  | "clicks"
+  | "conversions"
+  | "attribution_revenue"
+  | "event_date"
+  | "conversion_event"
+  | "refund_amount"
+  | "refund_id"
+  | "refund_reason"
+  | "quantity"
+  | "price"
+  | "status"
+  | "currency"
+  | "unknown";
+
+export type SemanticValueType = "string" | "number" | "boolean" | "datetime" | "object" | "array" | "null" | "unknown";
+
+export type RawFieldObservation = {
+  field: string;
+  path: string;
+  valueType: SemanticValueType;
+  samples: unknown[];
+  context: string[];
+};
+
+export type SemanticCandidate = {
+  field: string;
+  maps_to: CanonicalConcept;
+  confidence: number;
+  source: "engine" | "memory" | "feedback";
+  reason: string;
+};
+
+export type SemanticMemoryRecord = {
+  field_name: string;
+  normalized_field_name: string;
+  platform: string;
+  mapped_to: CanonicalConcept;
+  mapped_concept: CanonicalConcept;
+  embedding: number[];
+  confidence: number;
+  confidence_score: number;
+  user_feedback_score: number;
+  observations: number;
+  usage_count: number;
+  embedding_similarity_weight: number;
+  created_at: string;
+  last_updated: string;
+  last_seen_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type SemanticFeedbackEvent = {
+  field_name: string;
+  platform?: string;
+  previous_mapping?: CanonicalConcept;
+  corrected_mapping: CanonicalConcept;
+  feedback: "confirm" | "edit" | "reject" | "system_error";
+  confidence_delta?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type SemanticMappingDecision = {
+  field: string;
+  canonical: CanonicalConcept;
+  confidence: number;
+  source: "memory" | "engine" | "unmapped";
+  candidates: SemanticCandidate[];
+};
+
+export type CanonicalDataset = {
+  schema_version: "ecommerce_canonical_v1";
+  tables: {
+    ecommerce_orders: Array<Record<string, unknown>>;
+    ecommerce_order_items: Array<Record<string, unknown>>;
+    ecommerce_products: Array<Record<string, unknown>>;
+    ecommerce_customers: Array<Record<string, unknown>>;
+    ecommerce_refunds: Array<Record<string, unknown>>;
+    ecommerce_ads?: Array<Record<string, unknown>>;
+    ecommerce_inventory?: Array<Record<string, unknown>>;
+    inventory?: Array<Record<string, unknown>>;
+  };
+  metadata: {
+    source_platforms: string[];
+    normalized_at: string;
+    unknown_fields: Array<{ path: string; value: unknown; platform?: string }>;
+    validation: {
+      accepted_rows: number;
+      rejected_rows: number;
+      warnings: Array<{ table: string; field?: string; reason: string }>;
+      rejected: Array<{ table: string; reason: string; row: Record<string, unknown> }>;
+    };
+    dedupe: {
+      canonical_key_strategy: "hash(platform + source_id + order_id)";
+      duplicate_count: number;
+    };
+    mapping_confidence: number;
+  };
+};
+
+export type SemanticMapperResult = {
+  canonical_schema: CanonicalDataset;
+  mappings: SemanticMappingDecision[];
+  memory_hits: number;
+  engine_candidates: number;
+  confidence: number;
+  learning: {
+    records_updated: number;
+    unknown_fields: string[];
+    anomaly_fields: string[];
+  };
+};

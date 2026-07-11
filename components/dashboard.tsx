@@ -53,10 +53,14 @@ import {
 } from "recharts";
 import { AuthControls } from "@/components/auth-shell";
 import { BrandLogo } from "@/components/brand-logo";
+import { EcommerceSalesDashboard } from "@/components/ecommerce-sales-dashboard";
+import { DecisionAnalysisEnginePanel, ReportRendererEngine } from "@/components/report-renderer-engine";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import type { EcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-data";
+import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 import {
   getCopyLocale,
   getHtmlLang,
@@ -91,7 +95,7 @@ type DataSourceDefinition = {
 const dashboardCopy = {
   en: {
     navItems: [
-      { label: "Analysis Report", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "Profit Optimization Center", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
       { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -464,7 +468,8 @@ const dashboardCopy = {
         { name: "BigQuery", provider: "bigquery", type: "Data warehouse", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
         { name: "Google Analytics", provider: "google_analytics", type: "Analytics", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Shopify", provider: "shopify", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
-        { name: "Stripe", provider: "stripe", type: "Revenue", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
+        { name: "Stripe", provider: "stripe", type: "Revenue", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Meta Ads", provider: "meta_ads", type: "Advertising", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
       server: "Server",
       serverPlaceholder: "server.database.windows.net or host\\instance",
@@ -532,7 +537,7 @@ const dashboardCopy = {
         ["Executive summary", "Board-ready notes will be generated from trusted metrics"]
       ],
       pageBadge: "AI intelligence live",
-      pageTitle: "Analysis Report",
+      pageTitle: "Profit Optimization Center",
       pageSubtitle:
         "Real-time business intelligence from your connected data",
       periodLabel: "Reporting period",
@@ -546,7 +551,7 @@ const dashboardCopy = {
       databaseCtaTitle: "Connect business data",
       databaseCtaEmpty: "After importing a database, AI will automatically generate an analysis report",
       databaseCtaConnected: "Manage connected database",
-      databaseCtaDisconnected: "Connect database",
+      databaseCtaDisconnected: "Manage database",
       liveStatuses: [
         "Syncing Stripe data",
         "Processing 4.2M events",
@@ -795,8 +800,8 @@ const dashboardCopy = {
   },
   zh: {
     navItems: [
-      { label: "分析报告", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
-      { label: "报表", href: "/dashboard/report", target: "#report", icon: FileText },
+      { label: "利润优化中心", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
@@ -1154,7 +1159,8 @@ const dashboardCopy = {
         { name: "BigQuery", provider: "bigquery", type: "数据仓库", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
         { name: "Google Analytics", provider: "google_analytics", type: "分析工具", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Shopify", provider: "shopify", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
-        { name: "Stripe", provider: "stripe", type: "收入系统", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
+        { name: "Stripe", provider: "stripe", type: "收入系统", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Meta Ads", provider: "meta_ads", type: "广告平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
       server: "服务器",
       serverPlaceholder: "server.database.windows.net 或 host\\instance",
@@ -1222,7 +1228,7 @@ const dashboardCopy = {
         ["管理层摘要", "可信指标准备好后，会自动生成汇报说明"]
       ],
       pageBadge: "AI 实时分析",
-      pageTitle: "分析报告",
+      pageTitle: "利润优化中心",
       pageSubtitle: "来自已连接数据的实时业务智能",
       periodLabel: "报告周期",
       periodValue: "今日",
@@ -1235,7 +1241,7 @@ const dashboardCopy = {
       databaseCtaTitle: "连接业务数据",
       databaseCtaEmpty: "导入数据库后，AI 将自动生成经营分析报告",
       databaseCtaConnected: "管理已连接数据库",
-      databaseCtaDisconnected: "连接数据库",
+      databaseCtaDisconnected: "管理数据库",
       liveStatuses: [
         "正在同步 Stripe 数据",
         "正在处理 420 万事件",
@@ -1486,7 +1492,20 @@ type DashboardView =
   | "schema"
   | "reports"
   | "report"
+  | "sales"
   | "settings";
+
+type EcommerceDashboardPayload = {
+  data: EcommerceSalesDashboardData;
+  state: "ready" | "empty" | "unavailable";
+  message?: string;
+  lineage?: {
+    schemaSnapshotId: string;
+    dataSourceId: string | null;
+    manifestKey?: string;
+    syncRunId?: string;
+  };
+};
 
 type TeamMemberRole = "owner" | "admin" | "viewer";
 type TeamMemberStatus = "active" | "invited" | "removed";
@@ -1514,19 +1533,64 @@ type ConnectedSourceRow = {
     database?: string | null;
     ssl?: boolean | null;
     fileName?: string | null;
-  fileSize?: number | null;
+    fileSize?: number | null;
     extension?: string | null;
     shopDomain?: string | null;
+    adAccountId?: string | null;
+    adAccountName?: string | null;
+    adAccountCurrency?: string | null;
   } | null;
   schema?: {
     tableCount?: number | null;
     columnCount?: number | null;
     scannedAt?: string | null;
+    unifiedIngestion?: {
+      status?: string | null;
+      source?: string | null;
+      sampledRows?: number | null;
+      totalParsedRows?: number | null;
+      detectedSchema?: {
+        detected_type?: string | null;
+        confidence?: number | null;
+        fields?: Array<{
+          name: string;
+          path?: string | null;
+          type?: string | null;
+        }>;
+      };
+      semantic?: {
+        confidence?: number | null;
+        memory_hits?: number | null;
+        engine_candidates?: number | null;
+        mappings?: Record<string, string>;
+        mapping_details?: Array<{
+          field: string;
+          canonical: string;
+          confidence?: number | null;
+          source?: string | null;
+        }>;
+        unknown_fields?: string[];
+      };
+      canonical?: {
+        schemaVersion?: string | null;
+        rowCounts?: Record<string, unknown>;
+        mappingConfidence?: number | null;
+        unknownFieldCount?: number | null;
+      };
+      learning?: {
+        records_updated?: number | null;
+        memory_size?: number | null;
+        average_memory_confidence?: number | null;
+      };
+    } | null;
     tables?: Array<{
       name: string;
       schema?: string | null;
       columns: Array<{
         name: string;
+        displayName?: string | null;
+        semanticName?: string | null;
+        rawHeaderPath?: string[] | null;
         type?: string | null;
         nullable?: boolean | null;
       }>;
@@ -1537,6 +1601,36 @@ type ConnectedSourceRow = {
   deletedAt?: string | null;
   retentionExpiresAt?: string | null;
 };
+
+const CANONICAL_MAPPING_OPTIONS = [
+  "revenue",
+  "order_id",
+  "order_date",
+  "sku",
+  "product_name",
+  "product_id",
+  "customer_id",
+  "email_hash",
+  "country",
+  "ad_spend",
+  "campaign_id",
+  "adset_id",
+  "ad_id",
+  "impressions",
+  "clicks",
+  "conversions",
+  "attribution_revenue",
+  "event_date",
+  "conversion_event",
+  "refund_amount",
+  "refund_id",
+  "refund_reason",
+  "quantity",
+  "price",
+  "status",
+  "currency",
+  "unknown"
+] as const;
 type SettingsTab =
   | "basic"
   | "members"
@@ -1798,7 +1892,14 @@ function Sidebar({
         </Button>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto">
-        {copy.navItems.map(renderNavItem)}
+        {copy.navItems.map((item) => (
+          <div key={item.label}>
+            {renderNavItem(item)}
+            {!isCollapsed && item.target === "#report" && activeTarget === "#report" ? (
+              <ReportSectionNav isZh={isZh} placement="sidebar" />
+            ) : null}
+          </div>
+        ))}
       </nav>
       <div className="mt-auto pt-3">
         {!isLoaded ? (
@@ -3612,6 +3713,84 @@ function sourceTypeLabel(copy: DashboardCopy, source: ConnectedSourceRow) {
   return catalogSource?.type ?? source.type;
 }
 
+function mappingRowsForSource(source: ConnectedSourceRow) {
+  const details = source.schema?.unifiedIngestion?.semantic?.mapping_details ?? [];
+  const fields = source.schema?.unifiedIngestion?.detectedSchema?.fields ?? [];
+  const fieldTypes = new Map(fields.map((field) => [field.name, field.type ?? "unknown"]));
+
+  if (details.length > 0) {
+    return details.map((mapping) => ({
+      field: mapping.field,
+      canonical: mapping.canonical || "unknown",
+      confidence: mapping.confidence ?? source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
+      source: mapping.source ?? "engine",
+      type: fieldTypes.get(mapping.field) ?? "unknown"
+    }));
+  }
+
+  const mappings = source.schema?.unifiedIngestion?.semantic?.mappings ?? {};
+  const mappingEntries = Object.entries(mappings);
+
+  if (mappingEntries.length > 0) {
+    return mappingEntries.map(([field, canonical]) => ({
+      field,
+      canonical: canonical || "unknown",
+      confidence: source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
+      source: "engine",
+      type: fieldTypes.get(field) ?? "unknown"
+    }));
+  }
+
+  return (source.schema?.tables ?? []).flatMap((table) =>
+    table.columns.map((column) => {
+      const semanticName = column.semanticName && CANONICAL_MAPPING_OPTIONS.includes(column.semanticName as typeof CANONICAL_MAPPING_OPTIONS[number])
+        ? column.semanticName
+        : guessCanonicalConceptFromField(column.name);
+
+      return {
+        field: column.rawHeaderPath?.length ? column.rawHeaderPath.join(".") : `${table.name}.${column.name}`,
+        canonical: semanticName,
+        confidence: semanticName === "unknown" ? 0.35 : 0.55,
+        source: "schema",
+        type: column.type ?? "unknown"
+      };
+    })
+  );
+}
+
+function mappingConfidenceLabel(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return "—";
+  const normalized = value > 1 ? value / 100 : value;
+
+  return `${Math.round(normalized * 100)}%`;
+}
+
+function guessCanonicalConceptFromField(fieldName: string): typeof CANONICAL_MAPPING_OPTIONS[number] {
+  const normalized = fieldName.toLowerCase().replace(/[\s.-]+/g, "_");
+
+  if (/(^|_)sku($|_)/.test(normalized)) return "sku";
+  if (normalized.includes("campaign")) return "campaign_id";
+  if (normalized.includes("adset")) return "adset_id";
+  if (normalized === "ad_id" || normalized.endsWith("_ad_id")) return "ad_id";
+  if (normalized.includes("impression")) return "impressions";
+  if (normalized.includes("click")) return "clicks";
+  if (normalized.includes("conversion")) return "conversions";
+  if (normalized.includes("spend") || normalized.includes("cost")) return "ad_spend";
+  if (normalized.includes("revenue") || normalized.includes("sales") || normalized.includes("gmv")) return "revenue";
+  if (normalized.includes("order") && normalized.includes("date")) return "order_date";
+  if (normalized === "order_id" || normalized.endsWith("_order_id")) return "order_id";
+  if (normalized.includes("product") && normalized.includes("name")) return "product_name";
+  if (normalized === "product_id" || normalized.endsWith("_product_id")) return "product_id";
+  if (normalized.includes("customer")) return "customer_id";
+  if (normalized.includes("quantity") || normalized === "qty") return "quantity";
+  if (normalized.includes("price") || normalized.includes("amount")) return "price";
+  if (normalized.includes("currency")) return "currency";
+  if (normalized.includes("status")) return "status";
+  if (normalized.includes("date") || normalized.includes("month")) return "event_date";
+
+  return "unknown";
+}
+
 function SettingsConnectedSourcesPanel({
   copy,
   connectedSources,
@@ -3636,6 +3815,12 @@ function SettingsConnectedSourcesPanel({
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
   const [fetchingShopifySourceId, setFetchingShopifySourceId] = useState<string | null>(null);
   const [syncingShopifySourceId, setSyncingShopifySourceId] = useState<string | null>(null);
+  const [syncingMetaSourceId, setSyncingMetaSourceId] = useState<string | null>(null);
+  const [mappingOverrides, setMappingOverrides] = useState<Record<string, string>>({});
+  const [mappingFeedback, setMappingFeedback] = useState<Record<string, {
+    status: "saving" | "saved" | "error";
+    message?: string;
+  }>>({});
   const [shopifyFetchResults, setShopifyFetchResults] = useState<Record<string, {
     ok: boolean;
     message: string;
@@ -3662,6 +3847,14 @@ function SettingsConnectedSourcesPanel({
     confidenceScore?: number | null;
     estimationUsed?: boolean;
     missingFields?: string[];
+  }>>({});
+  const [metaSyncResults, setMetaSyncResults] = useState<Record<string, {
+    ok: boolean;
+    message: string;
+    syncRunId?: string | null;
+    manifestKey?: string | null;
+    rows?: number;
+    adAccountId?: string | null;
   }>>({});
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const connectedCountLabel = isLoadingConnectedSources
@@ -3690,6 +3883,8 @@ function SettingsConnectedSourcesPanel({
         fetchingShopify: "拉取中",
         syncShopify: "同步 Shopify",
         syncingShopify: "同步中",
+        syncMetaAds: "同步 Meta Ads",
+        syncingMetaAds: "同步中",
         recentScan: "最近扫描",
         noTables: "暂未读取到表结构",
         fieldNullable: "可为空",
@@ -3701,6 +3896,15 @@ function SettingsConnectedSourcesPanel({
         restore: "恢复",
         permanentDelete: "彻底删除",
         noDeleted: "暂无已删除数据源",
+        mappingTitle: "字段映射确认",
+        mappingDescription: "确认原始字段到 Canonical 概念的映射，系统会写入语义记忆用于后续自动识别。",
+        mappingUnavailable: "这个数据源还没有语义映射结果。请重新上传或更新数据源后再确认字段映射。",
+        rawField: "原始字段",
+        canonicalConcept: "Canonical 概念",
+        confidence: "置信度",
+        confirmMapping: "确认",
+        rejectMapping: "拒绝",
+        savingMapping: "保存中",
         on: "开启",
         off: "关闭"
       }
@@ -3726,6 +3930,8 @@ function SettingsConnectedSourcesPanel({
         fetchingShopify: "Fetching",
         syncShopify: "Sync Shopify",
         syncingShopify: "Syncing",
+        syncMetaAds: "Sync Meta Ads",
+        syncingMetaAds: "Syncing",
         recentScan: "Last scan",
         noTables: "No tables found yet",
         fieldNullable: "nullable",
@@ -3737,6 +3943,15 @@ function SettingsConnectedSourcesPanel({
         restore: "Restore",
         permanentDelete: "Delete permanently",
         noDeleted: "No deleted data sources",
+        mappingTitle: "Field mapping review",
+        mappingDescription: "Confirm raw field to canonical concept mappings. Confirmed mappings are saved into semantic memory for future ingestion.",
+        mappingUnavailable: "This source has no semantic mapping result yet. Re-upload or update the source before confirming mappings.",
+        rawField: "Raw field",
+        canonicalConcept: "Canonical concept",
+        confidence: "Confidence",
+        confirmMapping: "Confirm",
+        rejectMapping: "Reject",
+        savingMapping: "Saving",
         on: "On",
         off: "Off"
       };
@@ -3756,6 +3971,65 @@ function SettingsConnectedSourcesPanel({
         ? current.filter((item) => item !== key)
         : [...current, key]
     );
+  };
+
+  const mappingStateKey = (sourceId: string, field: string) => `${sourceId}:${field}`;
+
+  const updateMappingOverride = (sourceId: string, field: string, value: string) => {
+    setMappingOverrides((current) => ({
+      ...current,
+      [mappingStateKey(sourceId, field)]: value
+    }));
+  };
+
+  const submitMappingFeedback = async (
+    source: ConnectedSourceRow,
+    mapping: ReturnType<typeof mappingRowsForSource>[number],
+    feedback: "confirm" | "edit" | "reject"
+  ) => {
+    const key = mappingStateKey(source.id, mapping.field);
+    const correctedMapping = mappingOverrides[key] ?? mapping.canonical ?? "unknown";
+
+    setMappingFeedback((current) => ({
+      ...current,
+      [key]: { status: "saving" }
+    }));
+
+    try {
+      const response = await fetch("/api/semantic/mappings/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataSourceId: source.id,
+          fieldName: mapping.field,
+          platform: source.provider?.toLowerCase?.() || source.schema?.unifiedIngestion?.source || "excel",
+          previousMapping: mapping.canonical,
+          correctedMapping,
+          feedback
+        })
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "映射确认失败" : "Failed to save mapping feedback"));
+      }
+
+      setMappingFeedback((current) => ({
+        ...current,
+        [key]: {
+          status: "saved",
+          message: isZh ? "已写入语义记忆" : "Saved to semantic memory"
+        }
+      }));
+    } catch (error) {
+      setMappingFeedback((current) => ({
+        ...current,
+        [key]: {
+          status: "error",
+          message: error instanceof Error ? error.message : (isZh ? "映射确认失败" : "Failed to save mapping feedback")
+        }
+      }));
+    }
   };
 
   const rescanSource = async (sourceId: string) => {
@@ -3915,6 +4189,63 @@ function SettingsConnectedSourcesPanel({
     }
   };
 
+  const syncMetaAdsData = async (sourceId: string) => {
+    setSyncingMetaSourceId(sourceId);
+
+    try {
+      const response = await fetch("/api/connectors/meta/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataSourceId: sourceId })
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        syncRunId?: string | null;
+        manifest?: {
+          manifest_key?: string | null;
+          row_counts?: {
+            ecommerce_ads?: number;
+          };
+          ad_account_id?: string | null;
+        };
+        manifestKey?: string | null;
+        rowCounts?: {
+          ecommerce_ads?: number;
+        };
+        adAccountId?: string | null;
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "Meta Ads 同步失败" : "Meta Ads sync failed"));
+      }
+
+      setMetaSyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: true,
+          message: isZh ? "Meta Ads 同步完成" : "Meta Ads sync completed",
+          syncRunId: payload.syncRunId ?? null,
+          manifestKey: payload.manifestKey ?? payload.manifest?.manifest_key ?? null,
+          rows: payload.rowCounts?.ecommerce_ads ?? payload.manifest?.row_counts?.ecommerce_ads ?? 0,
+          adAccountId: payload.adAccountId ?? payload.manifest?.ad_account_id ?? null
+        }
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "Meta Ads 同步失败" : "Meta Ads sync failed";
+
+      setMetaSyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: false,
+          message
+        }
+      }));
+    } finally {
+      setSyncingMetaSourceId(null);
+    }
+  };
+
   return (
     <div className="grid gap-4">
     <Card className="overflow-hidden bg-white shadow-sm">
@@ -3959,8 +4290,12 @@ function SettingsConnectedSourcesPanel({
               const tables = source.schema?.tables ?? [];
               const scannedAt = source.schema?.scannedAt ?? source.lastSyncAt;
               const isShopifySource = source.provider === "shopify";
+              const isMetaAdsSource = source.provider === "meta_ads";
               const shopifyFetchResult = shopifyFetchResults[source.id];
               const shopifySyncResult = shopifySyncResults[source.id];
+              const metaSyncResult = metaSyncResults[source.id];
+              const semanticMappingRows = mappingRowsForSource(source);
+              const unifiedIngestion = source.schema?.unifiedIngestion ?? null;
 
               return (
                 <div key={source.id} className="rounded-lg border bg-secondary/10 p-4">
@@ -3987,9 +4322,9 @@ function SettingsConnectedSourcesPanel({
                             {source.provider} · {sourceTypeLabel(copy, source)}
                           </span>
                           <span className="rounded-full bg-white px-2.5 py-1">
-                            {isShopifySource ? "Shop" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : (source.config?.host ?? "—")}
+                            {isShopifySource ? "Shop" : isMetaAdsSource ? "Ad Account" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : isMetaAdsSource ? (source.config?.adAccountId ?? "—") : (source.config?.host ?? "—")}
                           </span>
-                          {!isShopifySource ? (
+                          {!isShopifySource && !isMetaAdsSource ? (
                           <span className="rounded-full bg-white px-2.5 py-1">
                             {labels.database}: {source.config?.database ?? "—"}
                           </span>
@@ -4009,6 +4344,18 @@ function SettingsConnectedSourcesPanel({
                         >
                           <RefreshCw className={cn("size-4", syncingShopifySourceId === source.id && "animate-spin")} />
                           {syncingShopifySourceId === source.id ? labels.syncingShopify : labels.syncShopify}
+                        </Button>
+                      ) : null}
+                      {isMetaAdsSource ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={syncingMetaSourceId === source.id}
+                          onClick={() => void syncMetaAdsData(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", syncingMetaSourceId === source.id && "animate-spin")} />
+                          {syncingMetaSourceId === source.id ? labels.syncingMetaAds : labels.syncMetaAds}
                         </Button>
                       ) : null}
                       {isShopifySource ? (
@@ -4103,7 +4450,7 @@ function SettingsConnectedSourcesPanel({
                           {shopifySyncResult.dataMode ? (
                             <p>
                               {shopifySyncResult.dataMode === "FALLBACK"
-                                ? (isZh ? "Data Quality: Partial ⚠ 部分指标因 Shopify API 限制使用估算。" : "Data Quality: Partial ⚠ Some metrics are estimated due to Shopify API limitations.")
+                                ? (isZh ? "Data Quality: Partial ⚠ Shopify API 限制导致订单、明细、退款或客户指标缺失。" : "Data Quality: Partial ⚠ Shopify API limitations prevent order, line item, refund, or customer metrics.")
                                 : (isZh ? "Data Quality: Full ✔" : "Data Quality: Full ✔")}
                             </p>
                           ) : null}
@@ -4116,6 +4463,28 @@ function SettingsConnectedSourcesPanel({
                           {shopifySyncResult.currencyMismatch ? (
                             <p>{isZh ? "检测到多币种，销售额聚合会被标记为受限。" : "Multiple currencies detected; revenue aggregation is marked limited."}</p>
                           ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {metaSyncResult ? (
+                    <div
+                      className={cn(
+                        "mt-4 rounded-lg border px-3 py-2 text-xs",
+                        metaSyncResult.ok
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                          : "border-rose-200 bg-rose-50 text-rose-800"
+                      )}
+                    >
+                      <p className="font-semibold">{metaSyncResult.message}</p>
+                      {metaSyncResult.ok ? (
+                        <div className="mt-1.5 space-y-1 text-muted-foreground">
+                          <p>syncRunId: {metaSyncResult.syncRunId ?? "—"}</p>
+                          <p>manifest: {metaSyncResult.manifestKey ?? "—"}</p>
+                          <p>
+                            {isZh ? "广告账户" : "Ad account"}: {metaSyncResult.adAccountId ?? source.config?.adAccountId ?? "—"} · ecommerce_ads rows: {metaSyncResult.rows ?? 0}
+                          </p>
                         </div>
                       ) : null}
                     </div>
@@ -4178,6 +4547,118 @@ function SettingsConnectedSourcesPanel({
                           {labels.noTables}
                         </p>
                       )}
+                      <div className="mt-4 rounded-lg border bg-secondary/10 p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold">{labels.mappingTitle}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {labels.mappingDescription}
+                            </p>
+                          </div>
+                          {unifiedIngestion ? (
+                            <div className="flex flex-wrap gap-2 text-xs">
+                              <Badge variant="secondary">
+                                {unifiedIngestion.detectedSchema?.detected_type ?? "unknown"}
+                              </Badge>
+                              <Badge variant="secondary">
+                                {labels.confidence} {mappingConfidenceLabel(unifiedIngestion.semantic?.confidence)}
+                              </Badge>
+                            </div>
+                          ) : null}
+                        </div>
+                        {semanticMappingRows.length > 0 ? (
+                          <div className="mt-3 overflow-hidden rounded-md border bg-white">
+                            <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(160px,0.9fr)_96px_160px] gap-2 border-b bg-secondary/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              <span>{labels.rawField}</span>
+                              <span>{labels.canonicalConcept}</span>
+                              <span>{labels.confidence}</span>
+                              <span className="text-right">{isZh ? "操作" : "Action"}</span>
+                            </div>
+                            <div className="divide-y">
+                              {semanticMappingRows.map((mapping) => {
+                                const key = mappingStateKey(source.id, mapping.field);
+                                const feedbackState = mappingFeedback[key];
+                                const selectedMapping = mappingOverrides[key] ?? mapping.canonical;
+
+                                return (
+                                  <div
+                                    key={key}
+                                    className="grid grid-cols-[minmax(0,1.1fr)_minmax(160px,0.9fr)_96px_160px] items-center gap-2 px-3 py-2 text-xs"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="truncate font-medium text-foreground">{mapping.field}</p>
+                                      <p className="mt-0.5 truncate text-muted-foreground">
+                                        {mapping.type} · {mapping.source}
+                                      </p>
+                                    </div>
+                                    <select
+                                      value={selectedMapping}
+                                      onChange={(event) => updateMappingOverride(source.id, mapping.field, event.target.value)}
+                                      className="h-8 rounded-md border bg-white px-2 text-xs outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                                    >
+                                      {CANONICAL_MAPPING_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>
+                                          {option}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <Badge
+                                      variant="secondary"
+                                      className={cn(
+                                        "w-fit",
+                                        (mapping.confidence ?? 0) < 0.7 && "bg-amber-50 text-amber-800"
+                                      )}
+                                    >
+                                      {mappingConfidenceLabel(mapping.confidence)}
+                                    </Badge>
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-2"
+                                        disabled={feedbackState?.status === "saving"}
+                                        onClick={() => void submitMappingFeedback(
+                                          source,
+                                          mapping,
+                                          selectedMapping === mapping.canonical ? "confirm" : "edit"
+                                        )}
+                                      >
+                                        {feedbackState?.status === "saving" ? labels.savingMapping : labels.confirmMapping}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="size-8 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                                        disabled={feedbackState?.status === "saving"}
+                                        aria-label={`${labels.rejectMapping} ${mapping.field}`}
+                                        onClick={() => void submitMappingFeedback(source, mapping, "reject")}
+                                      >
+                                        <X className="size-3.5" />
+                                      </Button>
+                                    </div>
+                                    {feedbackState?.message ? (
+                                      <p
+                                        className={cn(
+                                          "col-span-4 text-[11px]",
+                                          feedbackState.status === "error" ? "text-rose-700" : "text-emerald-800"
+                                        )}
+                                      >
+                                        {feedbackState.message}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-3 rounded-md border border-dashed bg-white px-3 py-2 text-sm text-muted-foreground">
+                            {labels.mappingUnavailable}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -5308,7 +5789,7 @@ function ChatPanel({
   onToggle: () => void;
   isReportView?: boolean;
 }) {
-  const isZh = copy.chat.title.includes("分析师");
+  const isZh = /[\u4e00-\u9fff]/.test(copy.chat.title);
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>(
     buildReportChatMessages(copy, null, isReportView)
   );
@@ -5408,19 +5889,33 @@ function ChatPanel({
   };
 
   if (isCollapsed) {
+    const collapsedTitle = isZh ? copy.chat.title.replace(/^AI\s*/i, "") : copy.chat.title.replace(/^AI\s*/i, "") || "Analyst";
+
     return (
       <section id="ai-chat" className={cn("scroll-mt-20", className)}>
-        <Card className="flex min-h-[76px] items-center justify-between gap-3 border-emerald-100 bg-white/85 p-3 shadow-sm xl:h-[calc(100vh-7rem)] xl:flex-col xl:justify-start">
+        <Card className="flex min-h-[76px] items-center justify-between gap-3 border-emerald-100 bg-white/90 p-3 shadow-sm xl:h-[calc(100vh-7rem)] xl:flex-col xl:justify-start">
           <Button variant="ghost" size="icon" aria-label={copy.chat.expandLabel} onClick={onToggle}>
             <ChevronLeft />
           </Button>
           <div className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground">
             <Bot className="size-5" />
           </div>
-          <div className="hidden min-h-0 flex-1 items-center justify-center xl:flex">
-            <p className="[writing-mode:vertical-rl] rotate-180 text-xs font-semibold tracking-wide text-muted-foreground">
-              {navLabel(copy, "#ai-chat")}
-            </p>
+          <div className="hidden min-h-0 flex-1 items-center justify-center xl:flex" aria-hidden="true">
+            {isZh ? (
+              <div className="flex flex-col items-center gap-3 text-slate-600">
+                <span className="rounded-md bg-secondary px-2 py-1 text-sm font-bold leading-none text-primary">AI</span>
+                <span className="[writing-mode:vertical-rl] text-sm font-semibold leading-6 tracking-[0.12em]">
+                  {collapsedTitle}
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-slate-600">
+                <span className="rounded-md bg-secondary px-2 py-1 text-sm font-bold leading-none text-primary">AI</span>
+                <span className="-rotate-90 whitespace-nowrap text-sm font-semibold leading-none tracking-normal">
+                  {collapsedTitle}
+                </span>
+              </div>
+            )}
           </div>
           <Badge variant="secondary" className="hidden xl:inline-flex">
             AI
@@ -5562,6 +6057,7 @@ function ConnectorPanel({
 	  const isFileSource = selectedSource.authMode === "file_upload";
 	  const isOAuthSource = selectedSource.authMode === "oauth";
 	  const isShopifySource = selectedSource.provider === "shopify";
+	  const isMetaAdsSource = selectedSource.provider === "meta_ads";
 	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = selectedSource.name === "PostgreSQL"
     ? "postgresql"
@@ -5597,6 +6093,11 @@ function ConnectorPanel({
 	        }
 
 	        window.location.href = `/api/connectors/shopify/start?shop=${encodeURIComponent(shopDomain)}`;
+	        return;
+	      }
+
+	      if (source.provider === "meta_ads") {
+	        window.location.href = "/api/connectors/meta/start";
 	        return;
 	      }
 
@@ -6115,6 +6616,8 @@ function ConnectorPanel({
 	                      <p className="text-sm font-semibold">
 	                        {isShopifySource
 	                          ? (isZh ? "连接 Shopify" : "Connect Shopify")
+	                          : isMetaAdsSource
+	                            ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
 	                          : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                      </p>
 	                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -6122,6 +6625,10 @@ function ConnectorPanel({
 	                          ? (isZh
 	                              ? "输入你自己的 myshopify.com 店铺域名后，将跳转到 Shopify OAuth 授权页面。授权成功后只保存加密 token 和连接元数据。"
 	                              : "Enter your own myshopify.com store domain to open Shopify OAuth. After install, Monarca stores only encrypted token and connection metadata.")
+	                          : isMetaAdsSource
+	                            ? (isZh
+	                                ? "将跳转到 Meta OAuth 授权页面。授权成功后只保存加密 token、广告账户 ID 和连接元数据。"
+	                                : "This opens Meta OAuth. After authorization, Monarca stores only encrypted token, ad account ID, and connection metadata.")
 	                          : (isZh
 	                              ? "该数据源将通过 OAuth 授权连接，不需要在 Monarca 输入 API key。"
 	                              : "This source uses OAuth. You do not enter API keys in Monarca.")}
@@ -6388,6 +6895,8 @@ function ConnectorPanel({
 	                    `${isZh ? "授权方式" : "Auth"}: OAuth`,
 	                    isShopifySource
 	                      ? `${isZh ? "数据口径" : "Schema"}: ecommerce_canonical_v1`
+	                      : isMetaAdsSource
+	                        ? `${isZh ? "数据口径" : "Schema"}: ecommerce_ads`
 	                      : `${isZh ? "状态" : "Status"}: ${isZh ? "待接入" : "not enabled"}`,
 	                    `${isZh ? "Token 存储" : "Token storage"}: ${isZh ? "加密保存" : "encrypted"}`
 	                  ].map((row) => (
@@ -6466,6 +6975,8 @@ function ConnectorPanel({
 	                <Button type="button" size="sm" onClick={() => connectDataSource(selectedSource)}>
 	                  {isShopifySource
 	                    ? (isZh ? "连接 Shopify" : "Connect Shopify")
+	                    : isMetaAdsSource
+	                      ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
 	                    : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                  <ArrowRight />
 	                </Button>
@@ -15096,25 +15607,6 @@ function ReportDatabaseCta({
   );
 }
 
-function NoConnectedAnalysisDataNotice({ locale }: { locale: Locale }) {
-  const isZh = locale === "zh";
-
-  return (
-    <Card className="border bg-white shadow-sm">
-      <CardContent className="flex flex-col gap-2 p-5">
-        <p className="text-sm font-semibold text-foreground">
-          {isZh ? "暂无可生成的分析报告" : "No analysis report can be generated yet"}
-        </p>
-        <p className="text-sm font-medium leading-6 text-muted-foreground">
-          {isZh
-            ? "当前没有已连接的数据源。恢复或连接数据源后，再重新生成报表。"
-            : "No connected data source is currently available. Restore or connect a data source, then regenerate the report."}
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
 const officialProblemTicketMetrics = {
   primary: [
     { id: "ticket_denominator_count", label: "工单分母数", aliases: ["ticket_denominator_count", "工单分母数"] },
@@ -15624,6 +16116,13 @@ function ReportsPage({
 	  const [isGenerating, setIsGenerating] = useState(false);
 	  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 	  const [selectedAnalysisDateRange, setSelectedAnalysisDateRange] = useState<SelectedReportDateRange>({ preset: "ALL" });
+  const [analysisDecisionReportPayload, setAnalysisDecisionReportPayload] = useState<{
+    ok?: boolean;
+    state?: "ready" | "empty" | "unavailable";
+    message?: string;
+    decision_report?: DecisionIntelligenceReportV1 | null;
+  } | null>(null);
+  const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(false);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const effectiveHasConnectedDatabase = hasConnectedDatabase || reportApiHasConnectedDatabase;
 
@@ -15631,7 +16130,9 @@ function ReportsPage({
 	    if (isLoadingConnectedSources || effectiveHasConnectedDatabase) return;
 	    analysisReportsPageDataCache = null;
 	    setReportData(null);
+    setAnalysisDecisionReportPayload(null);
 	    setIsLoading(false);
+    setIsLoadingAnalysisDecisionReport(false);
 	    setIsGenerating(false);
 	    setStatusMessage(null);
 	  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources]);
@@ -15656,13 +16157,27 @@ function ReportsPage({
     void loadAnalysisReport();
   }, [loadAnalysisReport]);
 
+  const loadAnalysisDecisionReport = useCallback(async () => {
+    if (isLoadingConnectedSources) return null;
+    setIsLoadingAnalysisDecisionReport(true);
+    setAnalysisDecisionReportPayload(null);
+    try {
+      const response = await fetch(`/api/dashboard/ecommerce/decision-report?_=${Date.now()}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as typeof analysisDecisionReportPayload;
+      if (response.ok && payload?.ok) {
+        setAnalysisDecisionReportPayload(payload);
+      }
+      return payload;
+    } finally {
+      setIsLoadingAnalysisDecisionReport(false);
+    }
+  }, [isLoadingConnectedSources]);
+
+  useEffect(() => {
+    void loadAnalysisDecisionReport();
+  }, [loadAnalysisDecisionReport]);
+
 	  const generateAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
-	    if (!effectiveHasConnectedDatabase) {
-	      analysisReportsPageDataCache = null;
-	      setReportData(null);
-	      setStatusMessage(isZh ? "当前没有已连接的数据源。" : "No connected data source is currently available.");
-	      return;
-	    }
 	    setIsGenerating(true);
 	    setStatusMessage(null);
 	    const requestedAt = Date.now();
@@ -15702,6 +16217,7 @@ function ReportsPage({
 	      }
 
 	      await loadAnalysisReport(dateRange);
+      await loadAnalysisDecisionReport();
 	      setStatusMessage(isZh ? "经营分析报告已更新。" : "Operational analysis updated.");
 	      window.dispatchEvent(new Event("monarca-report-updated"));
 	    } catch (error) {
@@ -15709,7 +16225,7 @@ function ReportsPage({
 	    } finally {
 	      setIsGenerating(false);
 	    }
-	  }, [effectiveHasConnectedDatabase, isZh, loadAnalysisReport, locale, selectedAnalysisDateRange]);
+	  }, [effectiveHasConnectedDatabase, isZh, loadAnalysisDecisionReport, loadAnalysisReport, locale, selectedAnalysisDateRange]);
 
 	  const aiReport = reportData?.briefing?.payloadJson?.aiReport ?? null;
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
@@ -15812,22 +16328,6 @@ function ReportsPage({
 
       <ReportDatabaseCta copy={copy} hasConnectedDatabase={effectiveHasConnectedDatabase} />
 
-      <div className="flex flex-col items-end gap-2">
-        <ReportDateRangeSelector
-          selectedRange={selectedAnalysisDateRange.preset}
-          customStartDate={resolvedAnalysisDateRange.startDate}
-          customEndDate={resolvedAnalysisDateRange.endDate}
-          availableDateRange={analysisAvailableDateRange}
-          onRangeChange={handleAnalysisRangeChange}
-          onCustomRangeChange={handleCustomAnalysisRangeChange}
-          locale={locale}
-          labelVariant="analysis"
-        />
-        {analysisRangeLabel ? (
-          <p className="text-xs font-medium text-muted-foreground">{analysisRangeLabel}</p>
-        ) : null}
-      </div>
-
       {isLoadingConnectedSources ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
@@ -15836,7 +16336,22 @@ function ReportsPage({
           </CardContent>
         </Card>
       ) : shouldShowEmptyAnalysisState ? (
-        <NoConnectedAnalysisDataNotice locale={locale} />
+        <>
+          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
+            <Card className="border bg-white shadow-sm">
+              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
+                <RefreshCw className="size-4 animate-spin" />
+                {isZh ? "正在加载决策分析模块..." : "Loading decision analysis modules..."}
+              </CardContent>
+            </Card>
+          ) : (
+            <DecisionAnalysisEnginePanel
+              report={analysisDecisionReportPayload?.decision_report ?? null}
+              message={analysisDecisionReportPayload?.message}
+              locale={locale}
+            />
+          )}
+        </>
       ) : isLoading ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
@@ -15846,18 +16361,26 @@ function ReportsPage({
         </Card>
       ) : (
         <>
-	          {isAnalysisCacheMiss ? (
-	            <Card className="border bg-white shadow-sm">
-	              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-	                {isZh ? "当前时间范围尚未生成分析报告。点击生成报告后，会按所选时间范围计算并缓存结果。" : "No analysis report has been generated for this time range. Generate the report to calculate and cache the selected range."}
-	              </CardContent>
-	            </Card>
-	          ) : (
+	          {!isAnalysisCacheMiss ? (
 	            <>
 	              <OfficialLogisticsRegistryPanel metricResults={latestMetricResults} locale={locale} />
 	              <AiLogisticsAnalysisReportPanel report={aiReport} locale={locale} />
 	            </>
-	          )}
+	          ) : null}
+          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
+            <Card className="border bg-white shadow-sm">
+              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
+                <RefreshCw className="size-4 animate-spin" />
+                {isZh ? "正在加载决策分析模块..." : "Loading decision analysis modules..."}
+              </CardContent>
+            </Card>
+          ) : (
+            <DecisionAnalysisEnginePanel
+              report={analysisDecisionReportPayload?.decision_report ?? null}
+              message={analysisDecisionReportPayload?.message}
+              locale={locale}
+            />
+          )}
 	        </>
 	      )}
     </section>
@@ -15874,313 +16397,213 @@ function ReportPage({
   isLoadingConnectedSources: boolean;
 }) {
   const isZh = locale === "zh";
-  type LegacyReportData = {
-    reportRunId?: string | null;
-    primaryDataSourceId?: string | null;
-    dataSourceIds?: string[];
-    reportMode?: string;
-    sourceSnapshotVersion?: number | null;
-    reportRun?: Record<string, unknown> | null;
-    reportScope?: Record<string, unknown> | null;
-    hasConnectedDataSource?: boolean;
-    status?: string;
+  type DecisionReportApiPayload = {
+    ok?: boolean;
+    state?: "ready" | "empty" | "unavailable";
+    message?: string;
+    decision_report?: DecisionIntelligenceReportV1 | null;
+    generated_at?: string;
+    source_platforms?: string[];
     code?: string;
-    reportEntitlement?: ReportEntitlementViewData;
-    briefing?: {
-      createdAt?: string;
-	      payloadJson?: {
-	        generatedAt?: string;
-	        metricResults?: ReportMetricEvidenceResult[];
-	        timeConfig?: ReportTimeConfigViewData;
-	        trendMetrics?: ReportTrendMetricViewData[];
-	        trendCharts?: ReportTrendChartViewData[];
-	        structuredReport?: StructuredReportViewData;
-	        cache?: {
-	          status?: "hit" | "miss" | "stale";
-	          cacheKey?: string;
-	          generatedAt?: string;
-	          staleAt?: string | null;
-	        };
-	        reportDataAudit?: ReportAvailableDateRange & {
-	          dateRangeStart?: string | null;
-	          dateRangeEnd?: string | null;
-	        };
-	      } | null;
-    } | null;
-    reportHistory?: Array<Record<string, unknown>>;
-    kpiAssetLibrary?: KpiAssetLibraryViewData | null;
-    availableDateRange?: ReportAvailableDateRange | null;
   };
-  const [reportData, setReportData] = useState<LegacyReportData | null>(() => reportsPageDataCache as LegacyReportData | null);
-  const [isLoadingReportEvidence, setIsLoadingReportEvidence] = useState(() => !reportsPageDataCache);
-  const [isUpdatingMetrics, setIsUpdatingMetrics] = useState(false);
-  const [metricsUpdateMessage, setMetricsUpdateMessage] = useState<string | null>(null);
-  const [selectedDateRange, setSelectedDateRange] = useState<SelectedReportDateRange>({ preset: "ALL" });
-  const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
-  const effectiveHasConnectedDatabase = hasConnectedDatabase || reportApiHasConnectedDatabase;
+  const [decisionReportPayload, setDecisionReportPayload] = useState<DecisionReportApiPayload | null>(
+    null
+  );
+  const [isLoadingDecisionReport, setIsLoadingDecisionReport] = useState(false);
+  const [decisionReportError, setDecisionReportError] = useState<string | null>(null);
+  const [decisionReportRange, setDecisionReportRange] = useState<SelectedReportDateRange>({ preset: "ALL" });
+  const decisionReportIsReady = decisionReportPayload?.ok === true
+    && decisionReportPayload.state === "ready"
+    && Boolean(decisionReportPayload.decision_report);
+  const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
+    && !decisionReportIsReady
+    && decisionReportPayload?.state !== "ready";
 
-  useEffect(() => {
-    if (isLoadingConnectedSources || effectiveHasConnectedDatabase) return;
-    reportsPageDataCache = null;
-    setReportData(null);
-    setIsLoadingReportEvidence(false);
-    setIsUpdatingMetrics(false);
-    setMetricsUpdateMessage(null);
-  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources]);
+  const loadDecisionReport = useCallback(async () => {
+    if (isLoadingConnectedSources) return;
 
-  const loadReportEvidence = useCallback(async (dateRange: SelectedReportDateRange = selectedDateRange) => {
-    if (isLoadingConnectedSources) {
-      return null;
-    }
-    setIsLoadingReportEvidence(true);
+    const cacheKey = reportDateRangeQuery(decisionReportRange);
+    setIsLoadingDecisionReport(true);
+    setDecisionReportError(null);
 
     try {
-      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=custom_report`, { cache: "no-store" });
-      const payload = await response.json().catch(() => null) as LegacyReportData | null;
-
-      if (response.ok) {
-        reportsPageDataCache = payload;
-        setReportData(payload);
-      }
-      return payload;
-    } finally {
-      setIsLoadingReportEvidence(false);
-    }
-  }, [isLoadingConnectedSources, selectedDateRange]);
-
-  useEffect(() => {
-    void loadReportEvidence();
-  }, [loadReportEvidence]);
-
-  const latestPayloadAudit = reportData?.briefing?.payloadJson?.reportDataAudit;
-  const reportAvailableDateRange: ReportAvailableDateRange | null = {
-    startDate: reportData?.availableDateRange?.startDate ?? latestPayloadAudit?.dateRangeStart ?? latestPayloadAudit?.startDate ?? reportData?.briefing?.payloadJson?.timeConfig?.startDate ?? null,
-    endDate: reportData?.availableDateRange?.endDate ?? latestPayloadAudit?.dateRangeEnd ?? latestPayloadAudit?.endDate ?? latestPayloadAudit?.latestDataDate ?? reportData?.briefing?.payloadJson?.timeConfig?.endDate ?? null,
-    latestDataDate: reportData?.availableDateRange?.latestDataDate ?? latestPayloadAudit?.latestDataDate ?? null,
-    dateField: reportData?.availableDateRange?.dateField ?? latestPayloadAudit?.dateField ?? reportData?.briefing?.payloadJson?.timeConfig?.defaultTimeField ?? null
-  };
-
-  const handleReportRangeChange = useCallback((range: ReportTimeRange) => {
-    const nextRange = range === "CUSTOM"
-      ? {
-          preset: range,
-          startDate: selectedDateRange.startDate ?? reportAvailableDateRange?.startDate ?? undefined,
-          endDate: selectedDateRange.endDate ?? reportAvailableDateRange?.endDate ?? reportAvailableDateRange?.latestDataDate ?? undefined
-        }
-      : { preset: range };
-    setSelectedDateRange(nextRange);
-  }, [reportAvailableDateRange?.endDate, reportAvailableDateRange?.latestDataDate, reportAvailableDateRange?.startDate, selectedDateRange.endDate, selectedDateRange.startDate]);
-
-  const handleCustomReportRangeChange = useCallback((startDate: string, endDate: string) => {
-    setSelectedDateRange({ preset: "CUSTOM", startDate, endDate });
-  }, []);
-
-  const generateReportForRange = useCallback(async (dateRange: SelectedReportDateRange, options?: { auto?: boolean }) => {
-    if (!effectiveHasConnectedDatabase) {
-      reportsPageDataCache = null;
-      setReportData(null);
-      setMetricsUpdateMessage(isZh ? "当前没有已连接的数据源。" : "No connected data source is currently available.");
-      return;
-    }
-    setIsUpdatingMetrics(true);
-    setMetricsUpdateMessage(null);
-    const requestedAt = Date.now();
-
-    try {
-      const response = await fetch("/api/dashboard/reports/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          locale,
-          userRequested: true,
-          dateRange,
-          idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
-        })
-      });
-      const payload = await response.json().catch(() => null) as {
-        ok?: boolean;
-        async?: boolean;
-        jobId?: string;
-        code?: string;
-        computedMetricCount?: number;
-        generatedAt?: string;
-        message?: string;
-      } | null;
+      const response = await fetch(`/api/dashboard/ecommerce/decision-report?${cacheKey}&_=${Date.now()}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as DecisionReportApiPayload | null;
 
       if (!response.ok || !payload?.ok) {
-        throw new Error(reportGenerationErrorMessage(payload, locale));
+        throw new Error(payload?.message || (isZh ? "经营报表加载失败" : "Failed to load decision report"));
       }
 
-      if (payload.async) {
-        setMetricsUpdateMessage(options?.auto
-          ? isZh ? "正在按所选日期重新计算..." : "Recomputing for the selected date range..."
-          : isZh ? "报告正在后台生成，完成后会自动刷新。" : "Report is generating in the background and will refresh when complete."
-        );
-
-        for (let attempt = 0; attempt < 30; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          const latest = await loadReportEvidence(dateRange);
-          const generatedAt = latest?.briefing?.payloadJson?.generatedAt ?? latest?.briefing?.createdAt;
-          const generatedTime = generatedAt ? new Date(generatedAt).getTime() : 0;
-          const hasMetrics = latest?.briefing?.payloadJson?.metricResults?.some((result) => result.status === "computed");
-
-          if (generatedAt && generatedTime >= requestedAt - 2000 && hasMetrics) {
-            setMetricsUpdateMessage(
-              isZh
-                ? `报告已更新 · ${formatReportDate(generatedAt)}`
-                : `Report updated · ${formatReportDate(generatedAt)}`
-            );
-            window.dispatchEvent(new Event("monarca-report-updated"));
-            return;
-          }
-        }
-
-        setMetricsUpdateMessage(isZh ? "报告仍在后台生成，请稍后刷新查看。" : "Report is still generating. Refresh later to view it.");
-        return;
-      }
-
-      setMetricsUpdateMessage(
-        isZh
-          ? `已更新 ${payload.computedMetricCount ?? 0} 个指标 · ${formatReportDate(payload.generatedAt)}`
-          : `Updated ${payload.computedMetricCount ?? 0} metrics · ${formatReportDate(payload.generatedAt)}`
-      );
-      await loadReportEvidence(dateRange);
-      window.dispatchEvent(new Event("monarca-report-updated"));
+      setDecisionReportPayload(payload);
+      return payload;
     } catch (error) {
-      const fallback = isZh ? "指标更新失败" : "Failed to update metrics";
-      setMetricsUpdateMessage(error instanceof Error ? localeSafeText(error.message, fallback, locale) : fallback);
+      setDecisionReportError(error instanceof Error ? error.message : (isZh ? "经营报表加载失败" : "Failed to load decision report"));
+      return null;
     } finally {
-      setIsUpdatingMetrics(false);
+      setIsLoadingDecisionReport(false);
     }
-  }, [effectiveHasConnectedDatabase, isZh, loadReportEvidence, locale]);
+  }, [decisionReportRange, isLoadingConnectedSources, isZh]);
 
-  const updateMetrics = useCallback(async () => {
-    await generateReportForRange(selectedDateRange);
-  }, [generateReportForRange, selectedDateRange]);
+  const handleDecisionReportRangeChange = useCallback((range: ReportTimeRange) => {
+    setDecisionReportRange((current) => ({
+      preset: range,
+      startDate: range === "CUSTOM" ? current.startDate : undefined,
+      endDate: range === "CUSTOM" ? current.endDate : undefined
+    }));
+  }, []);
 
-  const effectiveReportData = effectiveHasConnectedDatabase ? reportData : null;
-  const latestMetricResults = effectiveReportData?.briefing?.payloadJson?.metricResults ?? [];
-  const latestGeneratedAt = effectiveReportData?.briefing?.payloadJson?.generatedAt ?? effectiveReportData?.briefing?.createdAt;
-  const latestTimeConfig = effectiveReportData?.briefing?.payloadJson?.timeConfig;
-  const latestTrendMetrics = effectiveReportData?.briefing?.payloadJson?.trendMetrics ?? [];
-  const latestTrendCharts = effectiveReportData?.briefing?.payloadJson?.trendCharts ?? [];
-  const latestStructuredReport = effectiveReportData?.briefing?.payloadJson?.structuredReport ?? null;
-  const latestKpiAssetLibrary = effectiveReportData?.kpiAssetLibrary ?? null;
-  const shouldShowEmptyReportState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
-  const reportPanelMetricResults = latestMetricResults;
-  const reportPanelGeneratedAt = latestGeneratedAt;
-  const reportPanelTimeConfig = latestTimeConfig;
-  const reportPanelTrendMetrics = latestTrendMetrics;
-  const reportPanelTrendCharts = latestTrendCharts;
-  const reportPanelStructuredReport = latestStructuredReport;
-  const reportEntitlement = effectiveReportData?.reportEntitlement;
-  const reportEntitlementText = reportEntitlementMessage(reportEntitlement, locale);
-  const isReportRangeCacheMiss = effectiveReportData?.briefing?.payloadJson?.cache?.status === "miss";
+  const handleDecisionReportCustomRangeChange = useCallback((startDate: string, endDate: string) => {
+    setDecisionReportRange({
+      preset: "CUSTOM",
+      startDate,
+      endDate
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isLoadingConnectedSources) return;
+    if (!hasConnectedDatabase) {
+      setDecisionReportError(null);
+    }
+
+    void loadDecisionReport();
+  }, [hasConnectedDatabase, isLoadingConnectedSources, loadDecisionReport]);
 
   return (
     <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
       <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{isZh ? "报表" : "Reports"}</h2>
+          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{isZh ? "经营报表" : "Operating Reports"}</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {isZh
-              ? "查看经营指标、历史趋势与 AI 数据标注"
-              : "Review business metrics, historical trends, and AI data annotations"}
+              ? "查看经营指标、结构拆解与 AI 经营总结"
+              : "Review business metrics, breakdowns, and AI operating summaries"}
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-          {metricsUpdateMessage ? (
-            <p className="text-xs font-medium text-muted-foreground">{metricsUpdateMessage}</p>
-          ) : null}
-          {reportEntitlementText ? (
-            <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
-              {reportEntitlementText}
-            </div>
-          ) : null}
-          {reportEntitlement?.canGenerateReport !== false ? (
-            <Button type="button" onClick={() => void updateMetrics()} disabled={isUpdatingMetrics || !effectiveHasConnectedDatabase}>
-              <RefreshCw className={cn("size-4", isUpdatingMetrics && "animate-spin")} />
-              {isUpdatingMetrics
-                ? isZh ? "更新中..." : "Updating..."
-                : reportGenerateButtonLabel(reportEntitlement, locale, isZh ? "更新指标" : "Update metrics")}
-            </Button>
-          ) : (
-            <Button asChild type="button">
-              <a href="/checkout/professional">{isZh ? "升级套餐" : "Upgrade plan"}</a>
-            </Button>
-          )}
-        </div>
+        <Button
+          type="button"
+          onClick={() => void loadDecisionReport()}
+          disabled={isLoadingDecisionReport || isLoadingConnectedSources}
+        >
+          <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
+          {isLoadingDecisionReport ? (isZh ? "加载中..." : "Loading...") : (isZh ? "刷新报表" : "Refresh report")}
+        </Button>
       </div>
 
-      {isLoadingConnectedSources ? (
+      <div className="flex justify-end">
+        <ReportDateRangeSelector
+          selectedRange={decisionReportRange.preset}
+          customStartDate={decisionReportRange.startDate}
+          customEndDate={decisionReportRange.endDate}
+          onRangeChange={handleDecisionReportRangeChange}
+          onCustomRangeChange={handleDecisionReportCustomRangeChange}
+          locale={locale}
+          labelVariant="analysis"
+        />
+      </div>
+
+      {isLoadingConnectedSources || (isLoadingDecisionReport && !decisionReportPayload) ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
             <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在加载数据源状态..." : "Loading data source status..."}
+            {isZh ? "正在加载经营报表..." : "Loading decision report..."}
           </CardContent>
         </Card>
-      ) : shouldShowEmptyReportState ? (
+      ) : decisionReportIsReady ? (
+        <ReportRendererEngine
+          report={decisionReportPayload?.decision_report ?? null}
+          message={decisionReportPayload?.message}
+        />
+      ) : decisionReportError ? (
+        <Card className="border-rose-200 bg-rose-50 shadow-sm">
+          <CardContent className="p-5 text-sm font-medium text-rose-900">
+            {decisionReportError}
+          </CardContent>
+        </Card>
+      ) : shouldShowDecisionReportEmpty ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="p-5 text-sm text-muted-foreground">
             {isZh
-              ? "当前没有已连接的数据源。恢复或连接数据源后，再重新生成报表。"
-              : "No data source is currently connected. Restore or connect a data source, then regenerate reports."}
-          </CardContent>
-        </Card>
-      ) : isReportRangeCacheMiss ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-            {isZh
-              ? "当前时间范围尚未生成报表。点击生成报告后，会按所选时间范围重新计算。"
-              : "No report has been generated for this time range. Generate the report to calculate the selected range."}
+              ? "当前没有可用的经营报表数据。请确认统一后的电商数据已生成，然后刷新报表。"
+              : "No operating report data is available. Confirm the normalized ecommerce data has been generated, then refresh this report."}
           </CardContent>
         </Card>
       ) : (
-        <>
-          <ReportMetricEvidencePanel
-            metricResults={reportPanelMetricResults}
-            generatedAt={reportPanelGeneratedAt}
-            timeConfig={reportPanelTimeConfig}
-            trendMetrics={reportPanelTrendMetrics}
-            trendCharts={reportPanelTrendCharts}
-            structuredReport={reportPanelStructuredReport}
-            assetLibrary={latestKpiAssetLibrary}
-            selectedRange={selectedDateRange.preset}
-            customStartDate={selectedDateRange.startDate}
-            customEndDate={selectedDateRange.endDate}
-            availableDateRange={reportAvailableDateRange}
-            onRangeChange={handleReportRangeChange}
-            onCustomRangeChange={handleCustomReportRangeChange}
-            locale={locale}
-            isLoading={isLoadingReportEvidence || isUpdatingMetrics}
-          />
-        </>
+        <Card className="border bg-white shadow-sm">
+          <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
+            <RefreshCw className="size-4 animate-spin" />
+            {isZh ? "正在加载经营报表..." : "Loading decision report..."}
+          </CardContent>
+        </Card>
       )}
-
     </section>
+  );
+
+
+}
+
+function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; placement?: "inline" | "sidebar" }) {
+  const items = [
+    { href: "#report-sku", label: isZh ? "SKU" : "SKU", icon: Table2 },
+    { href: "#report-ads", label: isZh ? "广告" : "Ads", icon: BarChart3 },
+    { href: "#report-warehouse", label: isZh ? "仓库" : "Warehouse", icon: Database },
+    { href: "#report-customers", label: isZh ? "客户" : "Customers", icon: Users }
+  ];
+  const isSidebar = placement === "sidebar";
+
+  return (
+    <nav
+      className={cn(
+        isSidebar
+          ? "ml-6 mt-1 grid gap-1 border-l border-slate-200 pl-3"
+          : "mt-3 flex max-w-full gap-2 overflow-x-auto pb-1"
+      )}
+      aria-label={isZh ? "报表板块导航" : "Report section navigation"}
+    >
+      {items.map((item) => (
+        <a
+          key={item.href}
+          href={item.href}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-emerald-800",
+            isSidebar
+              ? "rounded-md px-2 py-1.5 hover:bg-emerald-50"
+              : "rounded-full border bg-white px-3 py-1.5 shadow-sm hover:border-emerald-200 hover:bg-emerald-50"
+          )}
+        >
+          <item.icon className="size-4" />
+          {item.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
 export function Dashboard({
   view = "overview",
   initialDataSource,
-  defaultLocale = "en"
+  defaultLocale = "en",
+  ecommerceDashboard
 }: {
   view?: DashboardView;
   initialDataSource?: string;
   defaultLocale?: Locale;
+  ecommerceDashboard?: EcommerceDashboardPayload;
 }) {
   const [locale, setLocale, isLocaleReady] = useLocale(defaultLocale);
-  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isChatCollapsed, setIsChatCollapsed] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? []);
   const [deletedSources, setDeletedSources] = useState<ConnectedSourceRow[]>([]);
   const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(() => !connectedSourcesCache);
   const copy = dashboardCopy[getCopyLocale(locale)];
   const isReportsView = view === "reports";
-  const hasChatPanel = view !== "settings";
+  const hasChatPanel = view !== "settings" && view !== "sales";
+
+  useEffect(() => {
+    setIsSidebarCollapsed(true);
+  }, []);
+
   const activeTarget =
     view === "import-data" || view === "import-data-connect"
       ? "#import-data"
@@ -16188,6 +16611,8 @@ export function Dashboard({
         ? "#metrics"
       : view === "report"
         ? "#report"
+      : view === "sales"
+        ? "#sales"
       : isReportsView
         ? "#reports"
         : view === "settings"
@@ -16314,9 +16739,14 @@ export function Dashboard({
 
   const loadConnectedSources = useCallback(async () => {
     setIsLoadingConnectedSources(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
 
     try {
-      const response = await fetch("/api/data-sources", { cache: "no-store" });
+      const response = await fetch("/api/data-sources", {
+        cache: "no-store",
+        signal: controller.signal
+      });
       const payload = await response.json().catch(() => null);
 
       if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
@@ -16336,7 +16766,10 @@ export function Dashboard({
         setConnectedSources(nextSources);
         setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
       }
+    } catch (error) {
+      console.warn("[dashboard] Failed to load connected sources", error);
     } finally {
+      window.clearTimeout(timeoutId);
       setIsLoadingConnectedSources(false);
     }
   }, []);
@@ -16430,6 +16863,16 @@ export function Dashboard({
                   locale={locale}
                   hasConnectedDatabase={connectedSources.length > 0}
                   isLoadingConnectedSources={isLoadingConnectedSources}
+                />
+              </div>
+            ) : view === "sales" && ecommerceDashboard ? (
+              <div className="min-w-0 xl:col-start-1">
+                <EcommerceSalesDashboard
+                  data={ecommerceDashboard.data}
+                  state={ecommerceDashboard.state}
+                  message={ecommerceDashboard.message}
+                  lineage={ecommerceDashboard.lineage}
+                  embedded
                 />
               </div>
             ) : (

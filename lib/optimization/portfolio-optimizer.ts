@@ -1,0 +1,932 @@
+import { solveBudgetAllocation, type PortfolioBudgetPlan } from "@/lib/optimization/budget-allocation-solver";
+import { constraintsApplied, groupValidPortfolioSimulations } from "@/lib/optimization/constraint-engine";
+import { buildInventoryPlan, inventoryUtilization, type InventoryPlan } from "@/lib/optimization/inventory-constraint-engine";
+import { generateOptimizationActions } from "@/lib/optimization/action-generator";
+import { detectOptimizationOpportunities } from "@/lib/optimization/opportunity-engine";
+import { simulatePricingOptimization, type PricingPlan } from "@/lib/optimization/pricing-simulator";
+import { solveGlobalPortfolio } from "@/lib/optimization/portfolio-solver";
+import {
+  simulateGeneratedActions,
+  type PortfolioOptimizationInput,
+  type ProfitSimulationResult
+} from "@/lib/optimization/profit-simulation-engine";
+import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
+
+export type PortfolioRecommendation = {
+  sku: string;
+  action: string;
+  decision_action: DecisionAction;
+  skuRole: SkuPortfolioRole;
+  recommendedActions: string[];
+  current_profit: number;
+  predicted_profit: number;
+  profit_delta: number;
+  confidence: number;
+  opportunity_score: number;
+  opportunity_type?: string;
+  evidence_tags: string[];
+  why: string;
+  evidence: string[];
+  decisionDrivers: DecisionDriver[];
+  causalExplanation: DecisionCausalExplanation;
+  simulation: {
+    predicted_revenue: number;
+    predicted_margin: number;
+    current_ads_spend: number;
+    recommended_ads_spend: number;
+    simulated_price: number;
+    required_inventory: number;
+    revenue_delta: number;
+    cost_delta: number;
+    margin_change: number;
+    inventory_impact: number;
+  };
+  simulation_horizon: {
+    days: number;
+    label: string;
+  };
+  prediction_type: "rule_based" | "statistical" | "ml_model";
+  confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
+  required_cash: number;
+  strategic_fit: number;
+  before_state: ProfitSimulationResult["before_state"];
+  after_state: ProfitSimulationResult["after_state"];
+  scenario_results: Array<{
+    action: string;
+    profit_delta: number;
+    revenue_delta: number;
+    confidence: number;
+    selected: boolean;
+  }>;
+};
+
+export type DecisionAction = "SCALE" | "REDUCE" | "OPTIMIZE" | "MONITOR";
+
+export type SkuPortfolioRole = "ACQUISITION" | "PROFIT" | "GROWTH" | "DRAIN";
+
+export type PortfolioAction = {
+  skuId: string;
+  action: DecisionAction;
+  skuRole: SkuPortfolioRole;
+  recommendedActions: string[];
+  decisionDrivers: DecisionDriver[];
+  risks: string[];
+  expectedProfitImpact: number;
+  confidence: number;
+};
+
+export type DecisionDriver = {
+  category: string;
+  metric: string;
+  value: string;
+  impact: "positive" | "negative" | "risk";
+};
+
+export type DecisionCausalExplanation = {
+  evidence: string[];
+  businessMeaning: string;
+  decision: string;
+};
+
+export type DecisionSummary = {
+  totalProfitImpact: number;
+  scaleCount: number;
+  reduceCount: number;
+  optimizeCount: number;
+  stopCount: number;
+  fixCount: number;
+  monitorCount: number;
+  inventoryRisk: number;
+  budgetOpportunity: number;
+};
+
+export type PortfolioAllocationRecommendation = {
+  current: Array<{ bucket: string; share: number; amount: number }>;
+  recommended: Array<{ bucket: string; share: number; amount: number }>;
+  narrative: string;
+};
+
+export type SKUDecision = {
+  skuId: string;
+  action: DecisionAction;
+  skuRole: SkuPortfolioRole;
+  sourceAction: string;
+  inventoryRisk: boolean;
+  budgetOpportunity: boolean;
+  expectedProfitImpact: number;
+  estimatedProfitImpact: number;
+  confidence: number;
+  priority: number;
+  reasons: string[];
+  decisionDrivers: DecisionDriver[];
+  causalExplanation: DecisionCausalExplanation;
+  risks: string[];
+  comparisonInsights: string[];
+  recommendedActions: string[];
+  recommendedExecution: string[];
+  evidence: {
+    margin: number;
+    roas: number | null;
+    inventoryRunwayDays: number | null;
+    revenueDelta: number;
+    marginChange: number;
+  };
+  simulation_horizon: ProfitSimulationResult["simulation_horizon"];
+  confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
+  constraints_passed: string[];
+};
+
+export type PortfolioRiskAlert = {
+  type: "inventory" | "budget" | "confidence" | "margin";
+  message: string;
+  affectedSkus: string[];
+  severity: "low" | "medium" | "high";
+};
+
+export type PortfolioExecutionStep = {
+  step: number;
+  action: DecisionAction;
+  description: string;
+  skuIds: string[];
+  estimatedProfitImpact: number;
+};
+
+export type PortfolioOptimizationResult = {
+  version: "sku_portfolio_optimization_v2";
+  algorithm: "prediction_driven_global_portfolio_solver";
+  optimization_summary: {
+    input_sku_count: number;
+    current_portfolio_profit: number;
+    optimized_portfolio_profit: number;
+    total_expected_profit_gain: number;
+    selected_sku_count: number;
+    ads_budget_used: number;
+    inventory_required: number;
+    inventory_utilization: number;
+    cash_required: number;
+    simulation_horizon_days: number;
+    constraints_applied: string[];
+  };
+  prediction_summary: {
+    simulation_source: "prediction_model";
+    models_used: string[];
+    prediction_type: "rule_based" | "statistical" | "ml_model";
+    prediction_confidence: number;
+  };
+  recommended_portfolio: PortfolioRecommendation[];
+  portfolioSummary: DecisionSummary;
+  allocationRecommendation: PortfolioAllocationRecommendation;
+  skuDecisions: SKUDecision[];
+  riskAlerts: PortfolioRiskAlert[];
+  executionPlan: PortfolioExecutionStep[];
+  budget_plan: PortfolioBudgetPlan[];
+  pricing_plan: PricingPlan[];
+  inventory_plan: InventoryPlan[];
+  total_expected_profit_gain: number;
+  optimization_confidence: number;
+  greedy_single_sku_baseline: {
+    sku: string | null;
+    profit_delta: number;
+  };
+  simulations: ProfitSimulationResult[];
+};
+
+const MAX_OPTIMIZATION_SKU_CANDIDATES = 320;
+
+export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): PortfolioOptimizationResult {
+  const optimizationInput = limitOptimizationInput(input);
+  const opportunities = detectOptimizationOpportunities(optimizationInput.skus);
+  const generatedActions = generateOptimizationActions({
+    skus: optimizationInput.skus,
+    opportunities
+  });
+  const simulations = simulateGeneratedActions({
+    skus: optimizationInput.skus,
+    ads: optimizationInput.ads ?? [],
+    actions: generatedActions,
+    simulationHorizonDays: optimizationInput.constraints.simulation_horizon_days ?? 30
+  });
+  const validBySku = groupValidPortfolioSimulations(optimizationInput, simulations);
+  const selected = solveGlobalPortfolio(validBySku, optimizationInput);
+  const selectedDecisionRows = selected.rows;
+  const selectedRows = selectedDecisionRows.filter((row) => row.action !== "STOP");
+  const currentPortfolioProfit = roundCurrency(input.skus.reduce((sum, sku) => sum + sku.net_profit, 0));
+  const totalGain = roundCurrency(selected.delta);
+  const optimizedPortfolioProfit = roundCurrency(currentPortfolioProfit + totalGain);
+  const budgetPlan = solveBudgetAllocation({
+    simulations,
+    ads: optimizationInput.ads ?? [],
+    constraints: optimizationInput.constraints
+  });
+  const pricingPlan = simulatePricingOptimization(optimizationInput.skus)
+    .filter((plan) => Math.abs((plan.optimal_price - plan.current_price) / Math.max(1, plan.current_price)) <= optimizationInput.constraints.max_price_change);
+  const inventoryPlan = buildInventoryPlan(optimizationInput.skus, simulations, optimizationInput.constraints);
+  const greedyBaseline = bestSingleSkuBaseline(validBySku);
+  const confidence = selectedRows.length
+    ? selectedRows.reduce((sum, row) => sum + row.confidence, 0) / selectedRows.length
+    : 0;
+  const portfolioRecommendations = selectedRows
+    .sort((left, right) => right.opportunity_score - left.opportunity_score || right.profit_delta - left.profit_delta || left.sku.localeCompare(right.sku))
+    .map((row) => toRecommendation(row, simulations));
+  const skuDecisions = buildSkuDecisions(selectedDecisionRows, simulations);
+  const portfolioSummary = buildDecisionSummary({
+    rows: selectedDecisionRows,
+    simulations,
+    totalGain,
+    constraints: input.constraints
+  });
+
+  return {
+    version: "sku_portfolio_optimization_v2",
+    algorithm: "prediction_driven_global_portfolio_solver",
+    optimization_summary: {
+      input_sku_count: input.skus.length,
+      current_portfolio_profit: currentPortfolioProfit,
+      optimized_portfolio_profit: optimizedPortfolioProfit,
+      total_expected_profit_gain: totalGain,
+      selected_sku_count: selectedRows.length,
+      ads_budget_used: roundCurrency(selectedRows.reduce((sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend), 0)),
+      inventory_required: selectedRows.reduce((sum, row) => sum + row.required_inventory, 0),
+      inventory_utilization: inventoryUtilization(selectedRows, input.constraints.inventory_capacity),
+      cash_required: roundCurrency(selectedRows.reduce((sum, row) => sum + row.required_cash, 0)),
+      simulation_horizon_days: optimizationInput.constraints.simulation_horizon_days ?? 30,
+      constraints_applied: constraintsApplied(input)
+    },
+    prediction_summary: {
+      simulation_source: "prediction_model",
+      models_used: Array.from(new Set(simulations.flatMap((row) => row.prediction_models))),
+      prediction_type: simulations[0]?.prediction_type ?? "rule_based",
+      prediction_confidence: roundRatio(confidence)
+    },
+    recommended_portfolio: portfolioRecommendations,
+    portfolioSummary,
+    allocationRecommendation: buildAllocationRecommendation({
+      rows: selectedDecisionRows,
+      input,
+      budgetPlan
+    }),
+    skuDecisions,
+    riskAlerts: buildRiskAlerts(selectedDecisionRows),
+    executionPlan: buildExecutionPlan(skuDecisions),
+    budget_plan: budgetPlan,
+    pricing_plan: pricingPlan,
+    inventory_plan: inventoryPlan,
+    total_expected_profit_gain: totalGain,
+    optimization_confidence: roundRatio(Math.max(0.35, Math.min(0.95, confidence))),
+    greedy_single_sku_baseline: greedyBaseline,
+    simulations
+  };
+}
+
+function limitOptimizationInput(input: PortfolioOptimizationInput): PortfolioOptimizationInput {
+  if (input.skus.length <= MAX_OPTIMIZATION_SKU_CANDIDATES) {
+    return input;
+  }
+
+  const rankedSkus = input.skus
+    .slice()
+    .sort((left, right) => optimizationSkuScore(right) - optimizationSkuScore(left))
+    .slice(0, MAX_OPTIMIZATION_SKU_CANDIDATES);
+
+  const candidateSkuSet = new Set(rankedSkus.map((sku) => sku.sku));
+
+  return {
+    ...input,
+    skus: rankedSkus,
+    ads: (input.ads ?? []).filter((row) => !row.sku || candidateSkuSet.has(row.sku)),
+    constraints: {
+      ...input.constraints,
+      inventory_capacity: Math.max(1, rankedSkus.reduce((sum, row) => sum + row.inventory, 0))
+    }
+  };
+}
+
+function optimizationSkuScore(sku: PortfolioOptimizationInput["skus"][number]) {
+  const confidence = sku.prediction_confidence ?? 0.55;
+  const marginScore = Math.max(0, sku.margin) * 2000;
+  const profitScore = Math.max(0, sku.net_profit);
+  const revenueScore = Math.max(0, sku.revenue) * 0.15;
+  const stockScore = sku.inventory > 0 && sku.sales_velocity > 0 ? 120 : 0;
+
+  return (profitScore + revenueScore + marginScore + stockScore) * Math.max(0.25, confidence);
+}
+
+function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimulationResult[]): PortfolioRecommendation {
+  const decision = classifyDecisionAction(row);
+  const skuRole = classifySkuRole(row, decision);
+  return {
+    sku: row.sku,
+    action: row.action,
+    decision_action: decision,
+    skuRole,
+    recommendedActions: buildRecommendedActions(row, decision),
+    current_profit: row.current_profit,
+    predicted_profit: row.predicted_profit,
+    profit_delta: row.profit_delta,
+    confidence: row.confidence,
+    opportunity_score: row.opportunity_score,
+    opportunity_type: row.opportunity_type,
+    evidence_tags: row.evidence_tags,
+    why: row.why,
+    evidence: row.evidence,
+    decisionDrivers: buildDecisionDrivers(row, decision),
+    causalExplanation: buildCausalExplanation(row, decision),
+    simulation: {
+      predicted_revenue: row.predicted_revenue,
+      predicted_margin: row.predicted_margin,
+      current_ads_spend: row.current_ads_spend,
+      recommended_ads_spend: row.recommended_ads_spend,
+      simulated_price: row.simulated_price,
+      required_inventory: row.required_inventory,
+      revenue_delta: row.revenue_delta,
+      cost_delta: row.cost_delta,
+      margin_change: row.margin_change,
+      inventory_impact: row.inventory_impact
+    },
+    simulation_horizon: row.simulation_horizon,
+    prediction_type: row.prediction_type,
+    confidence_breakdown: row.confidence_breakdown,
+    required_cash: row.required_cash,
+    strategic_fit: row.strategic_fit,
+    before_state: row.before_state,
+    after_state: row.after_state,
+    scenario_results: simulations
+      .filter((scenario) => scenario.sku === row.sku)
+      .sort((left, right) => right.opportunity_score - left.opportunity_score)
+      .slice(0, 4)
+      .map((scenario) => ({
+        action: scenario.action,
+        profit_delta: scenario.profit_delta,
+        revenue_delta: scenario.revenue_delta,
+        confidence: scenario.confidence,
+        selected: scenario.action === row.action
+      }))
+  };
+}
+
+function buildDecisionSummary(input: {
+  rows: ProfitSimulationResult[];
+  simulations: ProfitSimulationResult[];
+  totalGain: number;
+  constraints: PortfolioOptimizationInput["constraints"];
+}): DecisionSummary {
+  const counts = countDecisionActions(input.rows);
+  const inventoryRiskRows = input.rows.filter(isInventoryRiskRow);
+  const scalableBudgetOpportunity = input.rows.reduce(
+    (sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend),
+    0
+  );
+  const reducibleBudgetOpportunity = input.simulations
+    .filter((row) => classifyDecisionAction(row) === "REDUCE" || row.action === "REDUCE_ADS")
+    .reduce((sum, row) => sum + Math.max(0, row.current_ads_spend - row.recommended_ads_spend), 0);
+
+  return {
+    totalProfitImpact: roundCurrency(input.totalGain),
+    scaleCount: counts.SCALE,
+    reduceCount: counts.REDUCE,
+    optimizeCount: counts.OPTIMIZE,
+    stopCount: counts.REDUCE,
+    fixCount: counts.OPTIMIZE,
+    monitorCount: counts.MONITOR,
+    inventoryRisk: inventoryRiskRows.length,
+    budgetOpportunity: roundCurrency(Math.min(input.constraints.total_ads_budget, scalableBudgetOpportunity + reducibleBudgetOpportunity))
+  };
+}
+
+function isInventoryRiskRow(row: ProfitSimulationResult) {
+  return row.required_inventory > row.current_inventory || row.risk >= 0.25;
+}
+
+function hasBudgetOpportunity(row: ProfitSimulationResult) {
+  return Math.max(0, row.recommended_ads_spend - row.current_ads_spend) > 0
+    || Math.max(0, row.current_ads_spend - row.recommended_ads_spend) > 0
+    || row.action.includes("AD");
+}
+
+function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSimulationResult[]): SKUDecision[] {
+  const ranked = rows
+    .slice()
+    .sort((left, right) => right.opportunity_score - left.opportunity_score || right.profit_delta - left.profit_delta);
+
+  return ranked.map((row, index) => {
+    const decision = classifyDecisionAction(row);
+    const skuRole = classifySkuRole(row, decision);
+    const alternatives = simulations
+      .filter((scenario) => scenario.sku === row.sku && scenario.action !== row.action)
+      .sort((left, right) => right.opportunity_score - left.opportunity_score)
+      .slice(0, 2);
+    const betterRows = ranked.filter((candidate) => candidate.sku !== row.sku && candidate.opportunity_score > row.opportunity_score).slice(0, 2);
+
+    return {
+      skuId: row.sku,
+      action: decision,
+      skuRole,
+      sourceAction: row.action,
+      inventoryRisk: isInventoryRiskRow(row),
+      budgetOpportunity: hasBudgetOpportunity(row),
+      expectedProfitImpact: roundCurrency(row.profit_delta),
+      estimatedProfitImpact: roundCurrency(row.profit_delta),
+      confidence: row.confidence,
+      priority: index + 1,
+      reasons: buildDecisionReasons(row, decision),
+      decisionDrivers: buildDecisionDrivers(row, decision),
+      causalExplanation: buildCausalExplanation(row, decision),
+      risks: buildDecisionRisks(row),
+      comparisonInsights: buildComparisonInsights(row, alternatives, betterRows),
+      recommendedActions: buildRecommendedActions(row, decision),
+      recommendedExecution: buildRecommendedExecution(row, decision),
+      evidence: {
+        margin: row.before_state.margin,
+        roas: row.current_ads_spend > 0 ? roundRatio(row.before_state.revenue / Math.max(1, row.current_ads_spend)) : null,
+        inventoryRunwayDays: row.current_inventory > 0 && row.required_inventory > 0
+          ? roundRatio(row.current_inventory / Math.max(1, row.required_inventory / 30))
+          : null,
+        revenueDelta: row.revenue_delta,
+        marginChange: row.margin_change
+      },
+      simulation_horizon: row.simulation_horizon,
+      confidence_breakdown: row.confidence_breakdown,
+      constraints_passed: buildConstraintsPassed(row)
+    };
+  });
+}
+
+function buildConstraintsPassed(row: ProfitSimulationResult) {
+  const passed = ["budget", "margin", "confidence"];
+  if (row.required_inventory <= row.current_inventory || row.action === "RESTOCK_AND_SCALE") passed.push("inventory");
+  if (row.required_cash >= 0) passed.push("cash");
+  return passed;
+}
+
+function buildAllocationRecommendation(input: {
+  rows: ProfitSimulationResult[];
+  input: PortfolioOptimizationInput;
+  budgetPlan: PortfolioBudgetPlan[];
+}): PortfolioAllocationRecommendation {
+  const currentSpend = input.input.skus.reduce((sum, sku) => sum + sku.ads_spend, 0);
+  const recommendedSpend = input.rows.reduce((sum, row) => sum + row.recommended_ads_spend, 0);
+  const totalRecommendedBudget = Math.max(1, recommendedSpend);
+  const growthRows = input.rows.filter((row) => classifyDecisionAction(row) === "SCALE");
+  const fixRows = input.rows.filter((row) => classifyDecisionAction(row) === "OPTIMIZE");
+  const stopRows = input.rows.filter((row) => classifyDecisionAction(row) === "REDUCE");
+  const monitorRows = input.rows.filter((row) => classifyDecisionAction(row) === "MONITOR");
+
+  return {
+    current: [
+      { bucket: "Acquisition SKUs", share: 0.7, amount: roundCurrency(currentSpend * 0.7) },
+      { bucket: "Profit SKUs", share: 0.2, amount: roundCurrency(currentSpend * 0.2) },
+      { bucket: "Testing", share: 0.1, amount: roundCurrency(currentSpend * 0.1) }
+    ],
+    recommended: [
+      {
+        bucket: "Profit Growth SKUs",
+        share: roundRatio(growthRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0) / totalRecommendedBudget),
+        amount: roundCurrency(growthRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0))
+      },
+      {
+        bucket: "High Potential Fixes",
+        share: roundRatio(fixRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0) / totalRecommendedBudget),
+        amount: roundCurrency(fixRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0))
+      },
+      {
+        bucket: "Monitor / Data Collection",
+        share: roundRatio(monitorRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0) / totalRecommendedBudget),
+        amount: roundCurrency(monitorRows.reduce((sum, row) => sum + row.recommended_ads_spend, 0))
+      },
+      {
+        bucket: "Exit / Reduce Exposure",
+        share: roundRatio(stopRows.reduce((sum, row) => sum + row.current_ads_spend, 0) / Math.max(1, currentSpend)),
+        amount: roundCurrency(stopRows.reduce((sum, row) => sum + row.current_ads_spend, 0))
+      }
+    ],
+    narrative: input.budgetPlan.length
+      ? "Budget is shifted from lower-response exposure toward SKUs with stronger estimated marginal profit."
+      : "Current budget stays constrained while the portfolio is filtered toward higher-confidence profit actions."
+  };
+}
+
+function buildRiskAlerts(rows: ProfitSimulationResult[]): PortfolioRiskAlert[] {
+  const inventorySkus = rows
+    .filter((row) => row.required_inventory > row.current_inventory)
+    .map((row) => row.sku)
+    .slice(0, 8);
+  const lowConfidenceSkus = rows
+    .filter((row) => row.confidence < 0.6)
+    .map((row) => row.sku)
+    .slice(0, 8);
+  const marginSkus = rows
+    .filter((row) => row.predicted_margin < 0.15)
+    .map((row) => row.sku)
+    .slice(0, 8);
+  const alerts: PortfolioRiskAlert[] = [];
+
+  if (inventorySkus.length) {
+    alerts.push({
+      type: "inventory",
+      message: "Some selected actions require inventory coverage before scaling exposure.",
+      affectedSkus: inventorySkus,
+      severity: inventorySkus.length > 5 ? "high" : "medium"
+    });
+  }
+  if (lowConfidenceSkus.length) {
+    alerts.push({
+      type: "confidence",
+      message: "Some actions should remain monitored because prediction confidence is limited.",
+      affectedSkus: lowConfidenceSkus,
+      severity: "medium"
+    });
+  }
+  if (marginSkus.length) {
+    alerts.push({
+      type: "margin",
+      message: "Margin-sensitive SKUs need cost or price fixes before aggressive scaling.",
+      affectedSkus: marginSkus,
+      severity: "medium"
+    });
+  }
+
+  return alerts;
+}
+
+function buildExecutionPlan(decisions: SKUDecision[]): PortfolioExecutionStep[] {
+  const grouped = {
+    SCALE: decisions.filter((row) => row.action === "SCALE"),
+    OPTIMIZE: decisions.filter((row) => row.action === "OPTIMIZE"),
+    REDUCE: decisions.filter((row) => row.action === "REDUCE"),
+    MONITOR: decisions.filter((row) => row.action === "MONITOR")
+  };
+
+  const steps: PortfolioExecutionStep[] = [
+    {
+      step: 1,
+      action: "SCALE",
+      description: "Move budget and exposure toward SKUs with the highest estimated profit impact.",
+      skuIds: grouped.SCALE.slice(0, 8).map((row) => row.skuId),
+      estimatedProfitImpact: roundCurrency(grouped.SCALE.reduce((sum, row) => sum + Math.max(0, row.estimatedProfitImpact), 0))
+    },
+    {
+      step: 2,
+      action: "OPTIMIZE",
+      description: "Fix price, margin, inventory, or conversion constraints before scaling.",
+      skuIds: grouped.OPTIMIZE.slice(0, 8).map((row) => row.skuId),
+      estimatedProfitImpact: roundCurrency(grouped.OPTIMIZE.reduce((sum, row) => sum + Math.max(0, row.estimatedProfitImpact), 0))
+    },
+    {
+      step: 3,
+      action: "REDUCE",
+      description: "Reduce spend or exposure on SKUs where the portfolio solver favors removal or budget protection.",
+      skuIds: grouped.REDUCE.slice(0, 8).map((row) => row.skuId),
+      estimatedProfitImpact: roundCurrency(grouped.REDUCE.reduce((sum, row) => sum + Math.max(0, row.estimatedProfitImpact), 0))
+    }
+  ];
+
+  return steps.filter((step) => step.skuIds.length > 0 || step.estimatedProfitImpact > 0);
+}
+
+function countDecisionActions(rows: ProfitSimulationResult[]) {
+  return rows.reduce(
+    (counts, row) => {
+      counts[classifyDecisionAction(row)] += 1;
+      return counts;
+    },
+    { SCALE: 0, REDUCE: 0, OPTIMIZE: 0, MONITOR: 0 } satisfies Record<DecisionAction, number>
+  );
+}
+
+function classifyDecisionAction(row: ProfitSimulationResult): DecisionAction {
+  if (row.action === "STOP" || row.action === "REDUCE_ADS") return "REDUCE";
+  if (row.action === "SCALE_ADS" || row.action === "SCALE_ADS_PRICE_UP_5" || row.action === "SHIFT_CHANNEL" || row.action === "CREATE_BUNDLE") return "SCALE";
+  if (row.action === "RESTOCK_AND_SCALE") return row.required_inventory > row.current_inventory ? "OPTIMIZE" : "SCALE";
+  if (row.action === "PRICE_UP_5" || row.action === "PRICE_UP_10" || row.action === "PRICE_DOWN_10" || row.action === "PROMOTION_TEST" || row.action === "REDUCE_INVENTORY") return "OPTIMIZE";
+  if (row.profit_delta > 0 && row.confidence >= 0.65) return "SCALE";
+  return "MONITOR";
+}
+
+function classifySkuRole(row: ProfitSimulationResult, decision: DecisionAction): SkuPortfolioRole {
+  const margin = row.before_state.margin;
+  const roas = row.current_ads_spend > 0 ? row.before_state.revenue / Math.max(1, row.current_ads_spend) : null;
+  const runway = inventoryRunwayDays(row);
+
+  if (row.current_profit < 0 || row.predicted_margin < 0.12 || decision === "REDUCE") return "DRAIN";
+  if (decision === "SCALE" && row.profit_delta > 0 && row.revenue_delta > 0) return "GROWTH";
+  if (margin >= 0.35 || row.current_profit >= 2500) return "PROFIT";
+  if (roas !== null && roas >= 2 && margin < 0.35) return "ACQUISITION";
+  if (runway !== null && runway < 14 && row.revenue_delta > 0) return "GROWTH";
+  return margin >= 0.25 ? "PROFIT" : "ACQUISITION";
+}
+
+function buildDecisionDrivers(row: ProfitSimulationResult, decision: DecisionAction): DecisionDriver[] {
+  const margin = row.before_state.margin;
+  const marginChange = row.margin_change;
+  const revenueChangeRate = safeRate(row.revenue_delta, row.before_state.revenue);
+  const budgetDelta = row.recommended_ads_spend - row.current_ads_spend;
+  const runwayDays = inventoryRunwayDays(row);
+  const roas = row.current_ads_spend > 0 ? row.before_state.revenue / Math.max(1, row.current_ads_spend) : null;
+
+  if (decision === "SCALE") {
+    return compactDrivers([
+      {
+        category: "Demand Signal",
+        metric: "Simulated Revenue Lift",
+        value: `${formatSignedPercent(revenueChangeRate)} under selected action`,
+        impact: revenueChangeRate >= 0 ? "positive" : "risk"
+      },
+      {
+        category: "Profit Impact",
+        metric: "Estimated Incremental Profit",
+        value: `${formatSignedCurrency(row.profit_delta)} / ${row.simulation_horizon.label}`,
+        impact: row.profit_delta >= 0 ? "positive" : "negative"
+      },
+      {
+        category: "Margin Strength",
+        metric: "Contribution Margin",
+        value: `${formatPercentValue(margin)} current / ${formatSignedPercent(marginChange)} change`,
+        impact: margin >= 0.35 || marginChange >= 0 ? "positive" : "risk"
+      },
+      {
+        category: "Inventory Status",
+        metric: "Stock Runway",
+        value: runwayDays === null ? "Needs validation" : `${roundRatio(runwayDays)} days coverage`,
+        impact: row.required_inventory <= row.current_inventory ? "positive" : "risk"
+      }
+    ]);
+  }
+
+  if (decision === "REDUCE") {
+    return compactDrivers([
+      {
+        category: "Ad Efficiency",
+        metric: "Budget Reduction",
+        value: budgetDelta < 0 ? `${formatSignedCurrency(budgetDelta)} spend change` : "Spend not justified by simulation",
+        impact: "negative"
+      },
+      {
+        category: "Profit Impact",
+        metric: "Marginal Profit",
+        value: `${formatSignedCurrency(row.profit_delta)} / ${row.simulation_horizon.label}`,
+        impact: row.profit_delta < 0 ? "negative" : "risk"
+      },
+      {
+        category: "Margin Signal",
+        metric: "Predicted Margin",
+        value: `${formatPercentValue(row.predicted_margin)} after action`,
+        impact: row.predicted_margin < 0.15 ? "negative" : "risk"
+      },
+      {
+        category: "Recovery Signal",
+        metric: "Revenue Simulation",
+        value: `${formatSignedCurrency(row.revenue_delta)} revenue change`,
+        impact: row.revenue_delta < 0 ? "negative" : "risk"
+      }
+    ]);
+  }
+
+  if (decision === "OPTIMIZE") {
+    const rootCause = row.action.includes("RESTOCK")
+      ? "Inventory coverage constrains scale"
+      : row.action.includes("PRICE")
+        ? "Price and margin need adjustment"
+        : "Operating constraint limits scaling";
+
+    return compactDrivers([
+      {
+        category: "Root Cause",
+        metric: "Constraint",
+        value: rootCause,
+        impact: "risk"
+      },
+      {
+        category: "Profit Impact",
+        metric: "Estimated Fix Value",
+        value: `${formatSignedCurrency(row.profit_delta)} / ${row.simulation_horizon.label}`,
+        impact: row.profit_delta >= 0 ? "positive" : "risk"
+      },
+      {
+        category: "Margin Response",
+        metric: "Margin Change",
+        value: formatSignedPercent(marginChange),
+        impact: marginChange >= 0 ? "positive" : "risk"
+      },
+      {
+        category: "Inventory Status",
+        metric: "Required Inventory",
+        value: `${numberText(row.required_inventory)} required / ${numberText(row.current_inventory)} available`,
+        impact: row.required_inventory <= row.current_inventory ? "positive" : "risk"
+      }
+    ]);
+  }
+
+  return compactDrivers([
+    {
+      category: "Data Sufficiency",
+      metric: "Prediction Confidence",
+      value: formatPercentValue(row.confidence),
+      impact: row.confidence >= 0.65 ? "positive" : "risk"
+    },
+    {
+      category: "Profit Impact",
+      metric: "Estimated Impact",
+      value: `${formatSignedCurrency(row.profit_delta)} / ${row.simulation_horizon.label}`,
+      impact: row.profit_delta > 0 ? "positive" : "risk"
+    },
+    {
+      category: "Observation Need",
+      metric: "Decision Readiness",
+      value: "More outcome data needed before scale or stop",
+      impact: "risk"
+    },
+    roas === null ? null : {
+      category: "Ad Efficiency",
+      metric: "Current Revenue / Ad Spend",
+      value: `${roundRatio(roas)}x`,
+      impact: roas >= 2 ? "positive" : "risk"
+    }
+  ]);
+}
+
+function buildCausalExplanation(row: ProfitSimulationResult, decision: DecisionAction): DecisionCausalExplanation {
+  const drivers = buildDecisionDrivers(row, decision);
+  const evidence = drivers.slice(0, 3).map((driver) => `${driver.category}: ${driver.metric} ${driver.value}`);
+  const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
+
+  if (decision === "SCALE") {
+    return {
+      evidence,
+      businessMeaning: "Demand, margin, and inventory signals indicate positive marginal profit potential.",
+      decision: budgetDelta > 0
+        ? `Increase advertising budget by ${formatCurrencyValue(budgetDelta)} and track profit lift.`
+        : "Increase exposure within current budget constraints and track profit lift."
+    };
+  }
+
+  if (decision === "REDUCE") {
+    return {
+      evidence,
+      businessMeaning: "The SKU consumes resources that can be reallocated to stronger portfolio opportunities.",
+      decision: "Reduce exposure or stop inefficient campaigns, then reallocate budget."
+    };
+  }
+
+  if (decision === "OPTIMIZE") {
+    return {
+      evidence,
+      businessMeaning: "The SKU has profit potential, but a constraint must be fixed before scaling.",
+      decision: row.action.includes("RESTOCK")
+        ? "Resolve inventory coverage before increasing demand."
+        : row.action.includes("PRICE")
+          ? "Run a controlled price adjustment before scaling."
+          : "Fix the limiting operating metric before increasing exposure."
+    };
+  }
+
+  return {
+    evidence,
+    businessMeaning: "Current evidence is not strong enough for an irreversible portfolio move.",
+    decision: "Monitor until confidence or outcome data improves."
+  };
+}
+
+function buildDecisionReasons(row: ProfitSimulationResult, decision: DecisionAction) {
+  const reasons: string[] = [];
+  if (decision === "SCALE") {
+    if (row.profit_delta > 0) reasons.push(`Estimated marginal profit impact is ${roundCurrency(row.profit_delta)}.`);
+    if (row.margin_change >= 0) reasons.push("Margin remains stable or improves in the selected simulation.");
+    if (row.required_inventory <= row.current_inventory) reasons.push("Inventory can support the simulated demand window.");
+  } else if (decision === "REDUCE") {
+    reasons.push("Portfolio solver favors reducing exposure versus keeping current allocation.");
+    if (row.current_ads_spend > row.recommended_ads_spend) reasons.push("Ad budget can be protected or reallocated.");
+    if (row.predicted_margin < 0.15) reasons.push("Predicted margin is below the portfolio threshold.");
+  } else if (decision === "OPTIMIZE") {
+    if (row.action.includes("PRICE")) reasons.push("Price simulation indicates margin can be improved before scaling.");
+    if (row.action.includes("RESTOCK")) reasons.push("Inventory coverage constrains the growth scenario.");
+    if (row.margin_change > 0) reasons.push("The fix improves contribution margin.");
+  } else {
+    reasons.push("Current evidence is not strong enough for immediate scale or stop action.");
+  }
+  if (row.revenue_delta > 0) reasons.push(`Revenue simulation changes by ${roundCurrency(row.revenue_delta)}.`);
+  return reasons.slice(0, 4);
+}
+
+function buildDecisionRisks(row: ProfitSimulationResult) {
+  const risks: string[] = [];
+  if (row.confidence < 0.65) risks.push("Prediction confidence is moderate; track outcome before larger execution.");
+  if (row.required_inventory > row.current_inventory) risks.push("Inventory coverage must be validated before execution.");
+  if (row.margin_change < -0.03) risks.push("The selected action may reduce margin.");
+  if (row.risk > 0.25) risks.push("Simulation risk is elevated versus other portfolio actions.");
+  return risks.length ? risks : ["No material constraint breach detected in simulation."];
+}
+
+function buildComparisonInsights(row: ProfitSimulationResult, alternatives: ProfitSimulationResult[], strongerRows: ProfitSimulationResult[]) {
+  const insights: string[] = [];
+  const bestAlternative = alternatives[0];
+  if (bestAlternative) {
+    insights.push(`${row.action} was selected over ${bestAlternative.action} because its opportunity score is ${roundCurrency(row.opportunity_score)} versus ${roundCurrency(bestAlternative.opportunity_score)}.`);
+  }
+  if (strongerRows.length) {
+    insights.push(`Higher-priority SKUs such as ${strongerRows.map((item) => item.sku).join(", ")} receive allocation first because their simulated profit impact is stronger.`);
+  } else {
+    insights.push("This SKU is among the highest-ranked portfolio opportunities in the current simulation set.");
+  }
+  return insights;
+}
+
+function buildRecommendedExecution(row: ProfitSimulationResult, decision: DecisionAction) {
+  if (decision === "SCALE") {
+    const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
+    return [
+      budgetDelta > 0 ? `Increase advertising budget by ${roundCurrency(budgetDelta)}.` : "Increase exposure without exceeding current budget constraints.",
+      "Track revenue, contribution profit, and inventory consumption during the observation window."
+    ];
+  }
+  if (decision === "REDUCE") {
+    return [
+      "Reduce ad exposure or pause low-value campaigns for this SKU.",
+      "Reallocate freed budget to higher opportunity-score SKUs."
+    ];
+  }
+  if (decision === "OPTIMIZE") {
+    if (row.action.includes("RESTOCK")) return ["Validate stock availability before scaling demand.", "Execute inventory allocation before increasing exposure."];
+    if (row.action.includes("PRICE")) return ["Run the selected price adjustment as a controlled test.", "Track demand elasticity and margin response."];
+    return ["Fix the limiting metric before scaling.", "Re-run simulation after the fix is applied."];
+  }
+  return ["Continue collecting data.", "Re-evaluate after the next reporting window."];
+}
+
+function buildRecommendedActions(row: ProfitSimulationResult, decision: DecisionAction) {
+  if (decision === "SCALE") {
+    const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
+    const actions = [
+      budgetDelta > 0 ? `Increase advertising budget by ${formatCurrencyValue(budgetDelta)}` : "Increase exposure within current budget",
+      "Reserve inventory for the simulated demand window"
+    ];
+    if (row.action.includes("PRICE_UP")) actions.push("Run a controlled price lift with scale");
+    return actions;
+  }
+
+  if (decision === "REDUCE") {
+    return [
+      "Reduce advertising spend on this SKU",
+      "Stop inefficient campaigns if marginal profit stays weak",
+      "Reallocate budget to higher opportunity-score SKUs"
+    ];
+  }
+
+  if (decision === "OPTIMIZE") {
+    if (row.action.includes("RESTOCK")) {
+      return ["Increase inventory allocation before demand scaling", "Re-run scale simulation after stock is available"];
+    }
+    if (row.action.includes("PRICE")) {
+      return ["Run a controlled price adjustment", "Track demand elasticity and contribution margin"];
+    }
+    return ["Improve conversion or cost structure", "Re-run portfolio simulation after the fix"];
+  }
+
+  return ["Continue controlled testing", "Watch trend until confidence improves"];
+}
+
+function compactDrivers(drivers: Array<DecisionDriver | null>): DecisionDriver[] {
+  return drivers.filter((driver): driver is DecisionDriver => Boolean(driver));
+}
+
+function safeRate(delta: number, base: number) {
+  if (!Number.isFinite(delta) || !Number.isFinite(base) || Math.abs(base) < 1) return 0;
+  return delta / Math.abs(base);
+}
+
+function inventoryRunwayDays(row: ProfitSimulationResult) {
+  if (row.current_inventory <= 0 || row.required_inventory <= 0) return null;
+  return row.current_inventory / Math.max(1, row.required_inventory / 30);
+}
+
+function formatSignedCurrency(value: number) {
+  const rounded = roundCurrency(value);
+  return `${rounded >= 0 ? "+" : "-"}$${Math.abs(rounded).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatCurrencyValue(value: number) {
+  return `$${roundCurrency(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatSignedPercent(value: number) {
+  const rounded = roundRatio(value) * 100;
+  return `${rounded >= 0 ? "+" : "-"}${Math.abs(rounded).toFixed(2)}%`;
+}
+
+function formatPercentValue(value: number) {
+  return `${(roundRatio(value) * 100).toFixed(2)}%`;
+}
+
+function numberText(value: number) {
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function bestSingleSkuBaseline(validBySku: Map<string, ProfitSimulationResult[]>) {
+  const best = Array.from(validBySku.values())
+    .flat()
+    .filter((row) => row.action !== "STOP")
+    .sort((left, right) => right.profit_delta - left.profit_delta)[0];
+  return {
+    sku: best?.sku ?? null,
+    profit_delta: roundCurrency(best?.profit_delta ?? 0)
+  };
+}

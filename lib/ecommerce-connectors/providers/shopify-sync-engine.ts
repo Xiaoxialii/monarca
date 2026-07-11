@@ -3,7 +3,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { ConnectionStatus } from "@prisma/client";
 import {
   detectShopifyDataMode,
-  fetchShopifyFallbackOrderCount,
   runShopifyAnalytics,
   type ShopifyAnalyticsOutput,
   type ShopifyDataMode
@@ -16,11 +15,19 @@ import {
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
+import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
+import { SelfLearningSemanticRuntime } from "@/lib/semantic/runtime";
 import {
   runShopifyGuardrails,
   type ShopifyGuardrailOrder,
   type ShopifyGuardrailReport
 } from "@/lib/sync/guards/shopifySyncGuardrail";
+import {
+  buildCanonicalSnapshotJson,
+  storeCanonicalSchemaSnapshot
+} from "@/lib/snapshot/canonical-snapshot-generator";
+import { buildCanonicalSku } from "@/lib/sku/sku-intelligence-engine";
+import type { CanonicalDataset } from "@/lib/semantic/types";
 
 const SCHEMA_VERSION = "ecommerce_canonical_v1";
 const SAFETY_OVERLAP_MS = 5 * 60 * 1000;
@@ -104,6 +111,18 @@ type ShopifySyncManifest = {
   missing_fields: string[];
   estimation_used: boolean;
   analytics: ShopifyAnalyticsOutput;
+  semantic_learning: {
+    records_updated: number;
+    memory_size: number;
+    average_memory_confidence: number;
+    model_update: {
+      strategy: string;
+      embedding_similarity_weight: number;
+      runtime_updated: boolean;
+    };
+    unknown_fields: string[];
+    anomaly_fields: string[];
+  };
   sync_started_at: string;
   sync_finished_at: string;
   sync_window_start: string;
@@ -298,7 +317,6 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
     const missingFields: string[] = [];
     const orderQuery = `updated_at:>=${syncWindowStart.toISOString()}`;
     const productsPage = await client.fetchConnectionWithPageInfo<ShopifyProduct>(PRODUCTS_QUERY, "products", {}, MAX_RESOURCE_NODES);
-    const fallbackOrderCount = dataMode === "FALLBACK" ? await fetchShopifyFallbackOrderCount(client) : null;
     const ordersPage = dataMode === "FULL"
       ? await client.fetchConnectionWithPageInfo<ShopifyGuardrailOrder>(ORDERS_QUERY, "orders", { query: orderQuery }, MAX_RESOURCE_NODES)
       : {
@@ -335,7 +353,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
           lastCursor: null
         };
     if (dataMode === "FALLBACK") {
-      customerWarnings.push("Data Quality: Partial. Some metrics are estimated due to Shopify API limitations.");
+      customerWarnings.push("Data Quality: Partial. Shopify API limitations prevent order, line item, refund, and customer metrics.");
       missingFields.push("customers");
     }
     const guardrails = runShopifyGuardrails({
@@ -367,9 +385,31 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       orders: ordersPage.nodes,
       products: productsPage.nodes,
       customers: customersPage.nodes,
-      fallbackOrderCount,
-      defaultAov: 75,
       missingFields
+    });
+    const semanticLearning = await runSemanticLearning({
+      prisma,
+      workspaceId: input.workspaceId,
+      rawData: [
+        ...ordersPage.nodes,
+        ...productsPage.nodes,
+        ...customersPage.nodes
+      ]
+    }).catch((error) => {
+      guardrails.guardrailReport.warnings.push(`Semantic learning update skipped: ${error instanceof Error ? error.message : "unknown error"}`);
+
+      return {
+        records_updated: 0,
+        memory_size: 0,
+        average_memory_confidence: 0,
+        model_update: {
+          strategy: "zero-retraining-weight-adjustment",
+          embedding_similarity_weight: 0,
+          runtime_updated: false
+        },
+        unknown_fields: [],
+        anomaly_fields: []
+      };
     });
     const deduped = dedupeCanonicalArtifact(canonical);
     const baseKey = `workspaces/${input.workspaceId}/connectors/shopify/${account.dataSourceId}/${syncRunId}`;
@@ -408,6 +448,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       missing_fields: analytics.missingFields,
       estimation_used: analytics.estimation_used,
       analytics,
+      semantic_learning: semanticLearning,
       sync_started_at: syncRun.startedAt.toISOString(),
       sync_finished_at: new Date().toISOString(),
       sync_window_start: syncWindowStart.toISOString(),
@@ -458,29 +499,56 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
         where: { id: account.id },
         data: { lastSyncedAt: syncWindowEnd }
       });
-      const nextVersion = (await tx.schemaSnapshot.aggregate({
-        where: { workspaceId: input.workspaceId },
-        _max: { version: true }
-      }))._max.version ?? 0;
-      const snapshot = await tx.schemaSnapshot.create({
-        data: {
-          workspaceId: input.workspaceId,
-          dataSourceId: account.dataSourceId!,
-          version: nextVersion + 1,
-          status: guardrails.guardrailReport.paginationIncomplete ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
-          schemaJson: buildSchemaSnapshotJson(manifest, normalizedArtifacts) as Prisma.InputJsonValue,
-          qualityReport: {
-            guardrailReport: guardrails.guardrailReport,
-            duplicateCount: deduped.duplicateCounts,
-            manifestKey: manifest.manifest_key,
-            syncRunId,
-            dataMode: analytics.mode,
-            confidenceScore: analytics.confidence,
-            missingFields: analytics.missingFields,
-            estimationUsed: analytics.estimation_used,
-            analytics
-          } as Prisma.InputJsonValue
-        }
+      const snapshotJson = buildCanonicalSnapshotJson({
+        manifest: {
+          businessType: "ecommerce",
+          sourceProvider: SHOPIFY_PROVIDER,
+          manifestKey: manifest.manifest_key,
+          syncRunId: manifest.sync_run_id,
+          checksum: manifest.checksum,
+          latestBusinessDate: manifest.latest_business_date,
+          dataMode: manifest.data_mode,
+          confidenceScore: manifest.confidence_score,
+          missingFields: manifest.missing_fields,
+          estimationUsed: manifest.estimation_used,
+          syncStartedAt: manifest.sync_started_at,
+          syncFinishedAt: manifest.sync_finished_at,
+          analytics: manifest.analytics,
+          semanticLearning: manifest.semantic_learning,
+          guardrailReport: manifest.guardrailReport
+        },
+        artifacts: Object.fromEntries(Object.entries(normalizedArtifacts).map(([name, artifact]) => [
+          name,
+          {
+            ...artifact,
+            columns: canonicalColumns(name)
+          }
+        ])),
+        canonicalDataset: buildCanonicalDatasetFromArtifact(deduped.artifact, {
+          sourceProvider: SHOPIFY_PROVIDER,
+          normalizedAt: manifest.sync_finished_at,
+          validationWarnings: manifest.missing_fields,
+          duplicateCount: Object.values(deduped.duplicateCounts).reduce((sum, count) => sum + count, 0),
+          confidence: manifest.confidence_score
+        })
+      });
+      const snapshot = await storeCanonicalSchemaSnapshot({
+        prisma: tx,
+        workspaceId: input.workspaceId,
+        dataSourceId: account.dataSourceId!,
+        status: guardrails.guardrailReport.paginationIncomplete ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
+        schemaJson: snapshotJson,
+        qualityReport: {
+          guardrailReport: guardrails.guardrailReport,
+          duplicateCount: deduped.duplicateCounts,
+          manifestKey: manifest.manifest_key,
+          syncRunId,
+          dataMode: analytics.mode,
+          confidenceScore: analytics.confidence,
+          missingFields: analytics.missingFields,
+          estimationUsed: analytics.estimation_used,
+          analytics
+        } as Prisma.InputJsonValue
       });
 
       await Promise.all(Object.entries(normalizedArtifacts).map(([tableName, artifact]) =>
@@ -512,7 +580,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
         where: { id: account.dataSourceId! },
         data: {
           lastSyncAt: syncWindowEnd,
-          schemas: buildSchemaSnapshotJson(manifest, normalizedArtifacts) as Prisma.InputJsonValue,
+          schemas: snapshotJson as Prisma.InputJsonValue,
           config: {
             ...(typeof dataSource.config === "object" && dataSource.config ? dataSource.config as JsonRecord : {}),
             manifestKey: manifest.manifest_key,
@@ -630,6 +698,12 @@ function normalizeShopifyRecords(input: {
       const unitPrice = moneyAmount(item.originalUnitPriceSet);
       const itemGrossSales = unitPrice * quantity;
       const itemNetSales = moneyAmount(item.discountedTotalSet) || itemGrossSales;
+      const canonicalSku = buildCanonicalSku({
+        sku: item.sku ?? item.variant?.sku ?? null,
+        product_id: item.product?.id ?? null,
+        variant_id: item.variant?.id ?? null,
+        platform: SHOPIFY_PROVIDER
+      });
       artifact.ecommerce_order_items.push({
         ...base,
         source_order_id: sourceOrderId,
@@ -638,7 +712,9 @@ function normalizeShopifyRecords(input: {
         order_item_id: `shopify:${input.shopDomain}:${item.id}`,
         product_id: item.product?.id ? `shopify:${input.shopDomain}:${item.product.id}` : null,
         variant_id: item.variant?.id ? `shopify:${input.shopDomain}:${item.variant.id}` : null,
-        sku: item.sku ?? item.variant?.sku ?? null,
+        sku: canonicalSku.sku,
+        sku_unmapped: canonicalSku.unmapped,
+        sku_source: canonicalSku.unmapped ? "fallback" : "shopify",
         product_name: item.name ?? null,
         quantity,
         unit_price: unitPrice,
@@ -676,13 +752,21 @@ function normalizeShopifyRecords(input: {
     if (!product.id) continue;
     const variants = product.variants?.edges?.map((edge) => edge?.node).filter(Boolean) ?? [null];
     for (const variant of variants.length ? variants : [null]) {
+      const canonicalSku = buildCanonicalSku({
+        sku: variant?.sku ?? null,
+        product_id: product.id,
+        variant_id: variant?.id ?? null,
+        platform: SHOPIFY_PROVIDER
+      });
       artifact.ecommerce_products.push({
         ...base,
         source_product_id: product.id,
         source_variant_id: variant?.id ?? null,
         product_id: `shopify:${input.shopDomain}:${product.id}`,
         variant_id: variant?.id ? `shopify:${input.shopDomain}:${variant.id}` : null,
-        sku: variant?.sku ?? null,
+        sku: canonicalSku.sku,
+        sku_unmapped: canonicalSku.unmapped,
+        sku_source: canonicalSku.unmapped ? "fallback" : "shopify",
         product_name: product.title ?? null,
         product_type: product.productType ?? null,
         category: product.productType ?? null,
@@ -755,26 +839,77 @@ async function writeArtifact(key: string, rows: unknown[], contentType = "applic
   return { artifactKey: key, checksum, rowCount: rows.length };
 }
 
-function buildSchemaSnapshotJson(manifest: ShopifySyncManifest, artifacts: Record<string, ArtifactWriteResult>) {
+function buildCanonicalDatasetFromArtifact(artifact: CanonicalArtifact, input: {
+  sourceProvider: string;
+  normalizedAt: string;
+  validationWarnings: string[];
+  duplicateCount: number;
+  confidence: number;
+}): CanonicalDataset {
   return {
-    businessType: "ecommerce",
-    sourceProvider: SHOPIFY_PROVIDER,
-    schemaVersion: SCHEMA_VERSION,
-    manifestKey: manifest.manifest_key,
-    syncRunId: manifest.sync_run_id,
-    checksum: manifest.checksum,
-    dataMode: manifest.data_mode,
-    confidenceScore: manifest.confidence_score,
-    missingFields: manifest.missing_fields,
-    estimationUsed: manifest.estimation_used,
-    analytics: manifest.analytics,
-    tables: Object.entries(artifacts).map(([name, artifact]) => ({
-      name,
-      rowCount: artifact.rowCount,
-      artifactKey: artifact.artifactKey,
-      checksum: artifact.checksum,
-      columns: canonicalColumns(name)
-    }))
+    schema_version: SCHEMA_VERSION,
+    tables: artifact,
+    metadata: {
+      source_platforms: [input.sourceProvider],
+      normalized_at: input.normalizedAt,
+      unknown_fields: [],
+      validation: {
+        accepted_rows: Object.values(artifact).reduce((sum, rows) => sum + rows.length, 0),
+        rejected_rows: 0,
+        warnings: input.validationWarnings.map((field) => ({
+          table: "ecommerce",
+          field,
+          reason: "shopify_data_mode_missing_field"
+        })),
+        rejected: []
+      },
+      dedupe: {
+        canonical_key_strategy: "hash(platform + source_id + order_id)",
+        duplicate_count: input.duplicateCount
+      },
+      mapping_confidence: input.confidence
+    }
+  };
+}
+
+async function runSemanticLearning(input: {
+  prisma: PrismaClient;
+  workspaceId: string;
+  rawData: unknown[];
+}) {
+  try {
+    const memory = new PrismaSemanticMemoryStore(input.prisma, { workspaceId: input.workspaceId });
+    const runtime = new SelfLearningSemanticRuntime({ memory });
+    const result = await runtime.run({
+      rawData: input.rawData,
+      platform: SHOPIFY_PROVIDER
+    });
+
+    return {
+      records_updated: result.learning.records_updated,
+      memory_size: result.learning.memory_size,
+      average_memory_confidence: result.learning.average_memory_confidence,
+      model_update: result.learning.model_update,
+      unknown_fields: result.learning.unknown_fields,
+      anomaly_fields: result.learning.anomaly_fields
+    };
+  } catch {
+    return skippedSemanticLearning();
+  }
+}
+
+function skippedSemanticLearning() {
+  return {
+    records_updated: 0,
+    memory_size: 0,
+    average_memory_confidence: 0,
+    model_update: {
+      strategy: "zero-retraining-weight-adjustment",
+      embedding_similarity_weight: 0,
+      runtime_updated: false
+    },
+    unknown_fields: [],
+    anomaly_fields: []
   };
 }
 

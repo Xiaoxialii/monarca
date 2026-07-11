@@ -164,7 +164,7 @@ export function hashOAuthState(stateToken: string) {
 }
 
 export async function createOAuthState(input: {
-  provider: typeof SHOPIFY_PROVIDER;
+  provider: string;
   workspaceId: string;
   userId: string;
   shopDomain: string;
@@ -195,7 +195,7 @@ export async function createOAuthState(input: {
 
 export async function verifyAndConsumeOAuthState(input: {
   stateToken: string | null;
-  provider: typeof SHOPIFY_PROVIDER;
+  provider: string;
   shopDomain: string;
   now?: Date;
 }) {

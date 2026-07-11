@@ -1,6 +1,8 @@
 import { GetObjectCommand, PutBucketCorsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 type StoredUpload = {
   bucket: string;
@@ -52,6 +54,30 @@ function safeFileName(fileName: string) {
 
 export function isR2Configured() {
   return Boolean(r2Config());
+}
+
+export function isLocalArtifactFallbackEnabled() {
+  return process.env.NODE_ENV !== "production" || process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true";
+}
+
+function localArtifactRoot() {
+  return path.resolve(process.env.MONARCA_LOCAL_ARTIFACT_DIR || path.join(process.cwd(), ".monarca-artifacts"));
+}
+
+function localArtifactPath(key: string) {
+  const safeKey = key
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((segment) => segment && segment !== "." && segment !== "..")
+    .join(path.sep);
+  const root = localArtifactRoot();
+  const filePath = path.resolve(root, safeKey);
+
+  if (!filePath.startsWith(root + path.sep) && filePath !== root) {
+    throw new Error("Invalid local artifact key.");
+  }
+
+  return filePath;
 }
 
 function r2Client(config: NonNullable<ReturnType<typeof r2Config>>) {
@@ -182,7 +208,11 @@ export async function readR2ObjectBuffer(key: string) {
   const config = r2Config();
 
   if (!config) {
-    throw new Error("R2 storage is not configured.");
+    if (!isLocalArtifactFallbackEnabled()) {
+      throw new Error("R2 storage is not configured.");
+    }
+
+    return readFile(localArtifactPath(key));
   }
 
   const response = await r2Client(config).send(
@@ -208,7 +238,19 @@ export async function writeR2ObjectText(params: {
   const config = r2Config();
 
   if (!config) {
-    throw new Error("R2 storage is not configured.");
+    if (!isLocalArtifactFallbackEnabled()) {
+      throw new Error("R2 storage is not configured.");
+    }
+
+    const filePath = localArtifactPath(params.key);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, params.body, "utf8");
+
+    return {
+      bucket: "local-artifact-store",
+      endpoint: `file://${localArtifactRoot()}`,
+      key: params.key
+    };
   }
 
   const body = Buffer.from(params.body, "utf8");

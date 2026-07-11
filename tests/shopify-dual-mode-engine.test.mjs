@@ -16,19 +16,18 @@ test("Shopify dual mode analytics supports full and fallback data modes", () => 
   assert.match(engine, /orders\(first: 1, query: "status:any"\)/, "Detection should probe orders access");
   assert.match(engine, /lineItems\(first: 1\)/, "Detection should probe line item access");
   assert.match(engine, /refunds\s*\{\s*id/s, "Detection should probe refund access");
-  assert.match(engine, /export async function fetchShopifyFallbackOrderCount/, "Fallback should try to read ordersCount");
-  assert.match(engine, /ordersCount\(query: "status:any"\)/, "Fallback order count should use Shopify ordersCount");
   assert.match(engine, /export function runShopifyAnalytics/, "Engine should expose a unified analytics runner");
   assert.match(engine, /function runFullAnalytics/, "Full mode should calculate exact metrics");
-  assert.match(engine, /function runFallbackAnalytics/, "Fallback mode should calculate estimated metrics");
-  assert.match(engine, /orderCount \* aov/, "Fallback revenue should be order count times AOV");
-  assert.match(engine, /estimation_used: true/, "Fallback output should mark estimation used");
+  assert.match(engine, /function runFallbackAnalytics/, "Fallback mode should return partial-quality metrics without crashing");
+  assert.doesNotMatch(engine, /orderCount \* aov/, "Fallback revenue must not be estimated from order count times AOV");
+  assert.doesNotMatch(engine, /defaultAov/, "Fallback must not use a default AOV estimate");
+  assert.match(engine, /estimation_used: false/, "Fallback output should not mark estimation used");
   assert.match(engine, /data_quality: "partial"/, "Fallback output should mark partial data quality");
-  assert.match(engine, /confidence: orderCount > 0 \? 0\.55 : 0\.35/, "Fallback should lower confidence");
+  assert.match(engine, /confidence: 0\.35/, "Fallback should lower confidence");
 
   assert.match(syncEngine, /detectShopifyDataMode\(client\)/, "Sync should detect data mode before normalization");
   assert.match(syncEngine, /dataMode === "FALLBACK"/, "Sync should branch for fallback mode");
-  assert.match(syncEngine, /fetchShopifyFallbackOrderCount\(client\)/, "Sync should use fallback order count");
+  assert.doesNotMatch(syncEngine, /fetchShopifyFallbackOrderCount\(client\)/, "Sync must not use fallback order count for estimated sales");
   assert.match(syncEngine, /runShopifyAnalytics\(/, "Sync should run dual mode analytics");
   assert.match(syncEngine, /data_mode: analytics\.mode/, "Manifest should include data mode");
   assert.match(syncEngine, /confidence_score: analytics\.confidence/, "Manifest should include confidence score");
@@ -39,5 +38,5 @@ test("Shopify dual mode analytics supports full and fallback data modes", () => 
 
   assert.match(dashboard, /Data Quality: Partial/, "Dashboard should show partial data quality");
   assert.match(dashboard, /Data Quality: Full/, "Dashboard should show full data quality");
-  assert.match(dashboard, /Some metrics are estimated due to Shopify API limitations/, "Dashboard should explain fallback estimation");
+  assert.match(dashboard, /Shopify API limitations prevent order, line item, refund, or customer metrics/, "Dashboard should explain missing metrics without estimation");
 });

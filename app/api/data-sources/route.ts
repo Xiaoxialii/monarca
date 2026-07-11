@@ -60,6 +60,18 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
   const schemas = asRecord(sourceSchemas);
   const snapshot = asRecord(snapshotSchema);
   const report = asRecord(snapshotReport);
+  const unifiedIngestion = asRecord(schemas?.unifiedIngestion) ?? asRecord(snapshot?.unifiedIngestion);
+  const semantic = asRecord(unifiedIngestion?.semantic);
+  const detectedSchema = asRecord(unifiedIngestion?.detectedSchema);
+  const canonical = asRecord(unifiedIngestion?.canonical);
+  const learning = asRecord(unifiedIngestion?.learning);
+  const mappingDetails = Array.isArray(semantic?.mapping_details)
+    ? semantic.mapping_details
+    : Array.isArray(semantic?.mappingDetails)
+      ? semantic.mappingDetails
+      : null;
+  const mappings = asRecord(semantic?.mappings);
+  const detectedFields = Array.isArray(detectedSchema?.fields) ? detectedSchema.fields : [];
   const tables = Array.isArray(schemas?.tables)
     ? schemas.tables
     : Array.isArray(snapshot?.tables)
@@ -87,6 +99,64 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
         : typeof snapshot?.scannedAt === "string"
           ? snapshot.scannedAt
           : null,
+    unifiedIngestion: unifiedIngestion
+      ? {
+          status: typeof unifiedIngestion.status === "string" ? unifiedIngestion.status : null,
+          source: typeof unifiedIngestion.source === "string" ? unifiedIngestion.source : null,
+          sampledRows: toNumber(unifiedIngestion.sampledRows),
+          totalParsedRows: toNumber(unifiedIngestion.totalParsedRows),
+          detectedSchema: {
+            detected_type: typeof detectedSchema?.detected_type === "string" ? detectedSchema.detected_type : null,
+            confidence: toNumber(detectedSchema?.confidence),
+            fields: detectedFields.map((field) => {
+              const record = asRecord(field);
+
+              return {
+                name: typeof record?.name === "string" ? record.name : "",
+                path: typeof record?.path === "string" ? record.path : "",
+                type: typeof record?.type === "string" ? record.type : null
+              };
+            }).filter((field) => field.name)
+          },
+          semantic: {
+            confidence: toNumber(semantic?.confidence),
+            memory_hits: toNumber(semantic?.memory_hits),
+            engine_candidates: toNumber(semantic?.engine_candidates),
+            mappings: mappings ?? {},
+            mapping_details: mappingDetails
+              ? mappingDetails.map((mapping) => {
+                  const record = asRecord(mapping);
+
+                  return {
+                    field: typeof record?.field === "string" ? record.field : "",
+                    canonical: typeof record?.canonical === "string" ? record.canonical : "",
+                    confidence: toNumber(record?.confidence),
+                    source: typeof record?.source === "string" ? record.source : "engine"
+                  };
+                }).filter((mapping) => mapping.field)
+              : Object.entries(mappings ?? {}).map(([field, canonical]) => ({
+                  field,
+                  canonical: typeof canonical === "string" ? canonical : String(canonical),
+                  confidence: toNumber(semantic?.confidence),
+                  source: "engine"
+                })),
+            unknown_fields: Array.isArray(semantic?.unknown_fields)
+              ? semantic.unknown_fields.filter((field): field is string => typeof field === "string")
+              : []
+          },
+          canonical: {
+            schemaVersion: typeof canonical?.schemaVersion === "string" ? canonical.schemaVersion : null,
+            rowCounts: asRecord(canonical?.rowCounts) ?? {},
+            mappingConfidence: toNumber(canonical?.mappingConfidence),
+            unknownFieldCount: toNumber(canonical?.unknownFieldCount)
+          },
+          learning: {
+            records_updated: toNumber(learning?.records_updated),
+            memory_size: toNumber(learning?.memory_size),
+            average_memory_confidence: toNumber(learning?.average_memory_confidence)
+          }
+        }
+      : null,
     tables: (tables ?? []).map((table) => {
       const tableRecord = asRecord(table);
       const columns = Array.isArray(tableRecord?.columns) ? tableRecord.columns : [];
@@ -99,6 +169,11 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
 
           return {
             name: typeof columnRecord?.name === "string" ? columnRecord.name : "",
+            displayName: typeof columnRecord?.displayName === "string" ? columnRecord.displayName : null,
+            semanticName: typeof columnRecord?.semanticName === "string" ? columnRecord.semanticName : null,
+            rawHeaderPath: Array.isArray(columnRecord?.rawHeaderPath)
+              ? columnRecord.rawHeaderPath.filter((item): item is string => typeof item === "string")
+              : null,
             type: typeof columnRecord?.type === "string" ? columnRecord.type : null,
             nullable: typeof columnRecord?.nullable === "boolean" ? columnRecord.nullable : null
           };

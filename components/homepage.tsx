@@ -129,9 +129,9 @@ const homepageCopy = {
     logo: "Monarca AI",
     nav: [
       { label: "Sources", href: "#sources" },
-      { label: "Investigations", href: "#investigations" },
+      { label: "Profit Control", href: "#investigations" },
       { label: "Alerts", href: "#alerts" },
-      { label: "Reports", href: "#reports" },
+      { label: "Control Brief", href: "#reports" },
       { label: "Pricing", href: "#pricing" },
       { label: "Consulting", href: "/consulting" }
     ],
@@ -140,20 +140,20 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "AI Revenue & Growth System",
-      headline: "Identify growth opportunities and business risks earlier",
+      eyebrow: "AI Profit Control System",
+      headline: "Real-Time Profit Optimization",
       subheadline: "",
       teamLabel: "One AI team covering the full analytics workflow",
       team: [
         { role: "Data Engineer", text: "Connects sources and keeps pipelines clean" },
         { role: "Analytics Engineer", text: "Builds semantic layers and metric logic" },
-        { role: "BI Engineer", text: "Creates reports, dashboards, and trusted views" },
-        { role: "Business Intelligence", text: "Explains movement, cohorts, and root causes" },
-        { role: "Growth Operations", text: "Turns insights into focused growth actions" }
+        { role: "Decision Engineer", text: "Simulates scenarios and turns drivers into operating choices" },
+        { role: "Profit Controller", text: "Explains movement, margin pressure, and cross-channel tradeoffs" },
+        { role: "Growth Operations", text: "Turns optimal decisions into focused profit actions" }
       ],
       primaryCta: "Book a 30-min Business Consultation",
       secondaryCta: "View Demo",
-      trust: ["Automated data analysis", "Real-time insights", "Actionable recommendations"]
+      trust: ["Profit diagnosis", "Scenario simulation", "Optimal decisions"]
     },
     visual: {
       status: "Investigating",
@@ -239,7 +239,7 @@ const homepageCopy = {
     },
     system: {
       eyebrow: "Why teams need it",
-      title: "Growth teams have dashboards, They need judgment",
+      title: "Growth teams have dashboards. Profit teams need a control system",
       points: [
         {
           title: "Metrics move constantly",
@@ -256,12 +256,12 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "Work with AI",
+      sectionTitle: "AI Profit Control System",
       sectionSubtitle:
-        "After revenue, conversion, or cost anomalies appear, Monarca AI checks related metrics, identifies key root causes, and recommends actions with evidence.",
+        "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision.",
       eyebrow: "",
       title: "Revenue dropped 12.4%",
-      evidenceTitle: "Evidence chain",
+      evidenceTitle: "Driver chain",
       evidenceMetric: "Revenue dropped 18%",
       evidenceDrivers: ["iOS conversion declined", "CAC increased", "Retention Week 2 dropped"],
       confidenceLabel: "Confidence",
@@ -270,11 +270,11 @@ const homepageCopy = {
       timeline: [
         ["08:42", "System detected a revenue anomaly"],
         ["08:43", "Compared cohorts, campaigns, billing events, and product activation"],
-        ["08:45", "Generated root-cause judgment and recommended actions"]
+        ["08:45", "Generated profit-control decision and expected impact"]
       ],
       steps: [
         {
-          title: "AI analyzed 15+ metrics",
+          title: "AI diagnosed profit drivers",
           text: "Revenue, activation, traffic quality, billing errors, and expansion pipeline were reviewed"
         },
         {
@@ -282,16 +282,16 @@ const homepageCopy = {
           text: "The drop was traced to CAC inflation, checkout friction, and late-stage pipeline compression"
         },
         {
-          title: "Recommended actions",
-          text: "Outputs three recommended actions with expected impact and confidence"
+          title: "Optimized operating decisions",
+          text: "Outputs budget, channel, inventory, and SKU-level decisions with expected profit impact"
         }
       ]
     },
     reports: {
-      sectionEyebrow: "Team-specific reports",
-      eyebrow: "Reports",
-      title: "A daily growth brief that writes itself",
-      intro: "Summaries, owner updates, and impact tracking are generated from the same investigations your team already uses",
+      sectionEyebrow: "Team-specific control briefs",
+      eyebrow: "Control brief",
+      title: "A daily profit-control brief that writes itself",
+      intro: "Decision summaries, owner updates, and impact tracking are generated from the same control loop your team already uses",
       signal: "Daily signal",
       status: "Auto-drafted",
       cards: [
@@ -363,9 +363,9 @@ const homepageCopy = {
     logo: "蝴蝶效应",
     nav: [
       { label: "数据源", href: "#sources" },
-      { label: "智能调查", href: "#investigations" },
+      { label: "利润控制", href: "#investigations" },
       { label: "异常提醒", href: "#alerts" },
-      { label: "报告", href: "#reports" },
+      { label: "控制简报", href: "#reports" },
       { label: "价格", href: "#pricing" },
       { label: "预约咨询", href: "/consulting" }
     ],
@@ -374,18 +374,18 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "AI Revenue & Growth System",
-      headline: "提前识别增长机会与业务风险",
-      subheadline: "连接业务数据，自动生成增长分析与行动建议",
-      teamLabel: "三类关键洞察，帮助团队更早行动",
+      eyebrow: "AI Profit Control System",
+      headline: "实时利润优化",
+      subheadline: "连接 Shopify、Amazon、广告和库存数据，自动诊断利润异常、模拟方案，并输出最优经营决策",
+      teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
         { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
         { role: "更快识别风险与亏损", text: "发现利润下滑、低效投入、库存风险或业务异常，减少不必要的损失。" },
-        { role: "自动生成行动建议", text: "基于数据变化自动给出下一步建议，帮助团队更快判断、执行和优化。" }
+        { role: "输出最优经营决策", text: "基于预算、库存和毛利约束，给出下一步应该调整什么以及预期利润影响。" }
       ],
       primaryCta: "预约 30 分钟咨询",
       secondaryCta: "查看 Demo",
-      trust: ["数据自动分析", "实时洞察", "可执行建议"]
+      trust: ["利润诊断", "方案模拟", "最优决策"]
     },
     visual: {
       status: "正在调查",
@@ -411,19 +411,19 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "",
-      title: "一套 AI 工作流，完成从数据连接到经营洞察的全过程",
+      title: "一套 AI 利润控制流，完成从数据连接到经营决策的全过程",
       cards: [
         {
           title: "汇总分散数据",
-          text: "把 Excel、数据库和业务系统的数据集中到一个平台，自动生成分析报告"
+          text: "把 Excel、数据库和业务系统的数据集中到一个利润控制系统"
         },
         {
           title: "发现异常并定位原因",
           text: "自动监控关键指标变化，并拆解到渠道、客户、产品、地区或时间段"
         },
         {
-          title: "生成行动建议",
-          text: "给出优先级、建议动作、影响范围和下一步处理方向"
+          title: "生成最优决策",
+          text: "给出预算、库存、渠道和 SKU 层面的调整动作与预期利润影响"
         },
         {
           title: "追踪行动效果",
@@ -466,7 +466,7 @@ const homepageCopy = {
     },
     system: {
       eyebrow: "为什么需要它",
-      title: "增长不缺数据，缺的是能转化为价值的洞察",
+      title: "增长不缺数据，缺的是能控制利润的决策系统",
       points: [
         {
           title: "指标一直在变化",
@@ -477,14 +477,14 @@ const homepageCopy = {
           text: "系统会跨数据源对比，并缩短调查路径"
         },
         {
-          title: "洞察落地为价值",
-          text: "每个发现都会转化为可执行行动，并持续追踪影响"
+          title: "驱动因素转成决策",
+          text: "每个利润驱动因素都会进入模拟、优化和执行队列"
         }
       ]
     },
     investigation: {
-      sectionTitle: "与 AI 一起工作",
-      sectionSubtitle: "发现收入、转化或成本异常后，蝴蝶效应会自动检查相关指标，定位关键根因，并给出带证据链的行动建议。",
+      sectionTitle: "AI 利润控制系统",
+      sectionSubtitle: "发现收入、转化、成本或库存异常后，蝴蝶效应会诊断利润驱动因素，模拟跨渠道方案，并输出最优经营决策。",
       eyebrow: "",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",
@@ -514,10 +514,10 @@ const homepageCopy = {
       ]
     },
     reports: {
-      sectionEyebrow: "团队专属报告",
-      eyebrow: "报告",
-      title: "自动生成每天增长简报",
-      intro: "自动同步并清洗数据，生成摘要和影响追踪，不再手动更新数据或拼报表",
+      sectionEyebrow: "团队专属控制简报",
+      eyebrow: "控制简报",
+      title: "自动生成每天利润控制简报",
+      intro: "自动同步并清洗数据，生成决策摘要和影响追踪，不再手动更新数据或拼报表",
       signal: "每日信号",
       status: "自动生成",
       cards: [
@@ -621,15 +621,16 @@ function roleInitials(role: string) {
 }
 
 const businessCaseSignals = [
-  { channel: "TikTok", icon: "🚀", value: "+42%", zh: "爆发增长", en: "Explosive growth", tone: "green" },
-  { channel: "Amazon", icon: "📉", value: "-18%", zh: "广告亏损扩大", en: "Ad loss widening", tone: "red" },
-  { channel: "Shopify", icon: "🔁", value: "82%", zh: "复购表现健康", en: "Healthy repeat purchase", tone: "blue" }
+  { channel: "Amazon", icon: "📉", value: "-18%", zh: "SKU 1992 降低投放", en: "Reduce SKU 1992 spend", tone: "red" },
+  { channel: "Shopify", icon: "📦", value: "P1", zh: "库存优先级提升", en: "Inventory priority up", tone: "blue" },
+  { channel: "TikTok", icon: "🧪", value: "Test", zh: "维持测试投放", en: "Maintain test spend", tone: "green" }
 ] as const;
 
 const businessCaseRecommendations = [
-  { zh: "降低 Amazon（SKU 9）广告投放 15–25%", en: "Reduce Amazon (SKU 9) ad spend by 15–25%" },
-  { zh: "检查 iOS 落地页转化率", en: "Review iOS landing page conversion rate" },
-  { zh: "扩大 Shopify（SKU 1992）复购库存", en: "Increase Shopify (SKU 1992) retention inventory" }
+  { zh: "减少 Amazon SKU 1992 广告投放", en: "Reduce Amazon SKU 1992 ad spend" },
+  { zh: "Shopify 提升库存优先级", en: "Raise Shopify inventory priority" },
+  { zh: "TikTok 维持测试投放", en: "Maintain TikTok test spend" },
+  { zh: "建议涨价 +5%", en: "Increase price by +5%" }
 ] as const;
 
 function signalToneClass(tone: (typeof businessCaseSignals)[number]["tone"]) {
@@ -658,18 +659,18 @@ function signalToneClass(tone: (typeof businessCaseSignals)[number]["tone"]) {
 
 function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?: boolean; isZh?: boolean }) {
   const labels = {
-    case: isZh ? "业务案例" : "Business case",
-    title: isZh ? "哪些问题正在拖累利润？" : "What issues are dragging profit?",
-    live: isZh ? "AI 实时判断" : "AI live judgment",
-    signals: isZh ? "渠道信号" : "Channel signals",
+    case: isZh ? "利润控制" : "Profit control",
+    title: isZh ? "今日最优利润策略" : "Today’s optimal profit strategy",
+    live: isZh ? "AI 实时优化" : "AI live optimization",
+    signals: isZh ? "跨渠道决策" : "Cross-channel decisions",
     window: isZh ? "7 天窗口" : "7-day window",
-    diagnosis: isZh ? "AI 诊断" : "AI diagnosis",
+    diagnosis: isZh ? "优化层" : "Optimization layer",
     diagnosisText: isZh
-      ? "美国 iOS 用户转化下降，Amazon SKU 9 是持续亏损的投放中心，Shopify（SKU 1992）复购是唯一稳定利润。"
-      : "U.S. iOS conversion is declining. Amazon SKU 9 is the persistent loss-making ad center, while Shopify (SKU 1992) repeat purchase is the only stable profit source.",
-    tags: isZh ? ["iOS 转化下降", "SKU 9 亏损", "SKU 1992 稳定利润"] : ["iOS conversion down", "SKU 9 loss center", "SKU 1992 stable profit"],
-    actions: isZh ? "建议动作" : "Recommended actions",
-    confidence: isZh ? "置信度：82%" : "Confidence: 82%"
+      ? "系统已完成预算、库存、渠道和价格约束模拟，当前最优动作组合预计提升利润 +18.4%。"
+      : "The system simulated budget, inventory, channel, and pricing constraints. The current best action set is expected to lift profit by +18.4%.",
+    tags: isZh ? ["Amazon 降投放", "Shopify 保库存", "TikTok 保持测试", "价格 +5%"] : ["Amazon spend down", "Shopify inventory protected", "TikTok test maintained", "Price +5%"],
+    actions: isZh ? "最优决策" : "Optimal decisions",
+    confidence: isZh ? "预计利润提升：+18.4%" : "Expected profit lift: +18.4%"
   };
 
   return (
@@ -682,7 +683,7 @@ function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?:
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{labels.case}</p>
-          <h3 className="mt-1.5 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-[1.35rem]">
+          <h3 className="mt-1.5 whitespace-nowrap text-lg font-semibold leading-tight tracking-normal text-slate-950 sm:text-[1.18rem]">
             {labels.title}
           </h3>
         </div>
@@ -1019,32 +1020,82 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
 }
 
 function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
-  const isZh = copy.sectionTitle === "与 AI 一起工作";
+  const isZh = copy.sectionTitle === "AI 利润控制系统";
   const flow = {
     alert: {
-      label: isZh ? "🔴 下降" : "🔴 Drop",
-      title: isZh ? "本周收入下降 12.4%" : "Revenue dropped 12.4% this week",
-      text: isZh ? "高影响异常，已进入 AI 调查链路。" : "High-impact anomaly entered the AI investigation flow."
+      label: isZh ? "利润风险" : "Profit risk",
+      title: isZh ? "本周可控利润下降 12.4%" : "Controllable profit dropped 12.4% this week",
+      text: isZh
+        ? "系统已进入利润控制链路：不是只解释异常，而是寻找最优经营动作。"
+        : "The system entered profit control mode: it does not stop at explaining the anomaly; it searches for the best operating moves."
     },
     diagnosis: {
-      label: isZh ? "🟡 分析中" : "🟡 Investigating",
+      label: isZh ? "诊断中" : "Diagnosing",
       title: isZh
-        ? "AI 判断：CAC 上升 + 留存下降正在拉低增长"
-        : "AI judgment: rising CAC + retention decline are pulling growth down",
-      text: isZh ? "问题集中在获客质量和二周留存。" : "The issue is concentrated in acquisition quality and week-2 retention."
+        ? "利润驱动因素：CAC 上升、二周留存下降、iOS 转化拖累 SKU 净利"
+        : "Profit drivers: CAC inflation, week-2 retention decay, and iOS conversion drag are compressing SKU net profit",
+      text: isZh
+        ? "问题不只在收入，而是广告成本、复购效率和高毛利 SKU 供给之间的联动。"
+        : "The issue is not only revenue. It is the interaction between ad cost, repeat efficiency, and high-margin SKU supply."
     },
     evidence: [
-      { metric: "CAC", before: "12%", after: "18%", tone: "up" },
-      { metric: "Retention Week 2", before: "稳定", after: "-9%", tone: "down" },
-      { metric: "iOS conversion", before: "正常", after: isZh ? "下降" : "down", tone: "down" }
+      { metric: "Meta CAC", before: "12%", after: "18%", note: isZh ? "压低 SKU margin" : "compresses SKU margin", tone: "up" },
+      { metric: "Shopify Retention W2", before: isZh ? "稳定" : "stable", after: "-9%", note: isZh ? "削弱 LTV" : "weakens LTV", tone: "down" },
+      { metric: "Amazon SKU supply", before: isZh ? "充足" : "healthy", after: isZh ? "受限" : "limited", note: isZh ? "限制利润放大" : "limits profit scaling", tone: "down" }
     ],
-    actions: isZh
+    decisions: isZh
       ? ["降低低 ROI 渠道投放", "优化获客结构", "复查 Week 2 留存路径"]
       : ["Reduce low-ROI channel spend", "Optimize acquisition mix", "Review Week 2 retention path"]
   };
   const aiOps = isZh
-    ? ["AI 正在分析渠道 ROI", "已分析 24 个指标", "正在对比二周留存", "正在检查 iOS 转化", "正在识别高影响异常"]
-    : ["AI is analyzing channel ROI", "24 metrics analyzed", "Comparing Week 2 retention", "Checking iOS conversion", "Detecting high-impact anomalies"];
+    ? ["读取 Amazon / Shopify / Ads 利润链路", "模拟预算迁移方案", "检查库存和毛利约束", "计算 SKU 级净利润", "优化跨渠道分配"]
+    : ["Reading Amazon / Shopify / Ads profit paths", "Simulating budget migration", "Checking inventory and margin constraints", "Computing SKU-level net profit", "Optimizing cross-channel allocation"];
+  const processSteps = isZh
+    ? ["Data", "Diagnosis", "Simulation", "Optimization", "Action"]
+    : ["Data", "Diagnosis", "Simulation", "Optimization", "Action"];
+  const simulations = isZh
+    ? [
+        { name: "维持当前投放结构", impact: "0%", detail: "利润继续受 CAC 与库存约束压缩" },
+        { name: "将 18% 预算迁移到高毛利 SKU", impact: "+18.4%", detail: "提升 Shopify + Amazon 可控净利" },
+        { name: "暂停低 ROAS 获客组", impact: "+6.1%", detail: "减少亏损点击，保护利润率底线" }
+      ]
+    : [
+        { name: "Keep current spend mix", impact: "0%", detail: "Profit remains compressed by CAC and inventory constraints" },
+        { name: "Move 18% budget to high-margin SKUs", impact: "+18.4%", detail: "Improves Shopify + Amazon controllable net profit" },
+        { name: "Pause low-ROAS prospecting groups", impact: "+6.1%", detail: "Reduces loss-making clicks and protects margin floor" }
+      ];
+  const bestDecision = {
+    title: isZh ? "最优策略：预算迁移 + 高毛利 SKU 供给保护" : "Best strategy: budget migration + high-margin SKU supply protection",
+    impact: "+18.4%",
+    confidence: "86%",
+    constraints: isZh ? ["预算上限", "库存约束", "毛利底线"] : ["Budget cap", "Inventory constraint", "Margin floor"],
+    actions: isZh
+      ? [
+          "从低 ROAS 广告组迁移 18% 预算到 SKU_01306 / SKU_01126",
+          "TikTok 拉新暂停 72 小时，直到 CAC 回到目标区间",
+          "Shopify 保留高毛利变体库存，优先承接付费流量",
+          "Amazon 只放大库存充足且净利率高于 28% 的 SKU"
+        ]
+      : [
+          "Move 18% budget from low-ROAS ad sets to SKU_01306 / SKU_01126",
+          "Pause TikTok prospecting for 72 hours until CAC returns to target",
+          "Reserve Shopify inventory for high-margin variants receiving paid traffic",
+          "Scale only Amazon SKUs with enough inventory and net margin above 28%"
+        ]
+  };
+  const channels = isZh
+    ? [
+        { name: "Amazon", decision: "+12% 预算", impact: "高毛利 SKU" },
+        { name: "Shopify", decision: "保护库存", impact: "承接转化" },
+        { name: "Meta Ads", decision: "-18% 低效投放", impact: "降低 CAC" },
+        { name: "TikTok", decision: "暂停拉新", impact: "守住利润率" }
+      ]
+    : [
+        { name: "Amazon", decision: "+12% budget", impact: "High-margin SKUs" },
+        { name: "Shopify", decision: "Protect inventory", impact: "Capture conversion" },
+        { name: "Meta Ads", decision: "-18% weak spend", impact: "Lower CAC" },
+        { name: "TikTok", decision: "Hold prospecting", impact: "Protect margin" }
+      ];
 
   return (
     <section id="investigations" className="mx-auto max-w-7xl px-5 py-12 sm:px-8">
@@ -1059,7 +1110,7 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
       </div>
 
       <div className="overflow-hidden rounded-[30px] bg-white p-3 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.06] sm:p-6">
-        <div className="relative mx-auto max-w-4xl overflow-hidden">
+        <div className="relative mx-auto max-w-5xl overflow-hidden">
           <div className="absolute bottom-4 left-4 top-5 w-px bg-gradient-to-b from-rose-200 via-amber-200 to-emerald-200 sm:left-5" />
 
           <div className="relative grid gap-5">
@@ -1076,6 +1127,24 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                 </div>
                 <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-rose-700 sm:text-3xl">{flow.alert.title}</h3>
                 <p className="mt-2 text-sm leading-6 text-rose-900/70">{flow.alert.text}</p>
+              </div>
+            </div>
+
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-slate-50 text-slate-700 ring-1 ring-slate-200 sm:size-10">
+                <Zap className="size-4" />
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  {isZh ? "利润控制链路" : "Profit control flow"}
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-5">
+                  {processSteps.map((step, index) => (
+                    <div key={step} className={cn("rounded-2xl px-3 py-2 text-center text-xs font-semibold ring-1", index < 3 ? "bg-emerald-50 text-emerald-800 ring-emerald-100" : "bg-slate-50 text-slate-600 ring-slate-200")}>
+                      {step}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1104,7 +1173,7 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                 <BarChart3 className="size-4" />
               </div>
               <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{isZh ? "证据层" : "Evidence"}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{isZh ? "跨渠道驱动因素" : "Cross-channel drivers"}</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   {flow.evidence.map((item) => (
                     <div key={item.metric} className="min-w-0 rounded-2xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-900/[0.04]">
@@ -1115,8 +1184,41 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                         <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.after}</span>
                         <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.tone === "up" ? "↑" : "↓"}</span>
                       </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{item.note}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 sm:size-10">
+                <TrendingUp className="size-4" />
+              </div>
+              <div className="min-w-0 overflow-hidden rounded-[24px] bg-indigo-50/70 p-3 ring-1 ring-indigo-100 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">{isZh ? "模拟层" : "Simulation layer"}</p>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-100">
+                    {isZh ? "滚动模拟中" : "Simulation running"}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {simulations.map((scenario) => (
+                    <div key={scenario.name} className="rounded-2xl bg-white px-3 py-3 ring-1 ring-indigo-100">
+                      <p className="text-xs font-semibold text-slate-500">{scenario.name}</p>
+                      <p className={cn("mt-2 text-xl font-semibold", scenario.impact === "0%" ? "text-slate-500" : "text-emerald-700")}>{scenario.impact}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{scenario.detail}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 overflow-hidden rounded-2xl bg-white/80 px-3 py-2 ring-1 ring-indigo-100">
+                  <div className="ai-ops-track flex gap-2">
+                    {[...aiOps, ...aiOps].map((item, index) => (
+                      <span key={`simulation-${item}-${index}`} className="shrink-0 whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1127,16 +1229,40 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
               </div>
               <div className="min-w-0 rounded-[24px] bg-emerald-50/80 p-3 ring-1 ring-emerald-100 sm:p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">{isZh ? "行动建议" : "Action"}</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">{isZh ? "优化层 · 最优决策" : "Optimization layer · Best decision"}</p>
                   <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                    {isZh ? "🟢 下一步明确" : "🟢 Stable next step"}
+                    {isZh ? "预期利润 +18.4%" : "Expected profit +18.4%"}
                   </span>
                 </div>
+                <h3 className="mt-3 break-words text-base font-semibold leading-7 text-emerald-950 sm:text-lg">{bestDecision.title}</h3>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  {flow.actions.map((action) => (
-                    <div key={action} className="flex min-w-0 items-center gap-2 rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
+                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "利润影响" : "Profit impact"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-emerald-700">{bestDecision.impact}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "置信度" : "Confidence"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-950">{bestDecision.confidence}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "约束" : "Constraints"}</p>
+                    <p className="mt-1 text-sm font-semibold leading-6 text-slate-700">{bestDecision.constraints.join(" / ")}</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {bestDecision.actions.map((action) => (
+                    <div key={action} className="flex min-w-0 items-start gap-2 rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
                       <ArrowRight className="size-4 shrink-0 text-emerald-700" />
                       <p className="break-words text-sm font-semibold leading-5 text-emerald-950">{action}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {channels.map((channel) => (
+                    <div key={channel.name} className="rounded-2xl bg-emerald-100/60 px-3 py-2 ring-1 ring-emerald-200">
+                      <p className="text-xs font-semibold text-emerald-900">{channel.name}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-950">{channel.decision}</p>
+                      <p className="text-xs leading-5 text-slate-600">{channel.impact}</p>
                     </div>
                   ))}
                 </div>
@@ -1376,18 +1502,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
           <h1
             className="max-w-2xl text-[2.45rem] font-black leading-[1.02] tracking-normal text-slate-950 sm:text-[3.4rem] lg:text-[3.18rem] lg:leading-[1.02]"
           >
-            {isZh ? (
-              <span className="block">
-                <span className="hero-title-shimmer block">提前识别</span>
-                <span className="mt-0.5 block">
-                  <span className="hero-title-shimmer inline-block">增长机会</span>
-                  <span className="hero-title-shimmer mx-2 inline-block">与</span>
-                  <span className="hero-title-shimmer inline-block">业务风险</span>
-                </span>
-              </span>
-            ) : (
-              <span className="hero-title-shimmer">{copy.hero.headline}</span>
-            )}
+            <span className="hero-title-shimmer">{copy.hero.headline}</span>
           </h1>
           {copy.hero.subheadline ? (
             <p className="mt-6 max-w-xl text-base leading-[1.7] text-slate-600 lg:mt-6 lg:text-[1.02rem] lg:leading-8">

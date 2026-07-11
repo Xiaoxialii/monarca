@@ -15,7 +15,7 @@ match Monarca's production host.
 - Embedded app: `false`
 - Allowed redirection URL: `https://www.monarcadata.com/api/connectors/shopify/callback`
 - Preferences URL: `https://www.monarcadata.com/dashboard/import-data`
-- Admin API scopes: `read_orders,read_products,read_customers,read_fulfillments,write_draft_orders,write_orders`
+- Admin API scopes: `read_orders,read_products,read_customers,read_fulfillments,write_draft_orders,write_orders,write_products`
 - Use legacy install flow: `true`
 
 ## Deploy through Shopify CLI

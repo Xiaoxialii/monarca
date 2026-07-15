@@ -1743,39 +1743,43 @@ let connectedSourcesCache: ConnectedSourceRow[] | null = null;
 let connectedSourcesWorkspaceIdCache: string | null = null;
 let analysisReportsPageDataCache: unknown = null;
 let reportsPageDataCache: unknown = null;
-const CONNECTED_SOURCES_BROWSER_CACHE_KEY = "monarca.connectedSources.v1";
+const CONNECTED_SOURCES_BROWSER_CACHE_PREFIX = "monarca.connectedSources.v1";
 const CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 
-function readConnectedSourcesBrowserCache({
-  expectedWorkspaceId,
-  userId
-}: {
-  expectedWorkspaceId?: string | null;
-  userId?: string | null;
-} = {}) {
+function connectedSourcesBrowserCacheKey(workspaceId: string) {
+  return `${CONNECTED_SOURCES_BROWSER_CACHE_PREFIX}:${workspaceId}`;
+}
+
+function readConnectedSourcesMemoryCache(workspaceId?: string | null) {
+  if (!workspaceId || connectedSourcesWorkspaceIdCache !== workspaceId) return null;
+
+  return connectedSourcesCache;
+}
+
+function readConnectedSourcesBrowserCache(workspaceId?: string | null) {
   if (typeof window === "undefined") return null;
-  if (!expectedWorkspaceId && !userId) return null;
+  if (!workspaceId) return null;
 
   try {
-    const raw = window.localStorage.getItem(CONNECTED_SOURCES_BROWSER_CACHE_KEY);
+    const raw = window.localStorage.getItem(connectedSourcesBrowserCacheKey(workspaceId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { savedAt?: number; workspaceId?: string | null; userId?: string | null; sources?: ConnectedSourceRow[] };
+    const parsed = JSON.parse(raw) as { savedAt?: number; workspaceId?: string | null; sources?: ConnectedSourceRow[] };
     if (!parsed.savedAt || Date.now() - parsed.savedAt > CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS) return null;
-    if (expectedWorkspaceId && parsed.workspaceId !== expectedWorkspaceId) return null;
-    if (!expectedWorkspaceId && userId && parsed.userId !== userId) return null;
+    if (parsed.workspaceId !== workspaceId) return null;
     return Array.isArray(parsed.sources) ? parsed.sources : null;
   } catch {
     return null;
   }
 }
 
-function writeConnectedSourcesBrowserCache(sources: ConnectedSourceRow[], workspaceId: string | null, userId?: string | null) {
+function writeConnectedSourcesBrowserCache(sources: ConnectedSourceRow[], workspaceId: string | null) {
   if (typeof window === "undefined") return;
+  if (!workspaceId) return;
 
   try {
     window.localStorage.setItem(
-      CONNECTED_SOURCES_BROWSER_CACHE_KEY,
-      JSON.stringify({ savedAt: Date.now(), workspaceId, userId: userId ?? null, sources })
+      connectedSourcesBrowserCacheKey(workspaceId),
+      JSON.stringify({ savedAt: Date.now(), workspaceId, sources })
     );
   } catch {
     // Ignore storage failures; the in-memory cache still works during this session.
@@ -5858,9 +5862,7 @@ function DataSourcesWorkspace({
   const hasAnyKnownSources = connectedSources.length > 0 || workspaceSources.length > 0;
 
   useEffect(() => {
-    if (connectedSources.length > 0) {
-      setWorkspaceSources(connectedSources);
-    }
+    setWorkspaceSources(connectedSources);
   }, [connectedSources]);
 
   const removeBusinessSource = (source: BusinessSourceView) => {
@@ -16355,7 +16357,7 @@ function ReportsPage({
 	  const generatedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
 	  const isAnalysisCacheMiss = reportData?.briefing?.payloadJson?.cache?.status === "miss";
 	  const shouldShowEmptyAnalysisState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
-	  const shouldShowSkuTableEmptyState = isLoadingConnectedSources || !hasConnectedDatabase;
+	  const shouldShowSkuTableEmptyState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
 	  const shouldShowInitialAnalysisShell = isLoadingConnectedSources || isLoading || (isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload);
 	  const entitlement = reportData?.reportEntitlement;
 	  const entitlementText = reportEntitlementMessage(entitlement, locale);
@@ -16441,7 +16443,18 @@ function ReportsPage({
       ) : null}
 
       {isLoadingConnectedSources ? (
-        <div className="min-h-[640px]" aria-busy="true" />
+        <DecisionAnalysisEnginePanel
+          report={analysisDecisionReportPayload?.decision_report ?? null}
+          message={analysisDecisionReportPayload?.message}
+          locale={locale}
+          headerAction={reportHeaderAction}
+          optimizationStarted={hasStartedProfitOptimization}
+          onStartProfitOptimization={startProfitOptimization}
+          isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+          showSkuTableEmptyState={false}
+          showInitialShell
+          isLoadingData
+        />
       ) : shouldShowEmptyAnalysisState ? (
         <>
           <DecisionAnalysisEnginePanel
@@ -16454,6 +16467,7 @@ function ReportsPage({
             isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
             showSkuTableEmptyState
             showInitialShell={shouldShowInitialAnalysisShell}
+            isLoadingData={false}
           />
         </>
       ) : isLoading ? (
@@ -16467,6 +16481,7 @@ function ReportsPage({
           isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
           showSkuTableEmptyState={shouldShowSkuTableEmptyState}
           showInitialShell
+          isLoadingData={!shouldShowSkuTableEmptyState}
         />
       ) : (
 	        <>
@@ -16480,6 +16495,7 @@ function ReportsPage({
               isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
               showSkuTableEmptyState={shouldShowSkuTableEmptyState}
               showInitialShell={shouldShowInitialAnalysisShell}
+              isLoadingData={!shouldShowSkuTableEmptyState && shouldShowInitialAnalysisShell}
 	          />
 		          {!isAnalysisCacheMiss ? (
 		            <>
@@ -16698,27 +16714,17 @@ export function Dashboard({
   ecommerceDashboard?: EcommerceDashboardPayload;
 }) {
   const [locale, setLocale, isLocaleReady] = useLocale(defaultLocale);
-  const { isLoaded: isUserLoaded, user } = useUser();
-  const initialBrowserConnectedSourcesCache = readConnectedSourcesBrowserCache({ userId: user?.id });
-  const hasInitialConnectedSourcesCache = connectedSourcesCache !== null || initialBrowserConnectedSourcesCache !== null;
+  const { isLoaded: isUserLoaded } = useUser();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
-  const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? initialBrowserConnectedSourcesCache ?? []);
+  const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>([]);
   const [deletedSources, setDeletedSources] = useState<ConnectedSourceRow[]>([]);
-  const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(() => !hasInitialConnectedSourcesCache);
+  const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(true);
   const copy = dashboardCopy[getCopyLocale(locale)];
   const isReportsView = view === "reports";
 
   useEffect(() => {
     setIsSidebarCollapsed(true);
-    if (isUserLoaded && connectedSourcesCache === null) {
-      const cachedSources = readConnectedSourcesBrowserCache({ expectedWorkspaceId: connectedSourcesWorkspaceIdCache, userId: user?.id });
-      if (cachedSources) {
-        connectedSourcesCache = cachedSources;
-        setConnectedSources(cachedSources);
-        setIsLoadingConnectedSources(false);
-      }
-    }
-  }, [isUserLoaded, user?.id]);
+  }, [isUserLoaded]);
 
   const activeTarget =
     view === "import-data" || view === "import-data-connect"
@@ -16741,6 +16747,7 @@ export function Dashboard({
     setConnectedSources((current) => {
       const next = current.some((item) => item.id === source.id) ? current : [source, ...current];
       connectedSourcesCache = next;
+      writeConnectedSourcesBrowserCache(next, connectedSourcesWorkspaceIdCache);
       return next;
     });
   };
@@ -16749,6 +16756,7 @@ export function Dashboard({
     setConnectedSources((current) => {
       const next = current.map((item) => (item.id === source.id ? source : item));
       connectedSourcesCache = next;
+      writeConnectedSourcesBrowserCache(next, connectedSourcesWorkspaceIdCache);
       return next;
     });
   };
@@ -16764,6 +16772,7 @@ export function Dashboard({
     setConnectedSources((current) => {
       const next = current.filter((source) => source.id !== sourceId);
       connectedSourcesCache = next;
+      writeConnectedSourcesBrowserCache(next, connectedSourcesWorkspaceIdCache);
       return next;
     });
     if (sourceToRemove) {
@@ -16782,6 +16791,7 @@ export function Dashboard({
 
       if (!response.ok || !payload?.ok) {
         connectedSourcesCache = previousSources;
+        writeConnectedSourcesBrowserCache(previousSources, connectedSourcesWorkspaceIdCache);
         setConnectedSources(previousSources);
         setDeletedSources(previousDeletedSources);
         window.alert(payload?.message || failureMessage);
@@ -16791,6 +16801,7 @@ export function Dashboard({
       window.dispatchEvent(new Event("monarca-data-sources-updated"));
     }).catch(() => {
       connectedSourcesCache = previousSources;
+      writeConnectedSourcesBrowserCache(previousSources, connectedSourcesWorkspaceIdCache);
       setConnectedSources(previousSources);
       setDeletedSources(previousDeletedSources);
       window.alert(failureMessage);
@@ -16883,7 +16894,7 @@ export function Dashboard({
         }
         connectedSourcesWorkspaceIdCache = nextWorkspaceId;
         connectedSourcesCache = nextSources;
-        writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId, user?.id);
+        writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId);
         setConnectedSources(nextSources);
         setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
       }
@@ -16893,22 +16904,49 @@ export function Dashboard({
       window.clearTimeout(timeoutId);
       setIsLoadingConnectedSources(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
-    const hasWarmCache = connectedSourcesCache !== null;
-    void loadConnectedSources({ silent: hasWarmCache });
+    if (!isUserLoaded) return;
 
     const refreshConnectedSources = () => {
       void loadConnectedSources();
     };
 
+    let isActive = true;
+
+    const hydrateWorkspaceSources = async () => {
+      let currentWorkspaceId: string | null = null;
+
+      try {
+        const response = await fetch("/api/me", { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        currentWorkspaceId = typeof payload?.currentWorkspace?.id === "string" ? payload.currentWorkspace.id : null;
+      } catch (error) {
+        console.warn("[dashboard] Failed to resolve current workspace", error);
+      }
+
+      if (!isActive) return;
+
+      const cachedSources = readConnectedSourcesMemoryCache(currentWorkspaceId) ?? readConnectedSourcesBrowserCache(currentWorkspaceId);
+      if (cachedSources) {
+        connectedSourcesWorkspaceIdCache = currentWorkspaceId;
+        connectedSourcesCache = cachedSources;
+        setConnectedSources(cachedSources);
+        setIsLoadingConnectedSources(false);
+      }
+
+      void loadConnectedSources({ silent: Boolean(cachedSources) });
+    };
+
+    void hydrateWorkspaceSources();
     window.addEventListener("monarca-data-sources-updated", refreshConnectedSources);
 
     return () => {
+      isActive = false;
       window.removeEventListener("monarca-data-sources-updated", refreshConnectedSources);
     };
-  }, [loadConnectedSources]);
+  }, [isUserLoaded, loadConnectedSources]);
 
   if (!isLocaleReady) {
     return <div className="h-screen bg-background" />;
@@ -16974,7 +17012,11 @@ export function Dashboard({
               </div>
             ) : view === "launch-optimizer" ? (
               <div id="launch-optimizer" className="min-w-0 xl:col-start-1">
-                <NewProductLaunchOptimizer locale={getCopyLocale(locale)} />
+                <NewProductLaunchOptimizer
+                  locale={getCopyLocale(locale)}
+                  hasConnectedData={connectedSources.length > 0}
+                  isLoadingConnectedData={isLoadingConnectedSources}
+                />
               </div>
             ) : view === "report" ? (
               <div className="min-w-0 xl:col-start-1">

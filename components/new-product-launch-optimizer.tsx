@@ -5,7 +5,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   generateLaunchPlan,
   type LaunchPlan,
@@ -76,7 +76,15 @@ const TODAY_NEW_PRODUCTS: Array<LaunchProductInput & { createdDate: string }> = 
 type InputMode = "manual" | "import";
 type LaunchWorkspaceView = "recommendation" | "intelligence";
 
-export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "zh" }) {
+export function NewProductLaunchOptimizer({
+  locale = "en",
+  hasConnectedData = true,
+  isLoadingConnectedData = false
+}: {
+  locale?: "en" | "zh";
+  hasConnectedData?: boolean;
+  isLoadingConnectedData?: boolean;
+}) {
   const isZh = locale === "zh";
   const [mode, setMode] = useState<InputMode>("manual");
   const [product, setProduct] = useState<LaunchProductInput>(DEFAULT_PRODUCT);
@@ -85,6 +93,13 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
   const [workspaceView, setWorkspaceView] = useState<LaunchWorkspaceView>("recommendation");
   const [hasGeneratedPlan, setHasGeneratedPlan] = useState(false);
   const [manualHasInput, setManualHasInput] = useState(false);
+
+  useEffect(() => {
+    if (!isLoadingConnectedData && !hasConnectedData && mode === "import") {
+      setMode("manual");
+      setHasGeneratedPlan(false);
+    }
+  }, [hasConnectedData, isLoadingConnectedData, mode]);
 
   const selectedImportedProduct = useMemo(
     () => TODAY_NEW_PRODUCTS.find((item) => item.sku === selectedImportedSku) ?? TODAY_NEW_PRODUCTS[0],
@@ -121,9 +136,11 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
               <ModeButton
                 active={mode === "import"}
                 onClick={() => {
+                  if (!hasConnectedData) return;
                   setMode("import");
                   setHasGeneratedPlan(false);
                 }}
+                disabled={!hasConnectedData || isLoadingConnectedData}
               >
                 {isZh ? "导入新品" : "Import New Products"}
               </ModeButton>
@@ -138,7 +155,7 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
                 isZh={isZh}
                 onHasInputChange={setManualHasInput}
               />
-            ) : (
+            ) : hasConnectedData ? (
               <ImportProducts
                 selectedSku={selectedImportedSku}
                 onSelect={(sku) => {
@@ -146,6 +163,10 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
                   setHasGeneratedPlan(false);
                 }}
               />
+            ) : (
+              <div className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-sm font-semibold leading-6 text-slate-500">
+                {isZh ? "连接数据源后可导入新品。" : "Connect a data source to import new products."}
+              </div>
             )}
           </div>
 
@@ -168,7 +189,7 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
           <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-6 pb-7 pt-12 lg:px-8">
             {!hasGeneratedPlan ? (
               <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center text-center">
-                <h2 className="max-w-[760px] text-4xl font-semibold leading-tight tracking-tight text-slate-950 lg:text-5xl">
+                <h2 className="max-w-[680px] text-3xl font-semibold leading-tight tracking-tight text-slate-950 lg:text-4xl">
                   {isZh ? "把每一次新品上市变成利润机会" : "Turn every new product launch into a profit opportunity"}
                 </h2>
               </div>
@@ -338,7 +359,7 @@ function ManualProductInput({
             onHasInputChange(hasProductPromptDetails(nextValue));
           }}
           spellCheck={false}
-          className="min-h-[360px] w-full resize-none rounded-[28px] border border-slate-200 bg-white px-6 py-6 text-[15px] font-medium leading-8 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+          className="min-h-[360px] w-full resize-none rounded-[28px] border border-slate-200 bg-white px-6 py-6 text-[13px] font-medium leading-7 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
           placeholder={isZh ? "输入新品信息..." : "Enter product details..."}
         />
       </label>
@@ -510,13 +531,14 @@ function WorkspaceTab({ active, onClick, children }: { active: boolean; onClick:
   );
 }
 
-function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function ModeButton({ active, onClick, disabled = false, children }: { active: boolean; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "flex-1 rounded-full px-3 py-2 text-sm font-semibold transition",
+        "flex-1 rounded-full px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
         active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"
       )}
     >

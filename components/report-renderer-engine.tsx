@@ -933,7 +933,8 @@ export function DecisionAnalysisEnginePanel({
   onStartProfitOptimization,
   isLoadingOptimization = false,
   showSkuTableEmptyState = false,
-  showInitialShell = false
+  showInitialShell = false,
+  isLoadingData = false
 }: {
   report: DecisionIntelligenceReportV1 | null;
   message?: string;
@@ -944,6 +945,7 @@ export function DecisionAnalysisEnginePanel({
   isLoadingOptimization?: boolean;
   showSkuTableEmptyState?: boolean;
   showInitialShell?: boolean;
+  isLoadingData?: boolean;
 }) {
   const isZh = locale === "zh";
 
@@ -955,6 +957,7 @@ export function DecisionAnalysisEnginePanel({
           headerAction={headerAction}
           showSkuTableEmptyState={showSkuTableEmptyState}
           isLoadingOptimization={isLoadingOptimization}
+          isLoadingData={isLoadingData}
           onStartProfitOptimization={showSkuTableEmptyState ? undefined : onStartProfitOptimization}
         />
       );
@@ -993,12 +996,14 @@ function InitialProfitOptimizationShell({
   headerAction,
   showSkuTableEmptyState,
   isLoadingOptimization,
+  isLoadingData,
   onStartProfitOptimization
 }: {
   locale: RendererLocale;
   headerAction?: ReactNode;
   showSkuTableEmptyState: boolean;
   isLoadingOptimization: boolean;
+  isLoadingData: boolean;
   onStartProfitOptimization?: () => void | Promise<void>;
 }) {
   const isZh = locale === "zh";
@@ -1036,7 +1041,7 @@ function InitialProfitOptimizationShell({
         </div>
         <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
           <div className="min-w-0 space-y-3 p-4 xl:order-1 xl:p-5">
-            <div className="grid min-h-[360px] place-items-center rounded-lg bg-transparent p-0">
+            <div className="grid h-full min-h-[520px] place-items-center rounded-lg bg-transparent p-0">
               <div className="text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
@@ -1068,7 +1073,7 @@ function InitialProfitOptimizationShell({
               </span>
             </div>
             <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
-              <EmptySkuProfitPortfolioTable locale={locale} />
+              <EmptySkuProfitPortfolioTable locale={locale} isLoadingData={isLoadingData} />
             </div>
           </div>
         </div>
@@ -1397,7 +1402,7 @@ function SkuPortfolioOptimizationPanel({
                           key={`${row.skuId}-${row.action}-${row.sourceAction}`}
                           className={cn(
                             "cursor-pointer transition hover:bg-emerald-50/35",
-                            isSelected && "bg-emerald-50/70 ring-1 ring-inset ring-emerald-200"
+                            isSelected && "bg-emerald-50/70"
                           )}
                           onClick={() => setSelectedDecisionRow(row)}
                         >
@@ -1521,7 +1526,7 @@ function SkuPortfolioOptimizationPanel({
   );
 }
 
-function EmptySkuProfitPortfolioTable({ locale }: { locale: RendererLocale }) {
+function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { locale: RendererLocale; isLoadingData?: boolean }) {
   const isZh = locale === "zh";
 
   return (
@@ -1533,6 +1538,11 @@ function EmptySkuProfitPortfolioTable({ locale }: { locale: RendererLocale }) {
         <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-950 sm:text-5xl">
           {isZh ? "最大化 SKU 组合利润" : "Maximize Your SKU Profit Portfolio"}
         </h2>
+        {isLoadingData ? (
+          <p className="mt-5 text-sm font-semibold text-slate-500">
+            {isZh ? "正在加载经营数据，追踪实时利润" : "Loading operating data and tracking real-time profit"}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -1635,7 +1645,7 @@ function OptimizationDecisionRail({
   const isZh = locale === "zh";
 
   return (
-    <aside className="sticky top-0 max-h-[calc(100vh-6rem)] overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
+    <aside className="sticky top-0 max-h-[calc(100vh-6rem)] overflow-hidden rounded-lg bg-emerald-50/70 p-3">
       <div className="rounded-lg bg-emerald-950 p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-base font-bold text-white">{isZh ? "利润待优化队列" : "Profit Optimization Queue"}</p>
@@ -1667,7 +1677,7 @@ function OptimizationDecisionRail({
                 }}
                 className={cn(
                   "w-full rounded-lg p-3 text-left transition hover:bg-emerald-50/50",
-                  isSelected && "bg-emerald-50 ring-1 ring-inset ring-emerald-200"
+                  isSelected && "bg-emerald-50"
                 )}
               >
                 <div className="flex items-start justify-between gap-2">

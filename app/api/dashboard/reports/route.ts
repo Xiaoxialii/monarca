@@ -451,7 +451,14 @@ async function latestWorkspaceSnapshotMeta(workspaceId: string, dataSourceIds: s
   return prisma.schemaSnapshot.findFirst({
     where: {
       workspaceId,
-      ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
+      ...(dataSourceIds.length
+        ? {
+            OR: [
+              { dataSourceId: { in: dataSourceIds } },
+              { dataSourceId: null }
+            ]
+          }
+        : {})
     },
     orderBy: { createdAt: "desc" },
     select: { id: true, version: true }
@@ -782,7 +789,10 @@ export async function GET(request: Request) {
     const latestSnapshot = await prisma.schemaSnapshot.findFirst({
       where: {
         workspaceId: session.workspace.id,
-        dataSourceId: { in: activeSourceIds }
+        OR: [
+          { dataSourceId: { in: activeSourceIds } },
+          { dataSourceId: null }
+        ]
       },
       orderBy: {
         createdAt: "desc"

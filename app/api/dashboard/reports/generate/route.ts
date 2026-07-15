@@ -77,7 +77,14 @@ async function latestWorkspaceSnapshotMeta(workspaceId: string, dataSourceIds: s
   return prisma.schemaSnapshot.findFirst({
     where: {
       workspaceId,
-      ...(dataSourceIds.length ? { dataSourceId: { in: dataSourceIds } } : {})
+      ...(dataSourceIds.length
+        ? {
+            OR: [
+              { dataSourceId: { in: dataSourceIds } },
+              { dataSourceId: null }
+            ]
+          }
+        : {})
     },
     orderBy: { createdAt: "desc" },
     select: { id: true, version: true }
@@ -508,11 +515,15 @@ async function runReportGenerationJob(input: {
     const snapshots = await prisma.schemaSnapshot.findMany({
       where: {
         workspaceId: input.workspaceId,
-        dataSourceId: { in: dataSources.map((source) => source.id) }
+        OR: [
+          { dataSourceId: { in: dataSources.map((source) => source.id) } },
+          { dataSourceId: null }
+        ]
       },
       orderBy: { createdAt: "desc" }
     });
     const snapshotBySource = new Map<string, typeof snapshots[number]>();
+    const workspaceSnapshot = snapshots.find((snapshot) => !snapshot.dataSourceId) ?? null;
 
     for (const snapshot of snapshots) {
       if (snapshot.dataSourceId && !snapshotBySource.has(snapshot.dataSourceId)) {
@@ -520,8 +531,8 @@ async function runReportGenerationJob(input: {
       }
     }
 
-    const contextCandidates = await Promise.all(dataSources.map(async (dataSource) => {
-      const snapshot = snapshotBySource.get(dataSource.id);
+    const contextCandidates = await Promise.all(dataSources.map(async (dataSource, index) => {
+      const snapshot = snapshotBySource.get(dataSource.id) ?? (index === 0 ? workspaceSnapshot : null);
 
       if (!snapshot) return null;
 

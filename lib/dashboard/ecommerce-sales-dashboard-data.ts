@@ -3,6 +3,8 @@ import { computeCanonicalEcommerceMetrics, type CanonicalEcommerceMetricOutput }
 import { enrichOrderItemsWithCanonicalSku, normalizeProductSkuRows } from "@/lib/sku/sku-intelligence-engine";
 import { buildDecisionIntelligenceReportV1, type DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 
+export type EcommerceDashboardDecisionMode = "full" | "sku";
+
 export type EcommerceSalesDashboardData = {
   metrics: CanonicalEcommerceMetricOutput["metrics"] & {
     total_sku_count: number;
@@ -62,7 +64,10 @@ export type TimeSeriesPoint = {
 
 type CanonicalRow = Record<string, unknown>;
 
-export function buildEcommerceSalesDashboardData(dataset: CanonicalDataset): EcommerceSalesDashboardData {
+export function buildEcommerceSalesDashboardData(
+  dataset: CanonicalDataset,
+  options: { decisionMode?: EcommerceDashboardDecisionMode } = {}
+): EcommerceSalesDashboardData {
   const metricDataset = adaptCanonicalDatasetForMetrics(dataset);
   const metricResult = computeCanonicalEcommerceMetrics(metricDataset);
   const orders = metricDataset.tables.ecommerce_orders;
@@ -142,7 +147,8 @@ export function buildEcommerceSalesDashboardData(dataset: CanonicalDataset): Eco
     },
     decision_report: buildDecisionIntelligenceReportV1({
       ...metricResult,
-      metrics
+      metrics,
+      decisionMode: options.decisionMode ?? "full"
     }),
     metadata: {
       schema_version: metricResult.metadata.schema_version,

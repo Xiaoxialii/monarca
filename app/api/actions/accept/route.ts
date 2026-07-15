@@ -15,6 +15,7 @@ export async function POST(request: Request) {
   const record = await acceptActionTrackingRecord({
     workspace_id: workspaceId,
     sku: body.sku,
+    lifecycle_stage: typeof body.lifecycle_stage === "string" ? body.lifecycle_stage : undefined,
     action_type: body.action_type,
     action_payload: asRecord(body.action_payload),
     accepted_by: userId,

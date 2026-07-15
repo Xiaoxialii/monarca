@@ -29,6 +29,7 @@ export type ActionTrackingRecord = {
   action_id: string;
   workspace_id: string;
   sku: string;
+  lifecycle_stage?: string;
   action_type: string;
   action_payload: Record<string, unknown>;
   accepted_by: string | null;

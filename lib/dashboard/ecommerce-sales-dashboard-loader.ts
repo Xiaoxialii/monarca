@@ -13,6 +13,7 @@ import {
   adaptCanonicalDatasetForMetrics,
   buildEcommerceSalesDashboardData,
   emptyEcommerceCanonicalDataset,
+  type EcommerceDashboardDecisionMode,
   type EcommerceSalesDashboardData
 } from "@/lib/dashboard/ecommerce-sales-dashboard-data";
 
@@ -42,6 +43,7 @@ const TABLE_NAMES = [
 export async function loadEcommerceSalesDashboardData(input: {
   workspaceId: string;
   dataSourceId?: string | null;
+  decisionMode?: EcommerceDashboardDecisionMode;
 }): Promise<LoadDashboardResult> {
   let snapshots: Awaited<ReturnType<typeof findLatestEcommerceCanonicalSnapshots>>;
 
@@ -54,7 +56,8 @@ export async function loadEcommerceSalesDashboardData(input: {
       return buildLocalArtifactDashboardResult(
         localDataset,
         input.dataSourceId ?? null,
-        error instanceof Error ? `Loaded local canonical artifacts after database snapshot lookup failed: ${error.message}` : undefined
+        error instanceof Error ? `Loaded local canonical artifacts after database snapshot lookup failed: ${error.message}` : undefined,
+        input.decisionMode
       );
     }
 
@@ -77,14 +80,15 @@ export async function loadEcommerceSalesDashboardData(input: {
       return buildLocalArtifactDashboardResult(
         localDataset,
         input.dataSourceId ?? null,
-        "Loaded local canonical artifacts because no ecommerce canonical snapshot was found."
+        "Loaded local canonical artifacts because no ecommerce canonical snapshot was found.",
+        input.decisionMode
       );
     }
 
     const spreadsheetDataset = await loadConnectedSpreadsheetCanonicalDataset(input);
 
     return {
-      data: buildEcommerceSalesDashboardData(spreadsheetDataset ?? emptyEcommerceCanonicalDataset()),
+      data: buildEcommerceSalesDashboardData(spreadsheetDataset ?? emptyEcommerceCanonicalDataset(), { decisionMode: input.decisionMode }),
       state: spreadsheetDataset ? "ready" : "empty",
       message: spreadsheetDataset ? undefined : "No ecommerce canonical snapshot is available yet."
     };
@@ -103,12 +107,13 @@ export async function loadEcommerceSalesDashboardData(input: {
         return buildLocalArtifactDashboardResult(
           localDataset,
           snapshot.dataSourceId,
-          error instanceof Error ? `Loaded local canonical artifacts after canonical artifact read failed: ${error.message}` : undefined
+          error instanceof Error ? `Loaded local canonical artifacts after canonical artifact read failed: ${error.message}` : undefined,
+          input.decisionMode
         );
       }
 
       return {
-        data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(schemaJson))),
+        data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(schemaJson)), { decisionMode: input.decisionMode }),
         state: "unavailable",
         message: error instanceof Error ? error.message : "Canonical ecommerce artifacts are unavailable.",
         lineage: lineage(snapshot.id, snapshot.dataSourceId, schemaJson)
@@ -126,12 +131,13 @@ export async function loadEcommerceSalesDashboardData(input: {
       return buildLocalArtifactDashboardResult(
         localDataset,
         snapshots[0].dataSourceId,
-        "Loaded local canonical artifacts because ecommerce canonical tables were empty."
+        "Loaded local canonical artifacts because ecommerce canonical tables were empty.",
+        input.decisionMode
       );
     }
   }
 
-  const data = buildEcommerceSalesDashboardData(adapted);
+  const data = buildEcommerceSalesDashboardData(adapted, { decisionMode: input.decisionMode });
 
   return {
     data,
@@ -141,20 +147,24 @@ export async function loadEcommerceSalesDashboardData(input: {
   };
 }
 
-export function loadLatestLocalEcommerceSalesDashboardData(workspaceId?: string | null): LoadDashboardResult | null {
+export function loadLatestLocalEcommerceSalesDashboardData(
+  workspaceId?: string | null,
+  decisionMode?: EcommerceDashboardDecisionMode
+): LoadDashboardResult | null {
   const localDataset = loadLatestLocalCanonicalArtifactDataset(workspaceId ?? null);
   if (!localDataset) return null;
 
-  return buildLocalArtifactDashboardResult(localDataset, null, "Loaded local canonical artifacts.");
+  return buildLocalArtifactDashboardResult(localDataset, null, "Loaded local canonical artifacts.", decisionMode);
 }
 
 function buildLocalArtifactDashboardResult(
   dataset: CanonicalDataset,
   dataSourceId: string | null,
-  message?: string
+  message?: string,
+  decisionMode?: EcommerceDashboardDecisionMode
 ): LoadDashboardResult {
   return {
-    data: buildEcommerceSalesDashboardData(adaptCanonicalDatasetForMetrics(dataset)),
+    data: buildEcommerceSalesDashboardData(adaptCanonicalDatasetForMetrics(dataset), { decisionMode }),
     state: "ready",
     message,
     lineage: {

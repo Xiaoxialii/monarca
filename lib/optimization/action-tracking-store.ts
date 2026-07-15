@@ -14,6 +14,7 @@ const STORE_PATH = join(process.cwd(), ".monarca-artifacts", "action-feedback", 
 type AcceptActionInput = {
   workspace_id: string;
   sku: string;
+  lifecycle_stage?: string;
   action_type: string;
   action_payload?: Record<string, unknown>;
   accepted_by?: string | null;
@@ -65,6 +66,7 @@ export async function acceptActionTrackingRecord(input: AcceptActionInput) {
     action_id: randomUUID(),
     workspace_id: input.workspace_id,
     sku: input.sku,
+    lifecycle_stage: input.lifecycle_stage,
     action_type: input.action_type,
     action_payload: input.action_payload ?? {},
     accepted_by: input.accepted_by ?? null,

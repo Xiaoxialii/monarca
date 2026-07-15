@@ -1,6 +1,7 @@
 import { roundRatio } from "@/lib/optimization/objective";
 import { violatesInventoryConstraint } from "@/lib/optimization/inventory-constraint-engine";
 import type { BusinessConstraintsInput, PortfolioOptimizationInput, ProfitSimulationResult } from "@/lib/optimization/profit-simulation-engine";
+import { isActionAllowedForLifecycle } from "@/lib/lifecycle/lifecycle-optimization-router";
 
 export type ConstraintEvaluation = {
   valid: boolean;
@@ -17,6 +18,7 @@ export function evaluateActionConstraints(
   const priceChange = Math.abs((result.simulated_price - result.current_price) / Math.max(1, result.current_price));
 
   if (!isStop && result.predicted_profit < constraints.minimum_profit) violations.push("minimum_profit");
+  if (!isStop && isIncrementalAdsAction(result.action) && result.profit_delta <= 0) violations.push("non_positive_incremental_profit");
   if (!isStop && result.predicted_margin < constraints.target_margin) violations.push("target_margin");
   if (!isStop && result.confidence < (constraints.minimum_confidence ?? 0.55)) violations.push("minimum_confidence");
   if (priceChange > constraints.max_price_change) violations.push("max_price_change");
@@ -24,12 +26,21 @@ export function evaluateActionConstraints(
   if (violatesInventoryConstraint(result, constraints)) violations.push("inventory_capacity");
   if (typeof constraints.available_cash === "number" && result.required_cash > constraints.available_cash) violations.push("available_cash");
   if (!isStop && result.current_profit < 0 && result.action.includes("SCALE")) violations.push("negative_margin_scaling");
+  if (!isStop && result.lifecycle && !isActionAllowedForLifecycle(result.action, result.lifecycle)) violations.push("lifecycle_action_not_allowed");
 
   return {
     valid: violations.length === 0,
     violations,
     risk_score: roundRatio(Math.min(0.95, result.risk + violations.length * 0.12))
   };
+}
+
+function isIncrementalAdsAction(action: ProfitSimulationResult["action"]) {
+  return action === "TEST_AD_SPEND" ||
+    action === "SCALE_ADS" ||
+    action === "SCALE_ADS_PRICE_UP_5" ||
+    action === "RESTOCK_AND_SCALE" ||
+    action === "SHIFT_CHANNEL";
 }
 
 export function groupValidPortfolioSimulations(input: PortfolioOptimizationInput, simulations: ProfitSimulationResult[]) {

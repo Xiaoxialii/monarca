@@ -9,8 +9,11 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const decisionMode = url.searchParams.get("mode") === "sku" ? "sku" : "full";
+
   if (process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true") {
-    const localFallback = loadLatestLocalEcommerceSalesDashboardData();
+    const localFallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
 
     if (localFallback) {
       return dashboardResponse(localFallback);
@@ -22,7 +25,7 @@ export async function GET(request: Request) {
   try {
     session = await syncCurrentClerkUser();
   } catch (error) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData();
+    const fallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
 
     if (fallback) {
       return dashboardResponse(fallback, error);
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
   }
 
   if (!session) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData();
+    const fallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
 
     if (fallback) {
       return dashboardResponse(fallback);
@@ -44,17 +47,17 @@ export async function GET(request: Request) {
     );
   }
 
-  const url = new URL(request.url);
   let result: LoadDashboardResult;
 
   try {
     result = await loadEcommerceSalesDashboardData({
       workspaceId: session.workspace.id,
-      dataSourceId: url.searchParams.get("dataSourceId")
+      dataSourceId: url.searchParams.get("dataSourceId"),
+      decisionMode
     });
   } catch (error) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData(session.workspace.id)
-      ?? loadLatestLocalEcommerceSalesDashboardData();
+    const fallback = loadLatestLocalEcommerceSalesDashboardData(session.workspace.id, decisionMode)
+      ?? loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
 
     if (fallback) {
       return dashboardResponse(fallback, error);

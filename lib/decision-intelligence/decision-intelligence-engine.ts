@@ -19,6 +19,7 @@ type MetricOutput = CanonicalEcommerceMetricOutput & {
   metrics: CanonicalEcommerceMetricOutput["metrics"] & {
     total_sku_count?: number;
   };
+  decisionMode?: "full" | "sku";
 };
 
 type ProfitControlDriver =
@@ -260,6 +261,7 @@ export type DecisionIntelligenceReportV1 = {
 export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): DecisionIntelligenceReportV1 {
   const metrics = metricOutput.metrics;
   const metadata = metricOutput.metadata;
+  const isSkuOnlyMode = metricOutput.decisionMode === "sku";
   const totalSkuRevenue = metrics.core.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
   const topRevenueSkus = metrics.core.sku_revenue.map((row) => ({
     sku: row.sku,
@@ -358,38 +360,47 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     })),
     total_ad_budget: metrics.ads.ad_spend
   });
-  const portfolioInputSkus = buildPortfolioOptimizationSkuInputs({
+  const portfolioInputSkus = isSkuOnlyMode ? [] : buildPortfolioOptimizationSkuInputs({
     profitRows: topProfitSkus,
     revenueRows: topRevenueSkus,
     metrics,
     confidence: metadata.confidence_score
   });
-  const portfolioAdsBudget = Math.max(
+  const portfolioAdsBudget = isSkuOnlyMode ? metrics.ads.ad_spend : Math.max(
     metrics.ads.ad_spend,
     portfolioInputSkus.reduce((sum, row) => sum + row.ads_spend, 0)
   );
-  const skuPortfolioOptimization = optimizeSkuPortfolio({
-    skus: portfolioInputSkus,
-    ads: metrics.attribution.campaign_performance.slice(0, 20).map((row) => ({
-      campaign_id: row.campaign_id,
-      spend: row.ad_spend,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-      roas: row.roas
-    })),
-    constraints: {
-      total_ads_budget: Math.max(1, portfolioAdsBudget),
-      inventory_capacity: Math.max(1, portfolioInputSkus.reduce((sum, row) => sum + row.inventory, 0)),
-      available_cash: Math.max(1, metrics.business.net_profit + metrics.ads.ad_spend),
-      target_margin: Math.max(0.1, Math.min(0.35, metrics.business.margin || 0.18)),
-      max_price_change: 0.2,
-      minimum_profit: 0,
-      minimum_confidence: 0.45,
-      simulation_horizon_days: 30
-    }
-  });
-  const skuPortfolioReport = generatePortfolioOptimizationReport(skuPortfolioOptimization);
+  const skuPortfolioOptimization = isSkuOnlyMode
+    ? buildDeferredPortfolioOptimization({
+        inputSkuCount: metrics.total_sku_count ?? topRevenueSkus.length,
+        currentProfit: metrics.business.net_profit,
+        adsBudget: portfolioAdsBudget,
+        confidence: metadata.confidence_score
+      })
+    : optimizeSkuPortfolio({
+        skus: portfolioInputSkus,
+        ads: metrics.attribution.campaign_performance.slice(0, 20).map((row) => ({
+          campaign_id: row.campaign_id,
+          spend: row.ad_spend,
+          impressions: 0,
+          clicks: 0,
+          conversions: 0,
+          roas: row.roas
+        })),
+        constraints: {
+          total_ads_budget: Math.max(1, portfolioAdsBudget),
+          inventory_capacity: Math.max(1, portfolioInputSkus.reduce((sum, row) => sum + row.inventory, 0)),
+          available_cash: Math.max(1, metrics.business.net_profit + metrics.ads.ad_spend),
+          target_margin: Math.max(0.1, Math.min(0.35, metrics.business.margin || 0.18)),
+          max_price_change: 0.2,
+          minimum_profit: 0,
+          minimum_confidence: 0.45,
+          simulation_horizon_days: 30
+        }
+      });
+  const skuPortfolioReport = isSkuOnlyMode
+    ? buildDeferredPortfolioOptimizationReport()
+    : generatePortfolioOptimizationReport(skuPortfolioOptimization);
 
   return {
     executive_summary: {
@@ -517,6 +528,91 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
       analysis_only: true
     }
   };
+}
+
+function buildDeferredPortfolioOptimization(input: {
+  inputSkuCount: number;
+  currentProfit: number;
+  adsBudget: number;
+  confidence: number;
+}): PortfolioOptimizationResult {
+  const portfolioSummary: DecisionSummary = {
+    totalProfitImpact: 0,
+    scaleCount: 0,
+    reduceCount: 0,
+    optimizeCount: 0,
+    stopCount: 0,
+    fixCount: 0,
+    monitorCount: 0,
+    inventoryRisk: 0,
+    budgetOpportunity: 0
+  };
+
+  return {
+    version: "sku_portfolio_optimization_v2",
+    algorithm: "prediction_driven_global_portfolio_solver",
+    optimization_summary: {
+      input_sku_count: input.inputSkuCount,
+      current_portfolio_profit: input.currentProfit,
+      optimized_portfolio_profit: input.currentProfit,
+      total_expected_profit_gain: 0,
+      selected_sku_count: 0,
+      ads_budget_used: input.adsBudget,
+      inventory_required: 0,
+      inventory_utilization: 0,
+      cash_required: 0,
+      simulation_horizon_days: 30,
+      constraints_applied: ["optimization_deferred_until_user_start"]
+    },
+    prediction_summary: {
+      simulation_source: "prediction_model",
+      models_used: ["sku_operating_data_only"],
+      prediction_type: "rule_based",
+      prediction_confidence: input.confidence
+    },
+    recommended_portfolio: [],
+    portfolioSummary,
+    lifecycleSummary: {
+      totalSkus: input.inputSkuCount,
+      launch: 0,
+      growth: 0,
+      mature: 0,
+      declining: 0
+    },
+    lifecycleClassifications: [],
+    allocationRecommendation: {
+      current: [],
+      recommended: [],
+      narrative: "Optimization plan is deferred until the operator starts profit optimization."
+    },
+    skuDecisions: [],
+    riskAlerts: [],
+    executionPlan: [],
+    budget_plan: [],
+    pricing_plan: [],
+    inventory_plan: [],
+    total_expected_profit_gain: 0,
+    optimization_confidence: input.confidence,
+    greedy_single_sku_baseline: {
+      sku: null,
+      profit_delta: 0
+    },
+    simulations: []
+  };
+}
+
+function buildDeferredPortfolioOptimizationReport(): PortfolioOptimizationBusinessReport {
+  return {
+    executive_summary: {
+      headline: "SKU operating data loaded. Profit optimization has not started.",
+      total_expected_profit_gain: 0,
+      selected_sku_count: 0,
+      optimization_confidence: 0,
+      recommended_focus: []
+    },
+    decision_sections: [],
+    next_steps: []
+  } as unknown as PortfolioOptimizationBusinessReport;
 }
 
 function buildProfitControlInsights(input: {

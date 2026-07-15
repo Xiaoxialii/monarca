@@ -5,12 +5,31 @@ import { generateOptimizationActions } from "@/lib/optimization/action-generator
 import { detectOptimizationOpportunities } from "@/lib/optimization/opportunity-engine";
 import { simulatePricingOptimization, type PricingPlan } from "@/lib/optimization/pricing-simulator";
 import { solveGlobalPortfolio } from "@/lib/optimization/portfolio-solver";
+import { classifySkuLifecycles, type SkuLifecycleClassification } from "@/lib/lifecycle/sku-lifecycle-classifier";
+import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
+import { buildAIEvidence, type AIEvidenceCard } from "@/lib/decision-intelligence/evidence-engine";
+import { buildScenarioComparison, type AIDecisionSelection, type AIScenario } from "@/lib/optimization/scenario-engine";
 import {
   simulateGeneratedActions,
   type PortfolioOptimizationInput,
   type ProfitSimulationResult
 } from "@/lib/optimization/profit-simulation-engine";
 import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
+
+export type OptimizationActionTiming = {
+  action_start_at: string;
+  simulation_window_days: number;
+  simulation_window_start: string;
+  simulation_window_end: string;
+  baseline_period_start: string;
+  baseline_period_end: string;
+  tracking_window_days: number;
+  tracking_window_start: string;
+  tracking_window_end: string;
+  timing_source: "report_generated_at" | "latest_data_date_plus_one" | "accepted_at" | "fallback_today";
+  ad_budget_period?: "daily" | "weekly" | "monthly" | "simulation_window";
+  inventory_snapshot_at?: string;
+};
 
 export type PortfolioRecommendation = {
   sku: string;
@@ -25,6 +44,8 @@ export type PortfolioRecommendation = {
   opportunity_score: number;
   opportunity_type?: string;
   evidence_tags: string[];
+  lifecycle_stage?: SkuLifecycleStage;
+  lifecycle?: SkuLifecycleClassification;
   why: string;
   evidence: string[];
   decisionDrivers: DecisionDriver[];
@@ -45,6 +66,8 @@ export type PortfolioRecommendation = {
     days: number;
     label: string;
   };
+  simulation_estimate?: ProfitSimulationResult["simulation_estimate"];
+  timing: OptimizationActionTiming;
   prediction_type: "rule_based" | "statistical" | "ml_model";
   confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
   required_cash: number;
@@ -58,6 +81,11 @@ export type PortfolioRecommendation = {
     confidence: number;
     selected: boolean;
   }>;
+  ai_evidence: AIEvidenceCard[];
+  scenarios: AIScenario[];
+  selected_scenario: AIScenario;
+  decision_explanation: AIDecisionSelection;
+  sku_decision_object: SKUDecisionObject;
 };
 
 export type DecisionAction = "SCALE" | "REDUCE" | "OPTIMIZE" | "MONITOR";
@@ -113,6 +141,8 @@ export type SKUDecision = {
   sourceAction: string;
   inventoryRisk: boolean;
   budgetOpportunity: boolean;
+  lifecycle_stage?: SkuLifecycleStage;
+  lifecycle?: SkuLifecycleClassification;
   expectedProfitImpact: number;
   estimatedProfitImpact: number;
   confidence: number;
@@ -132,8 +162,45 @@ export type SKUDecision = {
     marginChange: number;
   };
   simulation_horizon: ProfitSimulationResult["simulation_horizon"];
+  simulation_estimate?: ProfitSimulationResult["simulation_estimate"];
+  timing: OptimizationActionTiming;
   confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
   constraints_passed: string[];
+  ai_evidence: AIEvidenceCard[];
+  scenarios: AIScenario[];
+  selected_scenario: AIScenario;
+  decision_explanation: AIDecisionSelection;
+  tracking_status: "RECOMMENDED" | "ACCEPTED" | "RUNNING" | "COMPLETED" | "LEARNED";
+  feedback: {
+    prediction_error: number | null;
+    actual_profit_lift: number | null;
+    learned: boolean;
+  };
+  sku_decision_object: SKUDecisionObject;
+};
+
+export type SKUDecisionObject = {
+  sku: string;
+  lifecycle_stage?: SkuLifecycleStage;
+  current_metrics: {
+    profit: number;
+    revenue: number;
+    margin: number;
+    roas: number | null;
+    stock: number;
+    ads_spend: number;
+  };
+  recommended_action: string;
+  evidence: AIEvidenceCard[];
+  scenarios: AIScenario[];
+  selected_scenario: AIScenario;
+  confidence: number;
+  tracking_status: "RECOMMENDED" | "ACCEPTED" | "RUNNING" | "COMPLETED" | "LEARNED";
+  feedback: {
+    prediction_error: number | null;
+    actual_profit_lift: number | null;
+    learned: boolean;
+  };
 };
 
 export type PortfolioRiskAlert = {
@@ -175,6 +242,8 @@ export type PortfolioOptimizationResult = {
   };
   recommended_portfolio: PortfolioRecommendation[];
   portfolioSummary: DecisionSummary;
+  lifecycleSummary: LifecycleSummary;
+  lifecycleClassifications: SkuLifecycleClassification[];
   allocationRecommendation: PortfolioAllocationRecommendation;
   skuDecisions: SKUDecision[];
   riskAlerts: PortfolioRiskAlert[];
@@ -191,20 +260,35 @@ export type PortfolioOptimizationResult = {
   simulations: ProfitSimulationResult[];
 };
 
+export type LifecycleSummary = {
+  totalSkus: number;
+  launch: number;
+  growth: number;
+  mature: number;
+  declining: number;
+};
+
 const MAX_OPTIMIZATION_SKU_CANDIDATES = 320;
 
 export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): PortfolioOptimizationResult {
   const optimizationInput = limitOptimizationInput(input);
+  const lifecycleClassifications = classifySkuLifecycles({
+    skus: optimizationInput.skus,
+    ads: optimizationInput.ads ?? []
+  });
+  const lifecycleBySku = new Map(lifecycleClassifications.map((row) => [row.sku, row]));
   const opportunities = detectOptimizationOpportunities(optimizationInput.skus);
   const generatedActions = generateOptimizationActions({
     skus: optimizationInput.skus,
-    opportunities
+    opportunities,
+    lifecycleBySku
   });
   const simulations = simulateGeneratedActions({
     skus: optimizationInput.skus,
     ads: optimizationInput.ads ?? [],
     actions: generatedActions,
-    simulationHorizonDays: optimizationInput.constraints.simulation_horizon_days ?? 30
+    simulationHorizonDays: optimizationInput.constraints.simulation_horizon_days ?? 30,
+    lifecycleBySku
   });
   const validBySku = groupValidPortfolioSimulations(optimizationInput, simulations);
   const selected = solveGlobalPortfolio(validBySku, optimizationInput);
@@ -260,6 +344,8 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
     },
     recommended_portfolio: portfolioRecommendations,
     portfolioSummary,
+    lifecycleSummary: buildLifecycleSummary(lifecycleClassifications, input.skus.length),
+    lifecycleClassifications,
     allocationRecommendation: buildAllocationRecommendation({
       rows: selectedDecisionRows,
       input,
@@ -314,6 +400,18 @@ function optimizationSkuScore(sku: PortfolioOptimizationInput["skus"][number]) {
 function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimulationResult[]): PortfolioRecommendation {
   const decision = classifyDecisionAction(row);
   const skuRole = classifySkuRole(row, decision);
+  const timing = buildActionTiming(row);
+  const skuScenarios = buildScenarioComparison({
+    selected: row,
+    candidates: simulations.filter((scenario) => scenario.sku === row.sku)
+  });
+  const aiEvidence = buildAIEvidence({
+    simulation: row,
+    portfolioMarginBenchmark: portfolioMarginBenchmark(simulations),
+    lifecycle: row.lifecycle
+  });
+  const skuDecisionObject = buildSkuDecisionObject(row, aiEvidence, skuScenarios);
+
   return {
     sku: row.sku,
     action: row.action,
@@ -327,6 +425,8 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     opportunity_score: row.opportunity_score,
     opportunity_type: row.opportunity_type,
     evidence_tags: row.evidence_tags,
+    lifecycle_stage: row.lifecycle_stage,
+    lifecycle: row.lifecycle,
     why: row.why,
     evidence: row.evidence,
     decisionDrivers: buildDecisionDrivers(row, decision),
@@ -344,6 +444,8 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
       inventory_impact: row.inventory_impact
     },
     simulation_horizon: row.simulation_horizon,
+    simulation_estimate: row.simulation_estimate,
+    timing,
     prediction_type: row.prediction_type,
     confidence_breakdown: row.confidence_breakdown,
     required_cash: row.required_cash,
@@ -360,7 +462,12 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
         revenue_delta: scenario.revenue_delta,
         confidence: scenario.confidence,
         selected: scenario.action === row.action
-      }))
+      })),
+    ai_evidence: aiEvidence,
+    scenarios: skuScenarios.scenarios,
+    selected_scenario: skuScenarios.selected_scenario,
+    decision_explanation: skuScenarios.decision_explanation,
+    sku_decision_object: skuDecisionObject
   };
 }
 
@@ -393,6 +500,16 @@ function buildDecisionSummary(input: {
   };
 }
 
+function buildLifecycleSummary(classifications: SkuLifecycleClassification[], fallbackTotal: number): LifecycleSummary {
+  return {
+    totalSkus: fallbackTotal,
+    launch: classifications.filter((row) => row.lifecycle_stage === "LAUNCH").length,
+    growth: classifications.filter((row) => row.lifecycle_stage === "GROWTH").length,
+    mature: classifications.filter((row) => row.lifecycle_stage === "MATURE").length,
+    declining: classifications.filter((row) => row.lifecycle_stage === "DECLINING").length
+  };
+}
+
 function isInventoryRiskRow(row: ProfitSimulationResult) {
   return row.required_inventory > row.current_inventory || row.risk >= 0.25;
 }
@@ -411,6 +528,16 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
   return ranked.map((row, index) => {
     const decision = classifyDecisionAction(row);
     const skuRole = classifySkuRole(row, decision);
+    const skuScenarios = buildScenarioComparison({
+      selected: row,
+      candidates: simulations.filter((scenario) => scenario.sku === row.sku)
+    });
+    const aiEvidence = buildAIEvidence({
+      simulation: row,
+      portfolioMarginBenchmark: portfolioMarginBenchmark(simulations),
+      lifecycle: row.lifecycle
+    });
+    const skuDecisionObject = buildSkuDecisionObject(row, aiEvidence, skuScenarios);
     const alternatives = simulations
       .filter((scenario) => scenario.sku === row.sku && scenario.action !== row.action)
       .sort((left, right) => right.opportunity_score - left.opportunity_score)
@@ -424,6 +551,8 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
       sourceAction: row.action,
       inventoryRisk: isInventoryRiskRow(row),
       budgetOpportunity: hasBudgetOpportunity(row),
+      lifecycle_stage: row.lifecycle_stage,
+      lifecycle: row.lifecycle,
       expectedProfitImpact: roundCurrency(row.profit_delta),
       estimatedProfitImpact: roundCurrency(row.profit_delta),
       confidence: row.confidence,
@@ -445,10 +574,105 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
         marginChange: row.margin_change
       },
       simulation_horizon: row.simulation_horizon,
+      simulation_estimate: row.simulation_estimate,
+      timing: buildActionTiming(row),
       confidence_breakdown: row.confidence_breakdown,
-      constraints_passed: buildConstraintsPassed(row)
+      constraints_passed: buildConstraintsPassed(row),
+      ai_evidence: aiEvidence,
+      scenarios: skuScenarios.scenarios,
+      selected_scenario: skuScenarios.selected_scenario,
+      decision_explanation: skuScenarios.decision_explanation,
+      tracking_status: "RECOMMENDED",
+      feedback: {
+        prediction_error: null,
+        actual_profit_lift: null,
+        learned: false
+      },
+      sku_decision_object: skuDecisionObject
     };
   });
+}
+
+function buildSkuDecisionObject(
+  row: ProfitSimulationResult,
+  evidence: AIEvidenceCard[],
+  scenarioComparison: ReturnType<typeof buildScenarioComparison>
+): SKUDecisionObject {
+  const roas = row.current_ads_spend > 0 ? roundRatio(row.before_state.revenue / Math.max(1, row.current_ads_spend)) : null;
+
+  return {
+    sku: row.sku,
+    lifecycle_stage: row.lifecycle_stage,
+    current_metrics: {
+      profit: row.current_profit,
+      revenue: row.before_state.revenue,
+      margin: row.before_state.margin,
+      roas,
+      stock: row.current_inventory,
+      ads_spend: row.current_ads_spend
+    },
+    recommended_action: row.action,
+    evidence,
+    scenarios: scenarioComparison.scenarios,
+    selected_scenario: scenarioComparison.selected_scenario,
+    confidence: row.confidence,
+    tracking_status: "RECOMMENDED",
+    feedback: {
+      prediction_error: null,
+      actual_profit_lift: null,
+      learned: false
+    }
+  };
+}
+
+function portfolioMarginBenchmark(simulations: ProfitSimulationResult[]) {
+  const margins = simulations
+    .map((row) => row.before_state.margin)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+  if (!margins.length) return 0.274;
+  return margins[Math.floor(margins.length / 2)] ?? 0.274;
+}
+
+function buildActionTiming(row: ProfitSimulationResult): OptimizationActionTiming {
+  const windowDays = row.simulation_horizon?.days ?? 30;
+  const actionStart = startOfUtcDay(new Date());
+  const simulationEnd = addUtcDays(actionStart, Math.max(0, windowDays - 1));
+  const baselineEnd = addUtcDays(actionStart, -1);
+  const baselineStart = addUtcDays(baselineEnd, -Math.max(0, windowDays - 1));
+
+  return {
+    action_start_at: actionStart.toISOString(),
+    simulation_window_days: windowDays,
+    simulation_window_start: toDateOnly(actionStart),
+    simulation_window_end: toDateOnly(simulationEnd),
+    baseline_period_start: toDateOnly(baselineStart),
+    baseline_period_end: toDateOnly(baselineEnd),
+    tracking_window_days: windowDays,
+    tracking_window_start: toDateOnly(actionStart),
+    tracking_window_end: toDateOnly(simulationEnd),
+    timing_source: "report_generated_at",
+    ad_budget_period: isAdBudgetAction(row.action) ? "simulation_window" : undefined,
+    inventory_snapshot_at: actionStart.toISOString()
+  };
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function toDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function isAdBudgetAction(action: string) {
+  return /AD|ADS|BUDGET|SCALE/i.test(action);
 }
 
 function buildConstraintsPassed(row: ProfitSimulationResult) {
@@ -595,6 +819,7 @@ function countDecisionActions(rows: ProfitSimulationResult[]) {
 
 function classifyDecisionAction(row: ProfitSimulationResult): DecisionAction {
   if (row.action === "STOP" || row.action === "REDUCE_ADS") return "REDUCE";
+  if (row.action === "TEST_AD_SPEND") return "OPTIMIZE";
   if (row.action === "SCALE_ADS" || row.action === "SCALE_ADS_PRICE_UP_5" || row.action === "SHIFT_CHANNEL" || row.action === "CREATE_BUNDLE") return "SCALE";
   if (row.action === "RESTOCK_AND_SCALE") return row.required_inventory > row.current_inventory ? "OPTIMIZE" : "SCALE";
   if (row.action === "PRICE_UP_5" || row.action === "PRICE_UP_10" || row.action === "PRICE_DOWN_10" || row.action === "PROMOTION_TEST" || row.action === "REDUCE_INVENTORY") return "OPTIMIZE";
@@ -845,6 +1070,7 @@ function buildRecommendedExecution(row: ProfitSimulationResult, decision: Decisi
     ];
   }
   if (decision === "OPTIMIZE") {
+    if (row.action === "TEST_AD_SPEND") return ["Run a small budget ad response test.", "Collect SKU-level paid response data before scaling."];
     if (row.action.includes("RESTOCK")) return ["Validate stock availability before scaling demand.", "Execute inventory allocation before increasing exposure."];
     if (row.action.includes("PRICE")) return ["Run the selected price adjustment as a controlled test.", "Track demand elasticity and margin response."];
     return ["Fix the limiting metric before scaling.", "Re-run simulation after the fix is applied."];
@@ -872,6 +1098,10 @@ function buildRecommendedActions(row: ProfitSimulationResult, decision: Decision
   }
 
   if (decision === "OPTIMIZE") {
+    if (row.action === "TEST_AD_SPEND") {
+      const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
+      return [`Run small budget ad response test${budgetDelta > 0 ? ` with ${formatCurrencyValue(budgetDelta)} / ${row.simulation_horizon.label}` : ""}`, "Collect SKU-level marginal ROAS before scaling"];
+    }
     if (row.action.includes("RESTOCK")) {
       return ["Increase inventory allocation before demand scaling", "Re-run scale simulation after stock is available"];
     }

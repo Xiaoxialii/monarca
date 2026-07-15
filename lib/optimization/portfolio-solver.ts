@@ -25,12 +25,50 @@ export function portfolioObjective(state: PortfolioSolverState) {
   const inventoryConstraintCost = state.rows.reduce((sum, row) => sum + Math.max(0, row.required_inventory - row.current_inventory) * Math.max(1, row.current_price * 0.04), 0);
   const uncertaintyCost = state.rows.reduce((sum, row) => sum + (1 - row.confidence) * Math.max(1, Math.abs(row.profit_delta)) * 0.18, 0);
   const confidencePenalty = (1 - state.confidence) * Math.max(0, state.delta) * 0.04;
+  const lifecycleValue = lifecyclePortfolioValue(state.rows);
+  const lifecycleConcentrationPenalty = lifecycleBudgetConcentrationPenalty(state.rows);
 
-  return roundCurrency(state.delta - channelOverlapCost - inventoryConstraintCost - riskPenalty - uncertaintyCost - confidencePenalty);
+  return roundCurrency(state.delta + lifecycleValue - lifecycleConcentrationPenalty - channelOverlapCost - inventoryConstraintCost - riskPenalty - uncertaintyCost - confidencePenalty);
 }
 
 export function simulationScore(row: ProfitSimulationResult) {
-  return row.opportunity_score + row.profit_delta * 0.25 + row.confidence * 120 - row.risk * 120;
+  return row.opportunity_score + row.profit_delta * 0.25 + row.confidence * 120 - row.risk * 120 + lifecycleRowScore(row);
+}
+
+function lifecyclePortfolioValue(rows: ProfitSimulationResult[]) {
+  return rows.reduce((sum, row) => sum + lifecycleRowScore(row), 0);
+}
+
+function lifecycleRowScore(row: ProfitSimulationResult) {
+  if (!row.lifecycle_stage) return 0;
+  const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
+  if (row.lifecycle_stage === "LAUNCH") {
+    return row.action === "TEST_AD_SPEND" ? Math.min(180, 60 + budgetDelta * 0.25) : 20;
+  }
+  if (row.lifecycle_stage === "GROWTH") {
+    return Math.max(0, row.profit_delta) * 0.04;
+  }
+  if (row.lifecycle_stage === "MATURE") {
+    return (row.action.includes("PRICE") || row.action === "SHIFT_CHANNEL" || row.action === "REDUCE_INVENTORY") ? 80 : 20;
+  }
+  if (row.lifecycle_stage === "DECLINING") {
+    return (row.action === "REDUCE_ADS" || row.action === "REDUCE_INVENTORY" || row.action === "STOP") ? 120 : -120;
+  }
+  return 0;
+}
+
+function lifecycleBudgetConcentrationPenalty(rows: ProfitSimulationResult[]) {
+  const addedBudget = rows.reduce((sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend), 0);
+  if (addedBudget <= 0) return 0;
+  const growthBudget = rows
+    .filter((row) => row.lifecycle_stage === "GROWTH")
+    .reduce((sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend), 0);
+  const launchBudget = rows
+    .filter((row) => row.lifecycle_stage === "LAUNCH")
+    .reduce((sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend), 0);
+  const growthShare = growthBudget / addedBudget;
+  const missingLaunchTestingPenalty = rows.some((row) => row.lifecycle_stage === "LAUNCH") && launchBudget <= 0 ? 75 : 0;
+  return roundCurrency(Math.max(0, growthShare - 0.82) * addedBudget * 0.18 + missingLaunchTestingPenalty);
 }
 
 function solveWithBeamSearch(

@@ -18,10 +18,12 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 
 const jiti = jitiFactory(process.cwd() + "/");
 const { optimizeSkuPortfolio } = jiti("./lib/optimization/portfolio-optimizer.ts");
-const { simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
+const { simulateGeneratedActions, simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
+const { generateOptimizationActions } = jiti("./lib/optimization/action-generator.ts");
 const { generatePortfolioOptimizationReport } = jiti("./lib/optimization/optimization-report-generator.ts");
 const { predictRevenue } = jiti("./lib/optimization/prediction/revenue-prediction-model.ts");
 const { recordOptimizationFeedback } = jiti("./lib/optimization/feedback-learning-engine.ts");
+const { classifySkuLifecycles } = jiti("./lib/lifecycle/sku-lifecycle-classifier.ts");
 
 function input() {
   return {
@@ -149,6 +151,20 @@ test("portfolio optimization result beats single SKU ranking baseline", () => {
   assert.ok(result.skuDecisions[0].recommendedActions.length >= 1);
   assert.equal(typeof result.skuDecisions[0].expectedProfitImpact, "number");
   assert.equal(result.skuDecisions[0].simulation_horizon.days, 30);
+  assert.equal(result.skuDecisions[0].timing.simulation_window_days, 30);
+  assert.equal(result.skuDecisions[0].timing.timing_source, "report_generated_at");
+  assert.equal(
+    daysBetween(result.skuDecisions[0].timing.action_start_at.slice(0, 10), result.skuDecisions[0].timing.simulation_window_end),
+    29
+  );
+  assert.equal(
+    daysBetween(result.skuDecisions[0].timing.baseline_period_start, result.skuDecisions[0].timing.action_start_at.slice(0, 10)),
+    30
+  );
+  assert.equal(
+    daysBetween(result.skuDecisions[0].timing.baseline_period_end, result.skuDecisions[0].timing.action_start_at.slice(0, 10)),
+    1
+  );
   assert.equal(typeof result.skuDecisions[0].confidence_breakdown.overall_confidence, "number");
   assert.ok(result.skuDecisions[0].constraints_passed.includes("cash"));
   assert.equal(typeof result.portfolioSummary.reduceCount, "number");
@@ -160,8 +176,82 @@ test("portfolio optimization result beats single SKU ranking baseline", () => {
   assert.equal(typeof result.skuDecisions[0].causalExplanation.businessMeaning, "string");
   assert.ok(result.recommended_portfolio[0].decisionDrivers.length >= 2);
   assert.equal(result.recommended_portfolio[0].simulation_horizon.days, 30);
+  assert.equal(result.recommended_portfolio[0].timing.simulation_window_days, 30);
   assert.equal(result.recommended_portfolio[0].prediction_type, "rule_based");
+  assert.ok(result.recommended_portfolio[0].ai_evidence.length >= 4);
+  assert.ok(result.recommended_portfolio[0].ai_evidence.some((row) => row.type === "profit_signal"));
+  assert.ok(result.recommended_portfolio[0].ai_evidence.some((row) => row.type === "inventory_signal"));
+  assert.ok(result.recommended_portfolio[0].scenarios.length >= 3);
+  assert.ok(result.recommended_portfolio[0].selected_scenario.selected);
+  assert.equal(result.recommended_portfolio[0].decision_explanation.selected_action, result.recommended_portfolio[0].selected_scenario.action);
+  assert.ok(result.recommended_portfolio[0].decision_explanation.alternatives_considered.length >= 2);
+  assert.equal(result.recommended_portfolio[0].sku_decision_object.sku, result.recommended_portfolio[0].sku);
+  assert.equal(result.recommended_portfolio[0].sku_decision_object.tracking_status, "RECOMMENDED");
+  assert.ok(result.skuDecisions[0].ai_evidence.length >= 4);
+  assert.ok(result.skuDecisions[0].scenarios.length >= 3);
+  assert.equal(result.skuDecisions[0].tracking_status, "RECOMMENDED");
+  assert.equal(result.skuDecisions[0].feedback.learned, false);
 });
+
+function daysBetween(startDateOnly, endDateOnly) {
+  const start = new Date(`${startDateOnly}T00:00:00.000Z`);
+  const end = new Date(`${endDateOnly}T00:00:00.000Z`);
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
+function roundCurrency(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function adsSimulationSku(overrides = {}) {
+  return {
+    sku: "SKU_SIM_TARGET",
+    category: "evergreen apparel",
+    channel: "shopify",
+    revenue: 10000,
+    quantity: 200,
+    price: 50,
+    cogs: 18,
+    ads_spend: 500,
+    margin: 0.48,
+    net_profit: 3000,
+    inventory: 1000,
+    sales_velocity: 8,
+    refund_rate: 0.04,
+    customer_ltv: 180,
+    conversion_rate: 0.04,
+    prediction_confidence: 0.86,
+    shipping_cost: 2,
+    fulfillment_cost: 1,
+    fees: 350,
+    ...overrides
+  };
+}
+
+function adsSimulationAction(sku = "SKU_SIM_TARGET", budgetDelta = 300, portfolioAction = "SCALE_ADS") {
+  return {
+    action_id: `${sku}:${portfolioAction}`,
+    sku,
+    action: portfolioAction === "TEST_AD_SPEND" ? "TEST_AD_SPEND" : "INCREASE_AD_SPEND",
+    portfolio_action: portfolioAction,
+    budget_delta: budgetDelta,
+    price_delta: 0,
+    inventory_delta: 0,
+    opportunity_type: "GROWTH",
+    signals: ["unit_test"],
+    feasibility: 0.9
+  };
+}
+
+function simulateSingleAdAction({ sku = adsSimulationSku(), ads = [], allSkus = [sku], budgetDelta = 300, portfolioAction = "SCALE_ADS", days } = {}) {
+  const [row] = simulateGeneratedActions({
+    skus: allSkus,
+    ads,
+    actions: [adsSimulationAction(sku.sku, budgetDelta, portfolioAction)],
+    simulationHorizonDays: days
+  });
+  return row;
+}
 
 test("prediction model output feeds model-driven simulation", () => {
   const simulations = simulatePortfolioActions(input());
@@ -171,6 +261,282 @@ test("prediction model output feeds model-driven simulation", () => {
   assert.ok(scaled?.prediction_models.includes("ads-response-model"));
   assert.ok((scaled?.revenue_prediction.predicted_revenue ?? 0) > input().skus[0].revenue);
   assert.notEqual(scaled?.predicted_revenue, input().skus[0].revenue * 1.1);
+});
+
+test("incremental profit simulation uses SKU historical ads when available", () => {
+  const sku = adsSimulationSku();
+  const row = simulateSingleAdAction({
+    sku,
+    ads: [{ campaign_id: "CMP_TARGET", sku: sku.sku, spend: 500, impressions: 10000, clicks: 500, conversions: 120, roas: 4.2 }],
+    allSkus: [sku],
+    budgetDelta: 300
+  });
+
+  assert.equal(row.simulation_estimate?.prediction_source, "sku_historical_ads");
+  assert.equal(row.simulation_estimate?.simulation_window.days, 30);
+  assert.equal(row.simulation_estimate?.investment.additional_ad_spend, 300);
+  assert.equal(row.simulation_estimate?.investment.ad_budget_period, "simulation_window");
+  assert.equal(row.profit_delta, row.simulation_estimate?.profit_simulation.expected_profit_impact);
+});
+
+test("incremental profit simulation falls back to similar SKU benchmark before store fallback", () => {
+  const target = adsSimulationSku({ sku: "SKU_NO_ADS", ads_spend: 0 });
+  const similar = adsSimulationSku({ sku: "SKU_SIMILAR", ads_spend: 600, margin: 0.5 });
+  const row = simulateSingleAdAction({
+    sku: target,
+    allSkus: [target, similar],
+    ads: [{ campaign_id: "CMP_SIMILAR", sku: similar.sku, spend: 600, impressions: 9000, clicks: 450, conversions: 90, roas: 3.6 }],
+    budgetDelta: 50,
+    portfolioAction: "TEST_AD_SPEND"
+  });
+
+  assert.equal(row.action, "TEST_AD_SPEND");
+  assert.equal(row.simulation_estimate?.prediction_source, "similar_sku_benchmark");
+  assert.equal(row.simulation_estimate?.revenue_simulation.attribution_confidence_factor, 0.55);
+  assert.ok(row.simulation_estimate?.warnings.includes("prediction_source=similar_sku_benchmark"));
+});
+
+test("incremental profit simulation uses conservative fallback when ads evidence is unavailable", () => {
+  const target = adsSimulationSku({ sku: "SKU_UNKNOWN", ads_spend: 0, category: "new", channel: "tiktok" });
+  const row = simulateSingleAdAction({
+    sku: target,
+    allSkus: [target],
+    ads: [],
+    budgetDelta: 50,
+    portfolioAction: "TEST_AD_SPEND"
+  });
+  const estimate = row.simulation_estimate;
+
+  assert.equal(estimate?.prediction_source, "rule_based_conservative_fallback");
+  assert.equal(estimate?.revenue_simulation.base_roas, 1.5);
+  assert.equal(estimate?.revenue_simulation.attribution_confidence_factor, 0.35);
+  assert.ok((estimate?.confidence_breakdown.overall_confidence ?? 1) < 0.6);
+});
+
+test("diminishing return factor declines as additional ad spend grows", () => {
+  const sku = adsSimulationSku();
+  const ads = [{ campaign_id: "CMP_TARGET", sku: sku.sku, spend: 500, impressions: 10000, clicks: 500, conversions: 120, roas: 4.2 }];
+  const small = simulateSingleAdAction({ sku, ads, allSkus: [sku], budgetDelta: 100 }).simulation_estimate;
+  const large = simulateSingleAdAction({ sku, ads, allSkus: [sku], budgetDelta: 900 }).simulation_estimate;
+
+  assert.ok((large?.revenue_simulation.diminishing_return_factor ?? 1) < (small?.revenue_simulation.diminishing_return_factor ?? 0));
+});
+
+test("attribution fallback discounts incremental revenue", () => {
+  const sku = adsSimulationSku({ sku: "SKU_FALLBACK", ads_spend: 0 });
+  const estimate = simulateSingleAdAction({
+    sku,
+    allSkus: [sku],
+    ads: [],
+    budgetDelta: 50,
+    portfolioAction: "TEST_AD_SPEND"
+  }).simulation_estimate;
+  assert.ok(estimate);
+
+  const revenueWithoutAttributionDiscount = roundCurrency(
+    estimate.investment.additional_ad_spend *
+      estimate.revenue_simulation.marginal_roas *
+      estimate.revenue_simulation.diminishing_return_factor *
+      estimate.revenue_simulation.inventory_capacity_factor
+  );
+
+  assert.equal(estimate.revenue_simulation.attribution_confidence_factor, 0.35);
+  assert.ok(estimate.revenue_simulation.incremental_revenue < revenueWithoutAttributionDiscount);
+});
+
+test("inventory capacity limits expected profit impact when stock cannot support demand", () => {
+  const ads = [{ campaign_id: "CMP_TARGET", sku: "SKU_STOCK_TEST", spend: 500, impressions: 10000, clicks: 500, conversions: 120, roas: 20 }];
+  const stocked = adsSimulationSku({ sku: "SKU_STOCK_TEST", inventory: 1000, price: 10, shipping_cost: 0.2, fulfillment_cost: 0.1, fees: 100, refund_rate: 0.01 });
+  const constrained = adsSimulationSku({ sku: "SKU_STOCK_TEST", inventory: 1, price: 10, shipping_cost: 0.2, fulfillment_cost: 0.1, fees: 100, refund_rate: 0.01 });
+  const stockedEstimate = simulateSingleAdAction({ sku: stocked, ads, allSkus: [stocked], budgetDelta: 900 }).simulation_estimate;
+  const constrainedEstimate = simulateSingleAdAction({ sku: constrained, ads, allSkus: [constrained], budgetDelta: 900 }).simulation_estimate;
+
+  assert.ok((constrainedEstimate?.revenue_simulation.inventory_capacity_factor ?? 1) < 1);
+  assert.ok((constrainedEstimate?.revenue_simulation.incremental_revenue ?? 0) < (stockedEstimate?.revenue_simulation.incremental_revenue ?? 0));
+  assert.ok((constrainedEstimate?.profit_simulation.expected_profit_impact ?? 0) < (stockedEstimate?.profit_simulation.expected_profit_impact ?? 0));
+  assert.ok(constrainedEstimate?.warnings.includes("inventory_capacity_limited"));
+});
+
+test("incremental profit subtracts ads, shipping, fees, refund, and fulfillment costs", () => {
+  const sku = adsSimulationSku({
+    shipping_cost: 2.5,
+    fulfillment_cost: 1.25,
+    fees: 500,
+    refund_rate: 0.08
+  });
+  const estimate = simulateSingleAdAction({
+    sku,
+    ads: [{ campaign_id: "CMP_TARGET", sku: sku.sku, spend: 500, impressions: 10000, clicks: 500, conversions: 120, roas: 4.2 }],
+    allSkus: [sku],
+    budgetDelta: 300
+  }).simulation_estimate;
+  assert.ok(estimate);
+
+  const costs = estimate.cost_simulation;
+  assert.ok(costs.additional_ad_spend > 0);
+  assert.ok(costs.incremental_shipping_cost > 0);
+  assert.ok(costs.incremental_platform_fee > 0);
+  assert.ok(costs.incremental_payment_fee > 0);
+  assert.ok(costs.expected_refund_cost > 0);
+  assert.ok(costs.incremental_fulfillment_cost > 0);
+  assert.equal(
+    estimate.profit_simulation.incremental_profit,
+    roundCurrency(
+      estimate.profit_simulation.gross_incremental_profit -
+        costs.additional_ad_spend -
+        costs.incremental_shipping_cost -
+        costs.incremental_platform_fee -
+        costs.incremental_payment_fee -
+        costs.expected_refund_cost -
+        costs.incremental_fulfillment_cost
+    )
+  );
+});
+
+test("growth SKUs without historical ads receive TEST_AD_SPEND instead of SCALE_ADS", () => {
+  const sku = adsSimulationSku({ sku: "SKU_NEW_ADS", ads_spend: 0, prediction_confidence: 0.58 });
+  const actions = generateOptimizationActions({
+    skus: [sku],
+    opportunities: [{
+      sku: sku.sku,
+      opportunity_type: "GROWTH",
+      score: 0.8,
+      signals: ["growth_candidate"],
+      feasibility: 0.82
+    }]
+  });
+
+  assert.ok(actions.some((action) => action.portfolio_action === "TEST_AD_SPEND"));
+  assert.equal(actions.some((action) => action.portfolio_action === "SCALE_ADS"), false);
+});
+
+function lifecycleInput() {
+  return {
+    skus: [
+      adsSimulationSku({
+        sku: "SKU_LAUNCH",
+        product_age_days: 12,
+        quantity: 12,
+        order_count: 12,
+        ads_spend: 0,
+        revenue_growth: 0.02,
+        prediction_confidence: 0.42,
+        net_profit: 120,
+        inventory: 200
+      }),
+      adsSimulationSku({
+        sku: "SKU_GROWTH",
+        product_age_days: 80,
+        revenue_growth: 0.26,
+        ads_spend: 700,
+        net_profit: 3200,
+        margin: 0.42,
+        inventory: 900,
+        prediction_confidence: 0.82
+      }),
+      adsSimulationSku({
+        sku: "SKU_MATURE",
+        product_age_days: 260,
+        revenue_growth: 0.01,
+        ads_spend: 420,
+        net_profit: 2800,
+        margin: 0.32,
+        inventory: 320,
+        repeat_rate: 0.22,
+        prediction_confidence: 0.78
+      }),
+      adsSimulationSku({
+        sku: "SKU_DECLINING",
+        product_age_days: 220,
+        revenue_growth: -0.24,
+        ads_spend: 650,
+        net_profit: -180,
+        margin: 0.08,
+        inventory: 1400,
+        sales_velocity: 3,
+        prediction_confidence: 0.72
+      })
+    ],
+    ads: [
+      { campaign_id: "CMP_GROWTH", sku: "SKU_GROWTH", spend: 700, impressions: 10000, clicks: 500, conversions: 120, roas: 4.4 },
+      { campaign_id: "CMP_MATURE", sku: "SKU_MATURE", spend: 420, impressions: 8000, clicks: 350, conversions: 70, roas: 2.4 },
+      { campaign_id: "CMP_DECLINING", sku: "SKU_DECLINING", spend: 650, impressions: 9000, clicks: 200, conversions: 20, roas: 0.8 }
+    ],
+    constraints: {
+      total_ads_budget: 2400,
+      inventory_capacity: 5000,
+      available_cash: 6000,
+      target_margin: 0.05,
+      max_price_change: 0.12,
+      minimum_profit: -1000,
+      minimum_confidence: 0.35,
+      simulation_horizon_days: 30
+    }
+  };
+}
+
+test("SKU lifecycle classifier assigns every SKU a lifecycle stage", () => {
+  const inputData = lifecycleInput();
+  const classifications = classifySkuLifecycles({ skus: inputData.skus, ads: inputData.ads });
+
+  assert.equal(classifications.length, inputData.skus.length);
+  assert.equal(classifications.find((row) => row.sku === "SKU_LAUNCH")?.lifecycle_stage, "LAUNCH");
+  assert.equal(classifications.find((row) => row.sku === "SKU_GROWTH")?.lifecycle_stage, "GROWTH");
+  assert.equal(classifications.find((row) => row.sku === "SKU_MATURE")?.lifecycle_stage, "MATURE");
+  assert.equal(classifications.find((row) => row.sku === "SKU_DECLINING")?.lifecycle_stage, "DECLINING");
+});
+
+test("lifecycle action spaces route launch, growth, mature, and declining SKUs differently", () => {
+  const inputData = lifecycleInput();
+  const classifications = classifySkuLifecycles({ skus: inputData.skus, ads: inputData.ads });
+  const lifecycleBySku = new Map(classifications.map((row) => [row.sku, row]));
+  const opportunities = inputData.skus.map((sku) => ({
+    sku: sku.sku,
+    opportunity_type: "GROWTH",
+    signals: ["unit_test"],
+    evidence: {
+      margin: sku.margin,
+      net_profit: sku.net_profit,
+      ads_spend: sku.ads_spend,
+      inventory: sku.inventory,
+      sales_velocity: sku.sales_velocity,
+      conversion_rate: sku.conversion_rate,
+      confidence: sku.prediction_confidence ?? 0.55
+    },
+    feasibility: 0.82
+  }));
+  const actions = generateOptimizationActions({ skus: inputData.skus, opportunities, lifecycleBySku });
+  const bySku = (sku) => actions.filter((action) => action.sku === sku).map((action) => action.portfolio_action);
+
+  assert.ok(bySku("SKU_LAUNCH").includes("TEST_AD_SPEND"));
+  assert.equal(bySku("SKU_LAUNCH").includes("SCALE_ADS"), false);
+  assert.ok(bySku("SKU_GROWTH").includes("SCALE_ADS"));
+  assert.ok(bySku("SKU_MATURE").includes("PRICE_UP_5") || bySku("SKU_MATURE").includes("SHIFT_CHANNEL"));
+  assert.ok(bySku("SKU_DECLINING").includes("REDUCE_ADS") || bySku("SKU_DECLINING").includes("STOP"));
+  assert.equal(bySku("SKU_DECLINING").includes("SCALE_ADS"), false);
+});
+
+test("optimization result and report expose lifecycle intelligence", () => {
+  const result = optimizeSkuPortfolio(lifecycleInput());
+  const report = generatePortfolioOptimizationReport(result);
+
+  assert.equal(result.lifecycleClassifications.length, lifecycleInput().skus.length);
+  assert.equal(result.lifecycleSummary.totalSkus, lifecycleInput().skus.length);
+  assert.ok(result.skuDecisions.every((row) => row.lifecycle_stage));
+  assert.ok(report.top_actions.some((action) => action.lifecycle_stage || action.evidence.some((item) => item.includes("lifecycle:"))));
+});
+
+test("feedback learning records lifecycle stage", () => {
+  const feedback = recordOptimizationFeedback({
+    sku: "SKU_GROWTH",
+    lifecycle_stage: "GROWTH",
+    action: "SCALE_ADS",
+    predicted_profit: 5000,
+    actual_profit: 4200,
+    confidence: 0.82
+  });
+
+  assert.equal(feedback.lifecycle_stage, "GROWTH");
 });
 
 test("standalone revenue prediction model is deterministic and confidence-scored", () => {
@@ -293,4 +659,13 @@ test("optimization API exposes SKU portfolio optimization and report", () => {
   assert.match(route, /sku_portfolio_report/);
   assert.match(optimizer, /prediction_driven_global_portfolio_solver/);
   assert.doesNotMatch(optimizer, /greedy ranking only|openai|gpt|prompt/i);
+});
+
+test("optimization UI labels estimates as simulation estimates with breakdown", () => {
+  const renderer = fs.readFileSync(join(process.cwd(), "components/report-renderer-engine.tsx"), "utf8");
+
+  assert.match(renderer, /Simulation Estimate/);
+  assert.match(renderer, /模拟增量利润/);
+  assert.match(renderer, /Simulation Breakdown/);
+  assert.match(renderer, /simulationEstimateSourceLabel/);
 });

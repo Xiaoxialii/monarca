@@ -1,5 +1,5 @@
 import { roundCurrency } from "@/lib/optimization/objective";
-import type { PortfolioOptimizationResult } from "@/lib/optimization/portfolio-optimizer";
+import type { OptimizationActionTiming, PortfolioOptimizationResult } from "@/lib/optimization/portfolio-optimizer";
 
 export type PortfolioOptimizationBusinessReport = {
   executive_summary: {
@@ -16,7 +16,11 @@ export type PortfolioOptimizationBusinessReport = {
     reason: string;
     expected_profit_impact: number;
     evidence: string[];
+    lifecycle_stage?: string;
+    lifecycle_signals?: string[];
     simulation: Record<string, number | string>;
+    simulation_estimate?: PortfolioOptimizationResult["recommended_portfolio"][number]["simulation_estimate"];
+    timing?: OptimizationActionTiming;
     confidence: number;
   }>;
   budget_summary: string;
@@ -26,10 +30,12 @@ export type PortfolioOptimizationBusinessReport = {
 
 export function generatePortfolioOptimizationReport(result: PortfolioOptimizationResult): PortfolioOptimizationBusinessReport {
   const topPortfolioActions = result.recommended_portfolio.slice(0, 5).map((row) => ({
-    title: actionTitle(row.action, row.sku),
+    title: actionTitle(row.action, row.sku, row.lifecycle_stage),
     reason: row.why,
     expected_profit_impact: row.profit_delta,
-    evidence: row.evidence,
+    evidence: [...row.evidence, ...(row.lifecycle?.signals ?? []).map((signal) => `lifecycle:${signal}`)],
+    lifecycle_stage: row.lifecycle_stage,
+    lifecycle_signals: row.lifecycle?.signals,
     simulation: {
       current_profit: row.current_profit,
       predicted_profit: row.predicted_profit,
@@ -37,6 +43,8 @@ export function generatePortfolioOptimizationReport(result: PortfolioOptimizatio
       recommended_ads_spend: row.simulation.recommended_ads_spend,
       simulated_price: row.simulation.simulated_price
     },
+    simulation_estimate: row.simulation_estimate,
+    timing: row.timing,
     confidence: row.confidence
   }));
   const budgetActions = result.budget_plan.slice(0, 3).map((row) => ({
@@ -91,13 +99,24 @@ export function generatePortfolioOptimizationReport(result: PortfolioOptimizatio
   };
 }
 
-function actionTitle(action: string, sku: string) {
-  if (action.includes("SCALE_ADS")) return `Increase ${sku} ads allocation`;
-  if (action.includes("REDUCE_ADS")) return `Reduce ${sku} ads allocation`;
-  if (action.includes("PRICE_UP")) return `Raise ${sku} price`;
-  if (action.includes("PRICE_DOWN")) return `Lower ${sku} price`;
-  if (action.includes("RESTOCK")) return `Increase ${sku} inventory before scaling`;
-  return `Keep ${sku} in optimized portfolio`;
+function actionTitle(action: string, sku: string, lifecycleStage?: string) {
+  const prefix = lifecycleStage === "GROWTH"
+    ? "Growth Opportunity"
+    : lifecycleStage === "LAUNCH"
+      ? "Launch Test"
+      : lifecycleStage === "DECLINING"
+        ? "Exit Decision"
+        : lifecycleStage === "MATURE"
+          ? "Profit Efficiency"
+          : null;
+  const lifecyclePrefix = prefix ? `${prefix} · ` : "";
+  if (action.includes("TEST_AD_SPEND")) return `${lifecyclePrefix}Test ${sku} ad response`;
+  if (action.includes("SCALE_ADS")) return `${lifecyclePrefix}Increase ${sku} ads allocation`;
+  if (action.includes("REDUCE_ADS")) return `${lifecyclePrefix}Reduce ${sku} ads allocation`;
+  if (action.includes("PRICE_UP")) return `${lifecyclePrefix}Raise ${sku} price`;
+  if (action.includes("PRICE_DOWN")) return `${lifecyclePrefix}Lower ${sku} price`;
+  if (action.includes("RESTOCK")) return `${lifecyclePrefix}Increase ${sku} inventory before scaling`;
+  return `${lifecyclePrefix}Keep ${sku} in optimized portfolio${lifecycleStage ? ` (${lifecycleStage})` : ""}`;
 }
 
 function money(value: number) {

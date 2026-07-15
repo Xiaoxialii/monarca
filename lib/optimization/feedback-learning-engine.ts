@@ -1,8 +1,10 @@
 import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
+import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 
 export type OptimizationFeedbackRecord = {
   action: string;
   sku: string;
+  lifecycle_stage?: SkuLifecycleStage;
   prediction: {
     predicted_profit: number;
     predicted_revenue?: number;
@@ -20,6 +22,7 @@ export type OptimizationFeedbackRecord = {
 export function recordOptimizationFeedback(input: {
   action: string;
   sku: string;
+  lifecycle_stage?: SkuLifecycleStage;
   predicted_profit: number;
   predicted_revenue?: number;
   confidence: number;
@@ -34,6 +37,7 @@ export function recordOptimizationFeedback(input: {
   return {
     action: input.action,
     sku: input.sku,
+    lifecycle_stage: input.lifecycle_stage,
     prediction: {
       predicted_profit: roundCurrency(input.predicted_profit),
       predicted_revenue: input.predicted_revenue == null ? undefined : roundCurrency(input.predicted_revenue),

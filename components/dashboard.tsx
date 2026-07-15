@@ -6,10 +6,8 @@ import {
   ArrowRight,
   BarChart3,
   Bell,
-  Bot,
   BrainCircuit,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   CheckCircle2,
   CreditCard,
@@ -23,8 +21,6 @@ import {
   PanelLeft,
   Plus,
   RefreshCw,
-  Search,
-  Send,
   Settings,
   ShieldCheck,
   Share2,
@@ -54,6 +50,7 @@ import {
 import { AuthControls } from "@/components/auth-shell";
 import { BrandLogo } from "@/components/brand-logo";
 import { EcommerceSalesDashboard } from "@/components/ecommerce-sales-dashboard";
+import { NewProductLaunchOptimizer } from "@/components/new-product-launch-optimizer";
 import { DecisionAnalysisEnginePanel, ReportRendererEngine } from "@/components/report-renderer-engine";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,7 +92,9 @@ type DataSourceDefinition = {
 const dashboardCopy = {
   en: {
     navItems: [
+      { label: "Manage Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
       { label: "Profit Optimization Center", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "New Product Launch", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
       { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -119,7 +118,7 @@ const dashboardCopy = {
     },
     header: {
       openNav: "Open navigation",
-      searchPlaceholder: "Search metrics, sources, fields...",
+      searchPlaceholder: "Search SKU...",
       newSource: "Import data",
       help: "Help",
       notifications: "Notifications"
@@ -544,8 +543,8 @@ const dashboardCopy = {
       periodValue: "This week",
       generatedLabel: "Generated",
       generatedValue: "After data import",
-      generateAction: "Generate report",
-      generatingAction: "Generating...",
+      generateAction: "Update",
+      generatingAction: "Updating...",
       exportAction: "Export",
       shareAction: "Share",
       databaseCtaTitle: "Connect business data",
@@ -800,7 +799,9 @@ const dashboardCopy = {
   },
   zh: {
     navItems: [
+      { label: "管理数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
       { label: "利润优化中心", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "新品上市优化", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
       { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -824,7 +825,7 @@ const dashboardCopy = {
     },
     header: {
       openNav: "打开导航",
-      searchPlaceholder: "搜索指标、数据源、字段...",
+      searchPlaceholder: "搜索 SKU...",
       newSource: "导入数据",
       help: "帮助",
       notifications: "通知"
@@ -1234,8 +1235,8 @@ const dashboardCopy = {
       periodValue: "今日",
       generatedLabel: "生成状态",
       generatedValue: "导入数据后生成",
-      generateAction: "生成报告",
-      generatingAction: "生成中...",
+      generateAction: "更新",
+      generatingAction: "更新中...",
       exportAction: "导出",
       shareAction: "分享",
       databaseCtaTitle: "连接业务数据",
@@ -1491,6 +1492,7 @@ type DashboardView =
   | "metrics"
   | "schema"
   | "reports"
+  | "launch-optimizer"
   | "report"
   | "sales"
   | "settings";
@@ -1745,13 +1747,11 @@ let reportsPageDataCache: unknown = null;
 function Sidebar({
   copy,
   activeTarget,
-  isCollapsed,
-  onToggle
+  isCollapsed
 }: {
   copy: DashboardCopy;
   activeTarget: string;
   isCollapsed: boolean;
-  onToggle: () => void;
 }) {
   const { isLoaded, isSignedIn, user } = useUser();
   const isZh = copy.sidebar.brand === "蝴蝶效应";
@@ -1844,24 +1844,36 @@ function Sidebar({
       <a
         key={item.label}
         href={item.href}
-        title={isCollapsed ? item.label : undefined}
         className={cn(
-          "flex h-9 w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
-          isCollapsed ? "justify-center px-0" : "gap-2 px-2",
+          "group relative z-10 flex w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:z-50 hover:bg-secondary hover:text-foreground",
+          isCollapsed ? "min-h-12 justify-center px-0 py-1.5" : "h-9 gap-2 px-2",
+          isCollapsed && isActive && "bg-secondary text-foreground",
           isActive && "bg-secondary text-foreground"
         )}
       >
+        {isCollapsed && isActive ? (
+          <span className="absolute left-[-0.75rem] top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-slate-950" aria-hidden="true" />
+        ) : null}
         <item.icon className="size-4" />
-        <span className={cn(isCollapsed && "sr-only")}>{item.label}</span>
+        <span className={cn(
+          isCollapsed && "sr-only"
+        )}>{item.label}</span>
+        {isCollapsed ? (
+          <span className="pointer-events-none absolute left-[calc(100%+0.75rem)] top-1/2 z-[9999] max-w-none -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-950 px-3 py-2 text-center text-sm font-semibold leading-snug text-white opacity-0 shadow-2xl transition [writing-mode:horizontal-tb] before:absolute before:-left-1 before:top-1/2 before:size-2 before:-translate-y-1/2 before:rotate-45 before:bg-slate-950 before:content-[''] group-hover:opacity-100 group-focus-visible:opacity-100">
+            {item.label}
+          </span>
+        ) : null}
       </a>
     );
   };
+  const settingsNavItem = copy.navItems.find((item) => item.target === "#settings");
+  const primaryNavItems = copy.navItems.filter((item) => item.target !== "#settings");
 
   return (
     <aside
       className={cn(
         "hidden h-screen shrink-0 flex-col border-r bg-white/72 px-3 pb-4 pt-4 backdrop-blur transition-[width] duration-200 lg:flex",
-        isCollapsed ? "w-20" : "w-64"
+        isCollapsed ? "w-20 overflow-visible" : "w-64"
       )}
     >
       <div
@@ -1871,7 +1883,14 @@ function Sidebar({
         )}
       >
         <div className={cn("flex min-w-0 items-center gap-3", isCollapsed && "justify-center")}>
-          <BrandLogo compact label={copy.sidebar.brand} className="h-10 w-10 shrink-0" />
+          <div className={cn("flex min-w-0 items-center gap-3", isCollapsed && "flex-col gap-1")}>
+            <BrandLogo compact label={copy.sidebar.brand} className="h-10 w-10 shrink-0" />
+            {isCollapsed ? (
+              <span className="max-w-[4rem] text-center text-[10px] font-semibold leading-tight text-emerald-800">
+                {isZh ? "增长利润" : "Improve profit"}
+              </span>
+            ) : null}
+          </div>
           {!isCollapsed ? (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{copy.sidebar.brand}</p>
@@ -1881,18 +1900,9 @@ function Sidebar({
             </div>
           ) : null}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 shrink-0"
-          aria-label={isCollapsed ? copy.sidebar.expandLabel : copy.sidebar.collapseLabel}
-          onClick={onToggle}
-        >
-          {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
-        </Button>
       </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto">
-        {copy.navItems.map((item) => (
+      <nav className={cn("flex-1 space-y-1", isCollapsed ? "overflow-visible" : "overflow-y-auto")}>
+        {primaryNavItems.map((item) => (
           <div key={item.label}>
             {renderNavItem(item)}
             {!isCollapsed && item.target === "#report" && activeTarget === "#report" ? (
@@ -1956,6 +1966,11 @@ function Sidebar({
             </a>
           </div>
         )}
+        {settingsNavItem ? (
+          <div className={cn("mt-3", isCollapsed ? "" : "px-2")}>
+            {renderNavItem(settingsNavItem)}
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -1963,15 +1978,18 @@ function Sidebar({
 
 function Header({
   copy,
+  activeTarget,
   locale,
   onLocaleChange
 }: {
   copy: DashboardCopy;
+  activeTarget: string;
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;
 }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const isZh = copy.sidebar.brand === "蝴蝶效应";
+  const currentPageTitle = navLabel(copy, activeTarget) || (isZh ? "工作台" : "Workspace");
   const mobileNavItems = copy.navItems
     .filter((item) => item.href === "/dashboard/report" || item.href === "/dashboard/settings")
     .map((item) => ({
@@ -1982,7 +2000,7 @@ function Header({
     }));
 
   return (
-    <header className="sticky top-0 z-20 border-b bg-background/86 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b bg-slate-50/95 backdrop-blur">
       <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
         <Button
           type="button"
@@ -1995,14 +2013,11 @@ function Header({
         >
           {isMobileNavOpen ? <X /> : <PanelLeft />}
         </Button>
-        <div className="hidden min-w-0 flex-1 md:block">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder={copy.header.searchPlaceholder} />
-          </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{currentPageTitle}</h1>
         </div>
         <div className="flex flex-1 items-center justify-end gap-2">
-          <label className="hidden items-center gap-2 rounded-md border bg-white px-2 py-1 text-sm font-medium text-muted-foreground shadow-sm sm:flex">
+          <label className="hidden h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-medium text-muted-foreground shadow-sm ring-1 ring-slate-200 sm:flex">
             <select
               value={locale}
               onChange={(event) => onLocaleChange(event.target.value as Locale)}
@@ -2021,6 +2036,9 @@ function Header({
               <HelpCircle />
               {copy.header.help}
             </a>
+          </Button>
+          <Button asChild size="sm" className="hidden bg-indigo-600 text-white hover:bg-indigo-700 sm:inline-flex">
+            <a href="/checkout/professional">Upgrade</a>
           </Button>
           <Button variant="ghost" size="icon" aria-label={copy.header.notifications}>
             <Bell />
@@ -3015,7 +3033,7 @@ function SemanticMetricObjects({ copy }: { copy: DashboardCopy }) {
         </div>
       </div>
     ) : null}
-    <Card className="overflow-hidden bg-white shadow-sm">
+    <Card className="overflow-hidden border-emerald-200 bg-white shadow-sm shadow-emerald-950/5">
       <CardHeader className="border-b p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -5542,470 +5560,541 @@ function ImportDataSection({
   copy,
   connectedSources,
   onAddConnectedSource,
-  isLoadingConnectedSources = false,
   connectionPage = false,
   initialSourceName
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
   onAddConnectedSource: (source: ConnectedSourceRow) => void;
-  isLoadingConnectedSources?: boolean;
   connectionPage?: boolean;
   initialSourceName?: string;
 }) {
-  const isZh = navLabel(copy, "#import-data") === "数据源";
-
   return (
     <section id="import-data" className="scroll-mt-20">
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{navLabel(copy, "#import-data")}</h2>
-          <p className="text-sm text-muted-foreground">{copy.importData.description}</p>
+      {connectionPage ? (
+        <div className="grid gap-4">
+          <ConnectorPanel
+            copy={copy}
+            onAddConnectedSource={onAddConnectedSource}
+            connectionPage={connectionPage}
+            initialSourceName={initialSourceName}
+          />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a href="/dashboard/reports">
-              <BrainCircuit className="size-4" />
-              {isZh ? "回到报告" : "Back to analysis"}
-            </a>
-          </Button>
-          <Button asChild variant="outline" size="sm">
-            <a href="/dashboard/report">
-              <FileText className="size-4" />
-              {isZh ? "回到报表" : "Back to reports"}
-            </a>
-          </Button>
-        </div>
-      </div>
-      <div className="grid gap-4">
-        {!connectionPage ? (
-          <ConnectedDataOverview
+      ) : (
+        <div className="mt-5 grid gap-5">
+          <DataSourcesWorkspace
             copy={copy}
             connectedSources={connectedSources}
-            isLoadingConnectedSources={isLoadingConnectedSources}
+            onConnect={(sourceName) => {
+              if (typeof window !== "undefined") {
+                window.location.href = `/dashboard/import-data/connect?source=${encodeURIComponent(sourceName)}`;
+              }
+            }}
           />
-        ) : null}
-        <ConnectorPanel
-          copy={copy}
-          onAddConnectedSource={onAddConnectedSource}
-          connectionPage={connectionPage}
-          initialSourceName={initialSourceName}
-        />
-      </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function ConnectedDataOverview({
+type BusinessDatasetView = {
+  name: string;
+  rowsLabel: string;
+};
+
+type BusinessSourceView = {
+  id: string;
+  name: string;
+  typeLabel: string;
+  statusLabel: string;
+  lastSyncLabel: string;
+  datasets: BusinessDatasetView[];
+  summaryLabel: string;
+  sourceRows: ConnectedSourceRow[];
+};
+
+function inferBusinessSourceKey(source: ConnectedSourceRow) {
+  const value = [
+    source.name,
+    source.provider,
+    source.type,
+    source.config?.fileName
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (value.includes("shopify")) return "shopify";
+  if (value.includes("meta") || value.includes("facebook") || value.includes("ad")) return "meta_ads";
+  if (value.includes("amazon")) return "amazon";
+  if (value.includes("inventory") || value.includes("stock")) return "inventory";
+  if (
+    value.includes("database") ||
+    value.includes("sql") ||
+    value.includes("postgres") ||
+    value.includes("mysql") ||
+    value.includes("snowflake") ||
+    value.includes("bigquery")
+  ) {
+    return "database";
+  }
+
+  return null;
+}
+
+function businessDatasetRows(source: ConnectedSourceRow) {
+  return source.schema?.unifiedIngestion?.totalParsedRows ?? source.schema?.unifiedIngestion?.sampledRows ?? 0;
+}
+
+function formatBusinessNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: boolean): BusinessSourceView[] {
+  const grouped = new Map<string, ConnectedSourceRow[]>();
+
+  connectedSources.forEach((source) => {
+    const key = inferBusinessSourceKey(source);
+    if (!key) return;
+
+    grouped.set(key, [...(grouped.get(key) ?? []), source]);
+  });
+
+  const definitions: Array<{
+    id: string;
+    name: string;
+    typeLabel: string;
+    summaryLabel: string;
+    fallbackDatasets: BusinessDatasetView[];
+  }> = [
+    {
+      id: "shopify",
+      name: "Shopify",
+      typeLabel: isZh ? "电商系统" : "Ecommerce",
+      summaryLabel: isZh ? "订单、商品、客户和库存" : "Orders, products, customers, and inventory",
+      fallbackDatasets: [
+        { name: isZh ? "订单" : "Orders", rowsLabel: "82,911 rows" },
+        { name: isZh ? "商品" : "Products", rowsLabel: "2,000 SKUs" },
+        { name: isZh ? "客户" : "Customers", rowsLabel: "17,900 users" },
+        { name: isZh ? "退款" : "Refunds", rowsLabel: "1,200 records" }
+      ]
+    },
+    {
+      id: "meta_ads",
+      name: "Meta Ads",
+      typeLabel: isZh ? "广告投放" : "Advertising",
+      summaryLabel: isZh ? "活动、花费和广告表现" : "Campaigns, ad spend, and performance",
+      fallbackDatasets: [
+        { name: isZh ? "广告活动" : "Campaigns", rowsLabel: "128 campaigns" },
+        { name: isZh ? "广告花费" : "Ad Spend", rowsLabel: "$47.14 today" },
+        { name: isZh ? "广告表现" : "Performance", rowsLabel: "ready" }
+      ]
+    },
+    {
+      id: "amazon",
+      name: "Amazon",
+      typeLabel: isZh ? "电商渠道" : "Marketplace",
+      summaryLabel: isZh ? "销售、费用和渠道利润" : "Sales, fees, and channel profit",
+      fallbackDatasets: [
+        { name: isZh ? "订单" : "Orders", rowsLabel: "31,420 rows" },
+        { name: isZh ? "商品" : "Products", rowsLabel: "2,000 SKUs" },
+        { name: isZh ? "费用" : "Fees", rowsLabel: "ready" }
+      ]
+    },
+    {
+      id: "inventory",
+      name: "Inventory",
+      typeLabel: isZh ? "运营库存" : "Operations",
+      summaryLabel: isZh ? "库存、在库 SKU 和补货状态" : "Stock, SKU coverage, and replenishment status",
+      fallbackDatasets: [
+        { name: isZh ? "SKU 库存" : "SKU Stock", rowsLabel: "2,000 SKUs" },
+        { name: isZh ? "库存风险" : "Inventory Risk", rowsLabel: "ready" }
+      ]
+    },
+    {
+      id: "database",
+      name: isZh ? "业务数据库" : "Database",
+      typeLabel: isZh ? "数据仓库" : "Data warehouse",
+      summaryLabel: isZh ? "数据库表结构和聚合指标" : "Schema, tables, and metric-ready data",
+      fallbackDatasets: [
+        { name: isZh ? "业务表" : "Business tables", rowsLabel: "schema ready" },
+        { name: isZh ? "指标层" : "Metric layer", rowsLabel: "ready" }
+      ]
+    }
+  ];
+
+  return definitions.flatMap((definition) => {
+    const rows = grouped.get(definition.id) ?? [];
+    if (rows.length === 0) return [];
+
+    const detectedDatasets = rows.map((source) => {
+      const rowsCount = businessDatasetRows(source);
+      const sourceName = source.config?.fileName || source.name;
+
+      return {
+        name: sourceName.replace(/^Excel -\s*/i, "").replace(/_enriched\.xlsx$/i, ""),
+        rowsLabel: rowsCount > 0 ? `${formatBusinessNumber(rowsCount)} ${isZh ? "行" : "rows"}` : (isZh ? "已连接" : "connected")
+      };
+    });
+
+    return [{
+      ...definition,
+      statusLabel: isZh ? "已连接" : "Connected",
+      lastSyncLabel: isZh ? "今天" : "Today",
+      datasets: detectedDatasets.length > 0 ? detectedDatasets : definition.fallbackDatasets,
+      sourceRows: rows
+    }];
+  });
+}
+
+function businessSourceIcon(sourceId: string) {
+  if (sourceId === "meta_ads") return <BarChart3 className="size-5" />;
+  if (sourceId === "inventory") return <Table2 className="size-5" />;
+  if (sourceId === "database") return <Database className="size-5" />;
+  return <Activity className="size-5" />;
+}
+
+function resolveDatabaseConnectorType(source: DataSourceDefinition) {
+  const identity = `${source.provider ?? ""} ${source.name}`.toLowerCase();
+
+  if (identity.includes("postgres")) return "postgresql";
+  if (identity.includes("mysql")) return "mysql";
+
+  return null;
+}
+
+function resolveConnectorSourceName(name: string, copy: DashboardCopy) {
+  const lowerName = name.toLowerCase();
+  const findSource = (predicate: (source: DataSourceDefinition) => boolean) =>
+    copy.connectors.sources.find(predicate)?.name ?? null;
+
+  if (lowerName.includes("meta")) return findSource((source) => source.provider === "meta_ads");
+  if (lowerName.includes("shopify")) return findSource((source) => source.provider === "shopify");
+  if (lowerName.includes("postgres")) return findSource((source) => source.provider === "postgresql");
+  if (lowerName.includes("mysql")) return findSource((source) => source.provider === "mysql");
+  if (lowerName.includes("excel") || lowerName.includes("csv")) {
+    return findSource((source) => source.authMode === "file_upload");
+  }
+
+  return null;
+}
+
+function DataSourcesWorkspace({
   copy,
   connectedSources,
-  isLoadingConnectedSources = false
+  onConnect
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
-  isLoadingConnectedSources?: boolean;
+  onConnect: (sourceName: string) => void;
 }) {
   const isZh = copy.connectors.connectedCountLabel.includes("个");
-  const connectedCountLabel = isLoadingConnectedSources
-    ? (isZh ? "加载中" : "Loading")
-    : `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
+  const [workspaceSources, setWorkspaceSources] = useState<ConnectedSourceRow[]>(connectedSources);
+  const [isRefreshingSources, setIsRefreshingSources] = useState(false);
+  const businessSources = useMemo(
+    () => buildBusinessSources(workspaceSources.length > 0 ? workspaceSources : connectedSources, isZh),
+    [connectedSources, isZh, workspaceSources]
+  );
+
+  useEffect(() => {
+    if (connectedSources.length > 0) {
+      setWorkspaceSources(connectedSources);
+    }
+  }, [connectedSources]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setIsRefreshingSources(true);
+
+    void fetch("/api/data-sources", {
+      cache: "no-store",
+      signal: controller.signal
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
+        setWorkspaceSources(payload.dataSources as ConnectedSourceRow[]);
+      }
+    }).catch((error) => {
+      if (error instanceof Error && error.name === "AbortError") return;
+      console.warn("[dashboard] Failed to refresh data sources workspace", error);
+    }).finally(() => {
+      setIsRefreshingSources(false);
+    });
+
+    return () => controller.abort();
+  }, []);
 
   return (
-    <Card className="overflow-hidden bg-white shadow-sm">
-      <CardContent className="p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
-              <Database className="size-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold tracking-tight">
-                {copy.importData.connectedTitle}
-              </h3>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {copy.importData.connectedDescription}
-              </p>
-            </div>
+    <div className="grid gap-5 xl:grid-cols-[minmax(300px,400px)_minmax(0,1fr)] xl:items-start">
+      <section className="min-w-0 overflow-hidden rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight text-slate-950">
+              {isZh ? "已连接业务源" : "Connected Sources"}
+            </h3>
           </div>
-          <Badge variant="secondary" className="w-fit shrink-0">
-            {connectedCountLabel}
-          </Badge>
         </div>
-        {isLoadingConnectedSources ? (
-          <div className="mt-4 rounded-lg border border-dashed bg-secondary/25 p-4">
-            <div className="flex items-center gap-3">
-              <div className="grid size-9 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">{isZh ? "正在加载数据源" : "Loading data sources"}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {isZh ? "正在同步已连接数据源状态，请稍候" : "Refreshing connected source status."}
-                </p>
-              </div>
-            </div>
+
+        {isRefreshingSources && businessSources.length === 0 ? (
+          <div className="mt-5 rounded-3xl bg-slate-50 p-8 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
+            <Loader2 className="mr-2 inline size-4 animate-spin" />
+            {isZh ? "正在加载已连接业务源" : "Loading connected business sources"}
           </div>
-        ) : connectedSources.length > 0 ? (
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            {connectedSources.map((source) => (
-              <div key={source.id} className="flex items-center gap-3 rounded-lg border bg-secondary/15 p-3">
-                <div className="grid size-9 shrink-0 place-items-center rounded-md bg-emerald-50 text-emerald-800">
-                  <Database className="size-4" />
+        ) : businessSources.length > 0 ? (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            {businessSources.map((source) => (
+              <div
+                key={source.id}
+                className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <span className="grid size-11 place-items-center rounded-2xl bg-emerald-50 text-emerald-800">
+                    {businessSourceIcon(source.id)}
+                  </span>
+                  <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
+                    {source.statusLabel}
+                  </Badge>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{source.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {source.provider} · {source.status}
-                  </p>
+                <h4 className="mt-4 text-lg font-semibold text-slate-950">{source.name}</h4>
+                <p className="mt-1 text-sm font-medium text-slate-500">{source.typeLabel}</p>
+                <div className="mt-5 grid gap-2 text-sm font-medium text-slate-600">
+                  <div className="flex justify-between gap-3">
+                    <span>{isZh ? "数据集" : "Datasets"}</span>
+                    <span className="text-slate-950">{source.datasets.length}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>{isZh ? "最近同步" : "Last sync"}</span>
+                    <span className="text-slate-950">{source.lastSyncLabel}</span>
+                  </div>
                 </div>
-                <Badge variant="secondary">{copy.connectors.connectedStatus}</Badge>
               </div>
             ))}
           </div>
         ) : (
-          <div className="mt-4 rounded-lg border border-dashed bg-secondary/25 p-4">
-          <div className="flex items-center gap-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
-              <Database className="size-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">{copy.importData.connectedEmptyTitle}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {copy.importData.connectedEmptyText}
-              </p>
-            </div>
-          </div>
+          <div className="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm font-semibold text-slate-500">
+            {isZh ? "当前没有已连接业务源。请从下方分类选择要连接的系统。" : "No connected business sources yet. Choose an integration below to start."}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </section>
+
+      <AvailableIntegrationsWorkspace copy={copy} onConnect={onConnect} />
+    </div>
   );
 }
 
-function buildReportChatMessages(
-  copy: DashboardCopy,
-  reportPayload: { briefing?: { payloadJson?: { metricResults?: ReportMetricEvidenceResult[] } | null } | null } | null,
-  isReportView: boolean
-) {
-  const isZh = copy.chat.sendLabel === "发送消息";
-
-  if (!isReportView) {
-    return [
-      { role: "assistant" as const, content: copy.chat.assistantMessage },
-      { role: "user" as const, content: copy.chat.userQuestion },
-      { role: "assistant" as const, content: copy.chat.assistantReply }
-    ];
-  }
-
-  const metricResults = reportPayload?.briefing?.payloadJson?.metricResults ?? [];
-  const computedText = metricResults
-    .filter((result) => result.status === "computed")
-    .map((result) => [
-      result.metricName,
-      result.displayName,
-      result.metricCategory,
-      result.businessType,
-      result.formula
-    ].filter(Boolean).join(" "))
-    .join(" ")
-    .toLowerCase();
-
-  if (!computedText) {
-    return [
-      {
-        role: "assistant" as const,
-        content: isZh ? "生成报告后，可以继续追问分析结果。" : "Generate a report to ask follow-up questions."
-      }
-    ];
-  }
-
-  const hasAppOrReviews = /app|install|rating|review|sentiment|category/.test(computedText);
-  const hasSalesOrRevenue = /revenue|sales|gmv|order|product|channel|roi|cost|margin/.test(computedText);
-  const hasFinanceTimeseries = /close|adj close|volume|drawdown|return|volatility|trading|price/.test(computedText);
-  const questions = hasAppOrReviews
-    ? (isZh
-      ? [
-          "哪些类别贡献了最多安装量？",
-          "哪些 App 的负向反馈最高？",
-          "哪些指标存在口径限制？",
-          "下一步最应该优先处理什么？"
-        ]
-      : [
-          "Which category drives the most installs?",
-          "Which apps have the highest negative feedback?",
-          "What should I prioritize next?",
-          "Which metrics have reliability caveats?"
-        ])
-    : hasSalesOrRevenue
-      ? (isZh
-        ? [
-            "哪些产品贡献了最多收入？",
-            "哪些渠道转化最低？",
-            "哪些品类退款率最高？",
-            "哪些对象值得优先放大？"
-          ]
-        : [
-            "Which product drove the revenue change?",
-            "Which channel has the highest ROI?",
-            "Which segment declined most?"
-          ])
-      : hasFinanceTimeseries
-        ? (isZh
-          ? [
-              "当前价格趋势如何？",
-              "最大回撤是多少？",
-              "哪些时间段成交量异常？",
-              "当前波动风险高吗？"
-            ]
-          : [
-              "How is the current price trend?",
-              "What is the max drawdown?",
-              "Which periods show unusual trading volume?",
-              "Is current volatility risk elevated?"
-            ])
-      : (isZh
-        ? ["这份报告最重要的发现是什么？", "下一步应该优先处理什么？", "哪些指标需要注意口径？"]
-        : ["What is the most important finding in this report?", "What should I prioritize next?", "Which metrics need caveats?"]);
-
-  return [
-    {
-      role: "assistant" as const,
-      content: isZh ? "可以围绕当前报告继续追问，例如：" : "You can ask follow-up questions about this report, for example:"
-    },
-    ...questions.slice(0, 4).map((content) => ({ role: "user" as const, content }))
-  ];
-}
-
-function ChatPanel({
+function AvailableIntegrationsWorkspace({
   copy,
-  className,
-  isCollapsed,
-  onToggle,
-  isReportView = false
+  onConnect
 }: {
   copy: DashboardCopy;
-  className?: string;
-  isCollapsed: boolean;
-  onToggle: () => void;
-  isReportView?: boolean;
+  onConnect: (sourceName: string) => void;
 }) {
-  const isZh = /[\u4e00-\u9fff]/.test(copy.chat.title);
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>(
-    buildReportChatMessages(copy, null, isReportView)
-  );
-  const [inputValue, setInputValue] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!isReportView) {
-      setMessages(buildReportChatMessages(copy, null, false));
-      setInputValue("");
-      setErrorMessage(null);
-      return;
+  const isZh = copy.connectors.connectedCountLabel.includes("个");
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+  const groups = [
+    {
+      title: isZh ? "电商" : "Ecommerce",
+      integrations: [
+        { name: "Shopify", description: isZh ? "订单、商品、客户" : "Orders, products, customers" },
+        { name: "Amazon", description: isZh ? "市场销售和费用" : "Marketplace sales and fees" },
+        { name: "WooCommerce", description: isZh ? "店铺销售数据" : "Store sales data" },
+        { name: "TikTok Shop", description: isZh ? "社交电商数据" : "Social commerce data" }
+      ]
+    },
+    {
+      title: isZh ? "广告" : "Advertising",
+      integrations: [
+        { name: "Meta Ads", description: isZh ? "花费、活动、表现" : "Spend, campaigns, performance" },
+        { name: "Google Ads", description: isZh ? "搜索和购物广告" : "Search and shopping ads" },
+        { name: "TikTok Ads", description: isZh ? "内容投放表现" : "Creative and spend performance" }
+      ]
+    },
+    {
+      title: isZh ? "数据库" : "Database",
+      integrations: [
+        { name: "PostgreSQL", description: isZh ? "业务数据库" : "Operational database" },
+        { name: "MySQL", description: isZh ? "业务数据库" : "Operational database" },
+        { name: "SQL Server", description: isZh ? "企业数据库" : "Enterprise database" },
+        { name: "Snowflake", description: isZh ? "数据仓库" : "Data warehouse" },
+        { name: "BigQuery", description: isZh ? "数据仓库" : "Data warehouse" }
+      ]
+    },
+    {
+      title: isZh ? "文件" : "Files",
+      integrations: [
+        { name: "Excel / CSV", description: isZh ? "上传业务文件" : "Upload business files" },
+        { name: "Google Sheets", description: isZh ? "表格数据" : "Spreadsheet data" }
+      ]
     }
-
-    const refreshReportMessages = () => {
-      void fetch("/api/dashboard/reports", { cache: "no-store" })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((payload) => {
-          if (!isCancelled) {
-            setMessages(buildReportChatMessages(copy, payload, true));
-          }
-        })
-        .catch(() => {
-          if (!isCancelled) {
-            setMessages(buildReportChatMessages(copy, null, true));
-          }
-        });
-    };
-
-    refreshReportMessages();
-    window.addEventListener("monarca-report-updated", refreshReportMessages);
-    setInputValue("");
-    setErrorMessage(null);
-
-    return () => {
-      isCancelled = true;
-      window.removeEventListener("monarca-report-updated", refreshReportMessages);
-    };
-  }, [copy, isReportView]);
-
-  const sendMessage = async () => {
-    const content = inputValue.trim();
-
-    if (!content || isSending) {
-      return;
-    }
-
-    const nextMessages = [...messages, { role: "user" as const, content }];
-
-    setMessages(nextMessages);
-    setInputValue("");
-    setIsSending(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          messages: nextMessages.slice(-10)
-        })
-      });
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || (isZh ? "AI 分析失败" : "AI analysis failed"));
-      }
-
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: String(payload.reply || (isZh ? "我暂时没有生成回复，请再试一次。" : "I could not generate a reply. Please try again."))
-        }
-      ]);
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "";
-      const upgradeMessage = isZh ? "请先升级套餐" : "Please upgrade your plan first";
-      const fallbackMessage = isZh ? "AI 分析失败" : "AI analysis failed";
-      setErrorMessage(
-        isZh
-          ? upgradeMessage
-          : /upgrade|billing|entitlement|ChatGPT|OpenAI|Failed/i.test(rawMessage)
-            ? upgradeMessage
-            : rawMessage || fallbackMessage
-      );
-      setMessages((current) => current.filter((message) => message !== nextMessages[nextMessages.length - 1]));
-      setInputValue(content);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  if (isCollapsed) {
-    const collapsedTitle = isZh ? copy.chat.title.replace(/^AI\s*/i, "") : copy.chat.title.replace(/^AI\s*/i, "") || "Analyst";
-
-    return (
-      <section id="ai-chat" className={cn("scroll-mt-20", className)}>
-        <Card className="flex min-h-[76px] items-center justify-between gap-3 border-emerald-100 bg-white/90 p-3 shadow-sm xl:h-[calc(100vh-7rem)] xl:flex-col xl:justify-start">
-          <Button variant="ghost" size="icon" aria-label={copy.chat.expandLabel} onClick={onToggle}>
-            <ChevronLeft />
-          </Button>
-          <div className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Bot className="size-5" />
-          </div>
-          <div className="hidden min-h-0 flex-1 items-center justify-center xl:flex" aria-hidden="true">
-            {isZh ? (
-              <div className="flex flex-col items-center gap-3 text-slate-600">
-                <span className="rounded-md bg-secondary px-2 py-1 text-sm font-bold leading-none text-primary">AI</span>
-                <span className="[writing-mode:vertical-rl] text-sm font-semibold leading-6 tracking-[0.12em]">
-                  {collapsedTitle}
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 text-slate-600">
-                <span className="rounded-md bg-secondary px-2 py-1 text-sm font-bold leading-none text-primary">AI</span>
-                <span className="-rotate-90 whitespace-nowrap text-sm font-semibold leading-none tracking-normal">
-                  {collapsedTitle}
-                </span>
-              </div>
-            )}
-          </div>
-          <Badge variant="secondary" className="hidden xl:inline-flex">
-            AI
-          </Badge>
-        </Card>
-      </section>
-    );
-  }
+  ];
+  const activeGroup = groups[activeGroupIndex] ?? groups[0];
 
   return (
-    <section id="ai-chat" className={cn("scroll-mt-20", className)}>
-      <Card className="flex min-h-[480px] flex-col overflow-hidden border bg-white shadow-sm xl:h-[calc(100vh-7rem)]">
-        <CardHeader className="border-b px-3 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
-                <Bot className="size-4" />
-              </div>
-              <div>
-                <CardTitle className="text-sm">{copy.chat.title}</CardTitle>
-                <p className="text-xs text-muted-foreground">{copy.chat.description}</p>
-              </div>
-            </div>
-            <Button variant="ghost" size="icon" aria-label={copy.chat.collapseLabel} onClick={onToggle}>
-              <ChevronRight />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-2.5 p-3">
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
-            {messages.map((message, index) =>
-              message.role === "assistant" ? (
-                <div key={`${message.role}-${index}-${message.content}`} className="flex gap-2">
-                  <div className="grid size-7 shrink-0 place-items-center rounded-md bg-secondary text-foreground">
-                    <Bot className="size-4" />
-                  </div>
-                  <div className="rounded-lg border bg-secondary/45 px-3 py-2 text-sm leading-6">
-                    {message.content}
-                  </div>
-                </div>
-              ) : (
-                <div
-                  key={`${message.role}-${index}-${message.content}`}
-                  className="ml-auto max-w-[82%] rounded-lg bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground"
-                >
-                  {message.content}
-                </div>
-              )
-            )}
-            {isSending ? (
-              <div className="flex gap-2">
-                <div className="grid size-7 shrink-0 place-items-center rounded-md bg-secondary text-foreground">
-                  <Bot className="size-4" />
-                </div>
-                <div className="rounded-lg border bg-secondary/45 px-3 py-2 text-sm leading-6 text-muted-foreground">
-                  {isZh ? "正在继续分析..." : "Analyzing..."}
-                </div>
-              </div>
-            ) : null}
-            {errorMessage ? <p className="px-1 text-xs leading-5 text-rose-600">{errorMessage}</p> : null}
-          </div>
-          <form
-            className="mt-auto rounded-lg border bg-background p-1.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void sendMessage();
-            }}
-          >
-            <div className="flex gap-2">
-              <Input
-                className="h-9 border-0 bg-transparent shadow-none focus-visible:ring-0"
-                placeholder={copy.chat.inputPlaceholder}
-                value={inputValue}
-                onChange={(event) => setInputValue(event.target.value)}
-                disabled={isSending}
-              />
-              <Button
-                type="submit"
-                size="icon"
-                className="size-9 shrink-0"
-                aria-label={copy.chat.sendLabel}
-                disabled={isSending || !inputValue.trim()}
+    <section className="mx-auto w-full max-w-[860px] rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold tracking-tight text-slate-950">
+            {isZh ? "可连接集成" : "Available Integrations"}
+          </h3>
+        </div>
+      </div>
+
+      <div className="mt-5 flex justify-center">
+        <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-full bg-slate-100 p-1">
+          {groups.map((group, index) => {
+            const isActive = index === activeGroupIndex;
+
+            return (
+              <button
+                key={group.title}
+                type="button"
+                onClick={() => setActiveGroupIndex(index)}
+                className={cn(
+                  "whitespace-nowrap rounded-full px-5 py-2 text-sm font-semibold transition",
+                  isActive ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"
+                )}
               >
-                <Send />
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+                {group.title}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mx-auto mt-5 max-w-[760px] rounded-3xl bg-slate-50 p-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {activeGroup.integrations.map((integration) => {
+            const resolvedSourceName = resolveConnectorSourceName(integration.name, copy);
+            const isSupported = Boolean(resolvedSourceName);
+
+            return (
+              <div key={integration.name} className="min-h-[132px] rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-slate-950">{integration.name}</p>
+                    <p className="mt-1 text-sm font-medium leading-snug text-slate-500">{integration.description}</p>
+                  </div>
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800">
+                    {integration.name.includes("Ads") ? <BarChart3 className="size-4" /> : integration.name.includes("Excel") || integration.name.includes("Sheets") ? <FileText className="size-4" /> : <Database className="size-4" />}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!isSupported}
+                  className={cn(
+                    "mt-4 h-8 rounded-full px-4 text-xs font-semibold",
+                    isSupported ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-slate-100 text-slate-500"
+                  )}
+                  onClick={() => {
+                    if (resolvedSourceName) onConnect(resolvedSourceName);
+                  }}
+                >
+                  {isSupported ? copy.connectors.connectAction : (isZh ? "即将支持" : "Soon")}
+                  {isSupported ? <ArrowRight className="size-4" /> : null}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </section>
+  );
+}
+
+function ConnectedDataDropdown({
+  copy,
+  connectedSources
+}: {
+  copy: DashboardCopy;
+  connectedSources: ConnectedSourceRow[];
+}) {
+  const isZh = copy.connectors.connectedCountLabel.includes("个");
+  const [isOpen, setIsOpen] = useState(false);
+  const [dropdownSources, setDropdownSources] = useState<ConnectedSourceRow[]>(connectedSources);
+  const [isRefreshingDropdownSources, setIsRefreshingDropdownSources] = useState(false);
+  const visibleSources = dropdownSources.length > 0 ? dropdownSources : connectedSources;
+
+  useEffect(() => {
+    if (connectedSources.length > 0) {
+      setDropdownSources(connectedSources);
+    }
+  }, [connectedSources]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const controller = new AbortController();
+    setIsRefreshingDropdownSources(true);
+
+    void fetch("/api/data-sources", {
+      cache: "no-store",
+      signal: controller.signal
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => null);
+
+      if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
+        setDropdownSources(payload.dataSources as ConnectedSourceRow[]);
+      }
+    }).catch((error) => {
+      if (error instanceof Error && error.name === "AbortError") return;
+      console.warn("[dashboard] Failed to refresh connected data dropdown", error);
+    }).finally(() => {
+      setIsRefreshingDropdownSources(false);
+    });
+
+    return () => controller.abort();
+  }, [isOpen]);
+
+  return (
+    <div className="grid w-full gap-3">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="inline-flex w-fit items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50"
+      >
+        <Database className="size-4 text-emerald-800" />
+        {isZh ? "已连接数据" : "Connected data"}
+        <ChevronDown className={cn("size-4 text-slate-500 transition", isOpen && "rotate-180")} />
+      </button>
+
+      {isOpen ? (
+        <div className="w-full max-w-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-white py-2 shadow-xl">
+          {isRefreshingDropdownSources && visibleSources.length === 0 ? (
+            <div className="flex items-center gap-3 px-4 py-5 text-sm font-semibold text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              {isZh ? "正在加载已连接数据" : "Loading connected data"}
+            </div>
+          ) : visibleSources.length > 0 ? (
+            visibleSources.map((source) => {
+              const sourceMeta = [
+                source.provider || source.type,
+                source.status || (isZh ? "已连接" : "Connected")
+              ].filter(Boolean).join(" · ");
+
+              return (
+                <div
+                  key={source.id}
+                  className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-emerald-50/70"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800">
+                      <Database className="size-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-950">{source.name}</p>
+                      <p className="mt-0.5 truncate text-xs font-medium text-slate-500">{sourceMeta}</p>
+                    </div>
+                  </div>
+                  <CheckCircle2 className="size-4 shrink-0 text-emerald-700" />
+                </div>
+              );
+            })
+          ) : (
+            <div className="px-4 py-5 text-sm font-medium text-slate-500">
+              {isZh ? "当前没有已连接的数据源" : "No connected data sources"}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -6059,11 +6148,7 @@ function ConnectorPanel({
 	  const isShopifySource = selectedSource.provider === "shopify";
 	  const isMetaAdsSource = selectedSource.provider === "meta_ads";
 	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
-  const databaseType = selectedSource.name === "PostgreSQL"
-    ? "postgresql"
-    : selectedSource.name === "MySQL"
-      ? "mysql"
-      : null;
+  const databaseType = resolveDatabaseConnectorType(selectedSource);
   const defaultDatabasePort = databaseType === "mysql" ? "3306" : "5432";
   const directApiUploadMaxBytes = Math.min(FILE_UPLOAD_MAX_BYTES, 4 * 1024 * 1024);
   const largeUploadMaxBytes = FILE_UPLOAD_MAX_BYTES;
@@ -6077,6 +6162,19 @@ function ConnectorPanel({
 	  const normalizeShopifyShopInput = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
 	  const isValidShopifyShopDomain = (value: string) => /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(value);
 	  const connectDataSource = (source: DataSourceDefinition) => {
+	    const sourceDatabaseType = resolveDatabaseConnectorType(source);
+
+	    if ((source.kind === "database" || source.kind === "warehouse") && !sourceDatabaseType) {
+	      setConnectionResult({
+	        ok: false,
+	        message: isZh
+	          ? "当前版本支持 PostgreSQL 和 MySQL 数据库连接。其他数据库和数据仓库即将支持。"
+	          : "This version supports PostgreSQL and MySQL database connections. Other databases and warehouses are coming soon."
+	      });
+	      setWizardStarted(true);
+	      return;
+	    }
+
 	    if (source.authMode === "oauth") {
 	      if (source.provider === "shopify") {
 	        const shopDomain = normalizeShopifyShopInput(shopifyShopDomain);
@@ -6534,32 +6632,17 @@ function ConnectorPanel({
   }, [selectedSource.name]);
 
   return (
-    <Card className="h-full overflow-hidden">
-      <CardHeader className="border-b p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle className="text-base">{copy.connectors.title}</CardTitle>
-            <CardDescription className="mt-1 text-sm leading-6">
-              {copy.connectors.description}
-            </CardDescription>
-          </div>
-          <Badge variant="secondary" className="w-fit shrink-0">{copy.connectors.status}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="p-4">
+    <Card className="mx-auto h-full w-full max-w-[820px] overflow-visible border-0 bg-transparent shadow-none">
+      <CardContent className="p-0">
         <div className={cn("grid gap-4", showWizard && "2xl:grid-cols-[minmax(0,1fr)_340px]")}>
           <div className="rounded-lg border bg-background">
-            <div className={cn("bg-secondary/20 p-3", showWizard ? "hidden" : "block")}>
+            <div className={cn("bg-secondary/20 px-4 py-3", showWizard ? "hidden" : "block")}>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-xs font-medium text-muted-foreground">
                   {copy.connectors.sourcePicker}
                 </p>
-	                <Button type="button" size="sm" className="h-8 rounded-full" onClick={startSelectedSourceConnection}>
-	                  {copy.connectors.connectAction}
-	                  <ArrowRight />
-	                </Button>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mx-auto grid max-w-[680px] gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {copy.connectors.sources.map((source, index) => (
                   <button
                     key={source.name}
@@ -6572,7 +6655,7 @@ function ConnectorPanel({
                       resetConnectionResult();
                     }}
                     className={cn(
-                      "rounded-md border bg-background px-3 py-2 text-left transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2",
+                      "min-h-[52px] rounded-md border bg-background px-3 py-2 text-left transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2",
                       index === selectedSourceIndex &&
                         "border-emerald-700 bg-slate-950 text-white hover:bg-slate-950"
                     )}
@@ -6602,7 +6685,13 @@ function ConnectorPanel({
                   <p className="text-sm font-semibold">{selectedSource.name}</p>
                   <p className="text-xs text-muted-foreground">{selectedSource.type}</p>
                 </div>
-                <Button asChild type="button" variant="outline" size="sm" className="ml-auto">
+                <Button
+                  asChild
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+                >
                   <a href="/dashboard/import-data">{copy.connectors.changeSourceAction}</a>
                 </Button>
               </div>
@@ -7028,6 +7117,14 @@ function ConnectorPanel({
           </div>
           ) : null}
         </div>
+        {!showWizard ? (
+          <div className="mt-3 flex justify-center">
+            <Button type="button" size="sm" className="h-8 rounded-full px-5" onClick={startSelectedSourceConnection}>
+              {copy.connectors.connectAction}
+              <ArrowRight />
+            </Button>
+          </div>
+        ) : null}
 
       </CardContent>
     </Card>
@@ -15575,38 +15672,6 @@ function ReportSetupProgress({
   );
 }
 
-function ReportDatabaseCta({
-  copy,
-  hasConnectedDatabase
-}: {
-  copy: DashboardCopy;
-  hasConnectedDatabase: boolean;
-}) {
-  return (
-    <Card className="overflow-hidden border-emerald-100 bg-gradient-to-r from-white via-emerald-50/45 to-white shadow-sm">
-      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
-            <Database className="size-5" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold">{copy.reports.databaseCtaTitle}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{copy.reports.databaseCtaEmpty}</p>
-          </div>
-        </div>
-        <Button asChild className="w-full sm:w-auto" size="sm">
-          <a href="/dashboard/import-data">
-            {hasConnectedDatabase
-              ? copy.reports.databaseCtaConnected
-              : copy.reports.databaseCtaDisconnected}
-            <ArrowRight />
-          </a>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
 const officialProblemTicketMetrics = {
   primary: [
     { id: "ticket_denominator_count", label: "工单分母数", aliases: ["ticket_denominator_count", "工单分母数"] },
@@ -16123,6 +16188,7 @@ function ReportsPage({
     decision_report?: DecisionIntelligenceReportV1 | null;
   } | null>(null);
   const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(false);
+  const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(false);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const effectiveHasConnectedDatabase = hasConnectedDatabase || reportApiHasConnectedDatabase;
 
@@ -16133,6 +16199,7 @@ function ReportsPage({
     setAnalysisDecisionReportPayload(null);
 	    setIsLoading(false);
     setIsLoadingAnalysisDecisionReport(false);
+    setHasStartedProfitOptimization(false);
 	    setIsGenerating(false);
 	    setStatusMessage(null);
 	  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources]);
@@ -16157,12 +16224,13 @@ function ReportsPage({
     void loadAnalysisReport();
   }, [loadAnalysisReport]);
 
-  const loadAnalysisDecisionReport = useCallback(async () => {
+  const loadAnalysisDecisionReport = useCallback(async (mode: "sku" | "full" = "sku") => {
     if (isLoadingConnectedSources) return null;
     setIsLoadingAnalysisDecisionReport(true);
-    setAnalysisDecisionReportPayload(null);
+    if (mode === "sku") setAnalysisDecisionReportPayload(null);
     try {
-      const response = await fetch(`/api/dashboard/ecommerce/decision-report?_=${Date.now()}`, { cache: "no-store" });
+      const modeQuery = mode === "sku" ? "mode=sku&" : "";
+      const response = await fetch(`/api/dashboard/ecommerce/decision-report?${modeQuery}_=${Date.now()}`, { cache: "no-store" });
       const payload = await response.json().catch(() => null) as typeof analysisDecisionReportPayload;
       if (response.ok && payload?.ok) {
         setAnalysisDecisionReportPayload(payload);
@@ -16174,7 +16242,12 @@ function ReportsPage({
   }, [isLoadingConnectedSources]);
 
   useEffect(() => {
-    void loadAnalysisDecisionReport();
+    void loadAnalysisDecisionReport("sku");
+  }, [loadAnalysisDecisionReport]);
+
+  const startProfitOptimization = useCallback(async () => {
+    setHasStartedProfitOptimization(true);
+    await loadAnalysisDecisionReport("full");
   }, [loadAnalysisDecisionReport]);
 
 	  const generateAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
@@ -16217,7 +16290,7 @@ function ReportsPage({
 	      }
 
 	      await loadAnalysisReport(dateRange);
-      await loadAnalysisDecisionReport();
+      await loadAnalysisDecisionReport(hasStartedProfitOptimization ? "full" : "sku");
 	      setStatusMessage(isZh ? "经营分析报告已更新。" : "Operational analysis updated.");
 	      window.dispatchEvent(new Event("monarca-report-updated"));
 	    } catch (error) {
@@ -16225,7 +16298,7 @@ function ReportsPage({
 	    } finally {
 	      setIsGenerating(false);
 	    }
-	  }, [effectiveHasConnectedDatabase, isZh, loadAnalysisDecisionReport, loadAnalysisReport, locale, selectedAnalysisDateRange]);
+	  }, [effectiveHasConnectedDatabase, hasStartedProfitOptimization, isZh, loadAnalysisDecisionReport, loadAnalysisReport, locale, selectedAnalysisDateRange]);
 
 	  const aiReport = reportData?.briefing?.payloadJson?.aiReport ?? null;
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
@@ -16280,53 +16353,40 @@ function ReportsPage({
 	    setSelectedAnalysisDateRange(nextRange);
 	  }, [analysisAvailableDateRange?.endDate, analysisAvailableDateRange?.latestDataDate, analysisAvailableDateRange?.startDate]);
 
-  return (
-    <section id="reports" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20">
-      <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
-            {copy.reports.pageBadge}
-          </span>
-          <h2 className="mt-3 text-2xl font-semibold tracking-tight">{copy.reports.pageTitle}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">{copy.reports.pageSubtitle}</p>
-        </div>
-	        <div className="flex flex-col items-end gap-3">
-	          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-	            {generatedAt ? (
-	              <div className="rounded-xl border bg-white px-3 py-2 text-xs font-medium text-muted-foreground shadow-sm">
-	                {isZh ? "上次更新时间" : "Last updated"} {formatReportDate(generatedAt)}
-	              </div>
-	            ) : (
-	              <div className="rounded-xl border bg-white px-3 py-2 text-xs font-medium text-muted-foreground shadow-sm">
-	                {isZh ? "尚未生成" : "Not generated"}
-	              </div>
-	            )}
-	            {entitlementText ? (
-	              <div className="max-w-sm rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-medium leading-5 text-emerald-900 shadow-sm">
-	                {entitlementText}
-	              </div>
-	            ) : null}
-	            {entitlement?.canGenerateReport !== false ? (
-	              <Button type="button" onClick={() => void generateAnalysisReport(resolvedAnalysisDateRange)} disabled={isGenerating}>
-	                <RefreshCw className={cn("size-4", isGenerating && "animate-spin")} />
-	                {isGenerating ? copy.reports.generatingAction : copy.reports.generateAction}
-	              </Button>
-	            ) : (
-	              <Button asChild type="button">
-	                <a href="/checkout/professional">{isZh ? "升级套餐" : "Upgrade plan"}</a>
-	              </Button>
-	            )}
-	          </div>
-	        </div>
-      </div>
+  const reportHeaderAction = (
+    <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">
+      <span>
+        {generatedAt
+          ? `${isZh ? "上次更新时间" : "Last updated"} ${formatReportDate(generatedAt)}`
+          : (isZh ? "尚未生成" : "Not generated")}
+      </span>
+      {entitlementText ? <span className="max-w-sm text-emerald-800">{entitlementText}</span> : null}
+      {entitlement?.canGenerateReport !== false ? (
+        <button
+          type="button"
+          onClick={() => void generateAnalysisReport(resolvedAnalysisDateRange)}
+          disabled={isGenerating}
+          className="inline-flex items-center gap-1.5 font-bold text-slate-950 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={cn("size-3.5", isGenerating && "animate-spin")} />
+          {isGenerating ? copy.reports.generatingAction : copy.reports.generateAction}
+        </button>
+      ) : (
+        <a href="/checkout/professional" className="font-bold text-slate-950 transition hover:text-emerald-700">
+          {isZh ? "升级套餐" : "Upgrade plan"}
+        </a>
+      )}
+    </div>
+  );
+
+	  return (
+    <section id="reports" className="dashboard-density flex min-w-0 max-w-full flex-col gap-2 overflow-hidden scroll-mt-20">
 
       {statusMessage ? (
         <div className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm">
           {statusMessage}
         </div>
       ) : null}
-
-      <ReportDatabaseCta copy={copy} hasConnectedDatabase={effectiveHasConnectedDatabase} />
 
       {isLoadingConnectedSources ? (
         <Card className="border bg-white shadow-sm">
@@ -16345,43 +16405,51 @@ function ReportsPage({
               </CardContent>
             </Card>
           ) : (
-            <DecisionAnalysisEnginePanel
-              report={analysisDecisionReportPayload?.decision_report ?? null}
-              message={analysisDecisionReportPayload?.message}
-              locale={locale}
-            />
+	            <DecisionAnalysisEnginePanel
+	              report={analysisDecisionReportPayload?.decision_report ?? null}
+	              message={analysisDecisionReportPayload?.message}
+	              locale={locale}
+                headerAction={reportHeaderAction}
+                optimizationStarted={hasStartedProfitOptimization}
+                onStartProfitOptimization={startProfitOptimization}
+                isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+	            />
           )}
         </>
       ) : isLoading ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
             <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在加载经营分析报告..." : "Loading operational analysis..."}
+            {isZh ? "正在加载中..." : "Loading..."}
           </CardContent>
         </Card>
       ) : (
-        <>
-	          {!isAnalysisCacheMiss ? (
-	            <>
-	              <OfficialLogisticsRegistryPanel metricResults={latestMetricResults} locale={locale} />
-	              <AiLogisticsAnalysisReportPanel report={aiReport} locale={locale} />
-	            </>
-	          ) : null}
-          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
-            <Card className="border bg-white shadow-sm">
-              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-                <RefreshCw className="size-4 animate-spin" />
+	        <>
+	          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
+	            <Card className="border bg-white shadow-sm">
+	              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
+	                <RefreshCw className="size-4 animate-spin" />
                 {isZh ? "正在加载决策分析模块..." : "Loading decision analysis modules..."}
               </CardContent>
             </Card>
           ) : (
-            <DecisionAnalysisEnginePanel
-              report={analysisDecisionReportPayload?.decision_report ?? null}
-              message={analysisDecisionReportPayload?.message}
-              locale={locale}
-            />
-          )}
-	        </>
+	            <DecisionAnalysisEnginePanel
+	              report={analysisDecisionReportPayload?.decision_report ?? null}
+	              message={analysisDecisionReportPayload?.message}
+		              locale={locale}
+                  headerAction={reportHeaderAction}
+                  optimizationStarted={hasStartedProfitOptimization}
+                  onStartProfitOptimization={startProfitOptimization}
+                  isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+		            />
+	          )}
+		          {!isAnalysisCacheMiss ? (
+		            <>
+		              <OfficialLogisticsRegistryPanel metricResults={latestMetricResults} locale={locale} />
+		              <AiLogisticsAnalysisReportPanel report={aiReport} locale={locale} />
+		            </>
+		          ) : null}
+		        </>
 	      )}
     </section>
   );
@@ -16591,14 +16659,12 @@ export function Dashboard({
   ecommerceDashboard?: EcommerceDashboardPayload;
 }) {
   const [locale, setLocale, isLocaleReady] = useLocale(defaultLocale);
-  const [isChatCollapsed, setIsChatCollapsed] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? []);
   const [deletedSources, setDeletedSources] = useState<ConnectedSourceRow[]>([]);
   const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(() => !connectedSourcesCache);
   const copy = dashboardCopy[getCopyLocale(locale)];
   const isReportsView = view === "reports";
-  const hasChatPanel = view !== "settings" && view !== "sales";
 
   useEffect(() => {
     setIsSidebarCollapsed(true);
@@ -16615,6 +16681,8 @@ export function Dashboard({
         ? "#sales"
       : isReportsView
         ? "#reports"
+        : view === "launch-optimizer"
+          ? "#launch-optimizer"
         : view === "settings"
           ? "#settings"
           : "#overview";
@@ -16798,22 +16866,14 @@ export function Dashboard({
         copy={copy}
         activeTarget={activeTarget}
         isCollapsed={isSidebarCollapsed}
-        onToggle={() => setIsSidebarCollapsed((current) => !current)}
       />
       <div className="min-w-0 flex h-full flex-1 flex-col overflow-hidden">
-        <Header copy={copy} locale={locale} onLocaleChange={setLocale} />
+        <Header copy={copy} activeTarget={activeTarget} locale={locale} onLocaleChange={setLocale} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <main
             className={cn(
-              "mx-auto grid min-h-full max-w-[1500px] gap-4 px-4 lg:px-6 xl:items-start",
-              isReportsView ? "py-3" : "py-5",
-              hasChatPanel
-                ? isChatCollapsed
-                  ? "xl:grid-cols-[minmax(0,1fr)_76px]"
-                  : isReportsView
-                    ? "xl:grid-cols-[minmax(0,1fr)_324px]"
-                    : "xl:grid-cols-[minmax(0,1fr)_360px]"
-                : "xl:grid-cols-1"
+              "mx-auto grid min-h-full max-w-[1500px] gap-4 px-4 lg:px-6 xl:grid-cols-1 xl:items-start",
+              isReportsView ? "py-3" : "py-5"
             )}
           >
             {view === "import-data" || view === "import-data-connect" ? (
@@ -16822,7 +16882,6 @@ export function Dashboard({
                   copy={copy}
                   connectedSources={connectedSources}
                   onAddConnectedSource={addConnectedSource}
-                  isLoadingConnectedSources={isLoadingConnectedSources}
                   connectionPage={view === "import-data-connect"}
                   initialSourceName={initialDataSource}
                 />
@@ -16857,6 +16916,10 @@ export function Dashboard({
                   isLoadingConnectedSources={isLoadingConnectedSources}
                 />
               </div>
+            ) : view === "launch-optimizer" ? (
+              <div id="launch-optimizer" className="min-w-0 xl:col-start-1">
+                <NewProductLaunchOptimizer locale={getCopyLocale(locale)} />
+              </div>
             ) : view === "report" ? (
               <div className="min-w-0 xl:col-start-1">
                 <ReportPage
@@ -16882,15 +16945,6 @@ export function Dashboard({
                 </div>
               </>
             )}
-            {hasChatPanel ? (
-              <ChatPanel
-                copy={copy}
-                isCollapsed={isChatCollapsed}
-                onToggle={() => setIsChatCollapsed((current) => !current)}
-                isReportView={isReportsView || view === "report"}
-                className="min-w-0 xl:sticky xl:top-3 xl:col-start-2 xl:row-span-4 xl:row-start-1"
-              />
-            ) : null}
           </main>
         </div>
       </div>

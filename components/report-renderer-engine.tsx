@@ -34,6 +34,8 @@ import { cn } from "@/lib/utils";
 type ReportRendererEngineProps = {
   report: DecisionIntelligenceReportV1 | null;
   message?: string;
+  showEmptyShell?: boolean;
+  locale?: RendererLocale;
 };
 
 type RendererLocale = "en" | "zh";
@@ -178,7 +180,7 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
   });
 }
 
-export function ReportRendererEngine({ report, message }: ReportRendererEngineProps) {
+export function ReportRendererEngine({ report, message, showEmptyShell = false, locale = "en" }: ReportRendererEngineProps) {
   const [skuChannel, setSkuChannel] = useState("all");
   const [inventorySearch, setInventorySearch] = useState("");
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
@@ -268,6 +270,10 @@ export function ReportRendererEngine({ report, message }: ReportRendererEnginePr
   const inventorySummary = useMemo(() => summarizeInventoryRows(inventoryRows), [inventoryRows]);
 
   if (!report) {
+    if (showEmptyShell) {
+      return <OperatingReportEmptyShell locale={locale} />;
+    }
+
     return (
       <Card className="border-amber-200 bg-amber-50">
         <CardContent className="flex items-start gap-3 p-5">
@@ -464,6 +470,22 @@ export function ReportRendererEngine({ report, message }: ReportRendererEnginePr
           </CardContent>
         </Card>
       </section>
+
+    </div>
+  );
+}
+
+function OperatingReportEmptyShell({ locale }: { locale: RendererLocale }) {
+  const isZh = locale === "zh";
+
+  return (
+    <div id="report-sku" className="grid min-h-[520px] w-full place-items-center bg-transparent px-6 text-center scroll-mt-24">
+      <p className="max-w-5xl text-4xl font-bold leading-tight tracking-tight text-slate-950 sm:text-6xl">
+        {isZh ? "连接你的数据，追踪实时利润" : "Connect your data to track real-time profit"}
+      </p>
+      <span id="report-ads" className="sr-only" />
+      <span id="report-warehouse" className="sr-only" />
+      <span id="report-customers" className="sr-only" />
     </div>
   );
 }
@@ -909,7 +931,9 @@ export function DecisionAnalysisEnginePanel({
   headerAction,
   optimizationStarted = true,
   onStartProfitOptimization,
-  isLoadingOptimization = false
+  isLoadingOptimization = false,
+  showSkuTableEmptyState = false,
+  showInitialShell = false
 }: {
   report: DecisionIntelligenceReportV1 | null;
   message?: string;
@@ -918,10 +942,24 @@ export function DecisionAnalysisEnginePanel({
   optimizationStarted?: boolean;
   onStartProfitOptimization?: () => void | Promise<void>;
   isLoadingOptimization?: boolean;
+  showSkuTableEmptyState?: boolean;
+  showInitialShell?: boolean;
 }) {
   const isZh = locale === "zh";
 
   if (!report) {
+    if (showSkuTableEmptyState || showInitialShell) {
+      return (
+        <InitialProfitOptimizationShell
+          locale={locale}
+          headerAction={headerAction}
+          showSkuTableEmptyState={showSkuTableEmptyState}
+          isLoadingOptimization={isLoadingOptimization}
+          onStartProfitOptimization={showSkuTableEmptyState ? undefined : onStartProfitOptimization}
+        />
+      );
+    }
+
     return (
       <Card className="border-amber-200 bg-amber-50 shadow-sm">
         <CardContent className="flex items-start gap-3 p-5">
@@ -944,7 +982,97 @@ export function DecisionAnalysisEnginePanel({
         optimizationStarted={optimizationStarted}
         onStartProfitOptimization={onStartProfitOptimization}
         isLoadingOptimization={isLoadingOptimization}
+        showSkuTableEmptyState={showSkuTableEmptyState}
       />
+    </section>
+  );
+}
+
+function InitialProfitOptimizationShell({
+  locale,
+  headerAction,
+  showSkuTableEmptyState,
+  isLoadingOptimization,
+  onStartProfitOptimization
+}: {
+  locale: RendererLocale;
+  headerAction?: ReactNode;
+  showSkuTableEmptyState: boolean;
+  isLoadingOptimization: boolean;
+  onStartProfitOptimization?: () => void | Promise<void>;
+}) {
+  const isZh = locale === "zh";
+
+  return (
+    <section className="min-w-0 scroll-mt-24">
+      <div className="space-y-5 bg-transparent">
+        <div className="sticky top-0 z-30 py-4">
+          <div className="mb-3 flex items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
+              {isZh ? "实时组合监控" : "Live Portfolio Monitor"}
+            </div>
+            {headerAction ?? <span className="text-xs font-medium text-slate-500">{isZh ? "加载中" : "Loading"}</span>}
+          </div>
+          {!showSkuTableEmptyState ? (
+            <div className="grid gap-0 xl:grid-cols-2">
+              <div className="min-w-0 px-5 py-3 xl:order-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "当前组合" : "Current Portfolio"}</p>
+                <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">0 SKUs</p>
+                <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
+                  <span>{isZh ? "当前预计利润" : "Estimated Profit"}: $0.00</span>
+                  <span>{isZh ? "广告预算" : "Ad Spend"}: $0.00</span>
+                </div>
+              </div>
+              <div className="min-w-0 px-5 py-3 xl:order-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "推荐优化" : "Recommended Optimization"}</p>
+                <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">0 SKUs</p>
+                <div className="mt-4 text-sm font-semibold text-emerald-900">
+                  <span>{isZh ? "预计提升" : "Impact"}: +$0.00 / +0.00%</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-3 p-4 xl:order-1 xl:p-5">
+            <div className="grid min-h-[360px] place-items-center rounded-lg bg-transparent p-0">
+              <div className="text-center">
+                <div className="space-y-5">
+                  <p className="text-lg font-bold text-slate-950">
+                    {isZh ? "开始利润优化" : "Start profit optimization"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!showSkuTableEmptyState) void onStartProfitOptimization?.();
+                    }}
+                    disabled={isLoadingOptimization}
+                    className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
+                    aria-label={isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks"}
+                  >
+                    {isLoadingOptimization ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
+          <div className="min-w-0 space-y-4 xl:order-3">
+            <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
+              <span className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm ring-1 ring-emerald-200">
+                {isZh ? "SKU 经营数据" : "SKU operating data"}
+              </span>
+              <span className="rounded-full px-4 py-2 text-sm font-semibold text-slate-500">
+                {isZh ? "SKU 优化智能" : "SKU optimization intelligence"}
+              </span>
+            </div>
+            <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
+              <EmptySkuProfitPortfolioTable locale={locale} />
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -955,7 +1083,8 @@ function SkuPortfolioOptimizationPanel({
   headerAction,
   optimizationStarted = true,
   onStartProfitOptimization,
-  isLoadingOptimization = false
+  isLoadingOptimization = false,
+  showSkuTableEmptyState = false
 }: {
   report: DecisionIntelligenceReportV1;
   locale: RendererLocale;
@@ -963,6 +1092,7 @@ function SkuPortfolioOptimizationPanel({
   optimizationStarted?: boolean;
   onStartProfitOptimization?: () => void | Promise<void>;
   isLoadingOptimization?: boolean;
+  showSkuTableEmptyState?: boolean;
 }) {
   const isZh = locale === "zh";
   const optimization = report.sku_portfolio_optimization;
@@ -1013,7 +1143,14 @@ function SkuPortfolioOptimizationPanel({
     return status !== "accepted" && status !== "rejected";
   });
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
-  const selectedDecision = selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
+  const displayedCurrentSkuCount = showSkuTableEmptyState ? 0 : currentSkuCount;
+  const displayedCurrentProfit = showSkuTableEmptyState ? 0 : summary.current_portfolio_profit;
+  const displayedAdsBudget = showSkuTableEmptyState ? 0 : summary.ads_budget_used;
+  const displayedPendingOptimizationCount = showSkuTableEmptyState ? 0 : pendingOptimizationCount;
+  const displayedExpectedProfitGain = showSkuTableEmptyState ? 0 : optimization.total_expected_profit_gain;
+  const displayedLiftRate = showSkuTableEmptyState ? 0 : liftRate;
+  const displayedPendingDecisionRows = showSkuTableEmptyState ? [] : pendingDecisionRows;
+  const selectedDecision = !showSkuTableEmptyState && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
 
@@ -1093,6 +1230,11 @@ function SkuPortfolioOptimizationPanel({
       void onStartProfitOptimization?.();
       return;
     }
+    if (showSkuTableEmptyState) {
+      setSelectedDecisionRow(null);
+      setIsSkuOperationsOpen(false);
+      return;
+    }
     const nextSelection = selectedDecision ?? pendingDecisionRows[0] ?? filteredDecisionRows[0] ?? null;
     if (nextSelection) setSelectedDecisionRow(nextSelection);
     setIsSkuOperationsOpen(false);
@@ -1111,19 +1253,19 @@ function SkuPortfolioOptimizationPanel({
 	        <div className="grid gap-0 xl:grid-cols-2">
 	          <div className="min-w-0 px-5 py-3 xl:order-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "当前组合" : "Current Portfolio"}</p>
-            <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">{numberFormat.format(currentSkuCount)} SKUs</p>
+            <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">{numberFormat.format(displayedCurrentSkuCount)} SKUs</p>
             <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
-              <span>{isZh ? "当前预计利润" : "Estimated Profit"}: {currencyDecimal.format(summary.current_portfolio_profit)}</span>
-              <span>{isZh ? "广告预算" : "Ad Spend"}: {currencyDecimal.format(summary.ads_budget_used)}</span>
+              <span>{isZh ? "当前预计利润" : "Estimated Profit"}: {currencyDecimal.format(displayedCurrentProfit)}</span>
+              <span>{isZh ? "广告预算" : "Ad Spend"}: {currencyDecimal.format(displayedAdsBudget)}</span>
             </div>
           </div>
 	          <div className="min-w-0 px-5 py-3 xl:order-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "推荐优化" : "Recommended Optimization"}</p>
-            <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">{numberFormat.format(pendingOptimizationCount)} SKUs</p>
+            <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">{numberFormat.format(displayedPendingOptimizationCount)} SKUs</p>
             <div className="mt-4 text-sm font-semibold text-emerald-900">
               <span>
                 {optimizationStarted
-                  ? `${isZh ? "预计提升" : "Impact"}: +${currencyDecimal.format(optimization.total_expected_profit_gain)} / +${percent.format(liftRate)}`
+                  ? `${isZh ? "预计提升" : "Impact"}: +${currencyDecimal.format(displayedExpectedProfitGain)} / +${percent.format(displayedLiftRate)}`
                   : (isZh ? "点击 Start 后生成优化方案" : "Start to generate optimization plan")}
               </span>
             </div>
@@ -1160,14 +1302,18 @@ function SkuPortfolioOptimizationPanel({
           </div>
         {isSkuOperationsOpen ? (
           <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
-            <SkuBreakdownTable
-              rows={visibleSkuRows}
-              channelTags={skuChannelTags}
-              selectedChannel={skuChannel}
-              onChannelChange={setSkuChannel}
-              expandedSku={expandedSku}
-              onToggleExpanded={(sku) => setExpandedSku((current) => current === sku ? null : sku)}
-            />
+            {showSkuTableEmptyState ? (
+              <EmptySkuProfitPortfolioTable locale={locale} />
+            ) : (
+              <SkuBreakdownTable
+                rows={visibleSkuRows}
+                channelTags={skuChannelTags}
+                selectedChannel={skuChannel}
+                onChannelChange={setSkuChannel}
+                expandedSku={expandedSku}
+                onToggleExpanded={(sku) => setExpandedSku((current) => current === sku ? null : sku)}
+              />
+            )}
           </div>
         ) : (
           <div className="min-w-0 rounded-lg border bg-white p-3 shadow-sm shadow-slate-950/5">
@@ -1316,7 +1462,7 @@ function SkuPortfolioOptimizationPanel({
             "min-w-0 space-y-4 rounded-lg",
             isSkuOperationsOpen ? "grid min-h-[360px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-3 shadow-xl shadow-emerald-950/5"
           )}>
-            {isSkuOperationsOpen && (!optimizationStarted || isLoadingOptimization) ? (
+            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
               <div className="text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
@@ -1325,11 +1471,12 @@ function SkuPortfolioOptimizationPanel({
                   <button
                     type="button"
                     onClick={() => {
+                      if (showSkuTableEmptyState) return;
                       setIsSkuOperationsOpen(false);
                       void onStartProfitOptimization?.();
                     }}
                     disabled={isLoadingOptimization}
-                    className="inline-grid size-12 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-950/15 transition hover:bg-indigo-700"
+                    className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a]"
                     aria-label={isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks"}
                   >
                     {isLoadingOptimization ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
@@ -1347,7 +1494,7 @@ function SkuPortfolioOptimizationPanel({
               </div>
             ) : (
               <OptimizationDecisionRail
-                rows={pendingDecisionRows}
+                rows={displayedPendingDecisionRows}
                 selectedRow={selectedDecision}
                 portfolioRowsBySku={portfolioRowsBySku}
                 trackedOutcomeRows={trackedOutcomeRows}
@@ -1370,6 +1517,23 @@ function SkuPortfolioOptimizationPanel({
       {selectedOutcomeRow ? (
         <ActionTrackingDrawer row={selectedOutcomeRow} locale={locale} onClose={() => setSelectedOutcomeRow(null)} />
       ) : null}
+    </div>
+  );
+}
+
+function EmptySkuProfitPortfolioTable({ locale }: { locale: RendererLocale }) {
+  const isZh = locale === "zh";
+
+  return (
+    <div className="grid min-h-[520px] place-items-center bg-white p-8 text-center">
+      <div className="max-w-2xl">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+          {isZh ? "推荐优化" : "Recommended Optimization"}
+        </p>
+        <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-950 sm:text-5xl">
+          {isZh ? "最大化 SKU 组合利润" : "Maximize Your SKU Profit Portfolio"}
+        </h2>
+      </div>
     </div>
   );
 }
@@ -2983,7 +3147,7 @@ function ActionDecisionButtons({
         type="button"
         onClick={(event) => onAccept(event)}
         className={cn(
-          "flex-1 rounded-md bg-emerald-700 font-semibold text-white transition hover:bg-emerald-800",
+          "flex-1 rounded-md bg-[#079669] font-semibold text-white transition hover:bg-[#067f5a]",
           compact ? "px-2 py-1 text-[11px]" : "px-3 py-2 text-sm"
         )}
       >
@@ -3097,7 +3261,7 @@ function DecisionDetailDrawer({
           <button
             type="button"
             onClick={onAccept}
-            className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+            className="rounded-md bg-[#079669] px-3 py-2 text-sm font-semibold text-white hover:bg-[#067f5a]"
           >
             Accept
           </button>

@@ -156,7 +156,7 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
               onClick={() => generatePlan()}
               aria-label={isZh ? "生成上市计划" : "Generate launch plan"}
               disabled={mode === "manual" && !manualHasInput}
-              className="flex h-12 items-center justify-center rounded-2xl bg-[#5042ee] px-7 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(61,50,245,0.24)] transition hover:bg-[#3f34d8] disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex h-12 items-center justify-center rounded-2xl bg-[#079669] px-7 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(7,150,105,0.24)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isZh ? "开始" : "Start"}
             </button>
@@ -206,7 +206,7 @@ export function NewProductLaunchOptimizer({ locale = "en" }: { locale?: "en" | "
               <div className="mx-auto lg:max-w-[240px]">
                 <button
                   type="button"
-                  className="h-11 w-full rounded-2xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800"
+                  className="h-11 w-full rounded-2xl bg-[#079669] px-4 text-sm font-semibold text-white transition hover:bg-[#067f5a]"
                 >
                   {isZh ? "Accept Plan" : "Accept Plan"}
                 </button>

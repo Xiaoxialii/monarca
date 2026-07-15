@@ -54,8 +54,8 @@ const signInCopy = {
     next: "Next",
     brand: "Monarca AI",
     title: "Welcome back",
-    description: "Continue with Google, a one-time email code, or your account password.",
-    passwordlessDescription: "Continue with a one-time email code or your account password."
+    description: "",
+    passwordlessDescription: ""
   },
   zh: {
     language: "中文（简体）",
@@ -96,10 +96,10 @@ const signInCopy = {
     createAccount: "还没有账号？",
     createAccountLink: "创建账号",
     next: "下一步",
-    brand: "蝴蝶效应",
+    brand: "Monarca AI",
     title: "欢迎回来",
-    description: "使用 Google、邮箱验证码或账号密码继续访问。",
-    passwordlessDescription: "使用邮箱验证码或账号密码继续访问。"
+    description: "",
+    passwordlessDescription: ""
   }
 } as const;
 
@@ -676,9 +676,11 @@ function SignInBrand({ copy, hideGoogle = false }: { copy: SignInCopy; hideGoogl
       <h1 className="max-w-full break-words text-4xl font-semibold leading-tight tracking-normal text-slate-950 sm:max-w-[460px] sm:text-5xl lg:text-6xl">
         {copy.title}
       </h1>
-      <p className="mt-5 max-w-full text-lg leading-8 text-slate-700 sm:max-w-[430px]">
-        {hideGoogle ? copy.passwordlessDescription : copy.description}
-      </p>
+      {(hideGoogle ? copy.passwordlessDescription : copy.description) ? (
+        <p className="mt-5 max-w-full text-lg leading-8 text-slate-700 sm:max-w-[430px]">
+          {hideGoogle ? copy.passwordlessDescription : copy.description}
+        </p>
+      ) : null}
     </div>
   );
 }

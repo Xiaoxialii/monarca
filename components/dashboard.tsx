@@ -92,10 +92,10 @@ type DataSourceDefinition = {
 const dashboardCopy = {
   en: {
     navItems: [
-      { label: "Manage Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "Profit Optimization Center", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
-      { label: "New Product Launch", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
-      { label: "Reports", href: "/dashboard/report", target: "#report", icon: FileText },
+      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+      { label: "Profit Optimization", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "Product Launch", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
+      { label: "Operating Reports", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
@@ -536,7 +536,7 @@ const dashboardCopy = {
         ["Executive summary", "Board-ready notes will be generated from trusted metrics"]
       ],
       pageBadge: "AI intelligence live",
-      pageTitle: "Profit Optimization Center",
+      pageTitle: "Profit Optimization",
       pageSubtitle:
         "Real-time business intelligence from your connected data",
       periodLabel: "Reporting period",
@@ -799,9 +799,9 @@ const dashboardCopy = {
   },
   zh: {
     navItems: [
-      { label: "管理数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "利润优化中心", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
-      { label: "新品上市优化", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
+      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+      { label: "利润优化", href: "/dashboard/reports", target: "#reports", icon: BrainCircuit },
+      { label: "产品发布", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
       { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
       { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
@@ -809,7 +809,7 @@ const dashboardCopy = {
       { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database }
     ],
     sidebar: {
-      brand: "蝴蝶效应",
+      brand: "Monarca AI",
       subtitle: "",
       statusTitle: "工作区状态",
       statusText: "连接数据后，系统会自动清洗、映射业务语义，并生成 AI 洞察",
@@ -835,7 +835,7 @@ const dashboardCopy = {
       status: "等待导入数据",
       title: "先连接数据，开启 AI 增长分析",
       description:
-        "导入团队已经在使用的系统蝴蝶效应会先自动同步、清洗并映射业务语义，再开始展示指标和洞察",
+        "导入团队已经在使用的系统，Monarca AI 会先自动同步、清洗并映射业务语义，再开始展示指标和洞察",
       primary: "导入数据源",
       secondary: "查看指标架构",
       note: "连接数据源前，不展示任何业务数据",
@@ -1229,7 +1229,7 @@ const dashboardCopy = {
         ["管理层摘要", "可信指标准备好后，会自动生成汇报说明"]
       ],
       pageBadge: "AI 实时分析",
-      pageTitle: "利润优化中心",
+      pageTitle: "利润优化",
       pageSubtitle: "来自已连接数据的实时业务智能",
       periodLabel: "报告周期",
       periodValue: "今日",
@@ -1743,6 +1743,44 @@ let connectedSourcesCache: ConnectedSourceRow[] | null = null;
 let connectedSourcesWorkspaceIdCache: string | null = null;
 let analysisReportsPageDataCache: unknown = null;
 let reportsPageDataCache: unknown = null;
+const CONNECTED_SOURCES_BROWSER_CACHE_KEY = "monarca.connectedSources.v1";
+const CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function readConnectedSourcesBrowserCache({
+  expectedWorkspaceId,
+  userId
+}: {
+  expectedWorkspaceId?: string | null;
+  userId?: string | null;
+} = {}) {
+  if (typeof window === "undefined") return null;
+  if (!expectedWorkspaceId && !userId) return null;
+
+  try {
+    const raw = window.localStorage.getItem(CONNECTED_SOURCES_BROWSER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt?: number; workspaceId?: string | null; userId?: string | null; sources?: ConnectedSourceRow[] };
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS) return null;
+    if (expectedWorkspaceId && parsed.workspaceId !== expectedWorkspaceId) return null;
+    if (!expectedWorkspaceId && userId && parsed.userId !== userId) return null;
+    return Array.isArray(parsed.sources) ? parsed.sources : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeConnectedSourcesBrowserCache(sources: ConnectedSourceRow[], workspaceId: string | null, userId?: string | null) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CONNECTED_SOURCES_BROWSER_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), workspaceId, userId: userId ?? null, sources })
+    );
+  } catch {
+    // Ignore storage failures; the in-memory cache still works during this session.
+  }
+}
 
 function Sidebar({
   copy,
@@ -1754,7 +1792,7 @@ function Sidebar({
   isCollapsed: boolean;
 }) {
   const { isLoaded, isSignedIn, user } = useUser();
-  const isZh = copy.sidebar.brand === "蝴蝶效应";
+  const isZh = copy.header.help === "帮助";
   const [entitlement, setEntitlement] = useState<BillingEntitlementSummary | null>(() => null);
   const [isLoadingEntitlement, setIsLoadingEntitlement] = useState(true);
   const accountName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? "";
@@ -1770,9 +1808,7 @@ function Sidebar({
     entitlement?.planType === "MONTHLY"
       ? isZh ? "专业版" : "Professional"
       : isZh ? "免费版" : "Free";
-  const planActionLabel = entitlement?.planType === "FREE" || !entitlement
-    ? copy.sidebar.subscribe
-    : isZh ? "套餐" : "Plan";
+  const planStatusLabel = isZh ? "当前套餐" : "Current plan";
 
   useEffect(() => {
     if (!isLoaded) {
@@ -1845,7 +1881,7 @@ function Sidebar({
         key={item.label}
         href={item.href}
         className={cn(
-          "group relative z-10 flex w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:z-50 hover:bg-secondary hover:text-foreground",
+          "group relative z-[110] flex w-full items-center rounded-md text-sm font-medium text-muted-foreground transition hover:z-[10000] hover:bg-secondary hover:text-foreground focus-visible:z-[10000]",
           isCollapsed ? "min-h-12 justify-center px-0 py-1.5" : "h-9 gap-2 px-2",
           isCollapsed && isActive && "bg-secondary text-foreground",
           isActive && "bg-secondary text-foreground"
@@ -1859,7 +1895,7 @@ function Sidebar({
           isCollapsed && "sr-only"
         )}>{item.label}</span>
         {isCollapsed ? (
-          <span className="pointer-events-none absolute left-[calc(100%+0.75rem)] top-1/2 z-[9999] max-w-none -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-950 px-3 py-2 text-center text-sm font-semibold leading-snug text-white opacity-0 shadow-2xl transition [writing-mode:horizontal-tb] before:absolute before:-left-1 before:top-1/2 before:size-2 before:-translate-y-1/2 before:rotate-45 before:bg-slate-950 before:content-[''] group-hover:opacity-100 group-focus-visible:opacity-100">
+          <span className="pointer-events-none absolute left-[calc(100%+0.75rem)] top-1/2 z-[10000] max-w-none -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-950 px-3 py-2 text-center text-sm font-semibold leading-snug text-white opacity-0 shadow-[0_18px_45px_rgba(2,6,23,0.28)] transition [writing-mode:horizontal-tb] before:absolute before:-left-1 before:top-1/2 before:size-2 before:-translate-y-1/2 before:rotate-45 before:bg-slate-950 before:content-[''] group-hover:opacity-100 group-focus-visible:opacity-100">
             {item.label}
           </span>
         ) : null}
@@ -1872,7 +1908,7 @@ function Sidebar({
   return (
     <aside
       className={cn(
-        "hidden h-screen shrink-0 flex-col border-r bg-white/72 px-3 pb-4 pt-4 backdrop-blur transition-[width] duration-200 lg:flex",
+        "relative z-[100] hidden h-screen shrink-0 flex-col border-r bg-white px-3 pb-4 pt-4 transition-[width] duration-200 lg:flex",
         isCollapsed ? "w-20 overflow-visible" : "w-64"
       )}
     >
@@ -1926,10 +1962,10 @@ function Sidebar({
             </div>
           )
         ) : isCollapsed ? (
-          <a
-            href="/checkout/professional"
+          <button
+            type="button"
             title={`${accountName}${currentPlan ? ` · ${currentPlan}` : ""}`}
-            className="mx-auto grid size-10 place-items-center overflow-hidden rounded-full bg-teal-600 text-sm font-semibold text-white transition hover:bg-teal-700"
+            className="mx-auto grid size-10 place-items-center overflow-hidden rounded-full bg-teal-600 text-sm font-semibold text-white"
           >
             {accountImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1937,12 +1973,11 @@ function Sidebar({
             ) : (
               accountInitials
             )}
-          </a>
+          </button>
         ) : (
           <div className="px-2">
-            <a
-              href="/checkout/professional"
-              className="flex items-end justify-between gap-3 rounded-lg px-1.5 py-1.5 transition hover:bg-secondary/75"
+            <div
+              className="flex items-end justify-between gap-3 rounded-lg px-1.5 py-1.5"
             >
               <div className="flex min-w-0 items-end gap-2.5">
                 <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-teal-600 text-sm font-semibold text-white">
@@ -1961,9 +1996,9 @@ function Sidebar({
                 </div>
               </div>
               <span className="inline-flex h-7 shrink-0 items-center rounded-md border bg-secondary/35 px-2 text-xs font-medium text-muted-foreground">
-                {planActionLabel}
+                {planStatusLabel}
               </span>
-            </a>
+            </div>
           </div>
         )}
         {settingsNavItem ? (
@@ -1988,7 +2023,7 @@ function Header({
   onLocaleChange: (locale: Locale) => void;
 }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
-  const isZh = copy.sidebar.brand === "蝴蝶效应";
+  const isZh = getCopyLocale(locale) === "zh";
   const currentPageTitle = navLabel(copy, activeTarget) || (isZh ? "工作台" : "Workspace");
   const mobileNavItems = copy.navItems
     .filter((item) => item.href === "/dashboard/report" || item.href === "/dashboard/settings")
@@ -5560,12 +5595,16 @@ function ImportDataSection({
   copy,
   connectedSources,
   onAddConnectedSource,
+  onRemoveConnectedSource,
+  isLoadingConnectedSources,
   connectionPage = false,
   initialSourceName
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
   onAddConnectedSource: (source: ConnectedSourceRow) => void;
+  onRemoveConnectedSource: (sourceId: string) => void;
+  isLoadingConnectedSources: boolean;
   connectionPage?: boolean;
   initialSourceName?: string;
 }) {
@@ -5585,6 +5624,8 @@ function ImportDataSection({
           <DataSourcesWorkspace
             copy={copy}
             connectedSources={connectedSources}
+            onRemoveConnectedSource={onRemoveConnectedSource}
+            isLoadingConnectedSources={isLoadingConnectedSources}
             onConnect={(sourceName) => {
               if (typeof window !== "undefined") {
                 window.location.href = `/dashboard/import-data/connect?source=${encodeURIComponent(sourceName)}`;
@@ -5624,6 +5665,16 @@ function inferBusinessSourceKey(source: ConnectedSourceRow) {
   if (value.includes("shopify")) return "shopify";
   if (value.includes("meta") || value.includes("facebook") || value.includes("ad")) return "meta_ads";
   if (value.includes("amazon")) return "amazon";
+  if (
+    value.includes("excel") ||
+    value.includes("csv") ||
+    value.includes("xlsx") ||
+    value.includes("xls") ||
+    value.includes("file") ||
+    value.includes("upload")
+  ) {
+    return "file";
+  }
   if (value.includes("inventory") || value.includes("stock")) return "inventory";
   if (
     value.includes("database") ||
@@ -5709,6 +5760,15 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       ]
     },
     {
+      id: "file",
+      name: isZh ? "上传数据" : "Uploaded data",
+      typeLabel: isZh ? "文件数据源" : "File source",
+      summaryLabel: isZh ? "上传的 Excel、CSV 和业务文件" : "Uploaded Excel, CSV, and business files",
+      fallbackDatasets: [
+        { name: isZh ? "上传文件" : "Uploaded files", rowsLabel: "ready" }
+      ]
+    },
+    {
       id: "database",
       name: isZh ? "业务数据库" : "Database",
       typeLabel: isZh ? "数据仓库" : "Data warehouse",
@@ -5779,19 +5839,23 @@ function resolveConnectorSourceName(name: string, copy: DashboardCopy) {
 function DataSourcesWorkspace({
   copy,
   connectedSources,
+  onRemoveConnectedSource,
+  isLoadingConnectedSources,
   onConnect
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
+  onRemoveConnectedSource: (sourceId: string) => void;
+  isLoadingConnectedSources: boolean;
   onConnect: (sourceName: string) => void;
 }) {
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [workspaceSources, setWorkspaceSources] = useState<ConnectedSourceRow[]>(connectedSources);
-  const [isRefreshingSources, setIsRefreshingSources] = useState(false);
   const businessSources = useMemo(
     () => buildBusinessSources(workspaceSources.length > 0 ? workspaceSources : connectedSources, isZh),
     [connectedSources, isZh, workspaceSources]
   );
+  const hasAnyKnownSources = connectedSources.length > 0 || workspaceSources.length > 0;
 
   useEffect(() => {
     if (connectedSources.length > 0) {
@@ -5799,79 +5863,69 @@ function DataSourcesWorkspace({
     }
   }, [connectedSources]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setIsRefreshingSources(true);
-
-    void fetch("/api/data-sources", {
-      cache: "no-store",
-      signal: controller.signal
-    }).then(async (response) => {
-      const payload = await response.json().catch(() => null);
-      if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
-        setWorkspaceSources(payload.dataSources as ConnectedSourceRow[]);
-      }
-    }).catch((error) => {
-      if (error instanceof Error && error.name === "AbortError") return;
-      console.warn("[dashboard] Failed to refresh data sources workspace", error);
-    }).finally(() => {
-      setIsRefreshingSources(false);
-    });
-
-    return () => controller.abort();
-  }, []);
-
+  const removeBusinessSource = (source: BusinessSourceView) => {
+    const sourceIds = source.sourceRows.map((row) => row.id);
+    setWorkspaceSources((current) => current.filter((row) => !sourceIds.includes(row.id)));
+    sourceIds.forEach((sourceId) => onRemoveConnectedSource(sourceId));
+  };
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(300px,400px)_minmax(0,1fr)] xl:items-start">
-      <section className="min-w-0 overflow-hidden rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold tracking-tight text-slate-950">
-              {isZh ? "已连接业务源" : "Connected Sources"}
-            </h3>
+      <section className="mt-6 min-w-0 overflow-hidden rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 xl:mt-10">
+          <div className="flex items-center justify-between gap-3">
+            <div className="w-full">
+              <h3 className="text-center text-lg font-semibold tracking-tight text-slate-950">
+                {isZh ? "已连接业务源" : "Connected Sources"}
+              </h3>
+            </div>
           </div>
-        </div>
 
-        {isRefreshingSources && businessSources.length === 0 ? (
-          <div className="mt-5 rounded-3xl bg-slate-50 p-8 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
-            <Loader2 className="mr-2 inline size-4 animate-spin" />
-            {isZh ? "正在加载已连接业务源" : "Loading connected business sources"}
-          </div>
-        ) : businessSources.length > 0 ? (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            {businessSources.map((source) => (
-              <div
-                key={source.id}
-                className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="grid size-11 place-items-center rounded-2xl bg-emerald-50 text-emerald-800">
+          {(isLoadingConnectedSources || hasAnyKnownSources) && businessSources.length === 0 ? (
+            <div className="mt-5 rounded-3xl bg-slate-50 p-8 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
+              <Loader2 className="mr-2 inline size-4 animate-spin" />
+              {isZh ? "正在加载已连接业务源" : "Loading connected business sources"}
+            </div>
+          ) : businessSources.length > 0 ? (
+            <div className="mt-5 grid max-h-[520px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-1">
+              {businessSources.map((source) => (
+                <div
+                  key={source.id}
+                  className="relative flex items-center gap-4 rounded-[28px] border border-slate-200 bg-white p-4 transition hover:border-slate-300 hover:bg-slate-50/60"
+                >
+                  <button
+                    type="button"
+                    className="absolute -right-2.5 -top-2.5 grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                    aria-label={`${isZh ? "删除" : "Delete"} ${source.name}`}
+                    onClick={() => removeBusinessSource(source)}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                  <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-600">
                     {businessSourceIcon(source.id)}
                   </span>
-                  <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
-                    {source.statusLabel}
-                  </Badge>
-                </div>
-                <h4 className="mt-4 text-lg font-semibold text-slate-950">{source.name}</h4>
-                <p className="mt-1 text-sm font-medium text-slate-500">{source.typeLabel}</p>
-                <div className="mt-5 grid gap-2 text-sm font-medium text-slate-600">
-                  <div className="flex justify-between gap-3">
-                    <span>{isZh ? "数据集" : "Datasets"}</span>
-                    <span className="text-slate-950">{source.datasets.length}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-base font-semibold text-slate-950">{source.name}</h4>
+                        <p className="mt-1 truncate text-sm font-medium text-slate-500">{source.typeLabel}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                        {source.statusLabel}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500">
+                      <span>{source.datasets.length} {isZh ? "个数据集" : source.datasets.length === 1 ? "dataset" : "datasets"}</span>
+                      <span className="size-1 rounded-full bg-slate-300" aria-hidden="true" />
+                      <span>{isZh ? "最近同步" : "Last sync"} {source.lastSyncLabel}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between gap-3">
-                    <span>{isZh ? "最近同步" : "Last sync"}</span>
-                    <span className="text-slate-950">{source.lastSyncLabel}</span>
-                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm font-semibold text-slate-500">
-            {isZh ? "当前没有已连接业务源。请从下方分类选择要连接的系统。" : "No connected business sources yet. Choose an integration below to start."}
-          </div>
-        )}
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm font-semibold text-slate-500">
+              {isZh ? "连接你的电商数据，解锁 AI 利润智能。" : "Connect your commerce data. Unlock AI profit intelligence."}
+            </div>
+          )}
       </section>
 
       <AvailableIntegrationsWorkspace copy={copy} onConnect={onConnect} />
@@ -5927,16 +5981,13 @@ function AvailableIntegrationsWorkspace({
   const activeGroup = groups[activeGroupIndex] ?? groups[0];
 
   return (
-    <section className="mx-auto w-full max-w-[860px] rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold tracking-tight text-slate-950">
-            {isZh ? "可连接集成" : "Available Integrations"}
-          </h3>
-        </div>
-      </div>
+    <div className="mx-auto mt-6 w-full max-w-[860px] xl:mt-10">
+      <h3 className="text-center text-lg font-semibold tracking-tight text-slate-950">
+        {isZh ? "一键连接你的电商数据" : "Connect your commerce data in one click"}
+      </h3>
 
-      <div className="mt-5 flex justify-center">
+      <section className="mt-5 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div className="flex justify-center">
         <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-full bg-slate-100 p-1">
           {groups.map((group, index) => {
             const isActive = index === activeGroupIndex;
@@ -5958,7 +6009,7 @@ function AvailableIntegrationsWorkspace({
         </div>
       </div>
 
-      <div className="mx-auto mt-5 max-w-[760px] rounded-3xl bg-slate-50 p-4">
+      <div className="mx-auto mt-5 max-h-[520px] max-w-[760px] overflow-y-auto rounded-3xl bg-slate-50 p-4">
         <div className="grid gap-3 sm:grid-cols-2">
           {activeGroup.integrations.map((integration) => {
             const resolvedSourceName = resolveConnectorSourceName(integration.name, copy);
@@ -5975,27 +6026,26 @@ function AvailableIntegrationsWorkspace({
                     {integration.name.includes("Ads") ? <BarChart3 className="size-4" /> : integration.name.includes("Excel") || integration.name.includes("Sheets") ? <FileText className="size-4" /> : <Database className="size-4" />}
                   </span>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!isSupported}
-                  className={cn(
-                    "mt-4 h-8 rounded-full px-4 text-xs font-semibold",
-                    isSupported ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-slate-100 text-slate-500"
-                  )}
-                  onClick={() => {
-                    if (resolvedSourceName) onConnect(resolvedSourceName);
-                  }}
-                >
-                  {isSupported ? copy.connectors.connectAction : (isZh ? "即将支持" : "Soon")}
-                  {isSupported ? <ArrowRight className="size-4" /> : null}
-                </Button>
+                {isSupported ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-4 h-8 rounded-full bg-[#079669] px-4 text-xs font-semibold text-white hover:bg-[#067f5a]"
+                    onClick={() => {
+                      if (resolvedSourceName) onConnect(resolvedSourceName);
+                    }}
+                  >
+                    {copy.connectors.connectAction}
+                    <ArrowRight className="size-4" />
+                  </Button>
+                ) : null}
               </div>
             );
           })}
         </div>
       </div>
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -7119,7 +7169,7 @@ function ConnectorPanel({
         </div>
         {!showWizard ? (
           <div className="mt-3 flex justify-center">
-            <Button type="button" size="sm" className="h-8 rounded-full px-5" onClick={startSelectedSourceConnection}>
+            <Button type="button" size="sm" className="h-8 rounded-full bg-[#079669] px-5 text-white hover:bg-[#067f5a]" onClick={startSelectedSourceConnection}>
               {copy.connectors.connectAction}
               <ArrowRight />
             </Button>
@@ -16205,7 +16255,7 @@ function ReportsPage({
 	  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources]);
 
 	  const loadAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
-	    if (isLoadingConnectedSources) return null;
+	    if (isLoadingConnectedSources || !effectiveHasConnectedDatabase) return null;
 	    setIsLoading(true);
 	    try {
 	      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=${analysisReportModeForRange(dateRange.preset)}`, { cache: "no-store" });
@@ -16218,14 +16268,14 @@ function ReportsPage({
 	    } finally {
 	      setIsLoading(false);
 	    }
-	  }, [isLoadingConnectedSources, selectedAnalysisDateRange]);
+	  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources, selectedAnalysisDateRange]);
 
   useEffect(() => {
     void loadAnalysisReport();
   }, [loadAnalysisReport]);
 
   const loadAnalysisDecisionReport = useCallback(async (mode: "sku" | "full" = "sku") => {
-    if (isLoadingConnectedSources) return null;
+    if (isLoadingConnectedSources || !effectiveHasConnectedDatabase) return null;
     setIsLoadingAnalysisDecisionReport(true);
     if (mode === "sku") setAnalysisDecisionReportPayload(null);
     try {
@@ -16239,7 +16289,7 @@ function ReportsPage({
     } finally {
       setIsLoadingAnalysisDecisionReport(false);
     }
-  }, [isLoadingConnectedSources]);
+  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources]);
 
   useEffect(() => {
     void loadAnalysisDecisionReport("sku");
@@ -16305,6 +16355,8 @@ function ReportsPage({
 	  const generatedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
 	  const isAnalysisCacheMiss = reportData?.briefing?.payloadJson?.cache?.status === "miss";
 	  const shouldShowEmptyAnalysisState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
+	  const shouldShowSkuTableEmptyState = isLoadingConnectedSources || !hasConnectedDatabase;
+	  const shouldShowInitialAnalysisShell = isLoadingConnectedSources || isLoading || (isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload);
 	  const entitlement = reportData?.reportEntitlement;
 	  const entitlementText = reportEntitlementMessage(entitlement, locale);
 	  const latestPayloadAudit = reportData?.briefing?.payloadJson?.reportDataAudit;
@@ -16389,60 +16441,46 @@ function ReportsPage({
       ) : null}
 
       {isLoadingConnectedSources ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-            <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在加载数据源状态..." : "Loading data source status..."}
-          </CardContent>
-        </Card>
+        <div className="min-h-[640px]" aria-busy="true" />
       ) : shouldShowEmptyAnalysisState ? (
         <>
-          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
-            <Card className="border bg-white shadow-sm">
-              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-                <RefreshCw className="size-4 animate-spin" />
-                {isZh ? "正在加载决策分析模块..." : "Loading decision analysis modules..."}
-              </CardContent>
-            </Card>
-          ) : (
-	            <DecisionAnalysisEnginePanel
-	              report={analysisDecisionReportPayload?.decision_report ?? null}
-	              message={analysisDecisionReportPayload?.message}
-	              locale={locale}
-                headerAction={reportHeaderAction}
-                optimizationStarted={hasStartedProfitOptimization}
-                onStartProfitOptimization={startProfitOptimization}
-                isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
-	            />
-          )}
+          <DecisionAnalysisEnginePanel
+            report={analysisDecisionReportPayload?.decision_report ?? null}
+            message={analysisDecisionReportPayload?.message}
+            locale={locale}
+            headerAction={reportHeaderAction}
+            optimizationStarted={hasStartedProfitOptimization}
+            onStartProfitOptimization={startProfitOptimization}
+            isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+            showSkuTableEmptyState
+            showInitialShell={shouldShowInitialAnalysisShell}
+          />
         </>
       ) : isLoading ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-            <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在加载中..." : "Loading..."}
-          </CardContent>
-        </Card>
+        <DecisionAnalysisEnginePanel
+          report={analysisDecisionReportPayload?.decision_report ?? null}
+          message={analysisDecisionReportPayload?.message}
+          locale={locale}
+          headerAction={reportHeaderAction}
+          optimizationStarted={hasStartedProfitOptimization}
+          onStartProfitOptimization={startProfitOptimization}
+          isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+          showSkuTableEmptyState={shouldShowSkuTableEmptyState}
+          showInitialShell
+        />
       ) : (
 	        <>
-	          {isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload ? (
-	            <Card className="border bg-white shadow-sm">
-	              <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
-	                <RefreshCw className="size-4 animate-spin" />
-                {isZh ? "正在加载决策分析模块..." : "Loading decision analysis modules..."}
-              </CardContent>
-            </Card>
-          ) : (
-	            <DecisionAnalysisEnginePanel
-	              report={analysisDecisionReportPayload?.decision_report ?? null}
-	              message={analysisDecisionReportPayload?.message}
-		              locale={locale}
-                  headerAction={reportHeaderAction}
-                  optimizationStarted={hasStartedProfitOptimization}
-                  onStartProfitOptimization={startProfitOptimization}
-                  isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
-		            />
-	          )}
+	          <DecisionAnalysisEnginePanel
+	            report={analysisDecisionReportPayload?.decision_report ?? null}
+	            message={analysisDecisionReportPayload?.message}
+		          locale={locale}
+              headerAction={reportHeaderAction}
+              optimizationStarted={hasStartedProfitOptimization}
+              onStartProfitOptimization={startProfitOptimization}
+              isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+              showSkuTableEmptyState={shouldShowSkuTableEmptyState}
+              showInitialShell={shouldShowInitialAnalysisShell}
+	          />
 		          {!isAnalysisCacheMiss ? (
 		            <>
 		              <OfficialLogisticsRegistryPanel metricResults={latestMetricResults} locale={locale} />
@@ -16488,7 +16526,7 @@ function ReportPage({
     && decisionReportPayload?.state !== "ready";
 
   const loadDecisionReport = useCallback(async () => {
-    if (isLoadingConnectedSources) return;
+    if (isLoadingConnectedSources || !hasConnectedDatabase) return;
 
     const cacheKey = reportDateRangeQuery(decisionReportRange);
     setIsLoadingDecisionReport(true);
@@ -16510,7 +16548,7 @@ function ReportPage({
     } finally {
       setIsLoadingDecisionReport(false);
     }
-  }, [decisionReportRange, isLoadingConnectedSources, isZh]);
+  }, [decisionReportRange, hasConnectedDatabase, isLoadingConnectedSources, isZh]);
 
   const handleDecisionReportRangeChange = useCallback((range: ReportTimeRange) => {
     setDecisionReportRange((current) => ({
@@ -16531,7 +16569,10 @@ function ReportPage({
   useEffect(() => {
     if (isLoadingConnectedSources) return;
     if (!hasConnectedDatabase) {
+      setDecisionReportPayload(null);
       setDecisionReportError(null);
+      setIsLoadingDecisionReport(false);
+      return;
     }
 
     void loadDecisionReport();
@@ -16541,17 +16582,12 @@ function ReportPage({
     <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
       <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{isZh ? "经营报表" : "Operating Reports"}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {isZh
-              ? "查看经营指标、结构拆解与 AI 经营总结"
-              : "Review business metrics, breakdowns, and AI operating summaries"}
-          </p>
+          <ReportSectionNav isZh={isZh} />
         </div>
         <Button
           type="button"
           onClick={() => void loadDecisionReport()}
-          disabled={isLoadingDecisionReport || isLoadingConnectedSources}
+          disabled={isLoadingDecisionReport || isLoadingConnectedSources || !hasConnectedDatabase}
         >
           <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
           {isLoadingDecisionReport ? (isZh ? "加载中..." : "Loading...") : (isZh ? "刷新报表" : "Refresh report")}
@@ -16570,7 +16606,9 @@ function ReportPage({
         />
       </div>
 
-      {isLoadingConnectedSources || (isLoadingDecisionReport && !decisionReportPayload) ? (
+      {isLoadingConnectedSources || !hasConnectedDatabase ? (
+        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+      ) : isLoadingDecisionReport && !decisionReportPayload ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-muted-foreground">
             <RefreshCw className="size-4 animate-spin" />
@@ -16581,6 +16619,7 @@ function ReportPage({
         <ReportRendererEngine
           report={decisionReportPayload?.decision_report ?? null}
           message={decisionReportPayload?.message}
+          locale={locale}
         />
       ) : decisionReportError ? (
         <Card className="border-rose-200 bg-rose-50 shadow-sm">
@@ -16615,7 +16654,7 @@ function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; place
     { href: "#report-sku", label: isZh ? "SKU" : "SKU", icon: Table2 },
     { href: "#report-ads", label: isZh ? "广告" : "Ads", icon: BarChart3 },
     { href: "#report-warehouse", label: isZh ? "仓库" : "Warehouse", icon: Database },
-    { href: "#report-customers", label: isZh ? "客户" : "Customers", icon: Users }
+    { href: "#report-customers", label: isZh ? "用户" : "Customers", icon: Users }
   ];
   const isSidebar = placement === "sidebar";
 
@@ -16659,16 +16698,27 @@ export function Dashboard({
   ecommerceDashboard?: EcommerceDashboardPayload;
 }) {
   const [locale, setLocale, isLocaleReady] = useLocale(defaultLocale);
+  const { isLoaded: isUserLoaded, user } = useUser();
+  const initialBrowserConnectedSourcesCache = readConnectedSourcesBrowserCache({ userId: user?.id });
+  const hasInitialConnectedSourcesCache = connectedSourcesCache !== null || initialBrowserConnectedSourcesCache !== null;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
-  const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? []);
+  const [connectedSources, setConnectedSources] = useState<ConnectedSourceRow[]>(() => connectedSourcesCache ?? initialBrowserConnectedSourcesCache ?? []);
   const [deletedSources, setDeletedSources] = useState<ConnectedSourceRow[]>([]);
-  const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(() => !connectedSourcesCache);
+  const [isLoadingConnectedSources, setIsLoadingConnectedSources] = useState(() => !hasInitialConnectedSourcesCache);
   const copy = dashboardCopy[getCopyLocale(locale)];
   const isReportsView = view === "reports";
 
   useEffect(() => {
     setIsSidebarCollapsed(true);
-  }, []);
+    if (isUserLoaded && connectedSourcesCache === null) {
+      const cachedSources = readConnectedSourcesBrowserCache({ expectedWorkspaceId: connectedSourcesWorkspaceIdCache, userId: user?.id });
+      if (cachedSources) {
+        connectedSourcesCache = cachedSources;
+        setConnectedSources(cachedSources);
+        setIsLoadingConnectedSources(false);
+      }
+    }
+  }, [isUserLoaded, user?.id]);
 
   const activeTarget =
     view === "import-data" || view === "import-data-connect"
@@ -16805,8 +16855,10 @@ export function Dashboard({
     });
   };
 
-  const loadConnectedSources = useCallback(async () => {
-    setIsLoadingConnectedSources(true);
+  const loadConnectedSources = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!silent) {
+      setIsLoadingConnectedSources(true);
+    }
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 12000);
 
@@ -16831,6 +16883,7 @@ export function Dashboard({
         }
         connectedSourcesWorkspaceIdCache = nextWorkspaceId;
         connectedSourcesCache = nextSources;
+        writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId, user?.id);
         setConnectedSources(nextSources);
         setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
       }
@@ -16840,10 +16893,11 @@ export function Dashboard({
       window.clearTimeout(timeoutId);
       setIsLoadingConnectedSources(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
-    void loadConnectedSources();
+    const hasWarmCache = connectedSourcesCache !== null;
+    void loadConnectedSources({ silent: hasWarmCache });
 
     const refreshConnectedSources = () => {
       void loadConnectedSources();
@@ -16882,6 +16936,8 @@ export function Dashboard({
                   copy={copy}
                   connectedSources={connectedSources}
                   onAddConnectedSource={addConnectedSource}
+                  onRemoveConnectedSource={removeConnectedSource}
+                  isLoadingConnectedSources={isLoadingConnectedSources}
                   connectionPage={view === "import-data-connect"}
                   initialSourceName={initialDataSource}
                 />

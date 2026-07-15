@@ -61,9 +61,8 @@ const consultingCopy: Record<CopyLocale, {
       { label: "Reports", href: "/#reports" },
       { label: "Pricing", href: "/#pricing" }
     ],
-    heroTitle: "Book a 30-min Business Consultation",
-    heroSubtitle:
-      "Tell us about your business goals and data setup. We’ll help you identify the right data sources, define key metrics, and design automated business reports for your team.",
+    heroTitle: "Book a business consultation",
+    heroSubtitle: "",
     heroNote:
       "Best for teams that want to automate daily, weekly, and monthly business analysis while reducing manual data cleanup and reporting work.",
     clarifyTitle: "What this consultation helps clarify",
@@ -107,16 +106,15 @@ const consultingCopy: Record<CopyLocale, {
     trustTags: ["Data integration", "Metric system setup", "Automated business reports"]
   },
   zh: {
-    brand: "蝴蝶效应",
+    brand: "Monarca AI",
     langLabel: "切换语言",
     nav: [
       { label: "数据源", href: "/#sources" },
       { label: "报告", href: "/#reports" },
       { label: "价格", href: "/#pricing" }
     ],
-    heroTitle: "预约 30 分钟商业咨询",
-    heroSubtitle:
-      "告诉我们你的业务目标和数据现状，我们会帮你判断适合接入哪些数据源、如何设计指标体系，以及可以自动生成哪些经营报告。",
+    heroTitle: "预约商业咨询",
+    heroSubtitle: "",
     heroNote:
       "适合希望自动化日报、周报、月经营分析，并减少人工整理数据和制作报告的团队。",
     clarifyTitle: "这次咨询可以帮你明确什么？",
@@ -124,7 +122,7 @@ const consultingCopy: Record<CopyLocale, {
       "你的业务数据目前适合接入哪些数据源",
       "哪些指标应该作为团队的核心经营指标",
       "日报、周报和月经营分析应该如何设计",
-      "蝴蝶效应可以如何帮助你发现异常、定位原因并生成行动建议"
+      "Monarca AI 可以如何帮助你发现异常、定位原因并生成行动建议"
     ],
     formTitle: "提交预约申请",
     formText: "留下你的联系方式，我们会尽快与你沟通业务、数据和报告需求。",
@@ -155,7 +153,7 @@ const consultingCopy: Record<CopyLocale, {
     error: "预约申请提交失败，请稍后重试。",
     trustTitle: "不是普通 AI 总结，而是基于业务数据的经营分析",
     trustText:
-      "蝴蝶效应会结合你的数据源、指标口径和业务目标，帮助团队自动生成可解释、可追踪、可行动的经营报告。",
+      "Monarca AI 会结合你的数据源、指标口径和业务目标，帮助团队自动生成可解释、可追踪、可行动的经营报告。",
     trustTags: ["数据接入", "指标体系配置", "自动化经营报告"]
   }
 };
@@ -243,13 +241,6 @@ export function ConsultingPage() {
           <Link href="/" className="flex items-center" aria-label={copy.brand}>
             <BrandLogo label={copy.brand} className="h-10 sm:h-11" />
           </Link>
-          <div className="hidden items-center gap-6 lg:flex">
-            {copy.nav.map((item) => (
-              <Link key={item.label} href={item.href} className="text-xs font-medium text-slate-500 transition hover:text-slate-950">
-                {item.label}
-              </Link>
-            ))}
-          </div>
           <label className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
             <Languages className="size-4" />
             <span className="sr-only">{copy.langLabel}</span>
@@ -278,9 +269,11 @@ export function ConsultingPage() {
           <h1 className="mt-6 max-w-3xl text-4xl font-semibold leading-[1.08] tracking-normal text-slate-950 sm:text-5xl lg:text-[3.5rem]">
             {copy.heroTitle}
           </h1>
-          <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">
-            {copy.heroSubtitle}
-          </p>
+          {copy.heroSubtitle ? (
+            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">
+              {copy.heroSubtitle}
+            </p>
+          ) : null}
         </div>
 
         <aside className="mx-auto w-full max-w-[460px] rounded-[28px] border border-slate-200/80 bg-white/92 p-5 shadow-[0_22px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6 lg:mx-0">

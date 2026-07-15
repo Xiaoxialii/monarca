@@ -87,7 +87,7 @@ const supportCopy: Record<
     ]
   },
   zh: {
-    brand: "蝴蝶效应",
+    brand: "Monarca AI",
     back: "返回工作台",
     badge: "客服支持",
     title: "提交客服工单",

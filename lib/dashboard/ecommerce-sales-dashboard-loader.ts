@@ -40,6 +40,10 @@ const TABLE_NAMES = [
   "ecommerce_inventory"
 ] as const;
 
+function localArtifactFallbackEnabled() {
+  return process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true";
+}
+
 export async function loadEcommerceSalesDashboardData(input: {
   workspaceId: string;
   dataSourceId?: string | null;
@@ -50,7 +54,9 @@ export async function loadEcommerceSalesDashboardData(input: {
   try {
     snapshots = await findLatestEcommerceCanonicalSnapshots(input);
   } catch (error) {
-    const localDataset = loadLatestLocalCanonicalArtifactDataset(input.workspaceId);
+    const localDataset = localArtifactFallbackEnabled()
+      ? loadLatestLocalCanonicalArtifactDataset(input.workspaceId)
+      : null;
 
     if (localDataset) {
       return buildLocalArtifactDashboardResult(
@@ -74,7 +80,9 @@ export async function loadEcommerceSalesDashboardData(input: {
   }
 
   if (!snapshots.length) {
-    const localDataset = loadLatestLocalCanonicalArtifactDataset(input.workspaceId);
+    const localDataset = localArtifactFallbackEnabled()
+      ? loadLatestLocalCanonicalArtifactDataset(input.workspaceId)
+      : null;
 
     if (localDataset) {
       return buildLocalArtifactDashboardResult(
@@ -101,7 +109,9 @@ export async function loadEcommerceSalesDashboardData(input: {
     try {
       artifactDatasets.push(await readCanonicalDatasetFromSnapshot(schemaJson));
     } catch (error) {
-      const localDataset = loadLatestLocalCanonicalArtifactDataset(input.workspaceId);
+      const localDataset = localArtifactFallbackEnabled()
+        ? loadLatestLocalCanonicalArtifactDataset(input.workspaceId)
+        : null;
 
       if (localDataset) {
         return buildLocalArtifactDashboardResult(
@@ -125,7 +135,9 @@ export async function loadEcommerceSalesDashboardData(input: {
   const adapted = adaptCanonicalDatasetForMetrics(dataset);
   const hasRows = Object.values(adapted.tables).some((rows) => rows.length > 0);
   if (!hasRows) {
-    const localDataset = loadLatestLocalCanonicalArtifactDataset(input.workspaceId);
+    const localDataset = localArtifactFallbackEnabled()
+      ? loadLatestLocalCanonicalArtifactDataset(input.workspaceId)
+      : null;
 
     if (localDataset) {
       return buildLocalArtifactDashboardResult(

@@ -16,7 +16,7 @@ function ButterflyMark({ label, className }: { label: string; className?: string
 
 export function BrandLogo({
   compact = false,
-  label = "蝴蝶效应",
+  label = "Monarca AI",
   className
 }: {
   compact?: boolean;
@@ -30,15 +30,9 @@ export function BrandLogo({
     >
       <ButterflyMark label={label} className={compact ? "h-full w-full" : "h-full min-h-8 w-auto"} />
       {!compact ? (
-        label === "蝴蝶效应" ? (
-          <span className="whitespace-nowrap text-[1.45em] font-black leading-none tracking-normal">
-            蝴蝶效应
-          </span>
-        ) : (
-          <span className="whitespace-nowrap text-[1.05em] font-semibold tracking-normal">
-            {label}
-          </span>
-        )
+        <span className="whitespace-nowrap text-[1.05em] font-semibold tracking-normal">
+          {label}
+        </span>
       ) : null}
     </span>
   );

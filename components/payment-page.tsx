@@ -146,7 +146,7 @@ const paymentCopy = {
     }
   },
   zh: {
-    brand: "蝴蝶效应",
+    brand: "Monarca AI",
     selectorBadge: "第 1 步",
     selectorTitle: "先选择套餐",
     selectorSubtitle: "选择要开始的方案，下方结算信息会自动更新",

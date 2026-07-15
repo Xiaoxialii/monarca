@@ -60,9 +60,8 @@ const signUpCopy = {
     signInInstead: "Sign in",
     next: "Next",
     brand: "Monarca AI",
-    title: "Start automatically analyzing your business data",
-    description:
-      "Connect databases, Excel, and business systems to automatically generate operating briefs, growth insights, and action recommendations."
+    title: "Start optimizing your profit",
+    description: ""
   },
   zh: {
     language: "中文（简体）",
@@ -111,9 +110,9 @@ const signUpCopy = {
     signInPrompt: "已有账号？",
     signInInstead: "登录",
     next: "下一步",
-    brand: "蝴蝶效应",
-    title: "开始自动分析你的业务数据",
-    description: "连接数据库、Excel 和业务系统，自动生成经营简报、增长洞察和行动建议。"
+    brand: "Monarca AI",
+    title: "开始优化你的利润",
+    description: ""
   }
 } as const;
 
@@ -717,9 +716,11 @@ function AccountBrand({ copy }: { copy: SignUpCopy }) {
       <h1 className="max-w-full break-words text-3xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-4xl lg:text-[42px]">
         {copy.title}
       </h1>
-      <p className="mt-4 max-w-[360px] text-base leading-7 text-slate-600">
-        {copy.description}
-      </p>
+      {copy.description ? (
+        <p className="mt-4 max-w-[360px] text-base leading-7 text-slate-600">
+          {copy.description}
+        </p>
+      ) : null}
     </div>
   );
 }

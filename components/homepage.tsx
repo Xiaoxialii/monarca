@@ -129,11 +129,8 @@ const homepageCopy = {
     logo: "Monarca AI",
     nav: [
       { label: "Sources", href: "#sources" },
-      { label: "Profit Control", href: "#investigations" },
-      { label: "Alerts", href: "#alerts" },
-      { label: "Control Brief", href: "#reports" },
-      { label: "Pricing", href: "#pricing" },
-      { label: "Consulting", href: "/consulting" }
+      { label: "Profit Optimization", href: "#investigations" },
+      { label: "Alerts", href: "#alerts" }
     ],
     auth: {
       login: "Log in",
@@ -142,16 +139,14 @@ const homepageCopy = {
     hero: {
       eyebrow: "AI Profit Control System",
       headline: "Real-Time Profit Optimization",
-      subheadline: "",
-      teamLabel: "One AI team covering the full analytics workflow",
+      subheadline: "Connect data. Generate optimal profit decisions",
+      teamLabel: "Three-layer profit control that turns data changes into operating actions",
       team: [
-        { role: "Data Engineer", text: "Connects sources and keeps pipelines clean" },
-        { role: "Analytics Engineer", text: "Builds semantic layers and metric logic" },
-        { role: "Decision Engineer", text: "Simulates scenarios and turns drivers into operating choices" },
-        { role: "Profit Controller", text: "Explains movement, margin pressure, and cross-channel tradeoffs" },
-        { role: "Growth Operations", text: "Turns optimal decisions into focused profit actions" }
+        { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },
+        { role: "Spot risk and loss faster", text: "Detect profit drops, inefficient spend, inventory risk, and operating anomalies before they create avoidable loss." },
+        { role: "Output optimal operating decisions", text: "Recommend what to adjust next based on budget, inventory, and gross-margin constraints." }
       ],
-      primaryCta: "Book a 30-min Business Consultation",
+      primaryCta: "Book consultation",
       secondaryCta: "View Demo",
       trust: ["Profit diagnosis", "Scenario simulation", "Optimal decisions"]
     },
@@ -178,62 +173,60 @@ const homepageCopy = {
       ]
     },
     features: {
-      eyebrow: "Revenue intelligence",
-      title: "What Monarca AI helps you do",
+      eyebrow: "",
+      title: "An AI profit-control flow from data connection to profit optimization",
       cards: [
         {
-          title: "Detect anomalies",
-          text: "Monitor revenue, activation, funnel, and retention shifts as they happen"
+          title: "Connect scattered data",
+          text: "Connect Excel, databases, and business systems into one profit-control system"
         },
         {
-          title: "Find root causes",
-          text: "Trace changes back to channels, cohorts, accounts, product events, and billing states"
+          title: "Find growth opportunities",
+          text: "Break down revenue, profit, ads, inventory, and SKU performance to locate what is affecting profit"
         },
         {
-          title: "Get recommendations",
-          text: "Prioritize actions with owner context, expected impact, and confidence"
+          title: "Generate optimal decisions",
+          text: "Recommend budget, inventory, channel, and SKU-level actions with expected profit impact"
         },
         {
-          title: "Track impact",
-          text: "Close the loop by measuring whether every action moved the right metric"
+          title: "Track action impact",
+          text: "Continuously monitor whether metrics improve after each action and close the data-driven loop"
         }
       ]
     },
     useCases: {
       title: "How different teams use Monarca AI",
-      subtitle:
-        "From scattered data to actionable operating judgment, adapted to the everyday analysis workflows of different business teams.",
-      consultTitle: "Want to see what reports your data can generate?",
-      consultText:
-        "Book a business consultation and we will design daily, weekly, and monthly operating reports around your goals, data sources, and business questions.",
-      consultCta: "Book a 30-min Business Consultation",
+      subtitle: "Start from daily business questions and turn scattered data into executable operating judgment.",
+      consultTitle: "Want to see what profit opportunities your data can reveal?",
+      consultText: "",
+      consultCta: "Book consultation",
       cards: [
         {
           title: "Ecommerce team",
           persona:
-            "We used to stitch together order, ad, and inventory data ourselves just to barely understand what happened; now Monarca AI identifies the real profit sources directly, so we know faster which products are worth scaling.",
-          scene: "Orders look like they are growing, but I am not sure whether it is healthy growth.",
-          insight: "AI sees growth coming from short-term channel spikes rather than stable demand.",
-          action: "Identify the real growth source before increasing spend.",
-          roles: ["🚀 Growth Analyst", "📣 Marketing Operator"]
+            "Monarca AI helps us see which SKUs are truly profitable, which ads are wasting budget, and which inventory is creating risk.",
+          scene: "",
+          insight: "Monarca AI identifies the real profit sources directly.",
+          action: "Know faster which products are worth scaling.",
+          roles: ["🛒 Ecommerce Operator", "🚀 Growth Analyst"]
         },
         {
           title: "Executive team",
           persona:
-            "Monarca AI makes our operating review much faster. It automatically turns complex data changes into key points, so we no longer spend hours preparing weekly reports by hand.",
-          scene: "Ad spend and inventory are both increasing, but profit is going down.",
-          insight: "AI sees rising cost and weaker ad efficiency eroding margin.",
-          action: "Reduce low-ROI channel spend and rebalance cost structure.",
-          roles: ["⚠ Risk Analyst", "📊 Finance Operator"]
+            "Monarca AI turns scattered operating data into profit decisions, so we quickly know where we are making money, where we are losing money, and what to do next.",
+          scene: "",
+          insight: "Monarca AI automatically turns complex changes into key points.",
+          action: "The team completes reviews and decisions faster.",
+          roles: ["👔 Executive", "📊 Business Analyst"]
         },
         {
           title: "Operations team",
           persona:
-            "We often do not know which issue to handle first, and it is hard to judge the impact range; Monarca AI locates anomalies, ranks priorities, and turns each issue into a clear executable task.",
-          scene: "There is a lot of data, but no clear direction.",
-          insight: "AI turns multi-dimensional data into prioritized operating actions.",
-          action: "Execute the recommended next step and track impact.",
-          roles: ["👤 Growth Operator", "🚀 Decision Maker"]
+            "Sales, ads, inventory, and costs change every day, but it is hard to know what to handle first. Monarca AI diagnoses profit anomalies, simulates options, and outputs the best execution action.",
+          scene: "",
+          insight: "Monarca AI locates anomalies and ranks priorities first.",
+          action: "Then it turns the issue into a clear executable task.",
+          roles: ["👤 Ops Operator", "⚠ Risk Controller"]
         }
       ]
     },
@@ -322,7 +315,7 @@ const homepageCopy = {
             "Auto-generate daily, weekly, and monthly operating reports",
             "Support anomaly alerts, report refresh, and metric checks"
           ],
-          cta: "Book a 30-min Business Consultation",
+          cta: "Book consultation",
           href: "/consulting"
         },
         {
@@ -360,14 +353,11 @@ const homepageCopy = {
   zh: {
     lang: "EN",
     langLabel: "切换到英文",
-    logo: "蝴蝶效应",
+    logo: "Monarca AI",
     nav: [
       { label: "数据源", href: "#sources" },
-      { label: "利润控制", href: "#investigations" },
-      { label: "异常提醒", href: "#alerts" },
-      { label: "控制简报", href: "#reports" },
-      { label: "价格", href: "#pricing" },
-      { label: "预约咨询", href: "/consulting" }
+      { label: "利润优化", href: "#investigations" },
+      { label: "异常提醒", href: "#alerts" }
     ],
     auth: {
       login: "登录",
@@ -376,14 +366,14 @@ const homepageCopy = {
     hero: {
       eyebrow: "AI Profit Control System",
       headline: "实时利润优化",
-      subheadline: "连接 Shopify、Amazon、广告和库存数据，自动诊断利润异常、模拟方案，并输出最优经营决策",
+      subheadline: "连接数据，生成最优利润决策",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
         { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
         { role: "更快识别风险与亏损", text: "发现利润下滑、低效投入、库存风险或业务异常，减少不必要的损失。" },
         { role: "输出最优经营决策", text: "基于预算、库存和毛利约束，给出下一步应该调整什么以及预期利润影响。" }
       ],
-      primaryCta: "预约 30 分钟咨询",
+      primaryCta: "预约咨询",
       secondaryCta: "查看 Demo",
       trust: ["利润诊断", "方案模拟", "最优决策"]
     },
@@ -411,15 +401,15 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "",
-      title: "一套 AI 利润控制流，完成从数据连接到经营决策的全过程",
+      title: "一套 AI 利润控制流，完成从数据连接到利润优化的全过程",
       cards: [
         {
-          title: "汇总分散数据",
-          text: "把 Excel、数据库和业务系统的数据集中到一个利润控制系统"
+          title: "连接分散数据",
+          text: "连接 Excel、数据库和业务系统，进入统一的利润控制系统"
         },
         {
-          title: "发现异常并定位原因",
-          text: "自动监控关键指标变化，并拆解到渠道、客户、产品、地区或时间段"
+          title: "定位增长机会",
+          text: "拆解收入、利润、广告、库存和 SKU 表现，定位正在影响利润的因素"
         },
         {
           title: "生成最优决策",
@@ -432,15 +422,15 @@ const homepageCopy = {
       ]
     },
     useCases: {
-      title: "不同团队如何使用蝴蝶效应",
+      title: "不同团队如何使用 Monarca AI",
       subtitle: "从每天要回答的业务问题出发，把分散数据转化为可执行的经营判断。",
-      consultTitle: "想看看你的数据可以生成什么报告？",
-      consultText: "预约一次商业咨询，我们会根据你的业务目标、数据来源和经营问题，帮你设计适合团队的日报、周报和月经营分析。",
-      consultCta: "预约 30 分钟商业咨询",
+      consultTitle: "想知道你的数据能发现哪些利润机会？",
+      consultText: "",
+      consultCta: "预约咨询",
       cards: [
         {
           title: "电商团队",
-          persona: "以前我们总是要自己拼订单、广告和库存数据，才能勉强看清发生了什么；现在 Monarca AI 能直接识别真实利润来源，让我们更快知道哪些商品值得继续放大。",
+          persona: "Monarca AI 帮我们看清哪些 SKU 真正赚钱，哪些广告在浪费预算，哪些库存正在带来风险。",
           scene: "",
           insight: "Monarca AI 直接识别真实利润来源。",
           action: "更快知道哪些商品值得继续放大。",
@@ -448,7 +438,7 @@ const homepageCopy = {
         },
         {
           title: "管理层",
-          persona: "Monarca AI 让我们的经营复盘快了很多，它会自动把复杂的数据变化整理成重点，让我们不需要再花大量时间手工准备每周汇报。",
+          persona: "Monarca AI 把分散的经营数据转成利润决策，让我们快速知道哪里在赚钱、哪里在亏钱、下一步该做什么。",
           scene: "",
           insight: "Monarca AI 自动把复杂变化整理成重点。",
           action: "团队能更快完成复盘和决策。",
@@ -456,7 +446,7 @@ const homepageCopy = {
         },
         {
           title: "运营团队",
-          persona: "我们常常不知道该先处理哪一个，也很难判断影响范围；Monarca AI 会先帮我们定位异常、判断优先级，再把问题转成清晰可执行的任务。",
+          persona: "每天都有销售、广告、库存和成本变化，但我们很难判断先处理哪个。Monarca AI 会自动诊断利润异常、模拟不同方案，并输出最优执行动作。",
           scene: "",
           insight: "Monarca AI 先定位异常并判断优先级。",
           action: "再把问题转成清晰可执行的任务。",
@@ -470,7 +460,7 @@ const homepageCopy = {
       points: [
         {
           title: "指标一直在变化",
-          text: "蝴蝶效应会持续监控增长模型，不依赖人工盯盘"
+          text: "Monarca AI 会持续监控增长模型，不依赖人工盯盘"
         },
         {
           title: "定位原因太慢",
@@ -484,7 +474,7 @@ const homepageCopy = {
     },
     investigation: {
       sectionTitle: "AI 利润控制系统",
-      sectionSubtitle: "发现收入、转化、成本或库存异常后，蝴蝶效应会诊断利润驱动因素，模拟跨渠道方案，并输出最优经营决策。",
+      sectionSubtitle: "发现收入、转化、成本或库存异常后，Monarca AI 会诊断利润驱动因素，模拟跨渠道方案，并输出最优经营决策。",
       eyebrow: "",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",
@@ -546,7 +536,7 @@ const homepageCopy = {
             "自动生成日报、周报和月经营分析",
             "支持异常提醒、报告刷新和指标口径校验"
           ],
-          cta: "预约 30 分钟商业咨询",
+          cta: "预约咨询",
           href: "/consulting"
         },
         {
@@ -898,7 +888,7 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
 }
 
 function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
-  const isZh = copy.title === "不同团队如何使用蝴蝶效应";
+  const isZh = copy.title === "不同团队如何使用 Monarca AI";
   const labels = {
     team: isZh ? "团队角色" : "Team act"
   };
@@ -1007,7 +997,7 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
 
       <div className="mx-auto mt-12 max-w-3xl text-center lg:mt-20">
         <h3 className="text-lg font-semibold tracking-normal text-slate-950">{copy.consultTitle}</h3>
-        <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">{copy.consultText}</p>
+        {copy.consultText ? <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">{copy.consultText}</p> : null}
         <Button asChild className="mt-4 h-11 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto">
           <Link href="/consulting">
             {copy.consultCta}
@@ -1023,33 +1013,33 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
   const isZh = copy.sectionTitle === "AI 利润控制系统";
   const flow = {
     alert: {
-      label: isZh ? "利润风险" : "Profit risk",
-      title: isZh ? "本周可控利润下降 12.4%" : "Controllable profit dropped 12.4% this week",
+      label: isZh ? "利润机会" : "Profit opportunity",
+      title: isZh ? "本周可控利润预计提升 18.4%" : "Controllable profit is projected to rise 18.4% this week",
       text: isZh
-        ? "系统已进入利润控制链路：不是只解释异常，而是寻找最优经营动作。"
-        : "The system entered profit control mode: it does not stop at explaining the anomaly; it searches for the best operating moves."
+        ? "系统已识别高利润增长机会：不止解释变化，而是模拟最优经营动作并推动执行。"
+        : "The system identified a high-profit growth opportunity: it simulates the best operating moves and turns them into action."
     },
     diagnosis: {
-      label: isZh ? "诊断中" : "Diagnosing",
+      label: isZh ? "机会识别" : "Opportunity detected",
       title: isZh
-        ? "利润驱动因素：CAC 上升、二周留存下降、iOS 转化拖累 SKU 净利"
-        : "Profit drivers: CAC inflation, week-2 retention decay, and iOS conversion drag are compressing SKU net profit",
+        ? "利润驱动因素：高毛利 SKU 需求上升、复购效率改善、Amazon 库存可承接放量"
+        : "Profit drivers: high-margin SKU demand is rising, repeat efficiency improved, and Amazon inventory can absorb scale",
       text: isZh
-        ? "问题不只在收入，而是广告成本、复购效率和高毛利 SKU 供给之间的联动。"
-        : "The issue is not only revenue. It is the interaction between ad cost, repeat efficiency, and high-margin SKU supply."
+        ? "机会来自广告效率、复购质量和高毛利 SKU 供给之间的正向联动。"
+        : "The opportunity comes from the positive interaction between ad efficiency, repeat quality, and high-margin SKU supply."
     },
     evidence: [
-      { metric: "Meta CAC", before: "12%", after: "18%", note: isZh ? "压低 SKU margin" : "compresses SKU margin", tone: "up" },
-      { metric: "Shopify Retention W2", before: isZh ? "稳定" : "stable", after: "-9%", note: isZh ? "削弱 LTV" : "weakens LTV", tone: "down" },
-      { metric: "Amazon SKU supply", before: isZh ? "充足" : "healthy", after: isZh ? "受限" : "limited", note: isZh ? "限制利润放大" : "limits profit scaling", tone: "down" }
+      { metric: "Meta CAC", before: "18%", after: "12%", note: isZh ? "释放 SKU 利润率" : "unlocks SKU margin", tone: "down" },
+      { metric: "Shopify Retention W2", before: isZh ? "稳定" : "stable", after: "+9%", note: isZh ? "提升 LTV" : "improves LTV", tone: "up" },
+      { metric: "Amazon SKU supply", before: isZh ? "受限" : "limited", after: isZh ? "充足" : "healthy", note: isZh ? "支持利润放大" : "supports profit scaling", tone: "up" }
     ],
     decisions: isZh
       ? ["降低低 ROI 渠道投放", "优化获客结构", "复查 Week 2 留存路径"]
       : ["Reduce low-ROI channel spend", "Optimize acquisition mix", "Review Week 2 retention path"]
   };
   const aiOps = isZh
-    ? ["读取 Amazon / Shopify / Ads 利润链路", "模拟预算迁移方案", "检查库存和毛利约束", "计算 SKU 级净利润", "优化跨渠道分配"]
-    : ["Reading Amazon / Shopify / Ads profit paths", "Simulating budget migration", "Checking inventory and margin constraints", "Computing SKU-level net profit", "Optimizing cross-channel allocation"];
+    ? ["读取 Amazon / Shopify / Ads 利润链路", "模拟利润放大方案", "确认库存和毛利空间", "计算 SKU 级净利润提升", "优化跨渠道增长分配"]
+    : ["Reading Amazon / Shopify / Ads profit paths", "Simulating profit scaling scenarios", "Confirming inventory and margin headroom", "Computing SKU-level profit lift", "Optimizing cross-channel growth allocation"];
   const processSteps = isZh
     ? ["Data", "Diagnosis", "Simulation", "Optimization", "Action"]
     : ["Data", "Diagnosis", "Simulation", "Optimization", "Action"];
@@ -1057,12 +1047,12 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
     ? [
         { name: "维持当前投放结构", impact: "0%", detail: "利润继续受 CAC 与库存约束压缩" },
         { name: "将 18% 预算迁移到高毛利 SKU", impact: "+18.4%", detail: "提升 Shopify + Amazon 可控净利" },
-        { name: "暂停低 ROAS 获客组", impact: "+6.1%", detail: "减少亏损点击，保护利润率底线" }
+        { name: "放大高复购受众", impact: "+6.1%", detail: "增加高质量点击，扩大利润率上行空间" }
       ]
     : [
         { name: "Keep current spend mix", impact: "0%", detail: "Profit remains compressed by CAC and inventory constraints" },
         { name: "Move 18% budget to high-margin SKUs", impact: "+18.4%", detail: "Improves Shopify + Amazon controllable net profit" },
-        { name: "Pause low-ROAS prospecting groups", impact: "+6.1%", detail: "Reduces loss-making clicks and protects margin floor" }
+        { name: "Scale high-repeat audiences", impact: "+6.1%", detail: "Adds higher-quality clicks and expands margin upside" }
       ];
   const bestDecision = {
     title: isZh ? "最优策略：预算迁移 + 高毛利 SKU 供给保护" : "Best strategy: budget migration + high-margin SKU supply protection",
@@ -1072,14 +1062,14 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
     actions: isZh
       ? [
           "从低 ROAS 广告组迁移 18% 预算到 SKU_01306 / SKU_01126",
-          "TikTok 拉新暂停 72 小时，直到 CAC 回到目标区间",
-          "Shopify 保留高毛利变体库存，优先承接付费流量",
+          "TikTok 高复购人群加预算，扩大正向 ROAS",
+          "Shopify 保留高毛利变体库存，优先承接新增付费流量",
           "Amazon 只放大库存充足且净利率高于 28% 的 SKU"
         ]
       : [
           "Move 18% budget from low-ROAS ad sets to SKU_01306 / SKU_01126",
-          "Pause TikTok prospecting for 72 hours until CAC returns to target",
-          "Reserve Shopify inventory for high-margin variants receiving paid traffic",
+          "Increase TikTok budget for high-repeat audiences with positive ROAS",
+          "Reserve Shopify inventory for high-margin variants receiving incremental paid traffic",
           "Scale only Amazon SKUs with enough inventory and net margin above 28%"
         ]
   };
@@ -1087,14 +1077,14 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
     ? [
         { name: "Amazon", decision: "+12% 预算", impact: "高毛利 SKU" },
         { name: "Shopify", decision: "保护库存", impact: "承接转化" },
-        { name: "Meta Ads", decision: "-18% 低效投放", impact: "降低 CAC" },
-        { name: "TikTok", decision: "暂停拉新", impact: "守住利润率" }
+        { name: "Meta Ads", decision: "+18% 高效投放", impact: "扩大转化" },
+        { name: "TikTok", decision: "放大高复购人群", impact: "提升利润率" }
       ]
     : [
         { name: "Amazon", decision: "+12% budget", impact: "High-margin SKUs" },
         { name: "Shopify", decision: "Protect inventory", impact: "Capture conversion" },
-        { name: "Meta Ads", decision: "-18% weak spend", impact: "Lower CAC" },
-        { name: "TikTok", decision: "Hold prospecting", impact: "Protect margin" }
+        { name: "Meta Ads", decision: "+18% efficient spend", impact: "Expand conversion" },
+        { name: "TikTok", decision: "Scale repeat audiences", impact: "Lift margin" }
       ];
 
   return (
@@ -1111,22 +1101,22 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
 
       <div className="overflow-hidden rounded-[30px] bg-white p-3 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.06] sm:p-6">
         <div className="relative mx-auto max-w-5xl overflow-hidden">
-          <div className="absolute bottom-4 left-4 top-5 w-px bg-gradient-to-b from-rose-200 via-amber-200 to-emerald-200 sm:left-5" />
+          <div className="absolute bottom-4 left-4 top-5 w-px bg-gradient-to-b from-emerald-200 via-sky-200 to-emerald-200 sm:left-5" />
 
           <div className="relative grid gap-5">
             <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
-              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100 sm:size-10">
-                <AlertTriangle className="size-4" />
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 sm:size-10">
+                <TrendingUp className="size-4" />
               </div>
-              <div className="min-w-0 rounded-[24px] bg-rose-50/80 p-3 ring-1 ring-rose-100 sm:p-4">
+              <div className="min-w-0 rounded-[24px] bg-emerald-50/80 p-3 ring-1 ring-emerald-100 sm:p-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{flow.alert.label}</span>
-                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                    {isZh ? "⚡ 高影响" : "⚡ High impact"}
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">{flow.alert.label}</span>
+                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-800">
+                    {isZh ? "⚡ 高增长潜力" : "⚡ High growth potential"}
                   </span>
                 </div>
-                <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-rose-700 sm:text-3xl">{flow.alert.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-rose-900/70">{flow.alert.text}</p>
+                <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-emerald-800 sm:text-3xl">{flow.alert.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-emerald-950/70">{flow.alert.text}</p>
               </div>
             </div>
 
@@ -1181,8 +1171,8 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
                         <span>{item.before}</span>
                         <ArrowRight className="size-3.5 text-slate-400" />
-                        <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.after}</span>
-                        <span className={item.tone === "up" ? "text-rose-600" : "text-emerald-700"}>{item.tone === "up" ? "↑" : "↓"}</span>
+                        <span className="text-emerald-700">{item.after}</span>
+                        <span className="text-emerald-700">{item.tone === "up" ? "↑" : "↓"}</span>
                       </div>
                       <p className="mt-1 text-xs leading-5 text-slate-500">{item.note}</p>
                     </div>
@@ -1319,58 +1309,21 @@ function ReportsSection({ copy }: { copy: HomeCopy["reports"] }) {
 }
 
 function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
-  const primaryPlan = copy.plans[0];
-  const enterprisePlan = copy.plans[1];
+  const isZh = copy.eyebrow === "价格";
 
   return (
     <section id="pricing" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
       <div className="overflow-hidden rounded-[30px] bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 p-5 text-white shadow-[0_24px_90px_rgba(6,78,59,0.18)] sm:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.05fr_1fr] lg:items-center">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">{copy.eyebrow}</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-normal sm:text-3xl">{copy.title}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-50/80">{copy.intro}</p>
-          </div>
-
-          <div className="grid gap-5 sm:grid-cols-2 sm:divide-x sm:divide-white/16">
-            <div className="sm:pr-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold">{primaryPlan.name}</h3>
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-800">{primaryPlan.badge}</span>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-emerald-50/75">{primaryPlan.description}</p>
-              <div className="mt-4 flex items-end gap-1">
-                <span className="text-4xl font-semibold tracking-normal">{primaryPlan.price}</span>
-                <span className="pb-1 text-sm text-emerald-50/75">{primaryPlan.cadence}</span>
-              </div>
-              <Button asChild className="mt-4 h-10 w-full rounded-full bg-white px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 sm:text-[13px]">
-                <Link href={`${primaryPlan.href}?from=home`}>
-                  {primaryPlan.cta}
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </div>
-
-            <div className="sm:pl-5">
-              <h3 className="text-lg font-semibold">{enterprisePlan.name}</h3>
-              <p className="mt-2 text-sm leading-6 text-emerald-50/75">{enterprisePlan.subtitle}</p>
-              <div className="mt-4 text-3xl font-semibold tracking-normal">{enterprisePlan.price}</div>
-              <div className="mt-4 space-y-2">
-                {enterprisePlan.features.slice(0, 3).map((feature) => (
-                  <div key={feature} className="flex gap-2 text-sm leading-5 text-emerald-50/82">
-                    <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-200" />
-                    <span>{feature}</span>
-                  </div>
-                ))}
-              </div>
-              <Button asChild className="mt-4 h-10 w-full rounded-full border-white/25 bg-white/10 text-sm font-semibold text-white hover:bg-white/16" variant="outline">
-                <Link href={`${enterprisePlan.href}?from=home`}>
-                  {enterprisePlan.cta}
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </div>
-          </div>
+        <div className="flex flex-col gap-5 py-8 text-center sm:py-10 lg:items-center">
+          <p className="mx-auto max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
+            {isZh ? "连接你的电商、广告和库存数据，开始生成最优利润决策。" : "Connect your commerce, ads, and inventory data to generate optimal profit decisions."}
+          </p>
+          <Button asChild className="h-12 w-full rounded-full bg-white px-8 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 sm:w-auto">
+            <Link href="/sign-up">
+              {isZh ? "开始" : "Start"}
+              <ArrowRight />
+            </Link>
+          </Button>
         </div>
       </div>
     </section>
@@ -1436,13 +1389,6 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
         <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:h-16 sm:px-6 lg:h-14 lg:px-8">
           <Logo label={copy.logo} className="h-10 sm:h-11" />
-          <div className="hidden items-center gap-6 lg:flex">
-            {copy.nav.map((item) => (
-              <a key={item.label} href={item.href} className="text-xs font-medium text-slate-500 transition hover:text-slate-950">
-                {item.label}
-              </a>
-            ))}
-          </div>
           <div className="flex items-center gap-2">
             <label className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 sm:gap-2 sm:px-3 lg:text-xs">
               <Languages className="size-4" />
@@ -1494,7 +1440,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
 
       <section className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[0.86fr_1.14fr] lg:items-center lg:gap-12 lg:px-8 lg:pb-14 lg:pt-18">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
-        <div className="relative z-10">
+        <div className="relative z-10 lg:pl-10 xl:pl-14">
           <div className="mb-7 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-7 lg:text-xs">
             <Zap className="size-3.5 sm:size-4" />
             {copy.hero.eyebrow}
@@ -1543,7 +1489,6 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
       <FeatureCards copy={copy.features} />
       <UseCaseSection copy={copy.useCases} />
       <InvestigationPreview copy={copy.investigation} />
-      <ReportsSection copy={copy.reports} />
       <Integrations copy={copy.integrations} />
       <PricingSection copy={copy.pricing} />
     </main>

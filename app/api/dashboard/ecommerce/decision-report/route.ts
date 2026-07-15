@@ -56,8 +56,10 @@ export async function GET(request: Request) {
       decisionMode
     });
   } catch (error) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData(session.workspace.id, decisionMode)
-      ?? loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
+    const fallback = process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true"
+      ? loadLatestLocalEcommerceSalesDashboardData(session.workspace.id, decisionMode)
+        ?? loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode)
+      : null;
 
     if (fallback) {
       return dashboardResponse(fallback, error);

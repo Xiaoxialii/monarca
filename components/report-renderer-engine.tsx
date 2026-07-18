@@ -185,6 +185,82 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
   });
 }
 
+function fallbackSkuReportRowFromDecision(row: PortfolioDecisionRow, recommendation?: PortfolioRow): SkuReportRow {
+  const rowWithSimulation = row as PortfolioDecisionRow & {
+    simulation?: {
+      predicted_revenue?: number;
+      revenue_delta?: number;
+      current_ads_spend?: number;
+      recommended_ads_spend?: number;
+      predicted_margin?: number;
+    };
+    before_state?: {
+      revenue?: number;
+      profit?: number;
+      inventory?: number;
+      sales_velocity?: number;
+      margin?: number;
+    };
+  };
+  const simulation = recommendation?.simulation ?? rowWithSimulation.simulation;
+  const beforeState = (recommendation?.before_state ?? rowWithSimulation.before_state) as {
+    revenue?: number;
+    profit?: number;
+    inventory?: number;
+    sales_velocity?: number;
+    margin?: number;
+  } | undefined;
+  const currentRevenue =
+    beforeState?.revenue ??
+    (simulation?.predicted_revenue != null ? Math.max(0, simulation.predicted_revenue - (simulation.revenue_delta ?? 0)) : 0);
+  const currentProfit = recommendation?.current_profit ?? beforeState?.profit ?? null;
+  const currentStock = beforeState?.inventory ?? null;
+  const salesVelocity = beforeState?.sales_velocity ?? 0;
+  const daysOfInventory = currentStock != null && salesVelocity > 0 ? currentStock / salesVelocity : null;
+
+  return {
+    sku: row.skuId,
+    product_name: displayProductName(undefined, row.skuId),
+    category: undefined,
+    variant_name: undefined,
+    size: undefined,
+    color: undefined,
+    revenue: currentRevenue,
+    quantity: salesVelocity > 0 ? Math.round(salesVelocity * 30) : 0,
+    profit: currentProfit,
+    margin: beforeState?.margin ?? simulation?.predicted_margin ?? null,
+    total_cost: null,
+    ad_cost_allocated: simulation?.current_ads_spend ?? null,
+    profit_confidence: row.confidence ?? recommendation?.confidence ?? null,
+    roas_value: null,
+    channel_breakdown: {},
+    channel_details: [],
+    ad_allocation_method: null,
+    ad_allocation_confidence: null,
+    campaign_ids: [],
+    attribution_window_start: null,
+    attribution_window_end: null,
+    cost_breakdown: null,
+    sku_roas: null,
+    stock_level: currentStock,
+    available_stock: currentStock,
+    sales_velocity: salesVelocity,
+    days_of_inventory: daysOfInventory,
+    stockout_risk: "unknown",
+    overstock_risk: "unknown",
+    refund_rate: 0,
+    refund_risk: "unknown",
+    margin_risk: false,
+    channel_concentration_risk: false,
+    attribution_risk: false,
+    overall_risk_score: row.risk ?? recommendation?.risk ?? 0,
+    inventory_confidence: null,
+    estimated_components: ["optimization_decision_snapshot"],
+    estimated: true,
+    lifecycle_stage: normalizeLifecycleStage(row.lifecycle_stage ?? recommendation?.lifecycle_stage)
+  };
+}
+
 export function ReportRendererEngine({ report, message, showEmptyShell = false, locale = "en" }: ReportRendererEngineProps) {
   const [skuChannel, setSkuChannel] = useState("all");
   const [inventorySearch, setInventorySearch] = useState("");
@@ -1188,7 +1264,7 @@ function SkuPortfolioOptimizationPanel({
     () => optimization.skuDecisions ?? report.skuDecisions ?? [],
     [optimization.skuDecisions, report.skuDecisions]
   );
-  const portfolioRowsBySku = new Map(selectedRows.map((row) => [row.sku, row]));
+  const portfolioRowsBySku = useMemo(() => new Map(selectedRows.map((row) => [row.sku, row])), [selectedRows]);
   const sourceRows = report.sku_breakdown.top_profit_skus.length ? report.sku_breakdown.top_profit_skus : report.sku_breakdown.top_revenue_skus;
   const sourceSkuIds = sourceRows.length
     ? sourceRows.map((row) => row.sku)
@@ -1206,8 +1282,10 @@ function SkuPortfolioOptimizationPanel({
   const focusedQueueSku = selectedDecisionRow?.skuId ?? null;
   const displayedSkuRows = useMemo(() => {
     if (!focusedQueueSku) return visibleSkuRows;
-    return skuRows.filter((row) => row.sku === focusedQueueSku);
-  }, [skuRows, visibleSkuRows, focusedQueueSku]);
+    const matchedRows = skuRows.filter((row) => row.sku === focusedQueueSku);
+    if (matchedRows.length > 0) return matchedRows;
+    return selectedDecisionRow ? [fallbackSkuReportRowFromDecision(selectedDecisionRow, portfolioRowsBySku.get(selectedDecisionRow.skuId))] : [];
+  }, [portfolioRowsBySku, selectedDecisionRow, skuRows, visibleSkuRows, focusedQueueSku]);
   const decisionActionFilter: PortfolioDecisionFilter = "ALL";
   const optimizationQueueRows = decisionRows.filter((row) => isOptimizationQueueRow(row));
   const filteredDecisionRows = (optimizationQueueRows.length ? optimizationQueueRows : decisionRows)

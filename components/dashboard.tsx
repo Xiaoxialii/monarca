@@ -1,8 +1,10 @@
 "use client";
 
 import { useUser } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   Bell,
@@ -5615,8 +5617,23 @@ function ImportDataSection({
   connectionPage?: boolean;
   initialSourceName?: string;
 }) {
+  const searchParams = useSearchParams();
+  const isZh = copy.connectors.connectedCountLabel.includes("个");
+  const connectorError = shopifyConnectorErrorMessage(searchParams, isZh);
+
   return (
     <section id="import-data" className="scroll-mt-20">
+      {connectorError ? (
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="flex gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-700" />
+            <div>
+              <p className="font-semibold">{connectorError.title}</p>
+              <p className="mt-1 font-medium leading-6">{connectorError.message}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {connectionPage ? (
         <div className="grid gap-4">
           <ConnectorPanel
@@ -5644,6 +5661,31 @@ function ImportDataSection({
     </section>
   );
 }
+
+function shopifyConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURLSearchParamsLike | null, isZh: boolean) {
+  if (searchParams?.get("shopify") !== "failed") return null;
+
+  const code = searchParams.get("code");
+  if (code === "SHOPIFY_SCOPES_NOT_GRANTED") {
+    return {
+      title: isZh ? "Shopify 未授权所需权限" : "Shopify did not grant required scopes",
+      message: isZh
+        ? "请在 Shopify 应用权限中启用 read_orders、read_products、read_customers，然后重新连接。"
+        : "Required scopes: read_orders, read_products, read_customers. Enable these Admin API permissions in the Shopify app, then reconnect."
+    };
+  }
+
+  return {
+    title: isZh ? "Shopify 连接失败" : "Shopify connection failed",
+    message: isZh
+      ? `错误代码：${code ?? "unknown"}。请检查店铺域名和应用权限后重试。`
+      : `Error code: ${code ?? "unknown"}. Check the shop domain and app permissions, then try again.`
+  };
+}
+
+type ReadonlyURLSearchParamsLike = {
+  get(name: string): string | null;
+};
 
 type BusinessDatasetView = {
   name: string;

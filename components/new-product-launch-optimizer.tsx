@@ -136,11 +136,11 @@ export function NewProductLaunchOptimizer({
               <ModeButton
                 active={mode === "import"}
                 onClick={() => {
-                  if (!hasConnectedData) return;
+                  if (!isLoadingConnectedData && !hasConnectedData) return;
                   setMode("import");
                   setHasGeneratedPlan(false);
                 }}
-                disabled={!hasConnectedData || isLoadingConnectedData}
+                disabled={!isLoadingConnectedData && !hasConnectedData}
               >
                 {isZh ? "导入新品" : "Import New Products"}
               </ModeButton>
@@ -155,6 +155,10 @@ export function NewProductLaunchOptimizer({
                 isZh={isZh}
                 onHasInputChange={setManualHasInput}
               />
+            ) : isLoadingConnectedData ? (
+              <div className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-sm font-semibold leading-6 text-[#5747e8]">
+                {isZh ? "正在更新数据" : "Updating data"}
+              </div>
             ) : hasConnectedData ? (
               <ImportProducts
                 selectedSku={selectedImportedSku}
@@ -176,7 +180,7 @@ export function NewProductLaunchOptimizer({
               type="button"
               onClick={() => generatePlan()}
               aria-label={isZh ? "生成上市计划" : "Generate launch plan"}
-              disabled={mode === "manual" && !manualHasInput}
+              disabled={isLoadingConnectedData || (mode === "manual" && !manualHasInput)}
               className="flex h-12 items-center justify-center rounded-2xl bg-[#079669] px-7 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(7,150,105,0.24)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isZh ? "开始" : "Start"}
@@ -187,9 +191,15 @@ export function NewProductLaunchOptimizer({
 
         <main className="min-w-0 overflow-y-auto">
           <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-6 pb-7 pt-12 lg:px-8">
-            {!hasGeneratedPlan ? (
+            {mode === "import" && isLoadingConnectedData ? (
               <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center text-center">
-                <h2 className="max-w-[680px] text-3xl font-semibold leading-tight tracking-tight text-slate-950 lg:text-4xl">
+                <p className="text-sm font-semibold text-[#5747e8]">
+                  {isZh ? "正在更新数据" : "Updating data"}
+                </p>
+              </div>
+            ) : !hasGeneratedPlan ? (
+              <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center text-center">
+                <h2 className="max-w-[560px] text-2xl font-semibold leading-tight tracking-tight text-slate-950 lg:text-3xl">
                   {isZh ? "把每一次新品上市变成利润机会" : "Turn every new product launch into a profit opportunity"}
                 </h2>
               </div>

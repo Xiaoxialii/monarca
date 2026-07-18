@@ -20,6 +20,8 @@ const jiti = jitiFactory(process.cwd() + "/");
 const { optimizeSkuPortfolio } = jiti("./lib/optimization/portfolio-optimizer.ts");
 const { simulateGeneratedActions, simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
 const { generateOptimizationActions } = jiti("./lib/optimization/action-generator.ts");
+const { buildDynamicThresholdProfile } = jiti("./lib/optimization/dynamic-threshold-engine.ts");
+const { assessSelectedInventoryMix, clearInventoryQualityScore } = jiti("./lib/optimization/inventory-health-score.ts");
 const { generatePortfolioOptimizationReport } = jiti("./lib/optimization/optimization-report-generator.ts");
 const { predictRevenue } = jiti("./lib/optimization/prediction/revenue-prediction-model.ts");
 const { recordOptimizationFeedback } = jiti("./lib/optimization/feedback-learning-engine.ts");
@@ -191,6 +193,63 @@ test("portfolio optimization result beats single SKU ranking baseline", () => {
   assert.ok(result.skuDecisions[0].scenarios.length >= 3);
   assert.equal(result.skuDecisions[0].tracking_status, "RECOMMENDED");
   assert.equal(result.skuDecisions[0].feedback.learned, false);
+});
+
+test("v2 multi-path optimization exposes scenario mix and alternatives", () => {
+  const result = optimizeSkuPortfolio(input());
+  const distribution = result.optimization_summary.action_distribution;
+
+  assert.equal(result.algorithm, "prediction_driven_global_portfolio_solver");
+  assert.equal(result.optimization_summary.total_opportunities, result.recommended_portfolio.length);
+  assert.equal(result.optimization_summary.scenarios_tested, result.simulations.length);
+  assert.equal(result.optimization_summary.expected_profit_gain, result.total_expected_profit_gain);
+  assert.ok(result.optimization_summary.scenarios_tested >= result.optimization_summary.total_opportunities * 2);
+  assert.ok(Object.values(distribution).reduce((sum, value) => sum + value, 0) === result.recommended_portfolio.length);
+  assert.ok((distribution.SCALE_ADS ?? 0) < result.recommended_portfolio.length);
+
+  for (const decision of result.skuDecisions) {
+    assert.equal(decision.expectedProfitImpact, decision.estimatedProfitImpact);
+    assert.equal(typeof decision.action_score, "number");
+    assert.ok(decision.scenarios.length >= 3);
+    assert.ok(decision.alternative_actions.length >= 2);
+    assert.equal(decision.sku_decision_object.expected_profit_impact, decision.expectedProfitImpact);
+    assert.equal(decision.sku_decision_object.simulation.profit_delta, decision.expectedProfitImpact);
+  }
+});
+
+test("adaptive threshold profile uses user history and business objective", () => {
+  const growthInput = input();
+  growthInput.business_objective = "GROWTH";
+  growthInput.industry = "fashion ecommerce";
+  growthInput.ads = [
+    { campaign_id: "A", sku: "SKU_A", spend: 200, impressions: 10000, clicks: 420, conversions: 40, roas: 4.2 },
+    { campaign_id: "B", sku: "SKU_B", spend: 160, impressions: 8200, clicks: 330, conversions: 28, roas: 3.6 },
+    { campaign_id: "C", sku: "SKU_STOCK_LIMITED", spend: 90, impressions: 4200, clicks: 150, conversions: 12, roas: 2.8 }
+  ];
+  growthInput.skus = growthInput.skus.map((sku, index) => ({
+    ...sku,
+    order_count: sku.quantity,
+    customer_count: Math.max(1, Math.floor(sku.quantity * 0.72)),
+    revenue_growth: index === 0 ? 0.22 : sku.revenue_growth ?? 0.08
+  }));
+
+  const cashInput = {
+    ...growthInput,
+    business_objective: "CASH_RECOVERY"
+  };
+
+  const growthResult = optimizeSkuPortfolio(growthInput);
+  const cashResult = optimizeSkuPortfolio(cashInput);
+
+  assert.equal(growthResult.threshold_profile.source, "user_historical");
+  assert.equal(growthResult.threshold_profile.business_objective, "GROWTH");
+  assert.ok(growthResult.threshold_profile.scale_ads_threshold.marginal_roas > 0);
+  assert.ok(growthResult.threshold_profile.price_threshold.margin_headroom > 0);
+  assert.notEqual(
+    growthResult.threshold_profile.scale_ads_threshold.marginal_roas,
+    cashResult.threshold_profile.scale_ads_threshold.marginal_roas
+  );
+  assert.ok(growthResult.simulations.every((row) => typeof row.action_score === "number"));
 });
 
 function daysBetween(startDateOnly, endDateOnly) {
@@ -511,9 +570,279 @@ test("lifecycle action spaces route launch, growth, mature, and declining SKUs d
   assert.ok(bySku("SKU_LAUNCH").includes("TEST_AD_SPEND"));
   assert.equal(bySku("SKU_LAUNCH").includes("SCALE_ADS"), false);
   assert.ok(bySku("SKU_GROWTH").includes("SCALE_ADS"));
-  assert.ok(bySku("SKU_MATURE").includes("PRICE_UP_5") || bySku("SKU_MATURE").includes("SHIFT_CHANNEL"));
+  assert.ok(bySku("SKU_MATURE").includes("SHIFT_CHANNEL") || bySku("SKU_MATURE").includes("REDUCE_ADS"));
   assert.ok(bySku("SKU_DECLINING").includes("REDUCE_ADS") || bySku("SKU_DECLINING").includes("STOP"));
   assert.equal(bySku("SKU_DECLINING").includes("SCALE_ADS"), false);
+});
+
+function matureLifecycle(stage = "MATURE") {
+  return {
+    sku: "SKU_PRICE_TEST",
+    lifecycle_stage: stage,
+    confidence: 0.86,
+    signals: [`stage=${stage}`],
+    scores: {}
+  };
+}
+
+function unitOpportunity(sku, type = "PROFIT") {
+  return {
+    sku: sku.sku,
+    opportunity_type: type,
+    opportunity_types: [type, "MARGIN_IMPROVEMENT"],
+    opportunity_score: 80,
+    score_components: {
+      demand_growth: 0.6,
+      customer_quality: 0.6,
+      channel_fit: 0.6,
+      margin_headroom: 0.6,
+      inventory_capacity: 0.6,
+      competition_risk: 0.1
+    },
+    signals: ["unit_test"],
+    evidence: {
+      margin: sku.margin,
+      net_profit: sku.net_profit,
+      ads_spend: sku.ads_spend,
+      inventory: sku.inventory,
+      sales_velocity: sku.sales_velocity,
+      conversion_rate: sku.conversion_rate,
+      confidence: sku.prediction_confidence ?? 0.55
+    },
+    feasibility: 0.86
+  };
+}
+
+function priceTestInput(sku) {
+  return {
+    skus: [sku],
+    ads: [],
+    business_objective: "PROFIT",
+    industry: "fashion ecommerce",
+    constraints: {
+      total_ads_budget: 1000,
+      inventory_capacity: 5000,
+      available_cash: 5000,
+      target_margin: 0.05,
+      max_price_change: 0.12,
+      minimum_profit: -1000,
+      minimum_confidence: 0.3,
+      simulation_horizon_days: 30
+    }
+  };
+}
+
+function fakeSimulationRow(sku, action, profitDelta, overrides = {}) {
+  const inventory = overrides.inventory ?? 120;
+  const requiredInventory = overrides.requiredInventory ?? 95;
+  const price = overrides.price ?? 50;
+  const margin = overrides.margin ?? 0.35;
+
+  return {
+    sku,
+    category: "test",
+    channel: "shopify",
+    action,
+    unified_action: action === "REDUCE_INVENTORY" ? "REDUCE_INVENTORY" : action === "SCALE_ADS" ? "SCALE_ADS" : action === "SHIFT_CHANNEL" ? "EXPAND_CHANNEL" : action === "REDUCE_ADS" ? "REALLOCATE_BUDGET" : "OPTIMIZE_PRICE",
+    lifecycle_stage: "MATURE",
+    predicted_profit: 1000 + profitDelta,
+    profit_delta: profitDelta,
+    confidence: 0.8,
+    risk: 0.1,
+    action_score: profitDelta,
+    opportunity_score: profitDelta,
+    required_inventory: requiredInventory,
+    current_inventory: inventory,
+    current_price: price,
+    recommended_ads_spend: 0,
+    current_ads_spend: 0,
+    required_cash: 0,
+    inventory_impact: action === "REDUCE_INVENTORY" ? -Math.round(inventory * 0.15) : requiredInventory - inventory,
+    simulation_horizon: { days: 30, label: "30 days" },
+    before_state: {
+      revenue: 5000,
+      profit: 1000,
+      ad_spend: 0,
+      price,
+      inventory,
+      margin
+    }
+  };
+}
+
+test("mature SKU at market average does not generate PRICE_UP", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_PRICE_MARKET_AVG",
+    product_age_days: 260,
+    price: 50,
+    competitor_price: 50,
+    market_median_price: 50,
+    similar_sku_price: 50,
+    price_elasticity: -0.6,
+    revenue_growth: 0.06,
+    order_growth: 0.04,
+    conversion_trend: 0.01,
+    inventory: 320,
+    sales_velocity: 8,
+    conversion_rate: 0.04,
+    margin: 0.42
+  });
+  const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("MATURE"), sku: sku.sku }]]);
+  const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku)], lifecycleBySku, thresholdProfile });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.equal(actionSet.includes("PRICE_UP_5"), false);
+  assert.equal(actionSet.includes("PRICE_UP_10"), false);
+});
+
+test("mature underpriced SKU with stable demand allows PRICE_UP", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_UNDERPRICED",
+    product_age_days: 260,
+    price: 48,
+    competitor_price: 60,
+    market_median_price: 60,
+    similar_sku_price: 58,
+    price_elasticity: -0.55,
+    revenue_growth: 0.08,
+    order_growth: 0.05,
+    conversion_trend: 0.01,
+    inventory: 320,
+    sales_velocity: 8,
+    conversion_rate: 0.045,
+    margin: 0.42
+  });
+  const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("MATURE"), sku: sku.sku }]]);
+  const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku)], lifecycleBySku, thresholdProfile });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.ok(actionSet.includes("PRICE_UP_5") || actionSet.includes("PRICE_UP_10"));
+});
+
+test("high inventory SKU prioritizes clearance over PRICE_UP", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_HIGH_INVENTORY",
+    product_age_days: 260,
+    price: 48,
+    competitor_price: 64,
+    market_median_price: 64,
+    similar_sku_price: 62,
+    price_elasticity: -0.55,
+    revenue_growth: 0.03,
+    order_growth: 0.02,
+    conversion_trend: 0,
+    inventory: 720,
+    sales_velocity: 4,
+    conversion_rate: 0.04,
+    margin: 0.42
+  });
+  const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("MATURE"), sku: sku.sku }]]);
+  const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku, "INVENTORY")], lifecycleBySku, thresholdProfile });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.equal(actionSet.includes("PRICE_UP_5"), false);
+  assert.equal(actionSet.includes("PRICE_UP_10"), false);
+  assert.ok(actionSet.includes("PROMOTION_TEST") || actionSet.includes("REDUCE_INVENTORY"));
+});
+
+test("healthy portfolio flags excess clear inventory mix above dynamic limit", () => {
+  const rows = [
+    fakeSimulationRow("SKU_CLEAR_A", "REDUCE_INVENTORY", 120),
+    fakeSimulationRow("SKU_CLEAR_B", "REDUCE_INVENTORY", 110),
+    fakeSimulationRow("SKU_SCALE_A", "SCALE_ADS", 180),
+    fakeSimulationRow("SKU_SCALE_B", "SHIFT_CHANNEL", 160),
+    fakeSimulationRow("SKU_SCALE_C", "PRICE_DOWN_10", 130),
+    fakeSimulationRow("SKU_SCALE_D", "REDUCE_ADS", 100)
+  ];
+  const mix = assessSelectedInventoryMix(rows);
+
+  assert.equal(mix.inventory_risk_level, "LOW");
+  assert.ok(mix.clear_inventory_ratio > mix.max_clear_inventory_ratio);
+});
+
+test("portfolio inventory crisis allows high clear inventory allocation", () => {
+  const rows = [
+    fakeSimulationRow("SKU_CLEAR_A", "REDUCE_INVENTORY", 120, { inventory: 1600, requiredInventory: 80 }),
+    fakeSimulationRow("SKU_CLEAR_B", "REDUCE_INVENTORY", 110, { inventory: 1500, requiredInventory: 75 }),
+    fakeSimulationRow("SKU_CLEAR_C", "REDUCE_INVENTORY", 100, { inventory: 1450, requiredInventory: 70 }),
+    fakeSimulationRow("SKU_CLEAR_D", "REDUCE_INVENTORY", 95, { inventory: 1400, requiredInventory: 65 }),
+    fakeSimulationRow("SKU_CLEAR_E", "REDUCE_INVENTORY", 90, { inventory: 1350, requiredInventory: 60 }),
+    fakeSimulationRow("SKU_SCALE_A", "REDUCE_ADS", 80, { inventory: 1200, requiredInventory: 90 }),
+    fakeSimulationRow("SKU_SCALE_B", "PRICE_DOWN_10", 90, { inventory: 1150, requiredInventory: 85 }),
+    fakeSimulationRow("SKU_SCALE_C", "SHIFT_CHANNEL", 70, { inventory: 1250, requiredInventory: 95 }),
+    fakeSimulationRow("SKU_SCALE_D", "SCALE_ADS", 60, { inventory: 1100, requiredInventory: 80 })
+  ];
+  const mix = assessSelectedInventoryMix(rows);
+
+  assert.equal(mix.inventory_risk_level, "HIGH");
+  assert.ok(mix.max_clear_inventory_ratio >= 0.5);
+  assert.ok(mix.clear_inventory_ratio <= mix.max_clear_inventory_ratio);
+});
+
+test("single high inventory SKU with strong demand does not qualify for clear inventory", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_HIGH_INVENTORY_STRONG_DEMAND",
+    inventory: 700,
+    sales_velocity: 8,
+    revenue_growth: 0.28,
+    order_growth: 0.24,
+    conversion_trend: 0.04,
+    margin: 0.42,
+    cogs: 18
+  });
+  const quality = clearInventoryQualityScore(sku, buildDynamicThresholdProfile(priceTestInput(sku)));
+
+  assert.equal(quality.eligible, false);
+});
+
+test("low velocity high inventory SKU qualifies for clear excess inventory", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_LOW_VELOCITY_HIGH_INVENTORY",
+    inventory: 900,
+    sales_velocity: 3,
+    revenue_growth: -0.08,
+    order_growth: -0.06,
+    conversion_trend: -0.02,
+    margin: 0.35,
+    cogs: 14
+  });
+  const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
+  const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("DECLINING"), sku: sku.sku }]]);
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku, "INVENTORY")], lifecycleBySku, thresholdProfile });
+
+  assert.equal(clearInventoryQualityScore(sku, thresholdProfile).eligible, true);
+  assert.ok(actions.some((action) => action.portfolio_action === "REDUCE_INVENTORY"));
+});
+
+test("declining low conversion SKU routes to PRICE_DOWN or EXIT, not PRICE_UP", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_DECLINING_PRICE",
+    product_age_days: 260,
+    price: 50,
+    competitor_price: 60,
+    market_median_price: 60,
+    price_elasticity: -1.4,
+    revenue_growth: -0.18,
+    order_growth: -0.15,
+    conversion_trend: -0.08,
+    conversion_rate: 0.006,
+    inventory: 600,
+    sales_velocity: 3,
+    margin: 0.08,
+    net_profit: -240,
+    ads_spend: 500
+  });
+  const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("DECLINING"), sku: sku.sku }]]);
+  const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku, "PORTFOLIO")], lifecycleBySku, thresholdProfile });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.equal(actionSet.includes("PRICE_UP_5"), false);
+  assert.equal(actionSet.includes("PRICE_UP_10"), false);
+  assert.ok(actionSet.includes("PRICE_DOWN_10") || actionSet.includes("STOP"));
 });
 
 test("optimization result and report expose lifecycle intelligence", () => {

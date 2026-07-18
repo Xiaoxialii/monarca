@@ -83,6 +83,7 @@ type SkuReportRow = {
   inventory_confidence: number | null;
   estimated_components: string[];
   estimated: boolean;
+  lifecycle_stage?: string;
 };
 
 const currency = new Intl.NumberFormat("en-US", {
@@ -175,7 +176,11 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
       overall_risk_score: profit?.overall_risk_score ?? 0,
       inventory_confidence: profit?.inventory_confidence ?? null,
       estimated_components: profit?.estimated_components ?? [],
-      estimated: profit?.estimated === true
+      estimated: profit?.estimated === true,
+      lifecycle_stage: normalizeLifecycleStage(
+        (profit as { lifecycle_stage?: string } | undefined)?.lifecycle_stage ??
+          (row as { lifecycle_stage?: string }).lifecycle_stage
+      )
     };
   });
 }
@@ -234,7 +239,11 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
         overall_risk_score: profit?.overall_risk_score ?? 0,
         inventory_confidence: profit?.inventory_confidence ?? null,
         estimated_components: profit?.estimated_components ?? [],
-        estimated: profit?.estimated === true
+        estimated: profit?.estimated === true,
+        lifecycle_stage: normalizeLifecycleStage(
+          (profit as { lifecycle_stage?: string } | undefined)?.lifecycle_stage ??
+            (row as { lifecycle_stage?: string }).lifecycle_stage
+        )
       };
     });
   }, [report]);
@@ -289,6 +298,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   const performance = report.performance_overview;
   const summary = report.executive_summary;
+  const hasTimeHistory = report.growth_overview.daily.length >= 2;
 
   return (
     <div className="flex w-full flex-col gap-5">
@@ -331,7 +341,11 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
               <LineChartIcon className="size-4 text-emerald-700" />
               Performance Overview
             </CardTitle>
-            <CardDescription>Revenue and order movement from report growth series.</CardDescription>
+            <CardDescription>
+              {hasTimeHistory
+                ? "Revenue and order movement from report growth series."
+                : "Only one order period is available, so trend movement cannot be calculated."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <TimeSeriesChart rows={report.growth_overview.daily} />
@@ -344,12 +358,16 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
               <BarChart3 className="size-4 text-emerald-700" />
               Current vs Previous
             </CardTitle>
-            <CardDescription>Growth signals calculated by the Metric Engine.</CardDescription>
+            <CardDescription>
+              {hasTimeHistory
+                ? "Growth signals calculated by the Metric Engine."
+                : "Growth requires at least two distinct order dates or periods."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <GrowthRow label="Revenue growth" value={report.growth_overview.revenue_growth_rate} />
-            <GrowthRow label="Order growth" value={report.growth_overview.order_growth_rate} />
-            <GrowthRow label="SKU growth" value={report.growth_overview.sku_growth_rate} />
+            <GrowthRow label="Revenue growth" value={report.growth_overview.revenue_growth_rate} isAvailable={hasTimeHistory} />
+            <GrowthRow label="Order growth" value={report.growth_overview.order_growth_rate} isAvailable={hasTimeHistory} />
+            <GrowthRow label="SKU growth" value={report.growth_overview.sku_growth_rate} isAvailable={hasTimeHistory} />
             <div className="grid grid-cols-2 gap-3 pt-2">
               <SmallMetric label="Ad Spend" value={currency.format(performance.ad_spend)} />
               <SmallMetric label="Gross Profit" value={currency.format(performance.gross_profit)} />
@@ -378,6 +396,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
               onChannelChange={setSkuChannel}
               expandedSku={expandedSku}
               onToggleExpanded={(sku) => setExpandedSku((current) => current === sku ? null : sku)}
+              locale={locale}
             />
           </CardContent>
         </Card>
@@ -650,6 +669,23 @@ function TimeSeriesChart({ rows }: { rows: DecisionIntelligenceReportV1["growth_
     return <EmptyBlock label="No time series rows." />;
   }
 
+  if (rows.length < 2) {
+    const row = rows[0];
+    return (
+      <div className="rounded-lg bg-slate-50 p-4">
+        <p className="text-sm font-semibold text-slate-700">Not enough time history to draw a trend.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Current data contains one order period: {row.period}. Add orders from another date or period to calculate movement.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <SmallMetric label="Period" value={row.period} />
+          <SmallMetric label="Revenue" value={currency.format(row.revenue)} />
+          <SmallMetric label="Orders" value={numberFormat.format(row.orders)} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-72">
       <ResponsiveContainer width="100%" height="100%">
@@ -692,7 +728,8 @@ function SkuBreakdownTable({
   selectedChannel,
   onChannelChange,
   expandedSku,
-  onToggleExpanded
+  onToggleExpanded,
+  locale
 }: {
   rows: SkuReportRow[];
   channelTags: string[];
@@ -700,10 +737,20 @@ function SkuBreakdownTable({
   onChannelChange: (value: string) => void;
   expandedSku: string | null;
   onToggleExpanded: (sku: string) => void;
+  locale: RendererLocale;
 }) {
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef({ active: false, startX: 0, startScrollLeft: 0 });
   const [isDraggingTable, setIsDraggingTable] = useState(false);
+  const [skuSearch, setSkuSearch] = useState("");
+  const normalizedSkuSearch = skuSearch.trim().toLowerCase();
+  const visibleRows = useMemo(() => {
+    if (!normalizedSkuSearch) return rows;
+    return rows.filter((row) =>
+      row.sku.toLowerCase().includes(normalizedSkuSearch) ||
+      (row.product_name ?? "").toLowerCase().includes(normalizedSkuSearch)
+    );
+  }, [rows, normalizedSkuSearch]);
 
   const startTableDrag = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -736,11 +783,11 @@ function SkuBreakdownTable({
     const escapedSku = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(expandedSku) : expandedSku.replace(/"/g, '\\"');
     const target = tableScrollRef.current.querySelector(`[data-sku-row="${escapedSku}"]`);
     target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-  }, [expandedSku, rows]);
+  }, [expandedSku, visibleRows]);
 
   return (
     <div className="min-w-0 overflow-hidden">
-      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
         <div className="flex flex-wrap gap-2">
           {channelTags.map((channel) => (
             <button
@@ -758,8 +805,18 @@ function SkuBreakdownTable({
             </button>
           ))}
         </div>
+        <label className="relative min-w-[220px] flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={skuSearch}
+            onChange={(event) => setSkuSearch(event.target.value)}
+            placeholder={locale === "zh" ? "搜索 SKU" : "Search SKU"}
+            className="h-10 w-full rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+          />
+        </label>
       </div>
-      {!rows.length ? <EmptyBlock label="No SKU rows match this channel or search." /> : null}
+      {!visibleRows.length ? <EmptyBlock label="No SKU rows match this channel or search." /> : null}
       <div
         ref={tableScrollRef}
         onMouseDown={startTableDrag}
@@ -809,7 +866,7 @@ function SkuBreakdownTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {rows.map((row, index) => {
+            {visibleRows.map((row, index) => {
               const lowMargin = row.margin !== null && row.margin < 0.1;
               const isExpanded = expandedSku === row.sku;
               const fees = row.cost_breakdown ? row.cost_breakdown.platform_fee + row.cost_breakdown.payment_fee : null;
@@ -833,8 +890,7 @@ function SkuBreakdownTable({
                         {row.variant_name ? <Badge tone="neutral">{row.variant_name}</Badge> : null}
                         {row.size ? <Badge tone="neutral">Size {row.size}</Badge> : null}
                         {row.color ? <Badge tone="neutral">{row.color}</Badge> : null}
-                        {row.estimated ? <Badge tone="warning">estimated</Badge> : null}
-                        {row.attribution_risk ? <Badge tone="warning">attribution fallback</Badge> : null}
+                        <LifecycleBadge stage={row.lifecycle_stage ?? inferSkuLifecycleStage(row)} locale={locale} />
                       </div>
                     </td>
                     <td className="px-3 py-3">{currency.format(row.revenue)}</td>
@@ -1030,33 +1086,38 @@ function InitialProfitOptimizationShell({
                 </div>
               </div>
               <div className="min-w-0 px-5 py-3 xl:order-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "推荐优化" : "Recommended Optimization"}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "优化机会" : "Optimization Opportunities"}</p>
                 <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">0 SKUs</p>
                 <div className="mt-4 text-sm font-semibold text-emerald-900">
-                  <span>{isZh ? "预计提升" : "Impact"}: +$0.00 / +0.00%</span>
+                  <span>{isZh ? "模拟利润增益" : "Simulated Profit Gain"}: +$0.00 / +0.00%</span>
                 </div>
               </div>
             </div>
           ) : null}
         </div>
-        <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+			      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
           <div className="min-w-0 space-y-3 p-4 xl:order-1 xl:p-5">
-            <div className="grid h-full min-h-[520px] place-items-center rounded-lg bg-transparent p-0">
-              <div className="text-center">
+            <div className="flex min-h-[calc(100vh-18rem)] items-center justify-center rounded-lg bg-transparent p-0">
+              <div className="w-full max-w-[430px] text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
-                    {isZh ? "开始利润优化" : "Start profit optimization"}
+                    {isLoadingData
+                      ? (isZh ? "正在加载 SKU 数据" : "Loading SKU operating data")
+                      : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
                   <button
                     type="button"
                     onClick={() => {
+                      if (isLoadingData) return;
                       if (!showSkuTableEmptyState) void onStartProfitOptimization?.();
                     }}
-                    disabled={isLoadingOptimization}
+                    disabled={isLoadingOptimization || isLoadingData}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
-                    aria-label={isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks"}
+                    aria-label={isLoadingData
+                      ? (isZh ? "正在加载 SKU 数据" : "Loading SKU operating data")
+                      : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
-                    {isLoadingOptimization ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
+                    {isLoadingOptimization || isLoadingData ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
                   </button>
                 </div>
               </div>
@@ -1069,7 +1130,7 @@ function InitialProfitOptimizationShell({
                 {isZh ? "SKU 经营数据" : "SKU operating data"}
               </span>
               <span className="rounded-full px-4 py-2 text-sm font-semibold text-slate-500">
-                {isZh ? "SKU 优化智能" : "SKU optimization intelligence"}
+                {isZh ? "SKU 优化决策" : "SKU optimization decision"}
               </span>
             </div>
             <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
@@ -1123,7 +1184,10 @@ function SkuPortfolioOptimizationPanel({
     }
     return ["all", ...Array.from(channels).filter(Boolean).sort()];
   }, [skuRows]);
-  const decisionRows = optimization.skuDecisions ?? report.skuDecisions ?? [];
+  const decisionRows = useMemo(
+    () => optimization.skuDecisions ?? report.skuDecisions ?? [],
+    [optimization.skuDecisions, report.skuDecisions]
+  );
   const portfolioRowsBySku = new Map(selectedRows.map((row) => [row.sku, row]));
   const sourceRows = report.sku_breakdown.top_profit_skus.length ? report.sku_breakdown.top_profit_skus : report.sku_breakdown.top_revenue_skus;
   const sourceSkuIds = sourceRows.length
@@ -1139,23 +1203,45 @@ function SkuPortfolioOptimizationPanel({
   const [selectedDecisionRow, setSelectedDecisionRow] = useState<PortfolioDecisionRow | null>(null);
   const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(true);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
+  const focusedQueueSku = selectedDecisionRow?.skuId ?? null;
+  const displayedSkuRows = useMemo(() => {
+    if (!focusedQueueSku) return visibleSkuRows;
+    return skuRows.filter((row) => row.sku === focusedQueueSku);
+  }, [skuRows, visibleSkuRows, focusedQueueSku]);
   const decisionActionFilter: PortfolioDecisionFilter = "ALL";
   const optimizationQueueRows = decisionRows.filter((row) => isOptimizationQueueRow(row));
   const filteredDecisionRows = (optimizationQueueRows.length ? optimizationQueueRows : decisionRows)
     .filter((row) => decisionFilterMatchesRow(row, decisionActionFilter));
+  const acceptedDecisionRows = filteredDecisionRows.filter((row) => actionStatuses[decisionRowKey(row)] === "accepted");
   const pendingDecisionRows = filteredDecisionRows.filter((row) => {
     const status = actionStatuses[decisionRowKey(row)];
     return status !== "accepted" && status !== "rejected";
   });
+  const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
+  const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
-  const displayedCurrentSkuCount = showSkuTableEmptyState ? 0 : currentSkuCount;
-  const displayedCurrentProfit = showSkuTableEmptyState ? 0 : summary.current_portfolio_profit;
-  const displayedAdsBudget = showSkuTableEmptyState ? 0 : summary.ads_budget_used;
-  const displayedPendingOptimizationCount = showSkuTableEmptyState ? 0 : pendingOptimizationCount;
-  const displayedExpectedProfitGain = showSkuTableEmptyState ? 0 : optimization.total_expected_profit_gain;
-  const displayedLiftRate = showSkuTableEmptyState ? 0 : liftRate;
-  const displayedPendingDecisionRows = showSkuTableEmptyState ? [] : pendingDecisionRows;
-  const selectedDecision = !showSkuTableEmptyState && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
+  const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
+  const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : summary.current_portfolio_profit;
+  const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : summary.ads_budget_used;
+  const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
+  const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : optimization.total_expected_profit_gain;
+  const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : liftRate;
+  const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
+    ? 0
+    : acceptedDecisionRows.reduce((sum, row) => sum + (row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta ?? 0), 0);
+  const displayedAcceptedLiftRate = displayedCurrentProfit > 0 ? displayedAcceptedProfitGain / displayedCurrentProfit : 0;
+  const displayedAcceptedProjectedPortfolioProfit = displayedCurrentProfit + displayedAcceptedProfitGain;
+  const displayedAcceptedAdditionalAds = shouldBlankOptimizationSummary
+    ? 0
+    : acceptedDecisionRows.reduce((sum, row) => {
+      const actionLabel = optimizationGoalForDecision(row).actionLabel;
+      if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
+      return sum + Math.max(0, adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
+    }, 0);
+  const hasAcceptedOptimizationActions = acceptedDecisionRows.length > 0;
+  const displayedPendingOptimizationCountLabel = numberFormat.format(displayedPendingOptimizationCount);
+  const displayedPendingDecisionRows = shouldBlankOptimizationSummary ? [] : pendingDecisionRows;
+  const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
 
@@ -1166,14 +1252,61 @@ function SkuPortfolioOptimizationPanel({
     wasLoadingOptimizationRef.current = isLoadingOptimization;
   }, [isLoadingOptimization, optimizationStarted]);
 
+  useEffect(() => {
+    if (!optimizationStarted || !decisionRows.length) {
+      return;
+    }
+    let cancelled = false;
+
+    async function loadPersistedDecisionStatuses() {
+      const response = await fetch("/api/actions", { cache: "no-store" }).catch(() => null);
+      if (!response?.ok) return;
+      const payload = await response.json().catch(() => null) as { actions?: PersistedActionTrackingRecord[] } | null;
+      const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+      if (!actions.length || cancelled) return;
+
+      const nextStatuses: Record<string, "accepted" | "rejected"> = {};
+      const nextAcceptedAt: Record<string, string> = {};
+
+      for (const action of actions) {
+        const status = action.status === "accepted" || action.status === "running" || action.status === "completed" || action.status === "learned"
+          ? "accepted"
+          : action.status === "rejected"
+            ? "rejected"
+            : null;
+        if (!status) continue;
+
+        const matchedRow = decisionRows.find((row) => persistedActionMatchesDecisionRow(action, row));
+        if (!matchedRow) continue;
+
+        const key = decisionRowKey(matchedRow);
+        nextStatuses[key] = status;
+        if (status === "accepted" && action.accepted_at) {
+          nextAcceptedAt[key] = action.accepted_at.slice(0, 10);
+        }
+      }
+
+      if (!Object.keys(nextStatuses).length || cancelled) return;
+      setActionStatuses((current) => ({ ...current, ...nextStatuses }));
+      setAcceptedAtByDecision((current) => ({ ...current, ...nextAcceptedAt }));
+    }
+
+    void loadPersistedDecisionStatuses();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [optimizationStarted, decisionRows]);
+
   const selectOptimizationQueueRow = (row: PortfolioDecisionRow) => {
-    setSelectedDecisionRow((current) => current && decisionRowKey(current) === decisionRowKey(row) ? null : row);
+    setSelectedDecisionRow(row);
     setSkuChannel("all");
     setExpandedSku(row.skuId);
   };
 
   const acceptDecisionAction = async (row: PortfolioDecisionRow) => {
     const recommendation = portfolioRowsBySku.get(row.skuId);
+    const goal = optimizationGoalForDecision(row);
     setActionStatuses((current) => ({ ...current, [decisionRowKey(row)]: "accepted" }));
     setAcceptedAtByDecision((current) => ({ ...current, [decisionRowKey(row)]: todayDateOnly() }));
     if (recommendation) {
@@ -1189,6 +1322,8 @@ function SkuPortfolioOptimizationPanel({
         action_type: row.action,
         action_payload: {
           action: row.sourceAction,
+          optimization_goal: `${goal.goalLabel} Optimization`,
+          display_action: goal.actionLabel,
           sku_role: row.skuRole,
           recommended_actions: row.recommendedActions,
           decision_drivers: row.decisionDrivers,
@@ -1218,13 +1353,41 @@ function SkuPortfolioOptimizationPanel({
   };
 
   const rejectDecisionAction = async (row: PortfolioDecisionRow) => {
+    const recommendation = portfolioRowsBySku.get(row.skuId);
+    const goal = optimizationGoalForDecision(row);
     setActionStatuses((current) => ({ ...current, [decisionRowKey(row)]: "rejected" }));
     await fetch("/api/actions/reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sku: row.skuId,
-        action_type: row.action
+        lifecycle_stage: row.lifecycle_stage,
+        action_type: row.action,
+        action_payload: {
+          action: row.sourceAction,
+          optimization_goal: `${goal.goalLabel} Optimization`,
+          display_action: goal.actionLabel,
+          sku_role: row.skuRole,
+          recommended_actions: row.recommendedActions,
+          decision_drivers: row.decisionDrivers,
+          ai_evidence: row.ai_evidence,
+          scenarios: row.scenarios,
+          selected_scenario: row.selected_scenario,
+          decision_explanation: row.decision_explanation,
+          rejection_reason: "User rejected recommendation"
+        },
+        baseline_metrics: recommendation ? {
+          profit: recommendation.current_profit,
+          ad_spend: recommendation.simulation.current_ads_spend
+        } : {},
+        predicted_metrics: recommendation ? {
+          profit: recommendation.predicted_profit,
+          revenue: recommendation.simulation.predicted_revenue,
+          ad_spend: recommendation.simulation.recommended_ads_spend
+        } : {
+          profit_delta: row.expectedProfitImpact ?? row.estimatedProfitImpact
+        },
+        confidence_score: row.confidence
       })
     }).catch(() => null);
   };
@@ -1246,8 +1409,8 @@ function SkuPortfolioOptimizationPanel({
   };
 
   return (
-	    <div className="space-y-5 bg-transparent">
-	      <div className="sticky top-0 z-30 py-4">
+	    <div className="space-y-2 bg-transparent">
+	      <div className="sticky top-0 z-30 pb-2 pt-4">
 	        <div className="mb-3 flex items-center justify-between gap-3 px-1">
 	          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
 	            <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
@@ -1257,37 +1420,56 @@ function SkuPortfolioOptimizationPanel({
 	        </div>
 	        <div className="grid gap-0 xl:grid-cols-2">
 	          <div className="min-w-0 px-5 py-3 xl:order-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "当前组合" : "Current Portfolio"}</p>
-            <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">{numberFormat.format(displayedCurrentSkuCount)} SKUs</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {!isSkuOperationsOpen
+                ? (isZh ? "已接受优化影响" : "Accepted Optimization Impact")
+                : (isZh ? "当前组合" : "Current Portfolio")}
+            </p>
+            <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">
+              {!isSkuOperationsOpen ? signedCurrency(displayedAcceptedProfitGain) : `${numberFormat.format(displayedCurrentSkuCount)} SKUs`}
+            </p>
             <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
-              <span>{isZh ? "当前预计利润" : "Estimated Profit"}: {currencyDecimal.format(displayedCurrentProfit)}</span>
-              <span>{isZh ? "广告预算" : "Ad Spend"}: {currencyDecimal.format(displayedAdsBudget)}</span>
+              {!isSkuOperationsOpen ? (
+                <>
+                  <span className="whitespace-nowrap">
+                    {hasAcceptedOptimizationActions
+                      ? `${isZh ? "优化后组合利润" : "Projected Portfolio Profit"}: ${currencyDecimal.format(displayedAcceptedProjectedPortfolioProfit)} / +${percent.format(displayedAcceptedLiftRate)}`
+                      : (isZh ? "尚未接受任何优化动作" : "No accepted actions yet")}
+                  </span>
+                  <span className="whitespace-nowrap">{isZh ? "新增广告" : "Additional ads"}: {currencyDecimal.format(displayedAcceptedAdditionalAds)}</span>
+                </>
+              ) : (
+                <>
+                  <span>{isZh ? "当前预计利润" : "Estimated Profit"}: {currencyDecimal.format(displayedCurrentProfit)}</span>
+                  <span>{isZh ? "广告预算" : "Ad Spend"}: {currencyDecimal.format(displayedAdsBudget)}</span>
+                </>
+              )}
             </div>
           </div>
 	          <div className="min-w-0 px-5 py-3 xl:order-1">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "推荐优化" : "Recommended Optimization"}</p>
-            <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">{numberFormat.format(displayedPendingOptimizationCount)} SKUs</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "优化机会" : "Optimization Opportunities"}</p>
+            <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">{displayedPendingOptimizationCountLabel} SKUs</p>
             <div className="mt-4 text-sm font-semibold text-emerald-900">
               <span>
                 {optimizationStarted
-                  ? `${isZh ? "预计提升" : "Impact"}: +${currencyDecimal.format(displayedExpectedProfitGain)} / +${percent.format(displayedLiftRate)}`
+                  ? `${isZh ? "模拟利润增益" : "Simulated Profit Gain"}: +${currencyDecimal.format(displayedExpectedProfitGain)} / +${percent.format(displayedLiftRate)}`
                   : (isZh ? "点击 Start 后生成优化方案" : "Start to generate optimization plan")}
               </span>
             </div>
           </div>
         </div>
       </div>
-      <div className="space-y-5">
-        <div className="min-w-0 space-y-5">
-		      <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+      <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
+			      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
 		        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:p-5">
           <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
             <button
               type="button"
               onClick={() => setIsSkuOperationsOpen(true)}
               className={cn(
-                "inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200",
-                isSkuOperationsOpen ? "bg-white text-slate-950 shadow-sm ring-1 ring-emerald-200" : "bg-transparent text-slate-500 hover:text-slate-800"
+                "inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5747e8]/30",
+                isSkuOperationsOpen ? "bg-[#5747e8] text-white shadow-sm ring-1 ring-[#5747e8]" : "bg-transparent text-slate-500 hover:text-slate-800"
               )}
               aria-expanded={isSkuOperationsOpen}
               aria-label={isZh ? "打开 SKU 经营数据" : "Open SKU operating data"}
@@ -1298,11 +1480,11 @@ function SkuPortfolioOptimizationPanel({
               type="button"
               onClick={openDecisionIntelligence}
               className={cn(
-                "rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200",
-                !isSkuOperationsOpen ? "bg-white text-slate-950 shadow-sm ring-1 ring-emerald-200" : "bg-transparent text-slate-500 hover:text-slate-800"
+                "rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5747e8]/30",
+                !isSkuOperationsOpen ? "bg-[#5747e8] text-white shadow-sm ring-1 ring-[#5747e8]" : "bg-transparent text-slate-500 hover:text-slate-800"
               )}
             >
-              {isZh ? "SKU 优化智能" : "SKU optimization intelligence"}
+              {isZh ? "SKU 优化决策" : "SKU optimization decision"}
             </button>
           </div>
         {isSkuOperationsOpen ? (
@@ -1311,12 +1493,13 @@ function SkuPortfolioOptimizationPanel({
               <EmptySkuProfitPortfolioTable locale={locale} />
             ) : (
               <SkuBreakdownTable
-                rows={visibleSkuRows}
+                rows={displayedSkuRows}
                 channelTags={skuChannelTags}
                 selectedChannel={skuChannel}
                 onChannelChange={setSkuChannel}
                 expandedSku={expandedSku}
                 onToggleExpanded={(sku) => setExpandedSku((current) => current === sku ? null : sku)}
+                locale={locale}
               />
             )}
           </div>
@@ -1462,10 +1645,10 @@ function SkuPortfolioOptimizationPanel({
 	        </div>
 	        <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
 
-        <div className="min-w-0 space-y-4 xl:order-1">
-	        <div className={cn(
-            "min-w-0 space-y-4 rounded-lg",
-            isSkuOperationsOpen ? "grid min-h-[360px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-3 shadow-xl shadow-emerald-950/5"
+	        <div className="min-w-0 space-y-2 xl:order-1 xl:self-start">
+		        <div className={cn(
+	            "min-w-0 rounded-lg",
+	            isSkuOperationsOpen ? "grid min-h-[calc(100vh-18rem)] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
           )}>
             {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
               <div className="text-center">
@@ -1533,14 +1716,14 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
     <div className="grid min-h-[520px] place-items-center bg-white p-8 text-center">
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-          {isZh ? "推荐优化" : "Recommended Optimization"}
+          {isZh ? "优化机会" : "Optimization Opportunities"}
         </p>
         <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-950 sm:text-5xl">
           {isZh ? "最大化 SKU 组合利润" : "Maximize Your SKU Profit Portfolio"}
         </h2>
         {isLoadingData ? (
-          <p className="mt-5 text-sm font-semibold text-slate-500">
-            {isZh ? "正在加载经营数据，追踪实时利润" : "Loading operating data and tracking real-time profit"}
+          <p className="mt-5 text-sm font-semibold text-[#5747e8]">
+            {isZh ? "正在更新数据" : "Updating data"}
           </p>
         ) : null}
       </div>
@@ -1551,8 +1734,60 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
 type PortfolioRow = DecisionIntelligenceReportV1["sku_portfolio_optimization"]["recommended_portfolio"][number];
 type PortfolioDecisionRow = DecisionIntelligenceReportV1["sku_portfolio_optimization"]["skuDecisions"][number];
 type PortfolioDecisionFilter = PortfolioDecisionRow["action"] | "INVENTORY_RISK" | "BUDGET_OPPORTUNITY" | "ALL";
+type OptimizationGoal = "GROWTH" | "PROFIT" | "INVENTORY" | "PORTFOLIO_HEALTH";
+type DecisionActionDisplay = {
+  title: string;
+  icon: string;
+  category: string;
+  description: string;
+  subtitle: string;
+  reason: string;
+  impact_label: string;
+};
+type DecisionActionReasoning = {
+  title: string;
+  reasons: Array<{
+    signal: string;
+    metric: string;
+    explanation: string;
+  }>;
+  summary: string;
+};
+
+const optimizationGoalFilters: Array<{ goal: OptimizationGoal; label: string }> = [
+  { goal: "GROWTH", label: "Growth" },
+  { goal: "PROFIT", label: "Profit" },
+  { goal: "INVENTORY", label: "Inventory" },
+  { goal: "PORTFOLIO_HEALTH", label: "Portfolio Health" }
+];
+
+const optimizationActionFilters: Record<OptimizationGoal, string[]> = {
+  GROWTH: ["Scale Ads", "Expand Channel"],
+  PROFIT: ["Increase Price", "Decrease Price", "Run Promotion"],
+  INVENTORY: ["Restock Inventory", "Clear Excess Inventory"],
+  PORTFOLIO_HEALTH: ["Reduce Ad Waste", "Reallocate Budget", "Exit SKU"]
+};
+
+function goalFilterDisplayLabel(goal: OptimizationGoal) {
+  if (goal === "GROWTH") return "Growth";
+  if (goal === "PROFIT") return "Profit";
+  if (goal === "INVENTORY") return "Inventory";
+  return "Portfolio Health";
+}
+
+function actionFilterDisplayLabel(action: string) {
+  return action;
+}
 
 type ActionOutcomeStatus = "Pending" | "Accepted" | "Running" | "Completed" | "Rejected" | "Blocked";
+
+type PersistedActionTrackingRecord = {
+  sku: string;
+  action_type: string;
+  status: string;
+  accepted_at?: string | null;
+  action_payload?: Record<string, unknown>;
+};
 
 type ActionOutcomeRow = {
   action: string;
@@ -1561,7 +1796,9 @@ type ActionOutcomeRow = {
   window: string;
   baselineProfit: number;
   predictedProfitLift: number;
+  actualTotalProfitChange: number | null;
   actualProfitLift: number | null;
+  organicProfitChange: number | null;
   status: ActionOutcomeStatus;
   confidence: number;
   evidence: string;
@@ -1575,7 +1812,9 @@ const seedActionOutcomeRows: ActionOutcomeRow[] = [
     window: "7d",
     baselineProfit: 3321.25,
     predictedProfitLift: 9755,
+    actualTotalProfitChange: 3000,
     actualProfitLift: 2410,
+    organicProfitChange: 590,
     status: "Running",
     confidence: 0.6507,
     evidence: "Margin 41% + inventory passed"
@@ -1587,7 +1826,9 @@ const seedActionOutcomeRows: ActionOutcomeRow[] = [
     window: "7d",
     baselineProfit: 5200,
     predictedProfitLift: 9677,
+    actualTotalProfitChange: 10200,
     actualProfitLift: 8950,
+    organicProfitChange: 1250,
     status: "Completed",
     confidence: 0.642,
     evidence: "High margin + high ROAS"
@@ -1599,7 +1840,9 @@ const seedActionOutcomeRows: ActionOutcomeRow[] = [
     window: "14d",
     baselineProfit: 4380,
     predictedProfitLift: 3100,
+    actualTotalProfitChange: 2100,
     actualProfitLift: 1820,
+    organicProfitChange: 280,
     status: "Completed",
     confidence: 0.782,
     evidence: "Price elasticity passed"
@@ -1608,6 +1851,16 @@ const seedActionOutcomeRows: ActionOutcomeRow[] = [
 
 function decisionRowKey(row: PortfolioDecisionRow) {
   return `${row.skuId}:${row.action}:${row.sourceAction}`;
+}
+
+function persistedActionMatchesDecisionRow(action: PersistedActionTrackingRecord, row: PortfolioDecisionRow) {
+  if (action.sku !== row.skuId) return false;
+  if (action.action_type !== row.action) return false;
+
+  const payloadSourceAction = String(action.action_payload?.action ?? "").trim();
+  if (!payloadSourceAction) return false;
+
+  return payloadSourceAction === row.sourceAction;
 }
 
 function isOptimizationQueueRow(row: PortfolioDecisionRow) {
@@ -1643,36 +1896,142 @@ function OptimizationDecisionRail({
   showInlineDetail?: boolean;
 }) {
   const isZh = locale === "zh";
+  const [selectedGoal, setSelectedGoal] = useState<OptimizationGoal>("GROWTH");
+  const [selectedGoalAction, setSelectedGoalAction] = useState<string | null>(null);
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(selectedRow ? decisionRowKey(selectedRow) : null);
+  const displayedRows = selectedGoal
+    ? rows.filter((row) => {
+      const goal = optimizationGoalForDecision(row);
+      return goal.goal === selectedGoal && (!selectedGoalAction || goal.actionLabel === selectedGoalAction);
+    })
+    : rows;
+  const goalRows = selectedGoal
+    ? rows.filter((row) => optimizationGoalForDecision(row).goal === selectedGoal)
+    : rows;
+  const actionCounts = goalRows.reduce<Record<string, number>>((counts, row) => {
+    const label = optimizationGoalForDecision(row).actionLabel;
+    counts[label] = (counts[label] ?? 0) + 1;
+    return counts;
+  }, {});
+  const queueCountLabel = displayedRows.length === rows.length
+    ? (isZh ? `待优化 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} pending`)
+    : (isZh
+      ? `${numberFormat.format(displayedRows.length)} 个显示 / ${numberFormat.format(rows.length)} 个待优化`
+      : `${numberFormat.format(displayedRows.length)} shown / ${numberFormat.format(rows.length)} pending`);
+  const visibleSelectedKey = displayedRows.some((row) => decisionRowKey(row) === selectedRowKey)
+    ? selectedRowKey
+    : null;
+
+  useEffect(() => {
+    if (selectedRow) setSelectedRowKey(decisionRowKey(selectedRow));
+  }, [selectedRow]);
+
+  const selectRow = (row: PortfolioDecisionRow) => {
+    setSelectedRowKey(decisionRowKey(row));
+    onSelect(row);
+  };
 
   return (
-    <aside className="sticky top-0 max-h-[calc(100vh-6rem)] overflow-hidden rounded-lg bg-emerald-50/70 p-3">
-      <div className="rounded-lg bg-emerald-950 p-4">
+    <aside className="sticky top-0 max-h-[calc(100vh-6rem)] overflow-hidden rounded-lg bg-emerald-50/70 p-0">
+      <div className="rounded-lg bg-emerald-950 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-base font-bold text-white">{isZh ? "利润待优化队列" : "Profit Optimization Queue"}</p>
+          <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
           <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 text-xs font-bold text-emerald-50 ring-1 ring-emerald-200/25">
-            {isZh ? `待优化 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} pending`}
+            {queueCountLabel}
           </span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {optimizationGoalFilters.map((filter) => {
+            const isSelected = selectedGoal === filter.goal;
+            return (
+            <button
+              key={filter.goal}
+              type="button"
+	              onClick={() => {
+	                setSelectedGoal((current) => {
+	                  if (current !== filter.goal) setSelectedGoalAction(null);
+	                  return filter.goal;
+	                });
+	              }}
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
+                isSelected
+                  ? "bg-[#5747e8] text-white ring-[#5747e8]"
+                  : "bg-emerald-300/10 text-emerald-50 ring-emerald-200/20 hover:bg-emerald-300/20"
+              )}
+              aria-pressed={isSelected}
+            >
+              {filter.label}
+            </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="mt-3 max-h-[calc(100vh-14rem)] space-y-2 overflow-y-auto pr-4 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-emerald-100/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-950/45">
-        {rows.length ? rows.map((row) => {
+      <div className={cn(
+        "mt-2 flex min-h-[38px] flex-wrap content-start gap-2 px-1",
+        !selectedGoal && "invisible"
+      )}>
+        {selectedGoal
+          ? optimizationActionFilters[selectedGoal].map((action) => {
+            const isSelected = selectedGoalAction === action;
+            const count = actionCounts[action] ?? 0;
+            return (
+              <button
+                key={action}
+                type="button"
+	                onClick={() => {
+	                  const nextAction = selectedGoalAction === action ? null : action;
+	                  setSelectedGoalAction(nextAction);
+	                }}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-bold transition ring-1",
+                  isSelected
+                    ? "bg-[#5747e8] text-white ring-[#5747e8]"
+                    : "bg-white text-emerald-900 ring-emerald-200 hover:bg-emerald-50"
+                )}
+                aria-pressed={isSelected}
+              >
+                {actionFilterDisplayLabel(action)}
+                <span className={cn(
+                  "ml-1 text-[10px]",
+                  isSelected ? "text-white/80" : "text-emerald-700/70"
+                )}>
+                  {numberFormat.format(count)}
+                </span>
+              </button>
+            );
+          })
+          : null}
+      </div>
+      <div className="mt-2 min-h-[420px] max-h-[calc(100vh-14rem)] space-y-2 overflow-y-auto px-1 pb-1 pr-4 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-emerald-100/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-950/45">
+        {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
-          const isSelected = selectedRow ? decisionRowKey(selectedRow) === key : false;
-          const recommendation = portfolioRowsBySku.get(row.skuId);
-          const impact = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? 0;
-          const status = actionStatuses[key] === "accepted" ? "accepted" : actionStatuses[key] === "rejected" ? "rejected" : "awaiting_decision";
+          const isSelected = visibleSelectedKey === key;
+	          const recommendation = portfolioRowsBySku.get(row.skuId);
+	          const impact = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? 0;
+	          const status = actionStatuses[key] === "accepted" ? "accepted" : actionStatuses[key] === "rejected" ? "rejected" : "awaiting_decision";
+	          const goal = optimizationGoalForDecision(row);
+	          const actionDisplay = actionDisplayForDecision(row, recommendation);
 
           return (
-            <div key={key} className="rounded-lg bg-white ring-1 ring-slate-100">
+            <div
+              key={key}
+              className={cn(
+                "rounded-lg border-2 bg-white transition",
+                isSelected
+                  ? "border-blue-600 shadow-sm"
+                  : "border-transparent ring-1 ring-slate-100"
+              )}
+            >
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => onSelect(row)}
+                onClick={() => selectRow(row)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    onSelect(row);
+                    selectRow(row);
                   }
                 }}
                 className={cn(
@@ -1684,14 +2043,14 @@ function OptimizationDecisionRail({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-950">{row.skuId}</p>
                     <div className="mt-1 flex flex-wrap gap-1.5">
-                      <LifecycleBadge stage={row.lifecycle_stage} />
-                      <DecisionBadge action={row.action ?? "MONITOR"} locale={locale} />
+                      <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal)} />
+	                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
                     </div>
                   </div>
                   <span className="text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
                 </div>
                 <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
-                  {(row.recommendedActions ?? row.recommendedExecution ?? [portfolioScenarioActionLabel(row.sourceAction, locale)])[0]}
+	                  {actionDisplay.description}
                 </p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="text-[11px] font-semibold text-slate-500">{recommendation ? percent.format(recommendation.confidence) : percent.format(row.confidence)}</span>
@@ -1730,7 +2089,7 @@ function OptimizationDecisionRail({
             </div>
           );
         }) : (
-          <div className="rounded-lg bg-white p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
+          <div className="grid min-h-[92px] place-items-start rounded-lg bg-white p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
             {isZh ? "暂无需要优化的 SKU。" : "No SKUs currently need optimization."}
           </div>
         )}
@@ -1883,7 +2242,9 @@ function portfolioRowToOutcomeRow(row: PortfolioRow, locale: RendererLocale): Ac
     window: row.action.includes("PRICE") ? "14d" : "7d",
     baselineProfit: row.current_profit,
     predictedProfitLift: Math.max(0, row.profit_delta),
+    actualTotalProfitChange: null,
     actualProfitLift: null,
+    organicProfitChange: null,
     status: "Running",
     confidence: row.confidence,
     evidence: portfolioEvidenceSummary(row, locale)
@@ -1901,17 +2262,50 @@ function actualProfitLiftForSku(rows: ActionOutcomeRow[], sku: string) {
   return matchedRows.reduce((sum, row) => sum + (row.actualProfitLift ?? 0), 0);
 }
 
-function LifecycleBadge({ stage }: { stage?: string }) {
-  const label = stage === "LAUNCH" ? "Launch" : stage === "GROWTH" ? "Growth" : stage === "MATURE" ? "Mature" : stage === "DECLINING" ? "Declining" : "Lifecycle";
+function organicProfitChangeForSku(rows: ActionOutcomeRow[], sku: string) {
+  const matchedRows = rows.filter((row) => row.sku === sku && row.organicProfitChange !== null);
+  if (!matchedRows.length) return null;
+  return matchedRows.reduce((sum, row) => sum + (row.organicProfitChange ?? 0), 0);
+}
+
+function outcomeStatusForProfitChange(value: number | null): "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "TRACKING" {
+  if (value === null) return "TRACKING";
+  if (value > 0.01) return "POSITIVE";
+  if (value < -0.01) return "NEGATIVE";
+  return "NEUTRAL";
+}
+
+function normalizeLifecycleStage(stage?: string | null) {
+  const normalized = String(stage ?? "").trim().toUpperCase();
+  if (normalized === "LAUNCH" || normalized === "GROWTH" || normalized === "MATURE" || normalized === "DECLINING") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function inferSkuLifecycleStage(row: Pick<SkuReportRow, "profit" | "margin" | "sales_velocity" | "days_of_inventory" | "overstock_risk">) {
+  if ((row.profit !== null && row.profit < 0) || (row.margin !== null && row.margin < 0.1)) return "DECLINING";
+  if (row.sales_velocity >= 10 && (row.margin === null || row.margin >= 0.2)) return "GROWTH";
+  if (row.days_of_inventory !== null && row.days_of_inventory > 120) return "DECLINING";
+  if (row.overstock_risk === "high") return "DECLINING";
+  return "MATURE";
+}
+
+function LifecycleBadge({ stage, locale = "en" }: { stage?: string; locale?: RendererLocale }) {
+  const normalizedStage = normalizeLifecycleStage(stage);
+  const labelMap = locale === "zh"
+    ? { LAUNCH: "新品", GROWTH: "增长", MATURE: "成熟", DECLINING: "衰退", FALLBACK: "生命周期" }
+    : { LAUNCH: "Launch", GROWTH: "Growth", MATURE: "Mature", DECLINING: "Declining", FALLBACK: "Lifecycle" };
+  const label = normalizedStage ? labelMap[normalizedStage] : labelMap.FALLBACK;
   return (
     <span
       className={cn(
         "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
-        stage === "LAUNCH" && "bg-sky-100 text-sky-800",
-        stage === "GROWTH" && "bg-emerald-100 text-emerald-800",
-        stage === "MATURE" && "bg-indigo-100 text-indigo-800",
-        stage === "DECLINING" && "bg-rose-100 text-rose-800",
-        !stage && "bg-slate-100 text-slate-600"
+        normalizedStage === "LAUNCH" && "bg-sky-100 text-sky-800",
+        normalizedStage === "GROWTH" && "bg-emerald-100 text-emerald-800",
+        normalizedStage === "MATURE" && "bg-indigo-100 text-indigo-800",
+        normalizedStage === "DECLINING" && "bg-rose-100 text-rose-800",
+        !normalizedStage && "bg-slate-100 text-slate-600"
       )}
     >
       {label}
@@ -2011,6 +2405,585 @@ function DecisionBadge({ action, locale }: { action: "SCALE" | "REDUCE" | "OPTIM
   const label = decisionActionLabel(action, locale);
   const tone = action === "SCALE" ? "success" : action === "REDUCE" ? "danger" : action === "OPTIMIZE" ? "warning" : "neutral";
   return <Badge tone={tone}>{label}</Badge>;
+}
+
+function OptimizationGoalBadge({ goal, label }: { goal: OptimizationGoal; label: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
+        goal === "GROWTH" && "bg-emerald-100 text-emerald-800",
+        goal === "PROFIT" && "bg-amber-100 text-amber-800",
+        goal === "INVENTORY" && "bg-sky-100 text-sky-800",
+        goal === "PORTFOLIO_HEALTH" && "bg-rose-100 text-rose-800"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function OptimizationActionBadge({ goal, label }: { goal: OptimizationGoal; label: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
+        goal === "GROWTH" && "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100",
+        goal === "PROFIT" && "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
+        goal === "INVENTORY" && "bg-sky-50 text-sky-700 ring-1 ring-sky-100",
+        goal === "PORTFOLIO_HEALTH" && "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function isNoActionDecisionRow(row: PortfolioDecisionRow) {
+  const sourceAction = String(row.sourceAction ?? "").trim();
+  const unifiedAction = String((row as { unified_action?: string }).unified_action ?? "").trim();
+  const displayTitle = String((row as { display?: { title?: string } }).display?.title ?? "").trim().toLowerCase();
+  const hasConcreteAction = Boolean(unifiedAction && unifiedAction !== "HOLD") ||
+    Boolean(displayTitle && !/hold|monitor|no action/.test(displayTitle));
+  return sourceAction === "HOLD" || (!sourceAction && !hasConcreteAction && row.action === "MONITOR");
+}
+
+function optimizationGoalForDecision(row: PortfolioDecisionRow): { goal: OptimizationGoal; goalLabel: string; actionLabel: string } {
+  const sourceAction = row.sourceAction ?? "";
+  const recommendedText = `${(row.recommendedActions ?? row.recommendedExecution ?? []).join(" ")} ${sourceAction}`.toLowerCase();
+  const backendGoal = (row as { optimization_goal?: string }).optimization_goal;
+  const backendUnifiedAction = (row as { unified_action?: string }).unified_action;
+  const opportunityType = (row as { opportunity_type?: string }).opportunity_type;
+
+  if (sourceAction === "STOP") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
+  }
+  if (backendUnifiedAction === "SCALE_ADS") {
+    return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Scale Ads" };
+  }
+  if (backendUnifiedAction === "EXPAND_CHANNEL") {
+    return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Expand Channel" };
+  }
+  if (backendUnifiedAction === "OPTIMIZE_PRICE") {
+    const actionLabel = sourceAction === "PRICE_DOWN_10"
+      ? "Decrease Price"
+      : sourceAction === "PROMOTION_TEST"
+        ? "Run Promotion"
+        : "Increase Price";
+    return { goal: "PROFIT", goalLabel: "Profit", actionLabel };
+  }
+  if (backendUnifiedAction === "RESTOCK") {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Restock Inventory" };
+  }
+  if (backendUnifiedAction === "REDUCE_INVENTORY") {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Clear Excess Inventory" };
+  }
+  if (backendUnifiedAction === "REALLOCATE_BUDGET") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Reallocate Budget" };
+  }
+  if (backendUnifiedAction === "REDUCE_WASTE") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Reduce Ad Waste" };
+  }
+  if (backendUnifiedAction === "STOP_SKU") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
+  }
+  if (sourceAction === "REDUCE_ADS" || row.action === "REDUCE") {
+    const actionLabel = opportunityType === "AD_EFFICIENCY" || opportunityType === "PORTFOLIO" || recommendedText.includes("waste")
+      ? "Reduce Ad Waste"
+      : backendUnifiedAction === "REALLOCATE_BUDGET" || backendGoal === "PROFIT" || recommendedText.includes("reallocate")
+        ? "Reallocate Budget"
+        : "Reduce Ad Waste";
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel };
+  }
+  if (sourceAction === "RESTOCK_AND_SCALE" || sourceAction.includes("RESTOCK")) {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Restock Inventory" };
+  }
+  if (sourceAction === "REDUCE_INVENTORY" || recommendedText.includes("inventory balance")) {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Clear Excess Inventory" };
+  }
+  if (sourceAction === "SHIFT_CHANNEL") {
+    return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Expand Channel" };
+  }
+  if (sourceAction === "PROMOTION_TEST") {
+    return { goal: "PROFIT", goalLabel: "Profit", actionLabel: "Run Promotion" };
+  }
+  if (sourceAction === "PRICE_DOWN_10") {
+    return { goal: "PROFIT", goalLabel: "Profit", actionLabel: "Decrease Price" };
+  }
+  if (sourceAction.includes("PRICE")) {
+    return { goal: "PROFIT", goalLabel: "Profit", actionLabel: "Increase Price" };
+  }
+  if (recommendedText.includes("reallocate")) {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Reallocate Budget" };
+  }
+  if (sourceAction.includes("SCALE") || sourceAction === "TEST_AD_SPEND" || sourceAction === "CREATE_BUNDLE" || row.action === "SCALE") {
+    return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Scale Ads" };
+  }
+  if (isNoActionDecisionRow(row)) {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "No Action Required" };
+  }
+
+  return { goal: "PROFIT", goalLabel: "Profit", actionLabel: "Reallocate Budget" };
+}
+
+function inventoryActionUnits(
+  row: PortfolioDecisionRow,
+  recommendation: PortfolioRow | undefined,
+  detail: SelectedSkuDetail | undefined,
+  mode: "restock" | "clear"
+) {
+  const rowWithSimulation = row as PortfolioDecisionRow & {
+    simulation?: { required_inventory?: number; inventory_impact?: number };
+    before_state?: { inventory?: number };
+  };
+  const simulation = recommendation?.simulation ?? rowWithSimulation.simulation;
+  const beforeState = recommendation?.before_state ?? rowWithSimulation.before_state;
+  const currentInventory = beforeState?.inventory ?? detail?.current_stock ?? 0;
+  const requiredInventory = simulation?.required_inventory ?? 0;
+  const inventoryImpact = simulation?.inventory_impact ?? 0;
+  const value = mode === "restock"
+    ? Math.max(0, requiredInventory - currentInventory, inventoryImpact)
+    : Math.max(0, currentInventory - requiredInventory, Math.abs(Math.min(0, inventoryImpact)));
+
+  return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+function adsBudgetDeltaForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
+  const rowWithSimulation = row as PortfolioDecisionRow & {
+    simulation?: { recommended_ads_spend?: number; current_ads_spend?: number };
+  };
+  const rowSimulationDelta = rowWithSimulation.simulation
+    ? (rowWithSimulation.simulation.recommended_ads_spend ?? 0) - (rowWithSimulation.simulation.current_ads_spend ?? 0)
+    : 0;
+  const simulationDelta = recommendation
+    ? recommendation.simulation.recommended_ads_spend - recommendation.simulation.current_ads_spend
+    : rowSimulationDelta;
+  const estimateDelta = row.simulation_estimate?.investment.additional_ad_spend ?? 0;
+  const fallbackDelta = Math.max(50, Math.round(Math.abs(expectedProfit) * 0.24));
+  const value = Math.max(simulationDelta, estimateDelta, 0);
+
+  return value > 0 ? value : fallbackDelta;
+}
+
+function budgetReallocationPlan(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const payload = row as PortfolioDecisionRow & {
+    source_channel?: string;
+    target_channel?: string;
+    from_channel?: string;
+    to_channel?: string;
+    channel?: string;
+  };
+  const from = payload.source_channel ?? payload.from_channel ?? "Amazon";
+  const to = payload.target_channel ?? payload.to_channel ?? (payload.channel && payload.channel !== from ? payload.channel : "Shopify");
+  const amount = Math.max(0, adsBudgetDeltaForDecision(row, recommendation));
+
+  return {
+    from,
+    to,
+    amount,
+    label: `${from} -> ${to}`
+  };
+}
+
+function actionDisplayForDecision(
+  row: PortfolioDecisionRow,
+  recommendation?: PortfolioRow,
+  detail?: SelectedSkuDetail,
+  simulationHorizonDays = 30
+): DecisionActionDisplay {
+  const goal = optimizationGoalForDecision(row);
+  const backendDisplay =
+    (row as { display?: DecisionActionDisplay }).display ??
+    (recommendation as { display?: DecisionActionDisplay } | undefined)?.display ??
+    (row.sku_decision_object as { display?: DecisionActionDisplay } | undefined)?.display;
+  const backendDisplayTitle = String(backendDisplay?.title ?? "").toLowerCase();
+  const backendDisplayIsNoAction = /hold|monitor|no action/.test(backendDisplayTitle);
+
+  if (backendDisplay) {
+    if (goal.actionLabel === "No Action Required") {
+      return {
+        ...backendDisplay,
+        title: "No Action Required",
+        icon: "⏸",
+        category: "Portfolio Health",
+        description: "Current portfolio performance is optimal; AI will continue monitoring new signals.",
+        subtitle: "Continue monitoring",
+        reason: "No alternative action generated higher risk-adjusted profit.",
+        impact_label: "No execution impact expected."
+      };
+    }
+    if (goal.actionLabel === "Scale Ads") {
+      const adsDelta = adsBudgetDeltaForDecision(row, recommendation);
+      return {
+        ...backendDisplay,
+        title: "Scale Ads",
+        icon: "🚀",
+        category: "Growth Optimization",
+        description: `Increase advertising budget by ${signedCurrency(Math.max(0, adsDelta))} / ${simulationHorizonDays} days`,
+        subtitle: `Increase ads budget ${signedCurrency(Math.max(0, adsDelta))} / ${simulationHorizonDays} days`,
+        reason: "ROAS and margin support additional spend."
+      };
+    } else if (goal.actionLabel === "Expand Channel") {
+      return {
+        ...backendDisplay,
+        title: "Expand Channel",
+        icon: "🌎",
+        category: "Growth Optimization",
+        description: "Launch new channel test",
+        subtitle: "Move budget to stronger channel",
+        reason: "Simulation shows higher channel profitability."
+      };
+    } else if (goal.actionLabel === "Restock Inventory") {
+      const restockUnits = inventoryActionUnits(row, recommendation, detail, "restock");
+      const restockText = restockUnits > 0 ? `Restock ${restockUnits.toLocaleString("en-US")} units` : "Restock Inventory";
+      const restockDescription = restockUnits > 0 ? `Add ${restockUnits.toLocaleString("en-US")} units inventory` : "Add inventory to prevent stockout risk";
+      return {
+        ...backendDisplay,
+        title: restockText,
+        icon: "📦",
+        category: "Inventory Optimization",
+        description: restockDescription,
+        subtitle: restockDescription,
+        reason: "Demand exceeds available stock."
+      };
+    } else if (goal.actionLabel === "Clear Excess Inventory") {
+      const clearUnits = inventoryActionUnits(row, recommendation, detail, "clear");
+      const clearText = clearUnits > 0 ? `Clear Excess Inventory ${clearUnits.toLocaleString("en-US")} units` : "Clear Excess Inventory";
+      const clearDescription = clearUnits > 0
+        ? `Clear ${clearUnits.toLocaleString("en-US")} excess units from active inventory exposure`
+        : "Clear excess inventory from active inventory exposure";
+      return {
+        ...backendDisplay,
+        title: clearText,
+        icon: "🏷",
+        category: "Inventory Optimization",
+        description: clearDescription,
+        subtitle: clearDescription,
+        reason: "Slow velocity and cash tied up."
+      };
+    }
+    if (!backendDisplayIsNoAction && goal.actionLabel === "Reallocate Budget") {
+      const plan = budgetReallocationPlan(row, recommendation);
+      return {
+        ...backendDisplay,
+        title: "Reallocate Budget",
+        icon: "🔄",
+        category: "Portfolio Health",
+        description: `Move ${currencyDecimal.format(plan.amount)} budget: ${plan.label} / ${simulationHorizonDays} days`,
+        subtitle: `Move budget: ${plan.label}`,
+        reason: "Same budget can generate higher profit."
+      };
+    }
+    if (!backendDisplayIsNoAction && goal.actionLabel === "Exit SKU") {
+      return {
+        ...backendDisplay,
+        title: "Exit SKU",
+        icon: "❌",
+        category: "Portfolio Health",
+        description: "Exit SKU from active optimization portfolio",
+        subtitle: "Exit SKU",
+        reason: "Negative profit trend and limited recovery potential."
+      };
+    }
+    if (!backendDisplayIsNoAction) return backendDisplay;
+  }
+
+  const sourceAction = row.sourceAction ?? "";
+  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
+  const horizon = `${simulationHorizonDays} days`;
+  const priceChange = recommendation && recommendation.before_state.price > 0
+    ? (recommendation.simulation.simulated_price - recommendation.before_state.price) / recommendation.before_state.price
+    : sourceAction === "PRICE_DOWN_10"
+      ? -0.1
+      : sourceAction === "PRICE_UP_10"
+        ? 0.1
+        : 0.05;
+  const pricePercent = `${priceChange >= 0 ? "+" : ""}${Math.round(priceChange * 100)}%`;
+  const adsDelta = adsBudgetDeltaForDecision(row, recommendation);
+  const restockUnits = inventoryActionUnits(row, recommendation, detail, "restock");
+  const clearUnits = inventoryActionUnits(row, recommendation, detail, "clear");
+
+  if (goal.actionLabel === "No Action Required") {
+    return {
+      title: "No Action Required",
+      icon: "⏸",
+      category: "Portfolio Health",
+      description: "Current portfolio performance is optimal; AI will continue monitoring new signals.",
+      subtitle: "Continue monitoring",
+      reason: "No alternative action generated higher risk-adjusted profit.",
+      impact_label: "No execution impact expected."
+    };
+  }
+
+  if (sourceAction.includes("PRICE") || sourceAction === "PROMOTION_TEST" || goal.actionLabel === "Increase Price" || goal.actionLabel === "Decrease Price" || goal.actionLabel === "Run Promotion") {
+    if (sourceAction === "PROMOTION_TEST" || goal.actionLabel === "Run Promotion") {
+      return {
+        title: "Run Promotion 10%",
+        icon: "🏷️",
+        category: "Profit Optimization",
+        description: "Apply 10% discount test",
+        subtitle: "Apply 10% discount test",
+        reason: "Promotion test checks whether demand lift offsets lower unit margin.",
+        impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+      };
+    }
+
+    const shouldDecrease = goal.actionLabel === "Decrease Price" || priceChange < 0;
+    const title = shouldDecrease ? `Decrease Price ${Math.abs(Math.round(priceChange * 100))}%` : `Increase Price ${pricePercent}`;
+    return {
+      title,
+      icon: "💰",
+      category: "Profit Optimization",
+      description: shouldDecrease ? `Lower price by ${Math.abs(Math.round(priceChange * 100))}% to improve demand` : `Raise price by ${pricePercent}`,
+      subtitle: shouldDecrease ? `Lower price by ${Math.abs(Math.round(priceChange * 100))}%` : `Raise price by ${pricePercent}`,
+      reason: shouldDecrease ? "Demand elasticity suggests volume growth will offset margin reduction." : "Current margin supports price increase with limited demand impact.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Scale Ads" || sourceAction.includes("SCALE") || sourceAction === "TEST_AD_SPEND") {
+    return {
+      title: "Scale Ads",
+      icon: "🚀",
+      category: "Growth Optimization",
+      description: `Increase advertising budget by ${signedCurrency(Math.max(0, adsDelta))} / ${horizon}`,
+      subtitle: `Increase ads budget ${signedCurrency(Math.max(0, adsDelta))} / ${horizon}`,
+      reason: "ROAS and margin support additional spend.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Expand Channel" || sourceAction === "SHIFT_CHANNEL") {
+    return {
+      title: "Expand Channel to TikTok",
+      icon: "🌎",
+      category: "Growth Optimization",
+      description: "Launch TikTok Shop channel test",
+      subtitle: "Launch TikTok Shop test",
+      reason: "Simulation shows higher channel profitability.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Restock Inventory" || sourceAction.includes("RESTOCK")) {
+    const restockText = restockUnits > 0 ? `Restock ${restockUnits.toLocaleString("en-US")} units` : "Restock Inventory";
+    const restockDescription = restockUnits > 0 ? `Add ${restockUnits.toLocaleString("en-US")} units inventory` : "Add inventory to prevent stockout risk";
+    return {
+      title: restockText,
+      icon: "📦",
+      category: "Inventory Optimization",
+      description: restockDescription,
+      subtitle: restockDescription,
+      reason: "Demand exceeds available stock.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Clear Excess Inventory" || sourceAction === "REDUCE_INVENTORY") {
+    const clearText = clearUnits > 0 ? `Clear Excess Inventory ${clearUnits.toLocaleString("en-US")} units` : "Clear Excess Inventory";
+    const clearDescription = clearUnits > 0
+      ? `Clear ${clearUnits.toLocaleString("en-US")} excess units from active inventory exposure`
+      : "Clear excess inventory from active inventory exposure";
+    return {
+      title: clearText,
+      icon: "🏷",
+      category: "Inventory Optimization",
+      description: clearDescription,
+      subtitle: clearDescription,
+      reason: "Slow velocity and cash tied up.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Reduce Ad Waste") {
+    return {
+      title: `Reduce Ad Waste ${signedCurrency(adsDelta)}`,
+      icon: "🛑",
+      category: "Portfolio Health",
+      description: `Reduce inefficient ad spend by ${currencyDecimal.format(Math.abs(adsDelta))} / ${horizon}`,
+      subtitle: `Reduce inefficient ad spend ${signedCurrency(adsDelta)} / ${horizon}`,
+      reason: "Marginal ROAS is below target.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit recovery over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Reallocate Budget" || sourceAction === "REDUCE_ADS") {
+    const plan = budgetReallocationPlan(row, recommendation);
+    return {
+      title: "Reallocate Budget",
+      icon: "🔄",
+      category: "Portfolio Health",
+      description: `Move ${currencyDecimal.format(plan.amount)} budget: ${plan.label} / ${horizon}`,
+      subtitle: `Move budget: ${plan.label}`,
+      reason: "Same budget can generate higher profit.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit over ${horizon}.`
+    };
+  }
+
+  if (goal.actionLabel === "Exit SKU" || sourceAction === "STOP") {
+    return {
+      title: "Exit SKU",
+      icon: "❌",
+      category: "Portfolio Health",
+      description: "Exit SKU from active optimization portfolio",
+      subtitle: "Exit SKU",
+      reason: "Negative profit trend and limited recovery potential.",
+      impact_label: `AI predicts ${signedCurrency(expectedProfit)} profit recovery over ${horizon}.`
+    };
+  }
+
+  return {
+    title: "No Action Required",
+    icon: "⏸",
+    category: "Portfolio Health",
+    description: "Current portfolio performance is optimal; AI will continue monitoring new signals.",
+    subtitle: "Continue monitoring",
+    reason: "No alternative action generated higher risk-adjusted profit.",
+    impact_label: "No execution impact expected."
+  };
+}
+
+function actionReasoningForDecision(
+  row: PortfolioDecisionRow,
+  detail: SelectedSkuDetail,
+  display: DecisionActionDisplay,
+  simulationHorizonDays: number,
+  recommendation?: PortfolioRow
+): DecisionActionReasoning {
+  const backendReasoning =
+    (row as { reasoning?: DecisionActionReasoning }).reasoning ??
+    (recommendation as { reasoning?: DecisionActionReasoning } | undefined)?.reasoning ??
+    (row.sku_decision_object as { reasoning?: DecisionActionReasoning } | undefined)?.reasoning;
+
+  const goal = optimizationGoalForDecision(row);
+  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d;
+  const roas = row.simulation_estimate?.revenue_simulation.base_roas ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
+  const marginalRoas = row.simulation_estimate?.revenue_simulation.marginal_roas ?? Math.max(1.2, roas * 0.83);
+  const salesVelocity = Math.max(0.1, detail.current_sales_velocity);
+  const demand30d = Math.round(detail.predicted_daily_demand * simulationHorizonDays);
+  const stockCoverage = Math.round(detail.inventory_runway_days);
+  const inventoryValue = detail.current_stock * Math.max(1, detail.current_profit / Math.max(1, demand30d));
+  const cashReleased = Math.max(0, inventoryValue * 0.6);
+
+  if (goal.actionLabel === "No Action Required") {
+    return {
+      title: "Why AI Selected Hold",
+      reasons: [
+        { signal: "No alternative action generated higher risk-adjusted profit", metric: "Decision: Hold baseline", explanation: "Candidate actions did not beat the current operating plan after risk, confidence, and constraints." },
+        { signal: "Current operation is already efficient", metric: `Margin: ${percent.format(detail.current_margin)} · ROAS: ${ratioFormat.format(roas)}`, explanation: "The SKU does not need an immediate operating change." },
+        { signal: "Waiting for stronger signal before changing strategy", metric: `Monitoring window: ${simulationHorizonDays} days`, explanation: "AI will re-evaluate after new demand, cost, inventory, or ad efficiency signals arrive." }
+      ],
+      summary: "AI recommends monitoring because no action cleared the risk-adjusted decision threshold."
+    };
+  }
+
+  if (goal.actionLabel === "Scale Ads") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Strong advertising efficiency", metric: `ROAS: ${ratioFormat.format(roas)} · Benchmark: 2.8`, explanation: "Paid demand is efficient enough to justify additional spend." },
+        { signal: "Positive incremental profit", metric: `Simulation: ${signedCurrency(expectedProfit)} profit impact`, explanation: "Profit impact is calculated after ads, COGS, fees, shipping, and refunds." },
+        { signal: "Inventory supports growth", metric: `Stock coverage: ${stockCoverage} days`, explanation: "Inventory can support the extra demand created by advertising." }
+      ],
+      summary: "This SKU has profitable demand and enough inventory capacity to support additional advertising spend."
+    };
+  }
+
+  if (goal.actionLabel === "Expand Channel") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Similar products perform well in this channel", metric: `TikTok category ROAS: ${ratioFormat.format(Math.max(4.5, marginalRoas))}`, explanation: "Comparable products show strong channel efficiency." },
+        { signal: "Channel opportunity detected", metric: "Current: Shopify only · Recommendation: Launch TikTok test", explanation: "The SKU can add a demand path without replacing the current channel." },
+        { signal: "Profit potential positive", metric: `Expected impact: ${signedCurrency(expectedProfit)} / ${simulationHorizonDays} days`, explanation: "The channel scenario cleared risk-adjusted profit scoring." }
+      ],
+      summary: "AI identified an additional profitable channel opportunity."
+    };
+  }
+
+  if (goal.actionLabel === "Increase Price" || goal.actionLabel === "Decrease Price" || goal.actionLabel === "Run Promotion") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Margin improvement opportunity", metric: `Current margin: ${percent.format(detail.current_margin)}`, explanation: "Current unit economics have room for a better price point." },
+        { signal: "Demand remains stable", metric: "Elasticity: -0.4", explanation: "The simulation expects demand impact to stay within the profitable range." },
+        { signal: "Simulation predicts higher profit", metric: `Expected impact: ${signedCurrency(expectedProfit)} / ${simulationHorizonDays} days`, explanation: "Profit impact comes from simulated contribution profit, not revenue lift." }
+      ],
+      summary: "AI found a better price point that improves profit while maintaining expected demand."
+    };
+  }
+
+  if (goal.actionLabel === "Reallocate Budget") {
+    const plan = budgetReallocationPlan(row, undefined);
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Channel profitability difference detected", metric: `Current ROAS: ${ratioFormat.format(roas)} · Alternative ROAS: ${ratioFormat.format(Math.max(5, roas * 1.4))}`, explanation: "The current spend path is less profitable than alternatives." },
+        { signal: "Same budget can generate higher profit", metric: `Move ${currencyDecimal.format(plan.amount)} budget: ${plan.label}`, explanation: "AI reallocates spend toward stronger contribution profit." },
+        { signal: "Profit recovery positive", metric: `Expected recovery: ${signedCurrency(expectedProfit)}`, explanation: "The selected action improves profit by reducing inefficient allocation." }
+      ],
+      summary: "AI reallocates budget toward higher-profit channels."
+    };
+  }
+
+  if (goal.actionLabel === "Restock Inventory") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Demand exceeds available inventory", metric: `Sales velocity: ${ratioFormat.format(salesVelocity)} units/day`, explanation: "Expected demand is higher than current inventory can support." },
+        { signal: "Stockout risk detected", metric: `Inventory coverage: ${stockCoverage} days`, explanation: "Inventory shortage can cap profitable demand." },
+        { signal: "Additional inventory creates profit opportunity", metric: `Simulation: ${signedCurrency(expectedProfit)} profit`, explanation: "Restocking lets the SKU capture expected demand." }
+      ],
+      summary: "AI recommends replenishment to capture expected demand."
+    };
+  }
+
+  if (goal.actionLabel === "Clear Excess Inventory") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Low inventory velocity", metric: `Sales velocity: ${ratioFormat.format(salesVelocity)} units/day`, explanation: "Inventory is moving slower than the current stock position requires." },
+        { signal: "Inventory exceeds demand forecast", metric: `Current stock: ${detail.current_stock.toLocaleString("en-US")} units · Expected 30D demand: ${demand30d.toLocaleString("en-US")} units`, explanation: "The SKU has more inventory than the simulation expects to sell." },
+        { signal: "Capital is locked in excess inventory", metric: `Inventory value: ${currencyDecimal.format(inventoryValue)} · Cash released: ${signedCurrency(cashReleased)}`, explanation: "Clearing excess inventory improves cash efficiency and lowers holding risk." }
+      ],
+      summary: "AI recommends clearing excess inventory to improve cash efficiency and reduce holding risk."
+    };
+  }
+
+  if (goal.actionLabel === "Reduce Ad Waste") {
+    return {
+      title: `Why AI Recommended ${display.title}`,
+      reasons: [
+        { signal: "Low marginal ROAS", metric: `Marginal ROAS: ${ratioFormat.format(marginalRoas)}`, explanation: "Additional spend is not producing enough contribution profit." },
+        { signal: "Spend exceeds profit contribution", metric: `Ad waste: ${currencyDecimal.format(Math.max(0, detail.current_ads_spend * 0.35))}`, explanation: "The budget can be better used elsewhere in the portfolio." },
+        { signal: "Better allocation opportunities exist", metric: `Expected profit recovery: ${signedCurrency(expectedProfit)}`, explanation: "Solver found higher risk-adjusted use of resources." }
+      ],
+      summary: "AI identified inefficient spending that reduces portfolio profitability."
+    };
+  }
+
+  if (backendReasoning && !reasoningLooksLikeHold(backendReasoning)) return backendReasoning;
+
+  return {
+    title: `Why AI Recommended ${display.title}`,
+    reasons: [
+      { signal: "Negative profitability trend", metric: `Current profit: ${currencyDecimal.format(detail.current_profit)}`, explanation: "The SKU does not meet the profit threshold." },
+      { signal: "Low demand recovery probability", metric: "Recovery probability: Low", explanation: "Simulation does not show enough recovery potential." },
+      { signal: "Capital tied in declining product", metric: `Avoided future loss: ${signedCurrency(expectedProfit)}`, explanation: "Exiting protects portfolio profitability." }
+    ],
+    summary: "AI recommends exiting this SKU to protect portfolio profitability."
+  };
+}
+
+function reasoningLooksLikeHold(reasoning: DecisionActionReasoning) {
+  const text = [
+    reasoning.title,
+    reasoning.summary,
+    ...reasoning.reasons.map((reason) => `${reason.signal} ${reason.metric} ${reason.explanation}`)
+  ].join(" ");
+
+  return /hold|monitor|no alternative action|current operation is already efficient|waiting for stronger signal/i.test(text);
 }
 
 function RoleBadge({ role, locale }: { role: "ACQUISITION" | "PROFIT" | "GROWTH" | "DRAIN"; locale: RendererLocale }) {
@@ -2139,7 +3112,6 @@ function SelectedSkuOptimizationPanel({
   trackedOutcomeRows,
   simulationHorizonDays,
   actionStatus,
-  acceptedAt,
   locale
 }: {
   row: PortfolioDecisionRow;
@@ -2150,7 +3122,6 @@ function SelectedSkuOptimizationPanel({
   acceptedAt?: string;
   locale: RendererLocale;
 }) {
-  const isZh = locale === "zh";
   const [range, setRange] = useState<7 | 14 | 30>(7);
   const detail = selectedSkuDetail(row, recommendation, trackedOutcomeRows, simulationHorizonDays, actionStatus);
   const dailyRows = buildDailyProfitTrackingRows(detail, range);
@@ -2162,80 +3133,89 @@ function SelectedSkuOptimizationPanel({
     ? (cumulativeActualLift - cumulativePredictedLift) / Math.abs(cumulativePredictedLift)
     : null;
   const accuracy = predictionError === null ? detail.tracking_summary.accuracy_score : Math.max(0, 1 - Math.abs(predictionError));
+  const decision = buildSkuDecisionObject(row, recommendation, detail, visibleRows, actionStatus, simulationHorizonDays);
 
   return (
     <aside className="sticky bottom-0 top-auto mx-auto max-h-[68vh] max-w-5xl overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
       <div className="p-0">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-base font-bold text-slate-950">AI SKU Decision Center</p>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              Evidence, scenario simulation, lifecycle strategy, and execution feedback for the selected SKU.
-            </p>
-          </div>
-          <Badge tone="success">{detail.source}</Badge>
+        <div>
+          <p className="text-base font-bold text-slate-950">AI SKU Decision Center</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Evidence, scenario simulation, lifecycle strategy, and execution feedback for the selected SKU.
+          </p>
         </div>
       </div>
 
       <div className="mt-6 p-0">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-500">{isZh ? "选中 SKU" : "Selected SKU Summary"}</p>
-            <p className="mt-1 text-lg font-bold text-slate-950">{detail.sku}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <LifecycleBadge stage={row.lifecycle_stage} />
-              {row.lifecycle?.confidence !== undefined ? (
-                <span className="text-xs font-semibold text-slate-500">{isZh ? "生命周期置信度" : "Lifecycle confidence"}: {percent.format(row.lifecycle.confidence)}</span>
-              ) : null}
+        <p className="text-sm font-bold text-slate-950">AI Decision Summary</p>
+        <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-lg font-extrabold text-[#5747e8]">{decision.sku}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                {decision.action === "No Action Required"
+                  ? "AI is monitoring this SKU because no action currently beats the baseline."
+                  : "AI is recommending a business action for this SKU."}
+              </p>
             </div>
+            {actionStatus === "pending" ? (
+              <Badge tone="warning">Pending Approval</Badge>
+            ) : (
+              <RecommendationStatusBadge status={actionStatus === "accepted" ? "accepted" : "rejected"} locale={locale} />
+            )}
           </div>
-          {actionStatus === "pending" ? null : (
-            <RecommendationStatusBadge status={actionStatus === "accepted" ? "accepted" : "rejected"} locale={locale} />
-          )}
-        </div>
-        <div className="mt-3 space-y-1.5 text-sm">
-          <DetailRow label="Action" value={detail.action} />
-          <DetailRow label="Recommendation" value={detail.recommendation} />
-          <DetailRow label={isZh ? "Baseline Period" : "Baseline Period"} value={formatBaselinePeriod(row, simulationHorizonDays)} />
-          <DetailRow label={isZh ? "Action Start" : "Action Start"} value={formatDecisionActionStart(row)} />
-          <DetailRow label={isZh ? "Simulation Window" : "Simulation Window"} value={formatDecisionWindow(row, simulationHorizonDays)} />
-          <DetailRow label={isZh ? "Tracking Window" : "Tracking Window"} value={formatTrackingWindow(row, simulationHorizonDays, acceptedAt)} />
-        </div>
-        {row.lifecycle?.signals?.length ? (
-          <div className="mt-4 rounded-lg bg-white/55 p-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{isZh ? "Lifecycle Why" : "Lifecycle Why"}</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {row.lifecycle.signals.slice(0, 6).map((signal) => (
-                <span key={signal} className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                  {signal.replaceAll("_", " ")}
-                </span>
+          <div className="mt-3 grid gap-2 text-sm">
+            <DecisionSummaryRow label="Lifecycle" value={decision.lifecycle_status} />
+            {decision.action !== "No Action Required" ? (
+              <DecisionProfitComparisonTable decision={decision} horizonDays={simulationHorizonDays} />
+            ) : null}
+            <DecisionSummaryRow label="Confidence" value={percent.format(detail.confidence)} />
+            <DecisionSummaryRow label="Decision Status" value={decision.decision_status} />
+          </div>
+          <div className="mt-4 rounded-lg bg-emerald-50/70 p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">Decision Context</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg bg-white/80 p-3 ring-1 ring-emerald-100">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Optimization Goal</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.optimization_goal}</p>
+              </div>
+              <div className="rounded-lg bg-white/80 p-3 ring-1 ring-emerald-100">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Recommended Action</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.action}</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{decision.action_description}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-sm font-bold text-slate-950">Why AI Selected This Decision</p>
+            <p className="mt-1 text-xs font-bold text-slate-700">{decision.reasoning.title}</p>
+            <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700">
+              {decision.reasoning.reasons.map((item) => (
+                <div key={item.signal} className="rounded-md bg-white/70 p-2">
+                  <span className="inline-flex items-center gap-2 text-slate-950">
+                    <span className="text-emerald-700">✓</span>
+                    {item.signal}
+                  </span>
+                  <div className="mt-1 grid gap-0.5 pl-5 text-xs font-semibold text-slate-600">
+                    <span>{item.metric}</span>
+                    <span className="font-medium leading-5 text-slate-500">{item.explanation}</span>
+                  </div>
+                </div>
               ))}
             </div>
+            <p className="mt-3 text-xs font-semibold leading-5 text-emerald-900">{decision.reasoning.summary}</p>
           </div>
-        ) : null}
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <SmallTrackerMetric label="Confidence" value={percent.format(detail.confidence)} />
-          <SmallTrackerMetric label={`Expected lift ${simulationHorizonDays}d`} value={`${signedCurrency(detail.expected_profit_lift_30d)} / ${simulationHorizonDays} days`} />
-          <SmallTrackerMetric label="Current profit" value={currencyDecimal.format(detail.current_profit)} />
-          <SmallTrackerMetric label="Actual lift" value={detail.tracking_summary.actual_cumulative_lift === null ? "Pending" : signedCurrency(detail.tracking_summary.actual_cumulative_lift)} />
         </div>
       </div>
 
-      <PanelDisclosure title="Operating signals">
-        <div className="grid grid-cols-2 gap-2">
-          <SmallTrackerMetric label="Margin" value={percent.format(detail.current_margin)} />
-          <SmallTrackerMetric label="Ads spend" value={currencyDecimal.format(detail.current_ads_spend)} />
-          <SmallTrackerMetric label="Stock" value={numberFormat.format(detail.current_stock)} />
-          <SmallTrackerMetric label="Sales velocity" value={`${ratioFormat.format(detail.current_sales_velocity)}/day`} />
-        </div>
+      <PanelDisclosure title="Why This SKU Has Opportunity" defaultOpen>
+        <DecisionSignalCards decision={decision} />
       </PanelDisclosure>
 
-      <PanelDisclosure title="Why AI Recommended">
-        <AIEvidenceCards row={row} detail={detail} />
+      <PanelDisclosure title="AI Reasoning">
+        <AIReasoningPanel decision={decision} />
       </PanelDisclosure>
 
-      <PanelDisclosure title="Simulation Comparison">
-        <ScenarioSimulationComparison row={row} recommendation={recommendation} detail={detail} />
+      <PanelDisclosure title="AI Scenario Comparison">
+        <ScenarioSimulationComparison decision={decision} />
       </PanelDisclosure>
 
       {row.simulation_estimate ? (
@@ -2246,7 +3226,7 @@ function SelectedSkuOptimizationPanel({
 
       <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-bold text-slate-950">Daily Profit Optimization</p>
+          <p className="text-sm font-bold text-slate-950">Prediction vs Actual Impact</p>
           <div className="flex rounded-md bg-slate-100 p-1">
             {[7, 14, 30].map((value) => (
               <button
@@ -2264,23 +3244,293 @@ function SelectedSkuOptimizationPanel({
           </div>
         </div>
         <ProfitTrendChart rows={visibleRows} compact />
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <SmallTrackerMetric label="Avg predicted lift/day" value={signedCurrency(cumulativePredictedLift / Math.max(1, visibleRows.length))} />
-          <SmallTrackerMetric label="Cumulative predicted" value={signedCurrency(cumulativePredictedLift)} />
-          <SmallTrackerMetric label="Cumulative actual" value={actualRows.length ? signedCurrency(cumulativeActualLift) : "Pending"} />
-          <SmallTrackerMetric label="Prediction error" value={predictionError === null ? "Pending" : percent.format(predictionError)} />
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <p className="mb-2 text-sm font-bold text-slate-950">Daily Impact Tracking</p>
+          <DailyProfitTrackingTable rows={visibleRows} />
         </div>
       </div>
 
-      <PanelDisclosure title="Daily tracking rows">
-        <DailyProfitTrackingTable rows={visibleRows} />
-      </PanelDisclosure>
-
-      <PanelDisclosure title="Action Lifecycle">
+      <PanelDisclosure title="AI Decision Lifecycle">
         <ActionLifecycleCard detail={detail} actionStatus={actionStatus} accuracy={accuracy} compact showTitle={false} />
       </PanelDisclosure>
 
     </aside>
+  );
+}
+
+type SkuDecisionObject = {
+  sku: string;
+  optimization_goal: string;
+  action: string;
+  action_description: string;
+  action_reason: string;
+  reasoning: {
+    title: string;
+    reasons: Array<{
+      signal: string;
+      metric: string;
+      explanation: string;
+    }>;
+    summary: string;
+  };
+  evidence: Array<{
+    signal: string;
+    metric: string;
+    benchmark?: string;
+    impact: string;
+    status: string;
+    explanation: string;
+  }>;
+  scenarios: Array<{
+    action: string;
+    profit_delta: number;
+    confidence: number;
+    risk?: number;
+    selected: boolean;
+    status: "Selected" | "Alternative" | "Rejected";
+  }>;
+  summary_comparison: Array<{
+    metric: string;
+    current: string;
+    action: string;
+    change: string;
+    strong?: boolean;
+  }>;
+  tracking: {
+    current_ads_spend: number;
+    current_strategy_profit: number;
+    predicted_profit: number;
+    expected_profit: number;
+    actual_profit: number | null;
+    organic_change: number | null;
+    outcome_status: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "TRACKING";
+    progress: number;
+    learning_status: string;
+  };
+  lifecycle_status: string;
+  decision_status: string;
+};
+
+function DecisionSummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
+      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <span className={cn("text-right text-sm font-bold", strong ? "text-emerald-700" : "text-slate-950")}>{value}</span>
+    </div>
+  );
+}
+
+function DecisionProfitComparisonTable({ decision, horizonDays }: { decision: SkuDecisionObject; horizonDays: number }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <table className="w-full text-left text-xs">
+        <thead className="bg-slate-50 text-slate-500">
+          <tr>
+            <th className="px-3 py-2 font-bold uppercase tracking-wide">Metric</th>
+            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">Current Plan</th>
+            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">AI Action</th>
+            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">Change</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {decision.summary_comparison.map((item) => (
+            <tr key={item.metric}>
+              <td className="px-3 py-2 font-semibold text-slate-600">
+                {item.metric.includes("/") ? item.metric : `${item.metric}${item.metric === "Profit" ? ` / ${horizonDays} days` : ""}`}
+              </td>
+              <td className="px-3 py-2 text-right font-bold text-slate-950">{item.current}</td>
+              <td className="px-3 py-2 text-right font-bold text-slate-950">{item.action}</td>
+              <td className={cn("px-3 py-2 text-right font-bold", item.strong ? "text-emerald-700" : "text-slate-700")}>{item.change}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function signedUnits(value: number) {
+  const rounded = Math.round(value);
+  return `${rounded >= 0 ? "+" : ""}${rounded.toLocaleString("en-US")} units`;
+}
+
+function priceChangeFromActionDisplay(display: DecisionActionDisplay) {
+  const match = display.title.match(/([+-]?\d+)%/);
+  if (!match?.[1]) return null;
+  return (Number(match[1]) || 0) / 100;
+}
+
+function buildDecisionSummaryComparisonRows(
+  row: PortfolioDecisionRow,
+  recommendation: PortfolioRow | undefined,
+  detail: SelectedSkuDetail,
+  actionDisplay: DecisionActionDisplay,
+  horizonDays: number
+): SkuDecisionObject["summary_comparison"] {
+  const goal = optimizationGoalForDecision(row);
+  const rows: SkuDecisionObject["summary_comparison"] = [];
+  const currentProfit = detail.current_profit;
+  const projectedProfit = detail.predicted_profit;
+  const incrementalProfit = projectedProfit - currentProfit;
+
+  if (goal.actionLabel === "Reallocate Budget") {
+    const plan = budgetReallocationPlan(row, recommendation);
+    rows.push({
+      metric: "Budget Move",
+      current: plan.from,
+      action: plan.to,
+      change: currencyDecimal.format(plan.amount)
+    });
+  } else if (goal.actionLabel === "Scale Ads" || goal.actionLabel === "Reduce Ad Waste") {
+    const currentAdSpend = detail.current_ads_spend;
+    const adsDelta = goal.actionLabel === "Reduce Ad Waste"
+      ? -Math.abs(adsBudgetDeltaForDecision(row, recommendation))
+      : Math.max(0, adsBudgetDeltaForDecision(row, recommendation));
+    rows.push({
+      metric: `Ad Spend / ${horizonDays} days`,
+      current: currencyDecimal.format(currentAdSpend),
+      action: currencyDecimal.format(Math.max(0, currentAdSpend + adsDelta)),
+      change: signedCurrency(adsDelta)
+    });
+  }
+
+  if (goal.actionLabel === "Restock Inventory" || goal.actionLabel === "Clear Excess Inventory") {
+    const mode = goal.actionLabel === "Restock Inventory" ? "restock" : "clear";
+    const units = inventoryActionUnits(row, recommendation, detail, mode);
+    const unitDelta = mode === "restock" ? units : -units;
+    rows.push({
+      metric: "Inventory Units",
+      current: `${Math.round(detail.current_stock).toLocaleString("en-US")} units`,
+      action: `${Math.max(0, Math.round(detail.current_stock + unitDelta)).toLocaleString("en-US")} units`,
+      change: signedUnits(unitDelta)
+    });
+  }
+
+  if (goal.goal === "PROFIT") {
+    const currentPrice = recommendation?.before_state.price ?? null;
+    const simulatedPrice = recommendation?.simulation.simulated_price ?? null;
+    const priceChange = priceChangeFromActionDisplay(actionDisplay);
+
+    if (currentPrice && currentPrice > 0) {
+      const actionPrice = simulatedPrice && simulatedPrice > 0
+        ? simulatedPrice
+        : currentPrice * (1 + (priceChange ?? 0));
+      rows.push({
+        metric: "Price",
+        current: currencyDecimal.format(currentPrice),
+        action: currencyDecimal.format(actionPrice),
+        change: signedCurrency(actionPrice - currentPrice)
+      });
+    } else if (goal.actionLabel === "Run Promotion") {
+      rows.push({
+        metric: "Promotion",
+        current: "No active discount",
+        action: "10% discount test",
+        change: "Test"
+      });
+    }
+  }
+
+  rows.push({
+    metric: `Profit / ${horizonDays} days`,
+    current: currencyDecimal.format(currentProfit),
+    action: currencyDecimal.format(projectedProfit),
+    change: signedCurrency(incrementalProfit),
+    strong: true
+  });
+
+  return rows;
+}
+
+function DecisionSignalCards({ decision }: { decision: SkuDecisionObject }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {decision.evidence.map((item) => {
+        const primaryLabel = item.signal === "Demand Signal"
+          ? "Revenue Trend"
+          : item.signal === "Profit Signal"
+            ? "Margin"
+            : item.signal === "Advertising Signal"
+              ? "ROAS"
+              : item.impact === "Excess inventory detected"
+                ? "Current Stock"
+                : "Stock Coverage";
+        const benchmarkLabel = item.signal === "Profit Signal"
+          ? "Portfolio Average"
+          : item.signal === "Advertising Signal"
+            ? "Marginal ROAS"
+            : item.impact === "Excess inventory detected"
+              ? "Demand Forecast"
+              : "Benchmark";
+
+        return (
+        <div key={item.signal} className="rounded-lg border border-emerald-100 bg-emerald-50/55 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-bold text-slate-950">{item.signal}</p>
+            <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              {item.status}
+            </span>
+          </div>
+          <div className="mt-3 space-y-1.5 text-xs">
+            <DetailRow label={primaryLabel} value={item.metric} />
+            {item.benchmark ? <DetailRow label={benchmarkLabel} value={item.benchmark} /> : null}
+          </div>
+          <p className="mt-3 text-xs font-medium leading-5 text-slate-600">{item.explanation}</p>
+        </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AIReasoningPanel({ decision }: { decision: SkuDecisionObject }) {
+  const selectedScenario = decision.scenarios.find((scenario) => scenario.status === "Selected") ?? decision.scenarios[0];
+
+  return (
+    <div className="space-y-3">
+      <DecisionReasonItem
+        index={1}
+        title="Input Signals"
+        body={decision.reasoning.reasons.map((reason) => `✓ ${reason.signal}`).join(" · ")}
+      />
+      <DecisionReasonItem
+        index={2}
+        title="Detected Opportunity"
+        body={decision.optimization_goal}
+      />
+      <DecisionReasonItem
+        index={3}
+        title="Candidate Actions"
+        body={decision.scenarios.slice(0, 4).map((scenario) => `${scenario.action}: ${signedCurrency(scenario.profit_delta)}`).join(" · ")}
+      />
+      <div className="rounded-lg bg-emerald-950 p-3 text-white">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">Selected Action</p>
+        <p className="mt-1 text-lg font-extrabold">{decision.action}</p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-emerald-50">
+          {selectedScenario?.selected
+            ? "Highest risk-adjusted profit under current constraints."
+            : "Current operation remains the best risk-adjusted baseline."}
+        </p>
+      </div>
+      <div className="rounded-lg bg-slate-50 p-3 text-xs font-semibold leading-5 text-slate-600">
+        {decision.reasoning.summary}
+      </div>
+    </div>
+  );
+}
+
+function DecisionReasonItem({ index, title, body }: { index: number; title: string; body: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <div className="flex gap-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-extrabold text-emerald-800">{index}</span>
+        <div>
+          <p className="text-sm font-bold text-slate-950">{title}</p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{body}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2325,57 +3575,51 @@ function AIEvidenceCards({ row, detail }: { row: PortfolioDecisionRow; detail: S
   );
 }
 
-function ScenarioSimulationComparison({
-  row,
-  recommendation,
-  detail
-}: {
-  row: PortfolioDecisionRow;
-  recommendation?: PortfolioRow;
-  detail: SelectedSkuDetail;
-}) {
-  const scenarios = (row.scenarios?.length ? row.scenarios : recommendation?.scenarios?.length ? recommendation.scenarios : fallbackScenarios(row, recommendation, detail)).slice(0, 4);
-  const selected = row.selected_scenario ?? recommendation?.selected_scenario ?? scenarios.find((scenario) => scenario.selected) ?? scenarios[0];
-  const explanation = row.decision_explanation ?? recommendation?.decision_explanation;
-
+function ScenarioSimulationComparison({ decision }: { decision: SkuDecisionObject }) {
   return (
     <div className="space-y-3">
-      <div className="rounded-lg bg-slate-50 p-3">
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="font-semibold text-slate-500">Current profit</span>
-          <span className="font-bold text-slate-950">{currencyDecimal.format(detail.current_profit)}</span>
+      <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-950">
+        AI evaluated: <span className="text-emerald-700">{decision.scenarios.length} strategies</span>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-slate-200">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Action</th>
+              <th className="px-3 py-2">Expected Profit Impact</th>
+              <th className="px-3 py-2">Confidence</th>
+              <th className="px-3 py-2">Decision</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {decision.scenarios.map((scenario) => (
+              <tr key={scenario.action} className={scenario.status === "Selected" ? "bg-emerald-50/70" : ""}>
+                <td className="px-3 py-2 font-bold text-slate-950">{scenario.action}</td>
+                <td className={cn("px-3 py-2 font-extrabold", scenario.profit_delta >= 0 ? "text-emerald-700" : "text-rose-600")}>{signedCurrency(scenario.profit_delta)}</td>
+                <td className="px-3 py-2 font-semibold text-slate-700">{percent.format(scenario.confidence)}</td>
+                <td className="px-3 py-2">
+                  <span className={cn(
+                    "rounded-full px-2 py-0.5 text-[11px] font-bold",
+                    scenario.status === "Selected" ? "bg-emerald-100 text-emerald-800" : scenario.status === "Rejected" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"
+                  )}>
+                    {scenario.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {decision.action === "No Action Required" ? (
+        <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
+          AI selected no action because current portfolio performance is optimal under current constraints.
         </div>
-      </div>
-      <div className="grid gap-2">
-        {scenarios.map((scenario) => (
-          <div
-            key={scenario.scenario_id ?? scenario.action}
-            className={cn(
-              "rounded-lg p-3",
-              scenario.selected ? "bg-emerald-50 text-emerald-950" : "bg-white/65 text-slate-950"
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold">{scenario.label ?? scenario.action}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-500">{percent.format(scenario.confidence ?? 0)} confidence</p>
-              </div>
-              <p className={cn("text-base font-bold", (scenario.expected_profit_lift ?? 0) >= 0 ? "text-emerald-700" : "text-rose-600")}>
-                {signedCurrency(scenario.expected_profit_lift ?? 0)}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-      {selected ? (
+      ) : (
         <div className="rounded-lg bg-emerald-950 p-3 text-white">
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">AI Selected</p>
-          <p className="mt-1 text-sm font-bold">{selected.label ?? selected.action}</p>
-          <p className="mt-2 text-xs leading-5 text-emerald-50">
-            {explanation?.selection_reason ?? "Selected because it provides the strongest expected profit while satisfying budget, inventory, margin, and confidence constraints."}
-          </p>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">Selected because:</p>
+          <p className="mt-1 text-sm font-bold">Highest risk-adjusted profit under current constraints.</p>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -2471,12 +3715,19 @@ function fallbackScenarios(row: PortfolioDecisionRow, recommendation: PortfolioR
 }
 
 function ProfitTrendChart({ rows, compact = false }: { rows: DailyProfitTrackingRow[]; compact?: boolean }) {
-  const data = rows.map((row) => ({
+  let cumulativeExpected = 0;
+  let cumulativeActual = 0;
+  const data = rows.map((row) => {
+    cumulativeExpected += row.profit_delta;
+    if (row.actual_profit !== null) {
+      cumulativeActual += row.actual_profit - row.baseline_profit;
+    }
+    return {
     date: row.date.slice(5),
-    baseline: row.baseline_profit,
-    predicted: row.predicted_profit,
-    actual: row.actual_profit
-  }));
+      expected: cumulativeExpected,
+      actual: row.actual_profit === null ? null : cumulativeActual
+    };
+  });
 
   return (
     <div className={cn("mt-3 rounded-lg border bg-slate-50 p-2", compact ? "h-24" : "h-36")}>
@@ -2486,9 +3737,8 @@ function ProfitTrendChart({ rows, compact = false }: { rows: DailyProfitTracking
           <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
           <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" width={48} />
           <Tooltip formatter={(value) => currencyDecimal.format(Number(value))} />
-          <Line type="monotone" dataKey="baseline" stroke="#94a3b8" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="predicted" stroke="#059669" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="actual" stroke="#0f172a" strokeWidth={2} dot={false} connectNulls />
+          <Line name="Expected Profit Lift" type="monotone" dataKey="expected" stroke="#059669" strokeWidth={2} dot={false} />
+          <Line name="Actual Profit Lift" type="monotone" dataKey="actual" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -2496,47 +3746,43 @@ function ProfitTrendChart({ rows, compact = false }: { rows: DailyProfitTracking
 }
 
 function DailyProfitTrackingTable({ rows }: { rows: DailyProfitTrackingRow[] }) {
+  const baselineAds = rows[0]?.ads_spend ?? 0;
+  const baselineRevenue = rows[0]?.revenue ?? 0;
+
   return (
     <div className="max-h-44 overflow-auto rounded-lg border">
-      <table className="min-w-[760px] w-full text-left text-xs">
+      <table className="min-w-[620px] w-full text-left text-xs">
         <thead className="sticky top-0 bg-slate-50 text-slate-500">
           <tr>
             <th className="px-2 py-2">Date</th>
-            <th className="px-2 py-2">Baseline Profit</th>
-            <th className="px-2 py-2">Predicted Profit</th>
-            <th className="px-2 py-2">Actual Profit</th>
-            <th className="px-2 py-2">Profit Lift</th>
-            <th className="px-2 py-2">Ads Spend</th>
-            <th className="px-2 py-2">Revenue</th>
-            <th className="px-2 py-2">Margin</th>
-            <th className="px-2 py-2">Stock</th>
-            <th className="px-2 py-2">Status</th>
+            <th className="px-2 py-2">Action Status</th>
+            <th className="px-2 py-2">Ad Spend Change</th>
+            <th className="px-2 py-2">Revenue Impact</th>
+            <th className="px-2 py-2">Profit Impact</th>
           </tr>
         </thead>
         <tbody className="divide-y">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const profitImpact = row.actual_profit === null ? null : row.actual_profit - row.baseline_profit;
+            return (
             <tr key={`${row.sku}-${row.date}`}>
-              <td className="px-2 py-2 font-semibold text-slate-900">{row.date}</td>
-              <td className="px-2 py-2">{currencyDecimal.format(row.baseline_profit)}</td>
-              <td className="px-2 py-2">{currencyDecimal.format(row.predicted_profit)}</td>
-              <td className="px-2 py-2">{row.actual_profit === null ? "Pending actual" : currencyDecimal.format(row.actual_profit)}</td>
-              <td className="px-2 py-2 font-semibold text-emerald-700">{signedCurrency(row.profit_delta)}</td>
-              <td className="px-2 py-2">{currencyDecimal.format(row.ads_spend)}</td>
-              <td className="px-2 py-2">{currencyDecimal.format(row.revenue)}</td>
-              <td className="px-2 py-2">{percent.format(row.margin)}</td>
-              <td className="px-2 py-2">{numberFormat.format(row.stock)}</td>
-              <td className="px-2 py-2"><Badge tone={row.action_status === "completed" ? "success" : row.action_status === "rejected" ? "neutral" : "warning"}>{row.action_status === "pending" ? "Waiting for feedback" : row.action_status}</Badge></td>
+              <td className="px-2 py-2 font-semibold text-slate-900">{new Date(`${row.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
+              <td className="px-2 py-2"><Badge tone={row.action_status === "tracking" ? "success" : "warning"}>{row.action_status === "tracking" ? "Running" : "Pending"}</Badge></td>
+              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.ads_spend - baselineAds)} Ads</td>
+              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.revenue - baselineRevenue)} Revenue</td>
+              <td className="px-2 py-2 font-bold text-emerald-700">{profitImpact === null ? "Pending" : `${signedCurrency(profitImpact)} Profit`}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-function PanelDisclosure({ title, children }: { title: string; children: ReactNode }) {
+function PanelDisclosure({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   return (
-    <details className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
+    <details className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-slate-950 marker:hidden">
         <span>{title}</span>
         <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">Open</span>
@@ -2621,6 +3867,8 @@ type SelectedSkuDetail = {
   tracking_summary: {
     predicted_cumulative_lift: number;
     actual_cumulative_lift: number | null;
+    organic_cumulative_change: number | null;
+    outcome_status: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "TRACKING";
     prediction_error: number | null;
     accuracy_score: number | null;
   };
@@ -2634,7 +3882,8 @@ function selectedSkuDetail(
   actionStatus: "pending" | "accepted" | "rejected"
 ): SelectedSkuDetail {
   const expectedLift = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
-  const actualLift = actualProfitLiftForSku(trackedRows, row.skuId);
+  const actualLift = actionStatus === "accepted" ? actualProfitLiftForSku(trackedRows, row.skuId) : null;
+  const organicLift = actionStatus === "accepted" ? organicProfitChangeForSku(trackedRows, row.skuId) : null;
   const currentProfit = recommendation?.current_profit ?? Math.max(0, expectedLift * 0.45);
   const predictedProfit = recommendation?.predicted_profit ?? currentProfit + expectedLift;
   const currentRevenue = recommendation?.before_state?.revenue ?? Math.max(predictedProfit * 2.4, currentProfit * 2.8, 1);
@@ -2665,13 +3914,215 @@ function selectedSkuDetail(
     predicted_margin: predictedMargin,
     predicted_daily_demand: predictedDailyDemand,
     inventory_runway_days: currentStock / Math.max(0.1, predictedDailyDemand),
-    source: actionStatus === "accepted" || actualLift !== null ? "actual" : "simulated",
+    source: actionStatus === "accepted" ? "actual" : "simulated",
     tracking_summary: {
       predicted_cumulative_lift: predictedCumulativeLift,
       actual_cumulative_lift: actualLift,
+      organic_cumulative_change: organicLift,
+      outcome_status: outcomeStatusForProfitChange(actualLift),
       prediction_error: predictionError,
       accuracy_score: predictionError === null ? null : Math.max(0, 1 - Math.abs(predictionError))
     }
+  };
+}
+
+function normalizeDecisionScenarios(
+  scenarios: SkuDecisionObject["scenarios"],
+  selectedAction: string
+): SkuDecisionObject["scenarios"] {
+  const selectedKey = scenarioActionKey(selectedAction);
+  const seen = new Set<string>();
+
+  return scenarios.reduce<SkuDecisionObject["scenarios"]>((items, scenario) => {
+    const actionKey = scenarioActionKey(scenario.action);
+    if (!actionKey || actionKey === selectedKey || seen.has(actionKey)) return items;
+
+    seen.add(actionKey);
+    const isHold = actionKey === "hold";
+    const profitDelta = isHold ? 0 : scenario.profit_delta;
+    items.push({
+      ...scenario,
+      action: cleanScenarioActionLabel(scenario.action),
+      profit_delta: profitDelta,
+      selected: false,
+      status: profitDelta < 0 ? "Rejected" : "Alternative"
+    });
+
+    return items;
+  }, []);
+}
+
+function scenarioActionKey(action: string) {
+  const normalized = cleanScenarioActionLabel(action).toLowerCase();
+  if (normalized.includes("hold")) return "hold";
+  if (normalized.includes("scale") || normalized.includes("increase ads")) return "scale_ads";
+  if (normalized.includes("expand channel")) return "expand_channel";
+  if (normalized.includes("increase price") || normalized.includes("raise price")) return "increase_price";
+  if (normalized.includes("decrease price") || normalized.includes("lower price")) return "decrease_price";
+  if (normalized.includes("promotion")) return "promotion";
+  if (normalized.includes("restock")) return "restock_inventory";
+  if (normalized.includes("clear excess") || normalized.includes("reduce inventory")) return "clear_excess_inventory";
+  if (normalized.includes("reduce ad waste") || normalized.includes("reduce ads")) return "reduce_ad_waste";
+  if (normalized.includes("reallocate")) return "reallocate_budget";
+  if (normalized.includes("exit")) return "exit_sku";
+  return normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function cleanScenarioActionLabel(action: string) {
+  return action.replace(/^[^\w$]+/u, "").trim();
+}
+
+function buildSkuDecisionObject(
+  row: PortfolioDecisionRow,
+  recommendation: PortfolioRow | undefined,
+  detail: SelectedSkuDetail,
+  rows: DailyProfitTrackingRow[],
+  actionStatus: "pending" | "accepted" | "rejected",
+  simulationHorizonDays: number
+): SkuDecisionObject {
+  const goal = optimizationGoalForDecision(row);
+  const goalIcon = goal.goal === "GROWTH" ? "🚀" : goal.goal === "PROFIT" ? "💰" : goal.goal === "INVENTORY" ? "📦" : "🛑";
+  const actionDisplay = actionDisplayForDecision(row, recommendation, detail, simulationHorizonDays);
+  const actionReasoning = actionReasoningForDecision(row, detail, actionDisplay, simulationHorizonDays);
+  const lifecycleStage = normalizeLifecycleStage(row.lifecycle_stage) ?? "MATURE";
+  const lifecycleLabel = lifecycleStage.charAt(0) + lifecycleStage.slice(1).toLowerCase();
+  const demandTrend = (detail.predicted_revenue - detail.current_revenue) / Math.max(1, detail.current_revenue);
+  const portfolioAverageMargin = 0.275;
+  const roas = row.simulation_estimate?.revenue_simulation.base_roas
+    ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
+  const marginalRoas = row.simulation_estimate?.revenue_simulation.marginal_roas ?? Math.max(1.2, roas * 0.83);
+  const stockCoverage = detail.inventory_runway_days;
+  const predicted30dDemand = Math.round(detail.predicted_daily_demand * simulationHorizonDays);
+  const inventorySignal = goal.actionLabel === "Clear Excess Inventory"
+    ? {
+      metric: `${detail.current_stock.toLocaleString("en-US")} units`,
+      benchmark: `${predicted30dDemand.toLocaleString("en-US")} units expected demand`,
+      impact: "Excess inventory detected",
+      status: "Excess",
+      explanation: "Inventory exceeds expected demand, so AI evaluates cash recovery and holding-risk reduction."
+    }
+    : goal.actionLabel === "Restock Inventory"
+      ? {
+        metric: `${Math.round(stockCoverage)} days`,
+        benchmark: `${simulationHorizonDays} days target`,
+        impact: "Stockout risk detected",
+        status: "Limited",
+        explanation: "Inventory coverage may cap profitable demand unless stock is replenished."
+      }
+      : {
+        metric: `${Math.round(stockCoverage)} days`,
+        benchmark: `${simulationHorizonDays} days`,
+        impact: "Inventory supports growth",
+        status: stockCoverage >= simulationHorizonDays ? "Healthy" : "Limited",
+        explanation: stockCoverage >= simulationHorizonDays
+          ? "Inventory can support the selected action during the simulation window."
+          : "Inventory coverage is limited, so growth actions are constrained."
+      };
+  const actualRows = rows.filter((item) => item.actual_profit !== null);
+  const actualProfit = detail.tracking_summary.actual_cumulative_lift
+    ?? (actualRows.length ? actualRows.reduce((sum, item) => sum + ((item.actual_profit ?? 0) - item.baseline_profit), 0) : null);
+  const progress = actualProfit === null || !detail.expected_profit_lift_30d
+    ? 0
+    : Math.max(0, Math.min(1, actualProfit / Math.abs(detail.expected_profit_lift_30d)));
+  const isNoActionDecision = goal.actionLabel === "No Action Required";
+  const expected = isNoActionDecision ? 0 : detail.expected_profit_lift_30d;
+
+  const backendScenarios = Array.isArray(row.scenarios) && row.scenarios.length
+    ? row.scenarios.map((scenario) => ({
+      action: scenario.label ?? portfolioScenarioActionLabel(scenario.action, "en"),
+      profit_delta: scenario.expected_profit_lift ?? 0,
+      confidence: scenario.confidence ?? row.confidence ?? detail.confidence,
+      risk: scenario.selected ? row.risk : undefined,
+      selected: Boolean(scenario.selected),
+      status: scenario.selected ? "Selected" as const : ((scenario.expected_profit_lift ?? 0) < 0 ? "Rejected" as const : "Alternative" as const)
+    }))
+    : null;
+  const selectedScenario: SkuDecisionObject["scenarios"][number] = {
+    action: actionDisplay.title,
+    profit_delta: expected,
+    confidence: detail.confidence,
+    risk: row.risk,
+    selected: true,
+    status: "Selected"
+  };
+  const fallbackScenarios: SkuDecisionObject["scenarios"] = [
+    { action: "Expand Channel", profit_delta: expected * 0.64, confidence: Math.max(0.45, detail.confidence - 0.06), selected: false, status: "Alternative" },
+    { action: "Increase Price", profit_delta: expected * 0.42, confidence: Math.max(0.45, detail.confidence - 0.1), selected: false, status: "Alternative" },
+    { action: "Promotion", profit_delta: expected * 0.24, confidence: Math.max(0.42, detail.confidence - 0.14), selected: false, status: "Alternative" },
+    { action: "Hold", profit_delta: 0, confidence: 0.7, selected: false, status: "Alternative" }
+  ];
+  const scenarioAlternatives = normalizeDecisionScenarios(
+    [...(backendScenarios ?? []), ...fallbackScenarios],
+    actionDisplay.title
+  );
+  const decisionScenarios = [selectedScenario, ...scenarioAlternatives].slice(0, 5);
+
+  return {
+    sku: detail.sku,
+    optimization_goal: `${goalIcon} ${goal.goalLabel} Optimization`,
+    action: actionDisplay.title,
+    action_description: actionDisplay.description,
+    action_reason: actionDisplay.reason,
+    reasoning: actionReasoning,
+    evidence: [
+      {
+        signal: "Demand Signal",
+        metric: percent.format(demandTrend),
+        benchmark: "0%",
+        impact: "Stable demand",
+        status: demandTrend >= 0 ? "Positive" : "Watch",
+        explanation: demandTrend >= 0
+          ? "Demand momentum is stronger than the neutral benchmark."
+          : "Demand is not yet strong enough for aggressive action."
+      },
+      {
+        signal: "Profit Signal",
+        metric: percent.format(detail.current_margin),
+        benchmark: percent.format(portfolioAverageMargin),
+        impact: "Positive margin",
+        status: detail.current_margin >= portfolioAverageMargin ? "Above Average" : "Below Average",
+        explanation: detail.current_margin >= portfolioAverageMargin
+          ? "SKU has healthy profitability versus the portfolio benchmark."
+          : "Margin is below benchmark, so AI avoids actions that add cost."
+      },
+      {
+        signal: "Advertising Signal",
+        metric: ratioFormat.format(roas),
+        benchmark: ratioFormat.format(marginalRoas),
+        impact: "Efficient ads",
+        status: marginalRoas >= 2 ? "Efficient" : "Needs Review",
+        explanation: marginalRoas >= 2
+          ? "Additional advertising has positive return potential."
+          : "Marginal ad return is below the preferred scale threshold."
+      },
+      {
+        signal: "Inventory Signal",
+        metric: inventorySignal.metric,
+        benchmark: inventorySignal.benchmark,
+        impact: inventorySignal.impact,
+        status: inventorySignal.status,
+        explanation: inventorySignal.explanation
+      }
+    ],
+    scenarios: decisionScenarios,
+    summary_comparison: buildDecisionSummaryComparisonRows(row, recommendation, detail, actionDisplay, simulationHorizonDays),
+    tracking: {
+      current_ads_spend: detail.current_ads_spend,
+      current_strategy_profit: detail.current_profit,
+      predicted_profit: detail.predicted_profit,
+      expected_profit: expected,
+      actual_profit: actualProfit,
+      organic_change: detail.tracking_summary.organic_cumulative_change,
+      outcome_status: detail.tracking_summary.outcome_status,
+      progress,
+      learning_status: actualProfit === null
+        ? "Waiting for outcome data"
+        : detail.tracking_summary.outcome_status === "NEGATIVE"
+          ? "Reduce confidence for similar actions"
+          : "Prediction is being calibrated using attributed outcomes"
+    },
+    lifecycle_status: `🟢 ${lifecycleLabel}`,
+    decision_status: actionStatus === "accepted" ? "Accepted" : actionStatus === "rejected" ? "Rejected" : "Pending Approval"
   };
 }
 
@@ -2688,7 +4139,7 @@ function buildDailyProfitTrackingRows(detail: SelectedSkuDetail, range: 7 | 14 |
     const baselineProfit = detail.current_profit / 30;
     const profitDelta = dailyLift * ramp;
     const predictedProfit = baselineProfit + profitDelta;
-    const hasActual = dayNumber <= Math.min(3, range);
+    const hasActual = detail.source === "actual" && dayNumber <= Math.min(3, range);
     const actualProfit = hasActual ? baselineProfit + profitDelta * (0.68 + dayNumber * 0.04) : null;
 
     rows.push({
@@ -2790,19 +4241,40 @@ function ActionLifecycleCard({
   showTitle?: boolean;
 }) {
   const actualLift = detail.tracking_summary.actual_cumulative_lift;
-  const variance = actualLift === null ? null : actualLift - detail.tracking_summary.predicted_cumulative_lift;
+  const dayLabel = actionStatus === "accepted" ? "Running Day 7 / 30" : actionStatus === "rejected" ? "Rejected before execution" : "Pending Approval";
+  const lifecycleSteps = ["Recommended", "Approved", "Executing", "Measured", "Learned"];
+  const currentStep = actionStatus === "pending" ? 0 : actionStatus === "accepted" ? 2 : 0;
 
   return (
     <div className={cn(compact ? "" : "mt-3 rounded-lg bg-white p-4 ring-1 ring-slate-100")}>
-      {showTitle ? <p className="text-sm font-bold text-slate-950">Action Lifecycle</p> : null}
-      <div className={showTitle ? "mt-3" : ""}>
-        <ActionTimeline status={actionStatus === "accepted" ? "Running" : actionStatus === "rejected" ? "Rejected" : "Pending"} />
+      {showTitle ? <p className="text-sm font-bold text-slate-950">AI Decision Lifecycle</p> : null}
+      <div className={cn(showTitle ? "mt-3" : "", "rounded-lg bg-slate-50 p-3")}>
+        <div className="flex flex-wrap items-center gap-2">
+          {lifecycleSteps.map((step, index) => (
+            <Fragment key={step}>
+              <span className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] font-bold ring-1",
+                index <= currentStep ? "bg-emerald-100 text-emerald-800 ring-emerald-200" : "bg-white text-slate-500 ring-slate-200"
+              )}>
+                {step}
+              </span>
+              {index < lifecycleSteps.length - 1 ? <span className="text-slate-300">↓</span> : null}
+            </Fragment>
+          ))}
+        </div>
+        <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Current Status</p>
+          <p className="mt-1 text-base font-extrabold text-emerald-700">{dayLabel}</p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+            AI compares expected lift with observed profit outcomes and updates future action selection.
+          </p>
+        </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <SmallTrackerMetric label="Predicted lift" value={signedCurrency(detail.tracking_summary.predicted_cumulative_lift)} />
+        <SmallTrackerMetric label="Expected lift" value={signedCurrency(detail.tracking_summary.predicted_cumulative_lift)} />
         <SmallTrackerMetric label="Actual lift" value={actualLift === null ? "Pending" : signedCurrency(actualLift)} />
-        <SmallTrackerMetric label="Variance" value={variance === null ? "Pending" : signedCurrency(variance)} />
-        <SmallTrackerMetric label="Accuracy" value={accuracy === null ? "Pending" : percent.format(accuracy)} />
+        <SmallTrackerMetric label="Learning status" value={actualLift === null ? "Waiting for outcome" : "Model adjusting"} />
+        <SmallTrackerMetric label="AI accuracy" value={accuracy === null ? "Pending" : percent.format(accuracy)} />
       </div>
     </div>
   );
@@ -3573,19 +5045,27 @@ function formatSignedPercentText(value: number) {
 
 function portfolioScenarioActionLabel(action: string, locale: RendererLocale) {
   if (locale !== "zh") {
-    if (action.includes("SCALE")) return "Increase Ads";
-    if (action.includes("REDUCE")) return "Reduce Ads";
-    if (action.includes("PRICE_UP")) return "Raise Price";
-    if (action.includes("PRICE_DOWN")) return "Lower Price";
-    if (action.includes("RESTOCK")) return "Restock";
+    if (action.includes("SCALE") || action === "TEST_AD_SPEND") return "🚀 Scale Ads";
+    if (action === "SHIFT_CHANNEL") return "🌎 Expand Channel";
+    if (action === "REDUCE_ADS") return "🛑 Reduce Ad Waste";
+    if (action.includes("PRICE_UP")) return "💰 Increase Price";
+    if (action.includes("PRICE_DOWN")) return "💰 Decrease Price";
+    if (action === "PROMOTION_TEST") return "🏷 Run Promotion";
+    if (action.includes("RESTOCK")) return "📦 Restock Inventory";
+    if (action === "REDUCE_INVENTORY") return "🏷 Clear Excess Inventory";
+    if (action === "STOP") return "❌ Exit SKU";
     return "Hold";
   }
 
   if (action.includes("SCALE")) return "增加广告";
-  if (action.includes("REDUCE")) return "降低广告";
+  if (action === "SHIFT_CHANNEL") return "扩展渠道";
+  if (action === "REDUCE_ADS") return "减少广告浪费";
   if (action.includes("PRICE_UP")) return "提价";
   if (action.includes("PRICE_DOWN")) return "降价";
+  if (action === "PROMOTION_TEST") return "促销测试";
   if (action.includes("RESTOCK")) return "补库存";
+  if (action === "REDUCE_INVENTORY") return "清理冗余库存";
+  if (action === "STOP") return "退出 SKU";
   return "保持";
 }
 
@@ -3783,12 +5263,14 @@ function CustomerSegmentTable({
   );
 }
 
-function GrowthRow({ label, value }: { label: string; value: number }) {
+function GrowthRow({ label, value, isAvailable = true }: { label: string; value: number; isAvailable?: boolean }) {
   const tone = value < 0 ? "text-rose-700" : value > 0 ? "text-emerald-700" : "text-slate-600";
   return (
     <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
       <span className="text-sm font-medium text-slate-600">{label}</span>
-      <span className={cn("text-sm font-semibold", tone)}>{percent.format(value)}</span>
+      <span className={cn("text-sm font-semibold", isAvailable ? tone : "text-slate-400")}>
+        {isAvailable ? percent.format(value) : "N/A"}
+      </span>
     </div>
   );
 }

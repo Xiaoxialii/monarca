@@ -19,7 +19,7 @@ export const LIFECYCLE_STAGE_STRATEGIES: Record<SkuLifecycleStage, LifecycleStra
   LAUNCH: {
     stage: "LAUNCH",
     goal: "VALIDATE_DEMAND",
-    allowed_actions: ["HOLD", "TEST_AD_SPEND", "PRICE_DOWN_10", "PROMOTION_TEST"],
+    allowed_actions: ["HOLD", "TEST_AD_SPEND", "SHIFT_CHANNEL", "PRICE_DOWN_10", "PROMOTION_TEST"],
     blocked_actions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE"],
     objective_weights: {
       profit_growth: 0.18,
@@ -41,7 +41,7 @@ export const LIFECYCLE_STAGE_STRATEGIES: Record<SkuLifecycleStage, LifecycleStra
   MATURE: {
     stage: "MATURE",
     goal: "MAXIMIZE_PROFIT_EFFICIENCY",
-    allowed_actions: ["HOLD", "PRICE_UP_5", "PRICE_UP_10", "SHIFT_CHANNEL", "CREATE_BUNDLE", "REDUCE_INVENTORY"],
+    allowed_actions: ["HOLD", "PRICE_UP_5", "PRICE_UP_10", "SHIFT_CHANNEL", "CREATE_BUNDLE", "REDUCE_INVENTORY", "REDUCE_ADS", "PROMOTION_TEST", "PRICE_DOWN_10", "RESTOCK_AND_SCALE"],
     blocked_actions: ["SCALE_ADS_PRICE_UP_5"],
     objective_weights: {
       profit_growth: 0.36,

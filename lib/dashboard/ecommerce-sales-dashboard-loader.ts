@@ -370,6 +370,8 @@ export async function loadConnectedSpreadsheetCanonicalDataset(input: {
         const price = numberField(normalized, "price", "unit_price");
         const revenue = numberField(normalized, "revenue", "net_sales", "total_paid", "gross_sales", "sales");
         const date = dateField(normalized, "order_date", "date", "month");
+        const monthlySpreadDate = spreadMonthDateForRow(normalized, index);
+        const orderDate = monthlySpreadDate ?? date;
         const adSpend = numberField(normalized, "ad_spend", "spend");
         const roles = detectSchemaRoles(normalized, sourceKind);
 
@@ -429,7 +431,7 @@ export async function loadConnectedSpreadsheetCanonicalDataset(input: {
             source_id: canonicalId,
             order_id: orderId,
             revenue,
-            order_date: date || "1970-01-01",
+            order_date: orderDate || "1970-01-01",
             currency: stringField(normalized, "currency") || "USD",
             customer_id: customerId || undefined,
             ad_id: stringField(normalized, "ad_id") || undefined,
@@ -448,7 +450,7 @@ export async function loadConnectedSpreadsheetCanonicalDataset(input: {
               source_id: canonicalId,
               customer_id: customerId,
               total_spent: revenue,
-              customer_created_at: date || undefined,
+              customer_created_at: orderDate || undefined,
               country: stringField(normalized, "country"),
               canonical_key: `${sourceKind}:customer:${customerId}`
             });
@@ -688,6 +690,22 @@ function dateField(row: Record<string, unknown>, ...keys: string[]) {
   }
 
   return null;
+}
+
+function spreadMonthDateForRow(row: Record<string, unknown>, index: number) {
+  const hasExactDate = Boolean(stringField(row, "order_date", "date", "created_at", "processed_at"));
+  if (hasExactDate) return null;
+
+  const monthText = stringField(row, "month");
+  if (!monthText) return null;
+  const match = /^(\d{4})-(\d{2})$/.exec(monthText);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = (index % daysInMonth) + 1;
+  return `${match[1]}-${match[2]}-${String(day).padStart(2, "0")}`;
 }
 
 function detectSchemaRoles(row: Record<string, unknown>, sourceKind: string) {

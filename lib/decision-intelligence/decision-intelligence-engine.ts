@@ -11,6 +11,7 @@ import {
   type SKUDecision,
   type DecisionSummary
 } from "@/lib/optimization/portfolio-optimizer";
+import { buildDynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
 import type { PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
@@ -551,9 +552,22 @@ function buildDeferredPortfolioOptimization(input: {
   return {
     version: "sku_portfolio_optimization_v2",
     algorithm: "prediction_driven_global_portfolio_solver",
-    optimization_summary: {
-      input_sku_count: input.inputSkuCount,
-      current_portfolio_profit: input.currentProfit,
+	    optimization_summary: {
+	      input_sku_count: input.inputSkuCount,
+	      total_opportunities: 0,
+	      scenarios_tested: 0,
+	      action_distribution: {
+	        SCALE_ADS: 0,
+	        EXPAND_CHANNEL: 0,
+	        OPTIMIZE_PRICE: 0,
+	        REALLOCATE_BUDGET: 0,
+	        RESTOCK: 0,
+	        REDUCE_INVENTORY: 0,
+	        REDUCE_WASTE: 0,
+	        STOP_SKU: 0
+	      },
+	      expected_profit_gain: 0,
+	      current_portfolio_profit: input.currentProfit,
       optimized_portfolio_profit: input.currentProfit,
       total_expected_profit_gain: 0,
       selected_sku_count: 0,
@@ -561,6 +575,22 @@ function buildDeferredPortfolioOptimization(input: {
       inventory_required: 0,
       inventory_utilization: 0,
       cash_required: 0,
+      inventory_health: {
+        inventory_risk_level: "LOW",
+        inventory_pressure_score: 0,
+        inventory_coverage_days: 0,
+        sell_through_rate: 0,
+        demand_forecast_units: 0,
+        inventory_value: 0,
+        holding_cost: 0,
+        cash_locked: 0,
+        max_clear_inventory_ratio: 0.25
+      },
+      clear_inventory_ratio: 0,
+      clear_inventory_impact_ratio: 0,
+      clear_inventory_cash_recovery_ratio: 0,
+      max_allowed_clear_inventory_ratio: 0.25,
+      inventory_risk_level: "LOW",
       simulation_horizon_days: 30,
       constraints_applied: ["optimization_deferred_until_user_start"]
     },
@@ -570,6 +600,17 @@ function buildDeferredPortfolioOptimization(input: {
       prediction_type: "rule_based",
       prediction_confidence: input.confidence
     },
+    threshold_profile: buildDynamicThresholdProfile({
+      skus: [],
+      constraints: {
+        total_ads_budget: input.adsBudget,
+        inventory_capacity: 0,
+        target_margin: 0,
+        max_price_change: 0.1,
+        minimum_profit: 0,
+        simulation_horizon_days: 30
+      }
+    }),
     recommended_portfolio: [],
     portfolioSummary,
     lifecycleSummary: {

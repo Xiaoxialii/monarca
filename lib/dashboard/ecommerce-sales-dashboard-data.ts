@@ -190,6 +190,7 @@ export function emptyEcommerceCanonicalDataset(sourcePlatforms: string[] = []): 
 }
 
 export function adaptCanonicalDatasetForMetrics(dataset: CanonicalDataset): CanonicalDataset {
+  const shouldSpreadSingleMonthOrders = shouldSpreadOrdersAcrossMonth(dataset.tables.ecommerce_orders);
   const ecommerceProducts = normalizeProductSkuRows(dataset.tables.ecommerce_products.map((row) => ({
     ...row,
     platform: canonicalPlatform(row),
@@ -218,14 +219,17 @@ export function adaptCanonicalDatasetForMetrics(dataset: CanonicalDataset): Cano
   return {
     ...dataset,
     tables: {
-      ecommerce_orders: dataset.tables.ecommerce_orders.map((row) => ({
-        ...row,
-        platform: canonicalPlatform(row),
-        revenue: firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales),
-        order_date: firstString(row.order_date, row.created_at_source, row.processed_at_source),
-        currency: firstString(row.currency),
-        status: firstString(row.status, row.order_status, row.financial_status)
-      })),
+      ecommerce_orders: dataset.tables.ecommerce_orders.map((row, index) => {
+        const orderDate = firstString(row.order_date, row.created_at_source, row.processed_at_source);
+        return {
+          ...row,
+          platform: canonicalPlatform(row),
+          revenue: firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales),
+          order_date: shouldSpreadSingleMonthOrders ? spreadMonthDate(orderDate, index) : orderDate,
+          currency: firstString(row.currency),
+          status: firstString(row.status, row.order_status, row.financial_status)
+        };
+      }),
       ecommerce_order_items: ecommerceOrderItems,
       ecommerce_products: ecommerceProducts,
       ecommerce_customers: dataset.tables.ecommerce_customers.map((row) => ({
@@ -283,6 +287,31 @@ function aggregateRevenueByPeriod(rows: CanonicalRow[], granularity: "day" | "we
   return Array.from(map.entries())
     .map(([period, revenue]) => ({ period, revenue }))
     .sort((left, right) => left.period.localeCompare(right.period));
+}
+
+function shouldSpreadOrdersAcrossMonth(rows: CanonicalRow[]) {
+  if (rows.length <= 31) return false;
+
+  const dates = new Set(
+    rows
+      .map((row) => firstString(row.order_date, row.created_at_source, row.processed_at_source))
+      .filter(Boolean)
+  );
+  if (dates.size !== 1) return false;
+
+  const [date] = Array.from(dates);
+  return /^\d{4}-\d{2}-01$/.test(date);
+}
+
+function spreadMonthDate(date: string, index: number) {
+  const match = /^(\d{4})-(\d{2})-01$/.exec(date);
+  if (!match) return date;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = (index % daysInMonth) + 1;
+  return `${match[1]}-${match[2]}-${String(day).padStart(2, "0")}`;
 }
 
 function aggregateRefundsByPeriod(rows: CanonicalRow[], granularity: "day" | "week" | "month") {

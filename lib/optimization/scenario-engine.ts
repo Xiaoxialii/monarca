@@ -9,6 +9,12 @@ export type AIScenario = {
   expected_profit_lift: number;
   expected_revenue_lift: number;
   confidence: number;
+  risk: number;
+  action_score: number;
+  cash_impact: number;
+  inventory_impact: number;
+  time_to_impact: string;
+  risk_level: string;
   selected: boolean;
   constraints: Array<"budget" | "inventory" | "margin" | "confidence">;
 };
@@ -40,7 +46,7 @@ export function buildScenarioComparison(input: {
   if (!unique.has(selectedAction)) unique.set(selectedAction, input.selected);
 
   const ranked = Array.from(unique.values())
-    .sort((left, right) => right.opportunity_score - left.opportunity_score || right.profit_delta - left.profit_delta)
+    .sort((left, right) => right.action_score - left.action_score || right.opportunity_score - left.opportunity_score || right.profit_delta - left.profit_delta)
     .slice(0, 5);
 
   const withHold = ranked.some((row) => row.action === "HOLD")
@@ -49,7 +55,7 @@ export function buildScenarioComparison(input: {
 
   const scenarios = withHold
     .slice()
-    .sort((left, right) => (left.action === selectedAction ? -1 : right.action === selectedAction ? 1 : right.profit_delta - left.profit_delta))
+    .sort((left, right) => (left.action === selectedAction ? -1 : right.action === selectedAction ? 1 : right.action_score - left.action_score))
     .slice(0, 4)
     .map((row) => toScenario(row, row.action === selectedAction));
 
@@ -78,6 +84,12 @@ function toScenario(row: ProfitSimulationResult, selected: boolean): AIScenario 
     expected_profit_lift: row.profit_delta,
     expected_revenue_lift: row.revenue_delta,
     confidence: row.confidence,
+    risk: row.risk,
+    action_score: row.action_score,
+    cash_impact: row.cash_impact,
+    inventory_impact: row.inventory_impact,
+    time_to_impact: row.time_to_impact,
+    risk_level: row.risk_level,
     selected,
     constraints: constraintsPassed(row)
   };
@@ -93,7 +105,11 @@ function buildHoldScenario(row: ProfitSimulationResult): ProfitSimulationResult 
     predicted_revenue: row.before_state.revenue,
     revenue_delta: 0,
     confidence: Math.max(0.5, Math.min(row.confidence, 0.72)),
-    opportunity_score: 0
+    opportunity_score: 0,
+    action_score: 0,
+    cash_impact: 0,
+    time_to_impact: "immediate",
+    risk_level: "Low"
   };
 }
 

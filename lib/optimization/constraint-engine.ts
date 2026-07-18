@@ -19,6 +19,7 @@ export function evaluateActionConstraints(
 
   if (!isStop && result.predicted_profit < constraints.minimum_profit) violations.push("minimum_profit");
   if (!isStop && isIncrementalAdsAction(result.action) && result.profit_delta <= 0) violations.push("non_positive_incremental_profit");
+  if (!isStop && isPriceAction(result.action) && result.profit_delta <= 0) violations.push("non_positive_price_profit");
   if (!isStop && result.predicted_margin < constraints.target_margin) violations.push("target_margin");
   if (!isStop && result.confidence < (constraints.minimum_confidence ?? 0.55)) violations.push("minimum_confidence");
   if (priceChange > constraints.max_price_change) violations.push("max_price_change");
@@ -41,6 +42,14 @@ function isIncrementalAdsAction(action: ProfitSimulationResult["action"]) {
     action === "SCALE_ADS_PRICE_UP_5" ||
     action === "RESTOCK_AND_SCALE" ||
     action === "SHIFT_CHANNEL";
+}
+
+function isPriceAction(action: ProfitSimulationResult["action"]) {
+  return action === "PRICE_UP_5" ||
+    action === "PRICE_UP_10" ||
+    action === "PRICE_DOWN_10" ||
+    action === "PROMOTION_TEST" ||
+    action === "SCALE_ADS_PRICE_UP_5";
 }
 
 export function groupValidPortfolioSimulations(input: PortfolioOptimizationInput, simulations: ProfitSimulationResult[]) {

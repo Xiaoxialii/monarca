@@ -1,5 +1,6 @@
 import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
 import type { PortfolioOptimizationInput, ProfitSimulationResult } from "@/lib/optimization/profit-simulation-engine";
+import { assessSelectedInventoryMix } from "@/lib/optimization/inventory-health-score";
 
 export type PortfolioSolverState = {
   rows: ProfitSimulationResult[];
@@ -27,12 +28,17 @@ export function portfolioObjective(state: PortfolioSolverState) {
   const confidencePenalty = (1 - state.confidence) * Math.max(0, state.delta) * 0.04;
   const lifecycleValue = lifecyclePortfolioValue(state.rows);
   const lifecycleConcentrationPenalty = lifecycleBudgetConcentrationPenalty(state.rows);
+  const actionConcentrationPenalty = portfolioActionConcentrationPenalty(state.rows);
+  const scaleAdsPenalty = scaleAdsConcentrationPenalty(state.rows);
+  const priceActionPenalty = priceActionConcentrationPenalty(state.rows);
+  const clearExcessInventoryPenalty = clearExcessInventoryConcentrationPenalty(state.rows);
 
-  return roundCurrency(state.delta + lifecycleValue - lifecycleConcentrationPenalty - channelOverlapCost - inventoryConstraintCost - riskPenalty - uncertaintyCost - confidencePenalty);
+  const actionScore = state.rows.reduce((sum, row) => sum + row.action_score, 0);
+  return roundCurrency(actionScore + lifecycleValue - lifecycleConcentrationPenalty - actionConcentrationPenalty - scaleAdsPenalty - priceActionPenalty - clearExcessInventoryPenalty - channelOverlapCost - inventoryConstraintCost - riskPenalty * 0.35 - uncertaintyCost * 0.35 - confidencePenalty);
 }
 
 export function simulationScore(row: ProfitSimulationResult) {
-  return row.opportunity_score + row.profit_delta * 0.25 + row.confidence * 120 - row.risk * 120 + lifecycleRowScore(row);
+  return row.action_score + row.opportunity_score * 0.35 + row.confidence * 80 - row.risk * 90 + lifecycleRowScore(row);
 }
 
 function lifecyclePortfolioValue(rows: ProfitSimulationResult[]) {
@@ -69,6 +75,58 @@ function lifecycleBudgetConcentrationPenalty(rows: ProfitSimulationResult[]) {
   const growthShare = growthBudget / addedBudget;
   const missingLaunchTestingPenalty = rows.some((row) => row.lifecycle_stage === "LAUNCH") && launchBudget <= 0 ? 75 : 0;
   return roundCurrency(Math.max(0, growthShare - 0.82) * addedBudget * 0.18 + missingLaunchTestingPenalty);
+}
+
+function portfolioActionConcentrationPenalty(rows: ProfitSimulationResult[]) {
+  if (rows.length < 3) return 0;
+  const totalPositiveScore = rows.reduce((sum, row) => sum + Math.max(0, row.action_score), 0);
+  if (totalPositiveScore <= 0) return 0;
+  const counts = rows.reduce<Record<string, number>>((map, row) => {
+    map[row.unified_action] = (map[row.unified_action] ?? 0) + 1;
+    return map;
+  }, {});
+  const maxShare = Math.max(...Object.values(counts).map((count) => count / rows.length));
+  return roundCurrency(Math.max(0, maxShare - 0.55) * totalPositiveScore * 0.18);
+}
+
+function scaleAdsConcentrationPenalty(rows: ProfitSimulationResult[]) {
+  if (rows.length < 4) return 0;
+  const scaleRows = rows.filter((row) => row.unified_action === "SCALE_ADS");
+  const scaleRatio = scaleRows.length / rows.length;
+  const growthLifecycleShare = rows.filter((row) => row.lifecycle_stage === "GROWTH").length / rows.length;
+  const maxRatio = Math.min(0.52, 0.38 + growthLifecycleShare * 0.14);
+  if (scaleRatio <= maxRatio) return 0;
+
+  const positiveScore = scaleRows.reduce((sum, row) => sum + Math.max(0, row.action_score), 0);
+  return roundCurrency((scaleRatio - maxRatio) * Math.max(500, positiveScore) * 0.85);
+}
+
+function priceActionConcentrationPenalty(rows: ProfitSimulationResult[]) {
+  if (rows.length < 4) return 0;
+  const priceUpRows = rows.filter((row) => row.action === "PRICE_UP_5" || row.action === "PRICE_UP_10" || row.action === "SCALE_ADS_PRICE_UP_5");
+  const maxRatio = 0.15;
+  const ratio = priceUpRows.length / rows.length;
+  if (ratio <= maxRatio) return 0;
+
+  const priceUpPositiveScore = priceUpRows.reduce((sum, row) => sum + Math.max(0, row.action_score), 0);
+  return roundCurrency((ratio - maxRatio) * Math.max(250, priceUpPositiveScore) * 1.25);
+}
+
+function clearExcessInventoryConcentrationPenalty(rows: ProfitSimulationResult[]) {
+  if (rows.length < 4) return 0;
+  const health = assessSelectedInventoryMix(rows);
+  const maxRatio = health.max_clear_inventory_ratio;
+  const ratio = Math.max(
+    health.clear_inventory_ratio,
+    health.clear_inventory_impact_ratio,
+    health.clear_inventory_cash_recovery_ratio * 0.75
+  );
+  if (ratio <= maxRatio) return 0;
+
+  const clearRows = rows.filter((row) => row.action === "REDUCE_INVENTORY" || row.unified_action === "REDUCE_INVENTORY");
+  const positiveScore = clearRows.reduce((sum, row) => sum + Math.max(0, row.action_score), 0);
+  const riskAdjustment = health.inventory_risk_level === "HIGH" ? 0.45 : health.inventory_risk_level === "MEDIUM" ? 0.85 : 1.35;
+  return roundCurrency((ratio - maxRatio) * Math.max(350, positiveScore) * riskAdjustment);
 }
 
 function solveWithBeamSearch(

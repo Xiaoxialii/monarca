@@ -75,6 +75,7 @@ function dashboardResponse(result: LoadDashboardResult, fallbackReason?: unknown
   return NextResponse.json({
     ok: true,
     state: result.state,
+    hasConnectedDataSource: result.state === "ready",
     message: result.message,
     decision_report: result.data.decision_report,
     portfolioSummary: result.data.decision_report.portfolioSummary,

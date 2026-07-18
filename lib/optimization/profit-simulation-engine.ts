@@ -3,6 +3,7 @@ import { createPredictionProvider, seasonalFactor, type PredictionProvider } fro
 import type { GeneratedAction } from "@/lib/optimization/action-generator";
 import type { SkuLifecycleClassification } from "@/lib/lifecycle/sku-lifecycle-classifier";
 import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
+import { lifecycleThresholdMultiplier, type BusinessObjective, type DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
 
 export type PortfolioSkuInput = {
   sku: string;
@@ -29,6 +30,14 @@ export type PortfolioSkuInput = {
   customer_count?: number;
   repeat_rate?: number;
   product_age_days?: number;
+  competitor_price?: number;
+  market_median_price?: number;
+  market_price_low?: number;
+  market_price_high?: number;
+  similar_sku_price?: number;
+  price_elasticity?: number;
+  order_growth?: number;
+  conversion_trend?: number;
 };
 
 export type AdsCampaignInput = {
@@ -56,6 +65,8 @@ export type PortfolioOptimizationInput = {
   skus: PortfolioSkuInput[];
   ads?: AdsCampaignInput[];
   constraints: BusinessConstraintsInput;
+  industry?: string;
+  business_objective?: BusinessObjective;
 };
 
 export type PortfolioAction =
@@ -195,6 +206,26 @@ export type ProfitSimulationResult = {
     learning_value: number;
   };
   opportunity_score: number;
+  action_score: number;
+  execution_feasibility: number;
+  strategic_value: number;
+  risk_penalty: number;
+  price_risk_penalty: number;
+  cash_impact: number;
+  time_to_impact: "immediate" | "short" | "medium" | "long";
+  risk_level: "Low" | "Medium" | "High";
+  market_reference_price?: number;
+  optimization_goal: "GROWTH" | "PROFIT" | "INVENTORY" | "PORTFOLIO_HEALTH";
+  unified_action:
+    | "SCALE_ADS"
+    | "EXPAND_CHANNEL"
+    | "OPTIMIZE_PRICE"
+    | "REALLOCATE_BUDGET"
+    | "RESTOCK"
+    | "REDUCE_INVENTORY"
+    | "REDUCE_WASTE"
+    | "STOP_SKU"
+    | "HOLD";
   strategic_fit: number;
   feasibility: number;
   evidence_tags: string[];
@@ -247,6 +278,7 @@ export function simulateGeneratedActions(input: {
   predictionProvider?: PredictionProvider;
   simulationHorizonDays?: number;
   lifecycleBySku?: Map<string, SkuLifecycleClassification>;
+  thresholdProfile?: DynamicThresholdProfile;
 }): ProfitSimulationResult[] {
   const skuById = new Map(input.skus.map((sku) => [sku.sku, sku]));
   const provider = input.predictionProvider ?? createPredictionProvider();
@@ -254,7 +286,7 @@ export function simulateGeneratedActions(input: {
   return input.actions.flatMap((action) => {
     const sku = skuById.get(action.sku);
     if (!sku) return [];
-    return [simulateSkuAction(sku, action.portfolio_action, input.ads ?? [], action, provider, input.simulationHorizonDays, input.skus, input.lifecycleBySku?.get(action.sku))];
+    return [simulateSkuAction(sku, action.portfolio_action, input.ads ?? [], action, provider, input.simulationHorizonDays, input.skus, input.lifecycleBySku?.get(action.sku), input.thresholdProfile)];
   });
 }
 
@@ -266,7 +298,8 @@ export function simulateSkuAction(
   predictionProvider: PredictionProvider = createPredictionProvider(),
   simulationHorizonDays = 30,
   allSkus: PortfolioSkuInput[] = [sku],
-  lifecycle?: SkuLifecycleClassification
+  lifecycle?: SkuLifecycleClassification,
+  thresholdProfile?: DynamicThresholdProfile
 ): ProfitSimulationResult {
   const priceChange = priceChangeForAction(action);
   const adsMultiplier = adsMultiplierForAction(action);
@@ -304,20 +337,34 @@ export function simulateSkuAction(
     demandForecast,
     restockLift: restockLift + bundleLift + promotionLift + channelLift
   });
-  const profitPrediction = predictionProvider.predictProfit({
+  const standardProfitPrediction = predictionProvider.predictProfit({
     sku,
     predictedRevenue: revenuePrediction.predicted_revenue,
     adsCost: recommendedAdsSpend
   });
-  const estimatedRevenue = simulationEstimate
+  const explicitPriceSimulation = isPriceAction(action)
+    ? simulatePriceActionProfit({
+      sku,
+      action,
+      priceChange,
+      simulatedPrice,
+      recommendedAdsSpend,
+      demandElasticity
+    })
+    : null;
+  const estimatedRevenue = explicitPriceSimulation
+    ? explicitPriceSimulation.predicted_revenue
+    : simulationEstimate
     ? roundCurrency(sku.revenue + simulationEstimate.revenue_simulation.incremental_revenue)
     : revenuePrediction.predicted_revenue;
   const predictedProfit = action === "STOP"
     ? 0
-    : simulationEstimate
+    : explicitPriceSimulation
+      ? explicitPriceSimulation.predicted_profit
+      : simulationEstimate
       ? roundCurrency(currentProfit + simulationEstimate.profit_simulation.expected_profit_impact)
-      : profitPrediction.predicted_profit;
-  const predictedMargin = action === "STOP" ? 0 : profitPrediction.predicted_margin;
+      : standardProfitPrediction.predicted_profit;
+  const predictedMargin = action === "STOP" ? 0 : explicitPriceSimulation ? explicitPriceSimulation.predicted_margin : standardProfitPrediction.predicted_margin;
   const requiredInventory = action === "STOP"
     ? 0
     : Math.ceil(Math.max(0, sku.quantity * safeRatio(estimatedRevenue, Math.max(1, sku.revenue))));
@@ -328,15 +375,27 @@ export function simulateSkuAction(
   const confidenceBreakdown = buildConfidenceBreakdown({
     sku,
     revenueConfidence: simulationEstimate?.confidence_breakdown.data_confidence ?? revenuePrediction.confidence,
-    profitConfidence: profitPrediction.predicted_margin >= 0 ? 0.82 : 0.46,
+    profitConfidence: predictedMargin >= 0 ? 0.82 : 0.46,
     requiredInventory,
     attributionConfidence: simulationEstimate?.confidence_breakdown.attribution_confidence ?? sku.prediction_confidence ?? 0.55,
     risk
   });
   const confidence = simulationEstimate?.confidence_breakdown.overall_confidence ?? confidenceBreakdown.overall_confidence;
   const feasibility = generatedAction?.feasibility ?? roundRatio(Math.max(0.1, 1 - risk));
+  const lifecycleFit = lifecycleFitScore(action, lifecycle, thresholdProfile);
   const strategicFit = strategicFitScore(sku, action, profitDelta, lifecycle);
-  const opportunityScore = roundCurrency(Math.max(0, profitDelta) * confidence * feasibility * strategicFit);
+  const strategicValue = strategicValueScore(sku, action, lifecycle, thresholdProfile);
+  const riskPenalty = riskPenaltyForAction(action, risk, profitDelta, thresholdProfile);
+  const priceRiskPenalty = priceRiskPenaltyForAction({
+    sku,
+    action,
+    priceChange,
+    demandElasticity,
+    requiredInventory,
+    thresholdProfile
+  });
+  const actionScore = roundCurrency(profitDelta * confidence * feasibility * lifecycleFit * strategicValue - riskPenalty - priceRiskPenalty);
+  const opportunityScore = roundCurrency(Math.max(0, actionScore));
   const requiredCash = roundCurrency(
     Math.max(0, recommendedAdsSpend - sku.ads_spend) +
       Math.max(0, requiredInventory - sku.inventory) * Math.max(0, sku.cogs)
@@ -381,7 +440,7 @@ export function simulateSkuAction(
     demand_elasticity: demandElasticity,
     ads_response: adsResponse,
     simulation_estimate: simulationEstimate,
-    predicted_cost: action === "STOP" ? 0 : profitPrediction.predicted_cost,
+    predicted_cost: action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost,
     simulation_source: "prediction_model",
     simulation_horizon: {
       days: simulationHorizonDays,
@@ -411,13 +470,24 @@ export function simulateSkuAction(
     lifecycle,
     lifecycle_objective: lifecycleObjectiveWeights(lifecycle),
     opportunity_score: opportunityScore,
-    strategic_fit: strategicFit,
+    action_score: actionScore,
+    execution_feasibility: feasibility,
+    strategic_value: strategicValue,
+    risk_penalty: riskPenalty,
+    price_risk_penalty: priceRiskPenalty,
+    cash_impact: roundCurrency(requiredCash - Math.max(0, sku.net_profit < 0 ? 0 : 0)),
+    time_to_impact: timeToImpact(action),
+    risk_level: riskLevel(risk),
+    market_reference_price: marketReasonablePrice(sku) ?? undefined,
+    optimization_goal: optimizationGoalForAction(action),
+    unified_action: unifiedActionForAction(action),
+    strategic_fit: roundRatio(strategicFit * lifecycleFit),
     feasibility,
     evidence_tags: generatedAction?.signals ?? evidenceTagsForSku(sku, profitDelta, requiredInventory),
     before_state: beforeState,
     after_state: afterState,
     revenue_delta: roundCurrency(afterState.revenue - beforeState.revenue),
-    cost_delta: roundCurrency((action === "STOP" ? 0 : profitPrediction.predicted_cost) - Math.max(0, sku.revenue - currentProfit)),
+    cost_delta: roundCurrency((action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost) - Math.max(0, sku.revenue - currentProfit)),
     margin_change: roundRatio(afterState.margin - beforeState.margin),
     inventory_impact: requiredInventory - sku.inventory
   };
@@ -636,6 +706,47 @@ function isIncreaseAdSpendAction(action: PortfolioAction) {
   return action === "TEST_AD_SPEND" || action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "RESTOCK_AND_SCALE" || action === "SHIFT_CHANNEL";
 }
 
+function isPriceAction(action: PortfolioAction) {
+  return action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST";
+}
+
+function simulatePriceActionProfit(input: {
+  sku: PortfolioSkuInput;
+  action: PortfolioAction;
+  priceChange: number;
+  simulatedPrice: number;
+  recommendedAdsSpend: number;
+  demandElasticity: DemandElasticityPrediction;
+}) {
+  const elasticity = typeof input.sku.price_elasticity === "number"
+    ? input.sku.price_elasticity
+    : input.demandElasticity.price_change !== 0
+      ? input.demandElasticity.demand_change / input.demandElasticity.price_change
+      : -0.8;
+  const promotionLift = input.action === "PROMOTION_TEST" ? 0.08 : 0;
+  const demandMultiplier = Math.max(0.25, 1 + input.priceChange * elasticity + promotionLift);
+  const currentDemand = Math.max(0, input.sku.quantity);
+  const newOrders = Math.max(0, currentDemand * demandMultiplier);
+  const predictedRevenue = roundCurrency(input.simulatedPrice * newOrders);
+  const cogs = roundCurrency(input.sku.cogs * newOrders);
+  const shipping = roundCurrency((input.sku.shipping_cost ?? 1.25) * newOrders);
+  const fees = roundCurrency(input.sku.fees != null
+    ? input.sku.fees * safeRatio(predictedRevenue, Math.max(1, input.sku.revenue))
+    : predictedRevenue * 0.035);
+  const refunds = roundCurrency(predictedRevenue * Math.max(0, input.sku.refund_rate));
+  const predictedCost = roundCurrency(cogs + input.recommendedAdsSpend + shipping + fees + refunds);
+  const predictedProfit = roundCurrency(predictedRevenue - predictedCost);
+
+  return {
+    predicted_revenue: predictedRevenue,
+    predicted_profit: predictedProfit,
+    predicted_cost: predictedCost,
+    predicted_margin: roundRatio(safeRatio(predictedProfit, predictedRevenue)),
+    new_orders: roundRatio(newOrders),
+    elasticity: roundRatio(elasticity)
+  };
+}
+
 function priceChangeForAction(action: PortfolioAction) {
   if (action === "PRICE_UP_5" || action === "SCALE_ADS_PRICE_UP_5") return 0.05;
   if (action === "PRICE_UP_10") return 0.1;
@@ -666,6 +777,154 @@ function strategicFitScore(sku: PortfolioSkuInput, action: PortfolioAction, prof
   return roundRatio(Math.max(0.25, Math.min(1.35, 1 + marginFit + demandFit + actionFit + deltaFit + lifecycleFit)));
 }
 
+function strategicValueScore(sku: PortfolioSkuInput, action: PortfolioAction, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile) {
+  const lifecycleValue = lifecycleStrategicFit(action, lifecycle);
+  const longTermGrowth = action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE" ? 0.22 : 0;
+  const marginQuality = action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "REDUCE_ADS" ? Math.max(0.08, sku.margin * 0.28) : 0;
+  const inventoryValue = action === "RESTOCK_AND_SCALE" || action === "REDUCE_INVENTORY" ? 0.16 : 0;
+  const healthValue = action === "STOP" || action === "REDUCE_ADS" ? (sku.net_profit < 0 ? 0.28 : 0.08) : 0;
+  const growthValue = action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" ? 0.1 : 0;
+  const objectiveValue = thresholdProfile?.business_objective === "GROWTH" && (action === "SCALE_ADS" || action === "SHIFT_CHANNEL")
+    ? 0.16
+    : thresholdProfile?.business_objective === "PROFIT" && (action.includes("PRICE") || action === "REDUCE_ADS")
+      ? 0.14
+      : thresholdProfile?.business_objective === "CASH_RECOVERY" && (action === "REDUCE_INVENTORY" || action === "STOP" || action === "REDUCE_ADS")
+        ? 0.18
+        : 0;
+
+  return roundRatio(Math.max(0.35, Math.min(1.55, 1 + lifecycleValue + longTermGrowth + marginQuality + inventoryValue + healthValue + growthValue + objectiveValue)));
+}
+
+function lifecycleFitScore(action: PortfolioAction, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile) {
+  const stage = lifecycle?.lifecycle_stage;
+  const adjustment = lifecycleThresholdMultiplier(thresholdProfile ?? defaultThresholdProfile(), stage);
+  const base = 1 + lifecycleStrategicFit(action, lifecycle);
+
+  if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "RESTOCK_AND_SCALE") {
+    return roundRatio(Math.max(0.45, Math.min(1.45, base / adjustment.scale_ads_multiplier)));
+  }
+  if (action.includes("PRICE") || action === "PROMOTION_TEST") {
+    return roundRatio(Math.max(0.45, Math.min(1.45, base / adjustment.price_multiplier)));
+  }
+  if (action === "REDUCE_ADS" || action === "REDUCE_INVENTORY" || action === "STOP") {
+    return roundRatio(Math.max(0.45, Math.min(1.45, base / adjustment.cash_recovery_multiplier)));
+  }
+  if (action === "TEST_AD_SPEND" || action === "SHIFT_CHANNEL") {
+    return roundRatio(Math.max(0.45, Math.min(1.45, base * adjustment.learning_value_multiplier)));
+  }
+
+  return roundRatio(Math.max(0.45, Math.min(1.45, base)));
+}
+
+function riskPenaltyForAction(action: PortfolioAction, risk: number, profitDelta: number, thresholdProfile?: DynamicThresholdProfile) {
+  const actionRisk = action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5"
+    ? 0.18
+    : action === "SHIFT_CHANNEL" || action === "PRICE_UP_5" || action === "PRICE_UP_10"
+      ? 0.1
+      : action === "STOP"
+        ? 0.14
+        : 0.07;
+  const objectiveDiscount = thresholdProfile?.business_objective === "GROWTH" && (action === "SCALE_ADS" || action === "SHIFT_CHANNEL")
+    ? 0.88
+    : thresholdProfile?.business_objective === "CASH_RECOVERY" && (action === "REDUCE_ADS" || action === "REDUCE_INVENTORY" || action === "STOP")
+      ? 0.82
+      : 1;
+  return roundCurrency((risk + actionRisk) * Math.max(25, Math.abs(profitDelta)) * 0.42 * objectiveDiscount);
+}
+
+function priceRiskPenaltyForAction(input: {
+  sku: PortfolioSkuInput;
+  action: PortfolioAction;
+  priceChange: number;
+  demandElasticity: DemandElasticityPrediction;
+  requiredInventory: number;
+  thresholdProfile?: DynamicThresholdProfile;
+}) {
+  if (!(input.action === "PRICE_UP_5" || input.action === "PRICE_UP_10" || input.action === "SCALE_ADS_PRICE_UP_5")) return 0;
+
+  const elasticity = typeof input.sku.price_elasticity === "number"
+    ? input.sku.price_elasticity
+    : input.demandElasticity.price_change !== 0
+      ? input.demandElasticity.demand_change / input.demandElasticity.price_change
+      : -0.8;
+  const coverageDays = input.sku.sales_velocity > 0 ? input.sku.inventory / Math.max(0.1, input.sku.sales_velocity) : 999;
+  const excessThreshold = input.thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const restockThreshold = input.thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
+  const marketPrice = marketReasonablePrice(input.sku);
+  const marketRisk = marketPrice && input.sku.price < marketPrice ? 0 : 0.28;
+  const elasticityRisk = Math.max(0, Math.abs(Math.min(0, elasticity)) - 0.85);
+  const demandVolatilityRisk = Math.max(0, -(input.sku.revenue_growth ?? 0)) + Math.max(0, -(input.sku.order_growth ?? 0)) + Math.max(0, -(input.sku.conversion_trend ?? 0));
+  const inventoryPressureRisk = coverageDays > excessThreshold || coverageDays < restockThreshold ? 0.22 : 0;
+  const risk = marketRisk + elasticityRisk + demandVolatilityRisk + inventoryPressureRisk;
+
+  return roundCurrency(risk * Math.max(50, input.sku.revenue * Math.abs(input.priceChange) * Math.max(0.08, input.sku.margin)));
+}
+
+function marketReasonablePrice(sku: PortfolioSkuInput) {
+  const prices = [
+    sku.market_median_price,
+    sku.competitor_price,
+    sku.similar_sku_price,
+    sku.market_price_high && sku.market_price_low ? (sku.market_price_high + sku.market_price_low) / 2 : undefined
+  ].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+
+  if (!prices.length) return null;
+  return prices.reduce((sum, value) => sum + value, 0) / prices.length;
+}
+
+function defaultThresholdProfile(): DynamicThresholdProfile {
+  return {
+    source: "system_default",
+    business_objective: "BALANCED",
+    industry: "general ecommerce",
+    user_benchmark: { roas: 2.5, margin: 0.3, conversion_rate: 0.02, inventory_turnover: 0.18, cac: 35 },
+    scale_ads_threshold: { marginal_roas: 2.2, confidence: 0.65, margin: 0.3, inventory_coverage_days: 30, customer_quality: 0.45 },
+    price_threshold: { market_gap: 0.1, elasticity: -0.5, margin_headroom: 0.22, conversion_stability: 0.012 },
+    channel_threshold: { channel_fit_score: 0.52, confidence: 0.58, margin: 0.24 },
+    inventory_threshold: { restock_coverage_days: 21, excess_coverage_days: 90, turnover: 0.12 },
+    portfolio_health_threshold: { marginal_roas: 1.35, minimum_profit: 0, confidence: 0.48, recovery_probability: 0.32 },
+    lifecycle_adjustments: {
+      LAUNCH: { scale_ads_multiplier: 1.35, price_multiplier: 1.15, cash_recovery_multiplier: 0.9, learning_value_multiplier: 1.35 },
+      GROWTH: { scale_ads_multiplier: 0.9, price_multiplier: 1.05, cash_recovery_multiplier: 1, learning_value_multiplier: 1.05 },
+      MATURE: { scale_ads_multiplier: 1.1, price_multiplier: 0.9, cash_recovery_multiplier: 0.85, learning_value_multiplier: 0.95 },
+      DECLINING: { scale_ads_multiplier: 1.35, price_multiplier: 0.95, cash_recovery_multiplier: 0.72, learning_value_multiplier: 0.9 }
+    }
+  };
+}
+
+function timeToImpact(action: PortfolioAction): ProfitSimulationResult["time_to_impact"] {
+  if (action === "REDUCE_ADS" || action === "STOP" || action === "PRICE_UP_5") return "immediate";
+  if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "PRICE_UP_10") return "short";
+  if (action === "SHIFT_CHANNEL" || action === "PROMOTION_TEST" || action === "CREATE_BUNDLE") return "medium";
+  if (action === "RESTOCK_AND_SCALE") return "long";
+  return "short";
+}
+
+function riskLevel(risk: number): ProfitSimulationResult["risk_level"] {
+  if (risk >= 0.45) return "High";
+  if (risk >= 0.22) return "Medium";
+  return "Low";
+}
+
+function optimizationGoalForAction(action: PortfolioAction): ProfitSimulationResult["optimization_goal"] {
+  if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE" || action === "TEST_AD_SPEND") return "GROWTH";
+  if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST") return "PROFIT";
+  if (action === "RESTOCK_AND_SCALE" || action === "REDUCE_INVENTORY") return "INVENTORY";
+  return "PORTFOLIO_HEALTH";
+}
+
+function unifiedActionForAction(action: PortfolioAction): ProfitSimulationResult["unified_action"] {
+  if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "TEST_AD_SPEND") return "SCALE_ADS";
+  if (action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE") return "EXPAND_CHANNEL";
+  if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST") return "OPTIMIZE_PRICE";
+  if (action === "REDUCE_ADS") return "REALLOCATE_BUDGET";
+  if (action === "RESTOCK_AND_SCALE") return "RESTOCK";
+  if (action === "REDUCE_INVENTORY") return "REDUCE_INVENTORY";
+  if (action === "STOP") return "STOP_SKU";
+  if (action === "HOLD") return "HOLD";
+  return "REDUCE_WASTE";
+}
+
 function lifecycleStrategicFit(action: PortfolioAction, lifecycle?: SkuLifecycleClassification) {
   if (!lifecycle) return 0;
   if (lifecycle.lifecycle_stage === "LAUNCH") {
@@ -677,7 +936,8 @@ function lifecycleStrategicFit(action: PortfolioAction, lifecycle?: SkuLifecycle
     if (action === "STOP" || action === "REDUCE_ADS") return -0.18;
   }
   if (lifecycle.lifecycle_stage === "MATURE") {
-    if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "SHIFT_CHANNEL" || action === "REDUCE_INVENTORY") return 0.14;
+    if (action === "SHIFT_CHANNEL" || action === "REDUCE_INVENTORY" || action === "REDUCE_ADS") return 0.12;
+    if (action === "PRICE_UP_5" || action === "PRICE_UP_10") return 0.04;
     if (action === "SCALE_ADS_PRICE_UP_5") return -0.1;
   }
   if (lifecycle.lifecycle_stage === "DECLINING") {

@@ -1517,15 +1517,23 @@ function SkuPortfolioOptimizationPanel({
             <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">
               {!isSkuOperationsOpen ? signedCurrency(displayedAcceptedProfitGain) : `${numberFormat.format(displayedCurrentSkuCount)} SKUs`}
             </p>
-            <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
+            <div className="mt-4 grid min-w-0 gap-3 text-sm font-semibold text-slate-600 lg:grid-cols-2">
               {!isSkuOperationsOpen ? (
                 <>
-                  <span className="whitespace-nowrap">
-                    {hasAcceptedOptimizationActions
-                      ? `${isZh ? "优化后组合利润" : "Projected Portfolio Profit"}: ${currencyDecimal.format(displayedAcceptedProjectedPortfolioProfit)} / +${percent.format(displayedAcceptedLiftRate)}`
-                      : (isZh ? "尚未接受任何优化动作" : "No accepted actions yet")}
-                  </span>
-                  <span className="whitespace-nowrap">{isZh ? "新增广告" : "Additional ads"}: {currencyDecimal.format(displayedAcceptedAdditionalAds)}</span>
+                  {hasAcceptedOptimizationActions ? (
+                    <div className="min-w-0">
+                      <span className="block text-slate-500">{isZh ? "优化后组合利润" : "Projected Portfolio Profit"}</span>
+                      <span className="block break-words text-slate-700">
+                        {currencyDecimal.format(displayedAcceptedProjectedPortfolioProfit)} / +{percent.format(displayedAcceptedLiftRate)}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="min-w-0 break-words">{isZh ? "尚未接受任何优化动作" : "No accepted actions yet"}</span>
+                  )}
+                  <div className="min-w-0">
+                    <span className="block text-slate-500">{isZh ? "新增广告" : "Additional ads"}</span>
+                    <span className="block break-words text-slate-700">{currencyDecimal.format(displayedAcceptedAdditionalAds)}</span>
+                  </div>
                 </>
               ) : (
                 <>
@@ -2117,6 +2125,14 @@ function OptimizationDecisionRail({
                 role="button"
                 tabIndex={0}
                 onClick={() => selectRow(row)}
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  selectRow(row);
+                }}
+                onMouseDown={(event) => {
+                  if (event.detail > 1) event.preventDefault();
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -2124,7 +2140,7 @@ function OptimizationDecisionRail({
                   }
                 }}
                 className={cn(
-                  "w-full rounded-lg p-3 text-left transition hover:bg-emerald-50/50",
+                  "w-full select-none rounded-lg p-3 text-left transition hover:bg-emerald-50/50",
                   isSelected && "bg-emerald-50"
                 )}
               >

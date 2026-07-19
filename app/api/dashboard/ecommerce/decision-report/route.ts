@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import {
   loadEcommerceSalesDashboardData,
-  loadLatestLocalEcommerceSalesDashboardData,
   type LoadDashboardResult
 } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 
@@ -12,35 +11,15 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const decisionMode = url.searchParams.get("mode") === "sku" ? "sku" : "full";
 
-  if (process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true") {
-    const localFallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
-
-    if (localFallback) {
-      return dashboardResponse(localFallback);
-    }
-  }
-
   let session: Awaited<ReturnType<typeof syncCurrentClerkUser>>;
 
   try {
     session = await syncCurrentClerkUser();
   } catch (error) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
-
-    if (fallback) {
-      return dashboardResponse(fallback, error);
-    }
-
     throw error;
   }
 
   if (!session) {
-    const fallback = loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode);
-
-    if (fallback) {
-      return dashboardResponse(fallback);
-    }
-
     return NextResponse.json(
       { ok: false, code: "UNAUTHENTICATED", message: "Missing authenticated user." },
       { status: 401 }
@@ -56,15 +35,6 @@ export async function GET(request: Request) {
       decisionMode
     });
   } catch (error) {
-    const fallback = process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true"
-      ? loadLatestLocalEcommerceSalesDashboardData(session.workspace.id, decisionMode)
-        ?? loadLatestLocalEcommerceSalesDashboardData(undefined, decisionMode)
-      : null;
-
-    if (fallback) {
-      return dashboardResponse(fallback, error);
-    }
-
     throw error;
   }
 

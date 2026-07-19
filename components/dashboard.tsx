@@ -16819,9 +16819,9 @@ function ReportPage({
       ) : shouldShowDecisionReportEmpty ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="p-5 text-sm text-muted-foreground">
-            {isZh
+            {decisionReportPayload?.message ?? (isZh
               ? "当前没有可用的经营报表数据。请确认统一后的电商数据已生成，然后刷新报表。"
-              : "No operating report data is available. Confirm the normalized ecommerce data has been generated, then refresh this report."}
+              : "No operating report data is available. Confirm the normalized ecommerce data has been generated, then refresh this report.")}
           </CardContent>
         </Card>
       ) : (

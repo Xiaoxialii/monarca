@@ -69,6 +69,7 @@ export function buildCanonicalSnapshotJson(input: {
     metrics: dashboard?.metrics ?? null,
     quality: dashboard?.quality ?? null,
     dashboardSnapshot: dashboard,
+    canonicalDataset: input.canonicalDataset ?? null,
     analytics: input.manifest.analytics ?? null,
     semanticLearning: input.manifest.semanticLearning ?? null,
     guardrailReport: input.manifest.guardrailReport ?? null,

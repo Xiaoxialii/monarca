@@ -113,6 +113,9 @@ export async function loadEcommerceSalesDashboardData(input: {
 }
 
 async function readCanonicalDatasetFromSnapshot(schemaJson: Record<string, unknown>): Promise<CanonicalDataset> {
+  const embeddedDataset = canonicalDatasetValue(schemaJson.canonicalDataset) ?? canonicalDatasetValue(schemaJson.canonical_dataset);
+  if (embeddedDataset) return embeddedDataset;
+
   const tableArtifacts = Array.isArray(schemaJson.tables) ? schemaJson.tables : [];
   const tables: CanonicalDataset["tables"] = {
     ecommerce_orders: [],
@@ -186,7 +189,9 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
           'manifestKey', "schemaJson"->>'manifestKey',
           'checksum', "schemaJson"->'checksum',
           'missingFields', "schemaJson"->'missingFields',
-          'confidenceScore', "schemaJson"->'confidenceScore'
+          'confidenceScore', "schemaJson"->'confidenceScore',
+          'canonicalDataset', "schemaJson"->'canonicalDataset',
+          'canonical_dataset', "schemaJson"->'canonical_dataset'
         ) as "schemaJson"
       from "SchemaSnapshot"
       where "workspaceId" = $1
@@ -288,6 +293,63 @@ function mergeCanonicalDatasets(left: CanonicalDataset, right: CanonicalDataset)
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function canonicalDatasetValue(value: unknown): CanonicalDataset | null {
+  const dataset = objectValue(value);
+  const tables = objectValue(dataset.tables);
+  if (!tables || dataset.schema_version !== ECOMMERCE_CANONICAL_SCHEMA_VERSION) return null;
+
+  return {
+    schema_version: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+    tables: {
+      ecommerce_orders: arrayRows(tables.ecommerce_orders),
+      ecommerce_order_items: arrayRows(tables.ecommerce_order_items),
+      ecommerce_products: arrayRows(tables.ecommerce_products),
+      ecommerce_customers: arrayRows(tables.ecommerce_customers),
+      ecommerce_refunds: arrayRows(tables.ecommerce_refunds),
+      ecommerce_ads: arrayRows(tables.ecommerce_ads),
+      ecommerce_inventory: arrayRows(tables.ecommerce_inventory)
+    },
+    metadata: canonicalMetadataValue(dataset.metadata)
+  };
+}
+
+function arrayRows(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+    : [];
+}
+
+function canonicalMetadataValue(value: unknown): CanonicalDataset["metadata"] {
+  const metadata = objectValue(value);
+  const validation = objectValue(metadata.validation);
+  const dedupe = objectValue(metadata.dedupe);
+
+  return {
+    source_platforms: Array.isArray(metadata.source_platforms)
+      ? metadata.source_platforms.map(String)
+      : [],
+    normalized_at: typeof metadata.normalized_at === "string" ? metadata.normalized_at : new Date().toISOString(),
+    unknown_fields: Array.isArray(metadata.unknown_fields)
+      ? metadata.unknown_fields.filter((row): row is CanonicalDataset["metadata"]["unknown_fields"][number] => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+      : [],
+    validation: {
+      accepted_rows: Number(validation.accepted_rows ?? 0),
+      rejected_rows: Number(validation.rejected_rows ?? 0),
+      warnings: Array.isArray(validation.warnings)
+        ? validation.warnings.filter((row): row is CanonicalDataset["metadata"]["validation"]["warnings"][number] => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+        : [],
+      rejected: Array.isArray(validation.rejected)
+        ? validation.rejected.filter((row): row is CanonicalDataset["metadata"]["validation"]["rejected"][number] => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+        : []
+    },
+    dedupe: {
+      canonical_key_strategy: "hash(platform + source_id + order_id)",
+      duplicate_count: Number(dedupe.duplicate_count ?? 0)
+    },
+    mapping_confidence: Number(metadata.mapping_confidence ?? 0)
+  };
 }
 
 function sourcePlatforms(schemaJson: Record<string, unknown>) {

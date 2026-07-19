@@ -335,6 +335,9 @@ model EcommerceConnectorAccount {
   shopDomain           String
   encryptedAccessToken String
   scopes               String
+  grantedScopes        String?
+  requiredScopes       String?
+  scopeStatus          String                @default("OK")
   status               String                @default("connected")
   lastSyncedAt         DateTime?
   createdAt            DateTime              @default(now())

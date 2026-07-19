@@ -13,19 +13,19 @@ import {
 } from "@/lib/launch/new-product-launch-optimizer";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_PRODUCT: LaunchProductInput = {
-  productName: "Women's Summer Dress",
-  sku: "NEW_001",
-  category: "Fashion",
-  subcategory: "Dresses",
-  sellingPrice: 59.99,
-  cogs: 21,
-  initialInventory: 500,
-  targetMarket: "US",
-  targetCustomer: "Women 22-38 interested in summer fashion and social commerce",
-  productDescription: "Lightweight summer dress with visual appeal for short-form video discovery.",
-  supplierLeadTimeDays: 21,
-  fulfillmentCost: 5.2
+const EMPTY_PRODUCT: LaunchProductInput = {
+  productName: "",
+  sku: "",
+  category: "",
+  subcategory: "",
+  sellingPrice: 0,
+  cogs: 0,
+  initialInventory: 0,
+  targetMarket: "",
+  targetCustomer: "",
+  productDescription: "",
+  supplierLeadTimeDays: 0,
+  fulfillmentCost: 0
 };
 
 const PRODUCT_INPUT_FIELDS = [
@@ -39,39 +39,7 @@ const PRODUCT_INPUT_FIELDS = [
   "Product Description"
 ];
 
-const TODAY_NEW_PRODUCTS: Array<LaunchProductInput & { createdDate: string }> = [
-  { ...DEFAULT_PRODUCT, createdDate: "2026-07-14" },
-  {
-    productName: "Compact Travel Jewelry Case",
-    sku: "NEW_017",
-    category: "Accessories",
-    subcategory: "Travel",
-    sellingPrice: 34.99,
-    cogs: 8.5,
-    initialInventory: 780,
-    targetMarket: "US",
-    targetCustomer: "Frequent travelers and gift buyers",
-    productDescription: "Portable jewelry organizer for travel packing and gifting content.",
-    supplierLeadTimeDays: 18,
-    fulfillmentCost: 3.1,
-    createdDate: "2026-07-14"
-  },
-  {
-    productName: "Ceramic Bedside Lamp",
-    sku: "NEW_024",
-    category: "Home",
-    subcategory: "Lighting",
-    sellingPrice: 79,
-    cogs: 28,
-    initialInventory: 320,
-    targetMarket: "US",
-    targetCustomer: "Home decor buyers and apartment renters",
-    productDescription: "Minimal ceramic lamp suited for home decor visual discovery.",
-    supplierLeadTimeDays: 30,
-    fulfillmentCost: 7.4,
-    createdDate: "2026-07-14"
-  }
-];
+const IMPORTED_NEW_PRODUCTS: Array<LaunchProductInput & { createdDate?: string }> = [];
 
 type InputMode = "manual" | "import";
 type LaunchWorkspaceView = "recommendation" | "intelligence";
@@ -87,9 +55,9 @@ export function NewProductLaunchOptimizer({
 }) {
   const isZh = locale === "zh";
   const [mode, setMode] = useState<InputMode>("manual");
-  const [product, setProduct] = useState<LaunchProductInput>(DEFAULT_PRODUCT);
-  const [selectedImportedSku, setSelectedImportedSku] = useState(DEFAULT_PRODUCT.sku);
-  const [plan, setPlan] = useState<LaunchPlan>(() => generateLaunchPlan(DEFAULT_PRODUCT));
+  const [product, setProduct] = useState<LaunchProductInput>(EMPTY_PRODUCT);
+  const [selectedImportedSku, setSelectedImportedSku] = useState("");
+  const [plan, setPlan] = useState<LaunchPlan | null>(null);
   const [workspaceView, setWorkspaceView] = useState<LaunchWorkspaceView>("recommendation");
   const [hasGeneratedPlan, setHasGeneratedPlan] = useState(false);
   const [manualHasInput, setManualHasInput] = useState(false);
@@ -102,11 +70,16 @@ export function NewProductLaunchOptimizer({
   }, [hasConnectedData, isLoadingConnectedData, mode]);
 
   const selectedImportedProduct = useMemo(
-    () => TODAY_NEW_PRODUCTS.find((item) => item.sku === selectedImportedSku) ?? TODAY_NEW_PRODUCTS[0],
+    () => IMPORTED_NEW_PRODUCTS.find((item) => item.sku === selectedImportedSku) ?? null,
     [selectedImportedSku]
   );
 
   const generatePlan = (nextProduct = mode === "import" ? selectedImportedProduct : product) => {
+    if (!nextProduct) {
+      setHasGeneratedPlan(false);
+      return;
+    }
+
     if (mode === "manual" && !manualHasInput) {
       setHasGeneratedPlan(false);
       return;
@@ -162,6 +135,8 @@ export function NewProductLaunchOptimizer({
             ) : hasConnectedData ? (
               <ImportProducts
                 selectedSku={selectedImportedSku}
+                products={IMPORTED_NEW_PRODUCTS}
+                isZh={isZh}
                 onSelect={(sku) => {
                   setSelectedImportedSku(sku);
                   setHasGeneratedPlan(false);
@@ -180,7 +155,7 @@ export function NewProductLaunchOptimizer({
               type="button"
               onClick={() => generatePlan()}
               aria-label={isZh ? "生成上市计划" : "Generate launch plan"}
-              disabled={isLoadingConnectedData || (mode === "manual" && !manualHasInput)}
+              disabled={isLoadingConnectedData || (mode === "manual" && !manualHasInput) || (mode === "import" && !selectedImportedProduct)}
               className="flex h-12 items-center justify-center rounded-2xl bg-[#079669] px-7 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(7,150,105,0.24)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isZh ? "开始" : "Start"}
@@ -197,7 +172,7 @@ export function NewProductLaunchOptimizer({
                   {isZh ? "正在更新数据" : "Updating data"}
                 </p>
               </div>
-            ) : !hasGeneratedPlan ? (
+            ) : !hasGeneratedPlan || !plan ? (
               <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center text-center">
                 <h2 className="max-w-[560px] text-2xl font-semibold leading-tight tracking-tight text-slate-950 lg:text-3xl">
                   {isZh ? "把每一次新品上市变成利润机会" : "Turn every new product launch into a profit opportunity"}
@@ -445,12 +420,30 @@ function normalizePromptLabel(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-function ImportProducts({ selectedSku, onSelect }: { selectedSku: string; onSelect: (sku: string) => void }) {
+function ImportProducts({
+  selectedSku,
+  products,
+  isZh,
+  onSelect
+}: {
+  selectedSku: string;
+  products: Array<LaunchProductInput & { createdDate?: string }>;
+  isZh: boolean;
+  onSelect: (sku: string) => void;
+}) {
+  if (products.length === 0) {
+    return (
+      <div className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-sm font-semibold leading-6 text-slate-500">
+        {isZh ? "当前没有可导入的新品数据。" : "No imported new product data is available."}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="max-h-[520px] overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-3">
         <div className="space-y-3">
-          {TODAY_NEW_PRODUCTS.map((item) => (
+          {products.map((item) => (
             <button
               type="button"
               key={item.sku}
@@ -472,7 +465,7 @@ function ImportProducts({ selectedSku, onSelect }: { selectedSku: string; onSele
                 <span>{formatMoney(item.sellingPrice)}</span>
                 <span>Cost {formatMoney(item.cogs)}</span>
                 <span>{item.initialInventory} units</span>
-                <span className="col-span-2">Created {item.createdDate}</span>
+                {item.createdDate ? <span className="col-span-2">Created {item.createdDate}</span> : null}
               </div>
             </button>
           ))}

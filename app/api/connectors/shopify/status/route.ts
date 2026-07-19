@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { ConnectionStatus } from "@prisma/client";
+import {
+  SHOPIFY_PROVIDER,
+  currentRequiredShopifyScopes,
+  missingConfiguredShopifyScopes,
+  shopifyScopeStatus
+} from "@/lib/ecommerce-connectors/shopify-oauth";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import { prisma } from "@/lib/prisma";
 
@@ -27,6 +33,7 @@ export async function GET(request: Request) {
         select: {
           id: true,
           status: true,
+          isActive: true,
           config: true,
           lastSyncAt: true
         }
@@ -48,12 +55,38 @@ export async function GET(request: Request) {
     });
   }
 
+  const requiredScopes = account.requiredScopes ?? currentRequiredShopifyScopes();
+  const grantedScopes = account.grantedScopes ?? account.scopes;
+  const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
+  const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
+
+  if (scopeStatus !== account.scopeStatus || account.requiredScopes !== requiredScopes || account.grantedScopes !== grantedScopes) {
+    await prisma.ecommerceConnectorAccount.update({
+      where: { id: account.id },
+      data: {
+        requiredScopes,
+        grantedScopes,
+        scopeStatus
+      }
+    });
+  }
+  const hasConnectedDataSource =
+    Boolean(account.dataSource?.id) &&
+    account.dataSource?.isActive === true &&
+    account.dataSource?.status === ConnectionStatus.CONNECTED;
+  const isConnected = scopeStatus === "OK" && hasConnectedDataSource;
+
   return NextResponse.json({
-    connected: true,
+    connected: isConnected,
     shopDomain: account.shopDomain,
     lastSyncedAt: account.lastSyncedAt?.toISOString() ?? account.dataSource?.lastSyncAt?.toISOString() ?? null,
-    status: account.status,
+    status: isConnected ? account.status : "not_connected",
+    scopeStatus,
+    missingScopes,
+    requiredScopes,
+    grantedScopes,
     dataSourceId: account.dataSourceId,
+    dataSourceStatus: account.dataSource?.status ?? null,
     connectorAccountId: account.id
   });
 }

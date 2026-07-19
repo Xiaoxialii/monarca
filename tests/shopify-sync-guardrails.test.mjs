@@ -34,7 +34,7 @@ test("Shopify production sync has isolated artifacts, manifest lineage, and inte
   assert.match(syncEngine, /canonicalKey/, "Sync should use stable canonical unique keys");
   assert.match(syncEngine, /manifest_key/, "Manifest should include manifest key lineage");
   assert.match(syncEngine, /checksum/, "Manifest and artifacts should include checksums");
-  assert.match(syncEngine, /schemaJson: buildSchemaSnapshotJson/, "Sync should bind SchemaSnapshot to the manifest");
+  assert.match(syncEngine, /schemaJson: snapshotJson[\s\S]*manifestKey: manifest\.manifest_key/, "Sync should bind SchemaSnapshot to the manifest");
   assert.doesNotMatch(syncEngine, /generateWorkspaceMetrics|report composer|DailyBriefing|ReportRun/i, "Sync engine must not generate metrics or reports");
 
   assert.match(graphQLClient, /fetchConnectionWithPageInfo/, "GraphQL client should support cursor pagination");

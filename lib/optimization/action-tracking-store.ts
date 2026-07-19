@@ -86,7 +86,7 @@ export async function listActionTrackingRecords(filter: { workspaceId?: string; 
 
     return rows.map(recordFromDecisionAction);
   } catch {
-    return listJsonActionTrackingRecords(filter);
+    return [];
   }
 }
 

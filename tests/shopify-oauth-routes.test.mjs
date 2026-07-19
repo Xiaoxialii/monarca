@@ -19,6 +19,9 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(schema, /model OAuthState \{[\s\S]*stateHash\s+String\s+@unique/, "OAuthState should store a state hash");
   assert.doesNotMatch(schema, /stateToken|rawState/, "OAuthState should not store raw state tokens");
   assert.match(schema, /model EcommerceConnectorAccount \{[\s\S]*encryptedAccessToken\s+String/, "Connector account should store encrypted tokens");
+  assert.match(schema, /model EcommerceConnectorAccount \{[\s\S]*grantedScopes\s+String\?/, "Connector account should store granted Shopify scopes");
+  assert.match(schema, /model EcommerceConnectorAccount \{[\s\S]*requiredScopes\s+String\?/, "Connector account should store current required Shopify scopes");
+  assert.match(schema, /model EcommerceConnectorAccount \{[\s\S]*scopeStatus\s+String\s+@default\("OK"\)/, "Connector account should store scope migration status");
 
   assert.match(helper, /const stateToken = base64Url\(32\)/, "State token should be high entropy");
   assert.match(helper, /crypto\.randomBytes\(bytes\)\.toString\("base64url"\)/, "State helper should use crypto random bytes");
@@ -44,14 +47,20 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(callbackRoute, /verifyShopifyCallbackHmac\(url, clientSecret\)/, "Callback should verify hmac before state consumption");
   assert.match(callbackRoute, /verifyAndConsumeOAuthState\(/, "Callback should verify and consume OAuth state");
   assert.match(callbackRoute, /exchangeShopifyCodeForToken\(/, "Callback should exchange code for token");
-  assert.match(callbackRoute, /assertRequiredShopifyScopes\(token\.scope\)/, "Callback should reject tokens missing required Shopify scopes");
+  assert.match(callbackRoute, /currentRequiredShopifyScopes\(\)/, "Callback should snapshot the app's current required Shopify scopes");
+  assert.match(callbackRoute, /missingConfiguredShopifyScopes\(requiredScopes, grantedScopes\)/, "Callback should compare granted scopes against required scopes");
+  assert.match(callbackRoute, /shopifyScopeStatus\(requiredScopes, grantedScopes\)/, "Callback should compute scope migration status");
   assert.match(callbackRoute, /formatShopifyScopes\(token\.scope\)/, "Callback should persist Shopify's normalized granted scopes");
+  assert.match(callbackRoute, /grantedScopes[\s\S]*requiredScopes[\s\S]*scopeStatus/, "Callback should persist granted, required, and status scope metadata");
+  assert.match(callbackRoute, /SHOPIFY_SCOPES_NOT_GRANTED/, "Callback should redirect with a stable scope migration code when permissions are incomplete");
   assert.match(callbackRoute, /encryptConnectorToken\(token\.accessToken\)/, "Callback should encrypt token before storing");
   assert.match(callbackRoute, /DataSourceType\.ECOMMERCE_PLATFORM/, "Callback should create an ecommerce platform data source");
   assert.doesNotMatch(callbackRoute, /workspaceId\s*=\s*url\.searchParams|get\("workspaceId"\)/, "Callback must not trust workspaceId from query");
   assert.doesNotMatch(callbackRoute, /accessToken[^,\n]*config|encryptedAccessToken[^,\n]*config/, "DataSource config must not store tokens");
 
   assert.match(statusRoute, /workspaceId: session\.workspace\.id/, "Status should be workspace scoped");
+  assert.match(statusRoute, /missingConfiguredShopifyScopes\(requiredScopes, grantedScopes\)/, "Status route should detect outdated granted scopes");
+  assert.match(statusRoute, /scopeStatus/, "Status route should expose scope migration state without tokens");
   assert.doesNotMatch(statusRoute, /encryptedAccessToken|accessToken/, "Status response should not expose tokens");
 
   assert.match(graphQLClient, /X-Shopify-Access-Token/, "GraphQL client should authenticate with Shopify access token header");
@@ -65,4 +74,32 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(fetchRoute, /warnings/, "Fetch route should return protected data access warnings");
   assert.doesNotMatch(fetchRoute, /prisma\.\w+\.(create|update|upsert|delete)|R2|manifest|generateWorkspaceMetrics|report/i, "Fetch route must not write data, generate artifacts, metrics, or reports");
   assert.doesNotMatch(fetchRoute, /accessToken[^,\n]*NextResponse|encryptedAccessToken[^,\n]*NextResponse/, "Fetch route must not return tokens");
+});
+
+test("Shopify scope migration supports reauthorization without uninstalling", () => {
+  const migration = read("prisma/migrations/20260718_add_shopify_scope_migration_fields/migration.sql");
+  const callbackRoute = read("app/api/connectors/shopify/callback/route.ts");
+  const statusRoute = read("app/api/connectors/shopify/status/route.ts");
+  const dataSourcesRoute = read("app/api/data-sources/route.ts");
+  const syncEngine = read("lib/ecommerce-connectors/providers/shopify-sync-engine.ts");
+  const dashboard = read("components/dashboard.tsx");
+
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "grantedScopes"/, "Migration should add grantedScopes without requiring reinstall");
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "requiredScopes"/, "Migration should add requiredScopes");
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "scopeStatus"/, "Migration should add scopeStatus");
+  assert.match(migration, /"grantedScopes" = COALESCE\("grantedScopes", "scopes"\)/, "Migration should backfill old granted scopes from existing scopes");
+
+  assert.match(syncEngine, /missingConfiguredShopifyScopes\(requiredScopes, grantedScopes\)/, "Sync should compare current required scopes against merchant grants");
+  assert.match(syncEngine, /scopeStatus[\s\S]*NEEDS_REAUTHORIZATION|SHOPIFY_NEEDS_REAUTHORIZATION/, "Sync should mark accounts that need reauthorization");
+  assert.match(syncEngine, /lastErrorMessage: `Shopify permissions need update/, "Sync should store a user-actionable permission message");
+
+  assert.match(callbackRoute, /update:\s*\{[\s\S]*encryptedAccessToken[\s\S]*grantedScopes[\s\S]*requiredScopes[\s\S]*scopeStatus/, "Reauthorization callback should update token and granted scopes");
+  assert.match(statusRoute, /const isConnected = scopeStatus === "OK" && hasConnectedDataSource/, "Status should require both current scopes and an active connected data source");
+  assert.match(dataSourcesRoute, /repairConnectedShopifyDataSources\(session\.workspace\.id\)/, "Data source list should repair connected Shopify accounts before rendering connected sources");
+  assert.match(dataSourcesRoute, /prisma\.dataSourceConnection\.create\([\s\S]*Shopify - \$\{account\.shopDomain\}/, "Shopify account repair should recreate a missing data source without reinstall");
+  assert.match(dashboard, /const genericSources = ungrouped\.map/, "Connected source UI should not drop unknown active data sources");
+
+  assert.match(dashboard, /Shopify permissions need update/, "UI should show a user-friendly permission migration title");
+  assert.match(dashboard, /Update Shopify Permissions/, "UI should provide a reconnect authorization action");
+  assert.match(dashboard, /Orders[\s\S]*Products[\s\S]*Customer data/, "UI should show business-readable missing permissions");
 });

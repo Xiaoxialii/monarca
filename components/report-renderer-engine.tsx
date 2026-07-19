@@ -325,11 +325,13 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   }, [report]);
 
   const visibleSkuRows = useMemo(() => {
+    const showsAllSkus = skuChannel === "all";
+
     return skuRows
-      .filter((row) => skuChannel === "all" || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
+      .filter((row) => showsAllSkus || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
       .sort((a, b) => {
-        const aRankValue = skuChannel === "all" ? a.revenue : getSkuChannelRevenue(a, skuChannel);
-        const bRankValue = skuChannel === "all" ? b.revenue : getSkuChannelRevenue(b, skuChannel);
+        const aRankValue = showsAllSkus ? a.revenue : getSkuChannelRevenue(a, skuChannel);
+        const bRankValue = showsAllSkus ? b.revenue : getSkuChannelRevenue(b, skuChannel);
         return bRankValue - aRankValue || b.revenue - a.revenue || a.sku.localeCompare(b.sku);
       });
   }, [skuRows, skuChannel]);
@@ -1151,7 +1153,7 @@ function InitialProfitOptimizationShell({
             </div>
             {headerAction ?? <span className="text-xs font-medium text-slate-500">{isZh ? "加载中" : "Loading"}</span>}
           </div>
-          {!showSkuTableEmptyState ? (
+          {!showSkuTableEmptyState && !isLoadingData ? (
             <div className="grid gap-0 xl:grid-cols-2">
               <div className="min-w-0 px-5 py-3 xl:order-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "当前组合" : "Current Portfolio"}</p>
@@ -1178,7 +1180,7 @@ function InitialProfitOptimizationShell({
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
                     {isLoadingData
-                      ? (isZh ? "正在加载 SKU 数据" : "Loading SKU operating data")
+                      ? (isZh ? "正在模拟 SKU 优化" : "Simulating SKU optimization")
                       : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
                   <button
@@ -1190,7 +1192,7 @@ function InitialProfitOptimizationShell({
                     disabled={isLoadingOptimization || isLoadingData}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
                     aria-label={isLoadingData
-                      ? (isZh ? "正在加载 SKU 数据" : "Loading SKU operating data")
+                      ? (isZh ? "正在模拟 SKU 优化" : "Simulating SKU optimization")
                       : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
                     {isLoadingOptimization || isLoadingData ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
@@ -1201,15 +1203,17 @@ function InitialProfitOptimizationShell({
           </div>
           <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
           <div className="min-w-0 space-y-4 xl:order-3">
-            <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
-              <span className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm ring-1 ring-emerald-200">
-                {isZh ? "SKU 经营数据" : "SKU operating data"}
-              </span>
-              <span className="rounded-full px-4 py-2 text-sm font-semibold text-slate-500">
-                {isZh ? "SKU 优化决策" : "SKU optimization decision"}
-              </span>
-            </div>
-            <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
+            {!isLoadingData ? (
+              <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
+                <span className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm ring-1 ring-emerald-200">
+                  {isZh ? "SKU 经营数据" : "SKU operating data"}
+                </span>
+                <span className="rounded-full px-4 py-2 text-sm font-semibold text-slate-500">
+                  {isZh ? "SKU 优化决策" : "SKU optimization decision"}
+                </span>
+              </div>
+            ) : null}
+            <div className="min-w-0 overflow-hidden">
               <EmptySkuProfitPortfolioTable locale={locale} isLoadingData={isLoadingData} />
             </div>
           </div>
@@ -1244,11 +1248,13 @@ function SkuPortfolioOptimizationPanel({
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const skuRows = useMemo(() => buildSkuReportRows(report), [report]);
   const visibleSkuRows = useMemo(() => {
+    const showsAllSkus = skuChannel === "all";
+
     return skuRows
-      .filter((row) => skuChannel === "all" || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
+      .filter((row) => showsAllSkus || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
       .sort((a, b) => {
-        const aRankValue = skuChannel === "all" ? a.revenue : getSkuChannelRevenue(a, skuChannel);
-        const bRankValue = skuChannel === "all" ? b.revenue : getSkuChannelRevenue(b, skuChannel);
+        const aRankValue = showsAllSkus ? a.revenue : getSkuChannelRevenue(a, skuChannel);
+        const bRankValue = showsAllSkus ? b.revenue : getSkuChannelRevenue(b, skuChannel);
         return bRankValue - aRankValue || b.revenue - a.revenue || a.sku.localeCompare(b.sku);
       });
   }, [skuRows, skuChannel]);
@@ -1485,6 +1491,11 @@ function SkuPortfolioOptimizationPanel({
     if (nextSelection) setSelectedDecisionRow(nextSelection);
     setIsSkuOperationsOpen(false);
   };
+  const selectSkuChannel = (value: string) => {
+    setSelectedDecisionRow(null);
+    setExpandedSku(null);
+    setSkuChannel(value);
+  };
 
   return (
 	    <div className="space-y-2 bg-transparent">
@@ -1566,7 +1577,7 @@ function SkuPortfolioOptimizationPanel({
             </button>
           </div>
         {isSkuOperationsOpen ? (
-          <div className="min-w-0 overflow-hidden rounded-lg border bg-white">
+          <div className={cn("min-w-0 overflow-hidden", showSkuTableEmptyState ? "" : "rounded-lg border bg-white")}>
             {showSkuTableEmptyState ? (
               <EmptySkuProfitPortfolioTable locale={locale} />
             ) : (
@@ -1574,7 +1585,7 @@ function SkuPortfolioOptimizationPanel({
                 rows={displayedSkuRows}
                 channelTags={skuChannelTags}
                 selectedChannel={skuChannel}
-                onChannelChange={setSkuChannel}
+                onChannelChange={selectSkuChannel}
                 expandedSku={expandedSku}
                 onToggleExpanded={(sku) => setExpandedSku((current) => current === sku ? null : sku)}
                 locale={locale}
@@ -1791,7 +1802,7 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
   const isZh = locale === "zh";
 
   return (
-    <div className="grid min-h-[520px] place-items-center bg-white p-8 text-center">
+    <div className="grid min-h-[520px] place-items-center bg-transparent p-8 text-center">
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
           {isZh ? "优化机会" : "Optimization Opportunities"}
@@ -3304,7 +3315,7 @@ function SelectedSkuOptimizationPanel({
 
       <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-bold text-slate-950">Prediction vs Actual Impact</p>
+          <p className="text-sm font-bold text-slate-950">Prediction by Day</p>
           <div className="flex rounded-md bg-slate-100 p-1">
             {[7, 14, 30].map((value) => (
               <button

@@ -5619,18 +5619,59 @@ function ImportDataSection({
 }) {
   const searchParams = useSearchParams();
   const isZh = copy.connectors.connectedCountLabel.includes("个");
-  const connectorError = shopifyConnectorErrorMessage(searchParams, isZh);
+  const [shopifyPermissionIssue, setShopifyPermissionIssue] = useState<ShopifyConnectorMessage | null>(null);
+  const connectorError = shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
+
+  useEffect(() => {
+    let isActive = true;
+
+    void fetch("/api/connectors/shopify/status", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+
+        if (!isActive) return;
+        if (response.ok && payload?.scopeStatus === "NEEDS_REAUTHORIZATION") {
+          setShopifyPermissionIssue(shopifyConnectorReauthorizationMessage(payload, isZh));
+          return;
+        }
+
+        setShopifyPermissionIssue(null);
+      })
+      .catch(() => {
+        if (isActive) setShopifyPermissionIssue(null);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [isZh]);
 
   return (
     <section id="import-data" className="scroll-mt-20">
       {connectorError ? (
         <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex gap-3">
             <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-700" />
             <div>
               <p className="font-semibold">{connectorError.title}</p>
               <p className="mt-1 font-medium leading-6">{connectorError.message}</p>
+                {connectorError.missingPermissions.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {connectorError.missingPermissions.map((permission) => (
+                      <span key={permission} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-900 ring-1 ring-amber-200">
+                        {permission}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
+            {connectorError.actionHref ? (
+              <Button asChild size="sm" className="bg-amber-900 text-white hover:bg-amber-950">
+                <a href={connectorError.actionHref}>{connectorError.actionLabel}</a>
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -5662,16 +5703,29 @@ function ImportDataSection({
   );
 }
 
+type ShopifyConnectorMessage = {
+  title: string;
+  message: string;
+  missingPermissions: string[];
+  actionHref: string | null;
+  actionLabel: string;
+};
+
 function shopifyConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURLSearchParamsLike | null, isZh: boolean) {
   if (searchParams?.get("shopify") !== "failed") return null;
 
   const code = searchParams.get("code");
   if (code === "SHOPIFY_SCOPES_NOT_GRANTED") {
+    const shop = searchParams.get("shop");
+    const actionHref = shop ? `/api/connectors/shopify/start?shop=${encodeURIComponent(shop)}` : "/dashboard/import-data/connect?source=Shopify";
     return {
-      title: isZh ? "Shopify 未授权所需权限" : "Shopify did not grant required scopes",
+      title: isZh ? "Shopify 权限需要更新" : "Shopify permissions need update",
       message: isZh
-        ? "请在 Shopify 应用权限中启用 read_orders、read_products、read_customers，然后重新连接。"
-        : "Required scopes: read_orders, read_products, read_customers. Enable these Admin API permissions in the Shopify app, then reconnect."
+        ? "当前授权缺少同步所需权限。无需卸载应用，点击按钮重新授权即可。"
+        : "This store is missing required sync permissions. No uninstall is needed; update permissions to continue.",
+      missingPermissions: isZh ? ["订单", "商品", "客户数据"] : ["Orders", "Products", "Customer data"],
+      actionHref,
+      actionLabel: isZh ? "更新 Shopify 权限" : "Update Shopify Permissions"
     };
   }
 
@@ -5679,7 +5733,44 @@ function shopifyConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyUR
     title: isZh ? "Shopify 连接失败" : "Shopify connection failed",
     message: isZh
       ? `错误代码：${code ?? "unknown"}。请检查店铺域名和应用权限后重试。`
-      : `Error code: ${code ?? "unknown"}. Check the shop domain and app permissions, then try again.`
+      : `Error code: ${code ?? "unknown"}. Check the shop domain and app permissions, then try again.`,
+    missingPermissions: [],
+    actionHref: null,
+    actionLabel: ""
+  };
+}
+
+function shopifyScopePermissionLabels(missingScopes: unknown, isZh: boolean) {
+  const scopes = Array.isArray(missingScopes)
+    ? missingScopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const labels = new Set<string>();
+
+  scopes.forEach((scope) => {
+    if (scope.includes("order")) labels.add(isZh ? "订单" : "Orders");
+    if (scope.includes("product")) labels.add(isZh ? "商品" : "Products");
+    if (scope.includes("customer")) labels.add(isZh ? "客户数据" : "Customer data");
+  });
+
+  if (labels.size === 0) {
+    return isZh ? ["订单", "商品", "客户数据"] : ["Orders", "Products", "Customer data"];
+  }
+
+  return Array.from(labels);
+}
+
+function shopifyConnectorReauthorizationMessage(payload: Record<string, unknown>, isZh: boolean): ShopifyConnectorMessage {
+  const shop = typeof payload.shopDomain === "string" ? payload.shopDomain : "";
+  const actionHref = shop ? `/api/connectors/shopify/start?shop=${encodeURIComponent(shop)}` : "/dashboard/import-data/connect?source=Shopify";
+
+  return {
+    title: isZh ? "Shopify 权限需要更新" : "Shopify permissions need update",
+    message: isZh
+      ? "当前 Shopify 授权低于新版同步要求。无需卸载应用，重新授权后会恢复已连接业务源。"
+      : "This Shopify authorization is missing permissions required by the current sync version. No uninstall is needed; update permissions to restore the connected source.",
+    missingPermissions: shopifyScopePermissionLabels(payload.missingScopes, isZh),
+    actionHref,
+    actionLabel: isZh ? "更新 Shopify 权限" : "Update Shopify Permissions"
   };
 }
 
@@ -5749,10 +5840,14 @@ function formatBusinessNumber(value: number) {
 
 function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: boolean): BusinessSourceView[] {
   const grouped = new Map<string, ConnectedSourceRow[]>();
+  const ungrouped: ConnectedSourceRow[] = [];
 
   connectedSources.forEach((source) => {
     const key = inferBusinessSourceKey(source);
-    if (!key) return;
+    if (!key) {
+      ungrouped.push(source);
+      return;
+    }
 
     grouped.set(key, [...(grouped.get(key) ?? []), source]);
   });
@@ -5829,7 +5924,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
     }
   ];
 
-  return definitions.flatMap((definition) => {
+  const knownSources = definitions.flatMap((definition) => {
     const rows = grouped.get(definition.id) ?? [];
     if (rows.length === 0) return [];
 
@@ -5851,6 +5946,30 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       sourceRows: rows
     }];
   });
+
+  const genericSources = ungrouped.map((source) => {
+    const rowsCount = businessDatasetRows(source);
+    const sourceName = source.config?.fileName || source.name;
+    const typeLabel = source.provider || source.type || (isZh ? "业务数据源" : "Business source");
+
+    return {
+      id: `source-${source.id}`,
+      name: sourceName,
+      typeLabel,
+      summaryLabel: isZh ? "已连接业务数据源" : "Connected business data source",
+      statusLabel: isZh ? "已连接" : "Connected",
+      lastSyncLabel: source.lastSyncAt
+        ? new Date(source.lastSyncAt).toLocaleDateString(isZh ? "zh-CN" : "en-US")
+        : (isZh ? "今天" : "Today"),
+      datasets: [{
+        name: sourceName,
+        rowsLabel: rowsCount > 0 ? `${formatBusinessNumber(rowsCount)} ${isZh ? "行" : "rows"}` : (isZh ? "已连接" : "connected")
+      }],
+      sourceRows: [source]
+    };
+  });
+
+  return [...knownSources, ...genericSources];
 }
 
 function businessSourceIcon(sourceId: string) {
@@ -5904,7 +6023,7 @@ function DataSourcesWorkspace({
     () => buildBusinessSources(workspaceSources.length > 0 ? workspaceSources : connectedSources, isZh),
     [connectedSources, isZh, workspaceSources]
   );
-  const hasAnyKnownSources = connectedSources.length > 0 || workspaceSources.length > 0;
+  const hasAnySources = connectedSources.length > 0 || workspaceSources.length > 0;
 
   useEffect(() => {
     setWorkspaceSources(connectedSources);
@@ -5926,13 +6045,13 @@ function DataSourcesWorkspace({
             </div>
           </div>
 
-          {(isLoadingConnectedSources || hasAnyKnownSources) && businessSources.length === 0 ? (
+          {isLoadingConnectedSources && !hasAnySources && businessSources.length === 0 ? (
             <div className="mt-5 rounded-3xl bg-slate-50 p-8 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
               <Loader2 className="mr-2 inline size-4 animate-spin" />
               {isZh ? "正在加载已连接业务源" : "Loading connected business sources"}
             </div>
           ) : businessSources.length > 0 ? (
-            <div className="mt-5 grid max-h-[520px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-1">
+            <div className="mt-5 grid max-h-[60vh] gap-3 overflow-y-scroll overscroll-contain pr-2 [scrollbar-color:#cbd5e1_transparent] [scrollbar-width:thin] sm:grid-cols-2 xl:max-h-[520px] xl:grid-cols-1">
               {businessSources.map((source) => (
                 <div
                   key={source.id}
@@ -16772,7 +16891,15 @@ type DecisionImpactPayload = {
   };
 };
 
-function ActionTrackerPage({ locale }: { locale: Locale }) {
+function ActionTrackerPage({
+  locale,
+  hasConnectedData,
+  isLoadingConnectedData
+}: {
+  locale: Locale;
+  hasConnectedData: boolean;
+  isLoadingConnectedData: boolean;
+}) {
   const isZh = locale === "zh";
   const [payload, setPayload] = useState<DecisionImpactPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -16780,12 +16907,17 @@ function ActionTrackerPage({ locale }: { locale: Locale }) {
   const [selectedRunningTaskIndex, setSelectedRunningTaskIndex] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (!hasConnectedData) {
+      setPayload(null);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     const response = await fetch("/api/policy/actions", { cache: "no-store" });
     const data = await response.json().catch(() => null) as DecisionImpactPayload | null;
     if (data?.summary) setPayload(data);
     setIsLoading(false);
-  }, []);
+  }, [hasConnectedData]);
 
   useEffect(() => {
     void refresh();
@@ -16793,7 +16925,7 @@ function ActionTrackerPage({ locale }: { locale: Locale }) {
 
   const activeDecisionCount = payload?.activeDecisions.length ?? 0;
   const completedDecisionCount = payload?.completedActions.length ?? 0;
-  const shouldShowEmptyDecisionLoop = !isLoading && activeDecisionCount + completedDecisionCount === 0;
+  const shouldShowEmptyDecisionLoop = !isLoadingConnectedData && !isLoading && activeDecisionCount + completedDecisionCount === 0;
   const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
   const realizedProfitImpact = payload?.summary.realizedProfitImpact ?? 0;
   const predictionAccuracy = payload?.summary.predictionAccuracy;
@@ -16855,10 +16987,16 @@ function ActionTrackerPage({ locale }: { locale: Locale }) {
         <DecisionTextMetric label={isZh ? "预测准确率" : "Prediction Accuracy"} value={predictionAccuracy == null ? (isZh ? "评估后可用" : "Available after evaluation") : `${predictionAccuracy}%`} />
       </div>
 
-      {shouldShowEmptyDecisionLoop ? (
+      {isLoadingConnectedData ? (
+        <div className="grid min-h-[360px] place-items-center">
+          <p className="text-xl font-bold text-slate-500">{isZh ? "正在加载数据源状态" : "Loading data source status"}</p>
+        </div>
+      ) : shouldShowEmptyDecisionLoop ? (
         <div className="grid min-h-[360px] place-items-center">
           <p className="text-3xl font-bold text-slate-950">
-            {isZh ? "开始构建你的 AI 决策反馈闭环" : "Start building your AI decision feedback loop"}
+            {hasConnectedData
+              ? (isZh ? "开始构建你的 AI 决策反馈闭环" : "Start building your AI decision feedback loop")
+              : (isZh ? "连接数据源后开始跟踪优化决策" : "Connect a data source to start tracking optimization decisions")}
           </p>
         </div>
       ) : null}
@@ -17461,7 +17599,11 @@ export function Dashboard({
               </div>
             ) : view === "action-tracker" ? (
               <div id="action-tracker" className="min-w-0 xl:col-start-1">
-                <ActionTrackerPage locale={getCopyLocale(locale)} />
+                <ActionTrackerPage
+                  locale={getCopyLocale(locale)}
+                  hasConnectedData={connectedSources.length > 0}
+                  isLoadingConnectedData={isLoadingConnectedSources}
+                />
               </div>
             ) : view === "report" ? (
               <div className="min-w-0 xl:col-start-1">

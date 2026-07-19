@@ -3,21 +3,24 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   SHOPIFY_PROVIDER,
-  assertRequiredShopifyScopes,
+  currentRequiredShopifyScopes,
   encryptConnectorToken,
   exchangeShopifyCodeForToken,
   formatShopifyScopes,
+  missingConfiguredShopifyScopes,
   normalizeShopDomain,
   publicShopifyError,
   requiredShopifyEnv,
+  shopifyScopeStatus,
   verifyAndConsumeOAuthState,
   verifyShopifyCallbackHmac
 } from "@/lib/ecommerce-connectors/shopify-oauth";
 
-function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string) {
+function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string, shopDomain?: string) {
   const url = new URL("/dashboard/import-data", request.url);
   url.searchParams.set("shopify", status);
   if (code) url.searchParams.set("code", code);
+  if (shopDomain) url.searchParams.set("shop", shopDomain);
 
   return NextResponse.redirect(url);
 }
@@ -43,6 +46,7 @@ export async function GET(request: Request) {
     const code = url.searchParams.get("code");
     const stateToken = url.searchParams.get("state");
     const { clientId, clientSecret } = requiredShopifyEnv();
+    const requiredScopes = currentRequiredShopifyScopes();
 
     if (!code) {
       return NextResponse.json({ ok: false, code: "MISSING_CODE", message: "Missing Shopify authorization code." }, { status: 400 });
@@ -60,9 +64,10 @@ export async function GET(request: Request) {
       clientId,
       clientSecret
     });
-    assertRequiredShopifyScopes(token.scope);
     const encryptedAccessToken = encryptConnectorToken(token.accessToken);
-    const scopes = formatShopifyScopes(token.scope);
+    const grantedScopes = formatShopifyScopes(token.scope);
+    const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
+    const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
 
     await prisma.$transaction(async (tx) => {
       const account = await tx.ecommerceConnectorAccount.upsert({
@@ -78,12 +83,18 @@ export async function GET(request: Request) {
           provider: SHOPIFY_PROVIDER,
           shopDomain: state.shopDomain,
           encryptedAccessToken,
-          scopes,
+          scopes: grantedScopes,
+          grantedScopes,
+          requiredScopes,
+          scopeStatus,
           status: "connected"
         },
         update: {
           encryptedAccessToken,
-          scopes,
+          scopes: grantedScopes,
+          grantedScopes,
+          requiredScopes,
+          scopeStatus,
           status: "connected"
         }
       });
@@ -104,6 +115,13 @@ export async function GET(request: Request) {
         shopDomain: state.shopDomain,
         connectorAccountId: account.id
       });
+      const nextConfig = {
+        ...config,
+        grantedScopes,
+        requiredScopes,
+        scopeStatus,
+        missingScopes
+      };
       const dataSource = existingSource
         ? await tx.dataSourceConnection.update({
             where: { id: existingSource.id },
@@ -111,16 +129,20 @@ export async function GET(request: Request) {
               name: `Shopify - ${state.shopDomain}`,
               provider: SHOPIFY_PROVIDER,
               type: DataSourceType.ECOMMERCE_PLATFORM,
-              status: ConnectionStatus.CONNECTED,
-              isActive: true,
+              status: missingScopes.length ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
+              isActive: missingScopes.length ? false : true,
               connectionMode: "oauth",
               authMethod: "oauth",
-              config,
+              config: nextConfig,
               connectedAt: new Date(),
-              lastErrorMessage: null
+              lastErrorMessage: missingScopes.length
+                ? `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`
+                : null
             }
           })
-        : await tx.dataSourceConnection.create({
+        : missingScopes.length
+          ? null
+          : await tx.dataSourceConnection.create({
             data: {
               workspaceId: state.workspaceId,
               name: `Shopify - ${state.shopDomain}`,
@@ -130,25 +152,31 @@ export async function GET(request: Request) {
               isActive: true,
               connectionMode: "oauth",
               authMethod: "oauth",
-              config,
+              config: nextConfig,
               connectedAt: new Date()
             }
           });
 
-      await tx.ecommerceConnectorAccount.update({
-        where: { id: account.id },
-        data: { dataSourceId: dataSource.id }
-      });
-      await tx.dataSourceConnection.update({
-        where: { id: dataSource.id },
-        data: {
-          config: sanitizedConfig({
-            shopDomain: state.shopDomain,
-            connectorAccountId: account.id
-          })
-        }
-      });
+      if (dataSource) {
+        await tx.ecommerceConnectorAccount.update({
+          where: { id: account.id },
+          data: { dataSourceId: dataSource.id }
+        });
+        await tx.dataSourceConnection.update({
+          where: { id: dataSource.id },
+          data: {
+            config: {
+              ...nextConfig,
+              connectorAccountId: account.id
+            }
+          }
+        });
+      }
     });
+
+    if (missingScopes.length > 0) {
+      return dashboardRedirect(request, "failed", "SHOPIFY_SCOPES_NOT_GRANTED", shopDomain);
+    }
 
     return dashboardRedirect(request, "connected");
   } catch (error) {

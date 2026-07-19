@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { ConnectionStatus } from "@prisma/client";
+import { ConnectionStatus, DataSourceType } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
+import {
+  SHOPIFY_PROVIDER,
+  currentRequiredShopifyScopes,
+  missingConfiguredShopifyScopes,
+  shopifyScopeStatus
+} from "@/lib/ecommerce-connectors/shopify-oauth";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -183,10 +189,180 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
   };
 }
 
+function resolveShopifyRequiredScopes(accountRequiredScopes: string | null, accountGrantedScopes: string) {
+  try {
+    return currentRequiredShopifyScopes();
+  } catch {
+    return accountRequiredScopes ?? accountGrantedScopes;
+  }
+}
+
+function shopifyDataSourceConfig(input: {
+  existingConfig?: unknown;
+  shopDomain: string;
+  connectorAccountId: string;
+  grantedScopes: string;
+  requiredScopes: string;
+  scopeStatus: string;
+  missingScopes: string[];
+}) {
+  return {
+    ...asRecord(input.existingConfig),
+    shopDomain: input.shopDomain,
+    connectorAccountId: input.connectorAccountId,
+    schemaVersion: "ecommerce_canonical_v1",
+    provider: SHOPIFY_PROVIDER,
+    businessType: "ecommerce",
+    grantedScopes: input.grantedScopes,
+    requiredScopes: input.requiredScopes,
+    scopeStatus: input.scopeStatus,
+    missingScopes: input.missingScopes
+  };
+}
+
+async function repairConnectedShopifyDataSources(workspaceId: string) {
+  const accounts = await prisma.ecommerceConnectorAccount.findMany({
+    where: {
+      workspaceId,
+      provider: SHOPIFY_PROVIDER,
+      status: "connected"
+    },
+    include: {
+      dataSource: {
+        select: {
+          id: true,
+          status: true,
+          isActive: true,
+          config: true
+        }
+      }
+    }
+  });
+
+  for (const account of accounts) {
+    const grantedScopes = account.grantedScopes ?? account.scopes;
+    const requiredScopes = resolveShopifyRequiredScopes(account.requiredScopes, grantedScopes);
+    const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
+    const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
+
+    if (scopeStatus !== "OK") {
+      await prisma.ecommerceConnectorAccount.update({
+        where: { id: account.id },
+        data: {
+          grantedScopes,
+          requiredScopes,
+          scopeStatus
+        }
+      });
+
+      if (account.dataSourceId) {
+        await prisma.dataSourceConnection.updateMany({
+          where: {
+            id: account.dataSourceId,
+            workspaceId
+          },
+          data: {
+            status: ConnectionStatus.PENDING,
+            isActive: false,
+            lastErrorMessage: `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
+            config: shopifyDataSourceConfig({
+              existingConfig: account.dataSource?.config,
+              shopDomain: account.shopDomain,
+              connectorAccountId: account.id,
+              grantedScopes,
+              requiredScopes,
+              scopeStatus,
+              missingScopes
+            })
+          }
+        });
+      }
+
+      continue;
+    }
+
+    const activeLinkedSource =
+      account.dataSource?.id &&
+      account.dataSource.isActive &&
+      account.dataSource.status === ConnectionStatus.CONNECTED
+        ? account.dataSource
+        : null;
+
+    const reusableSource = activeLinkedSource ?? await prisma.dataSourceConnection.findFirst({
+      where: {
+        workspaceId,
+        provider: SHOPIFY_PROVIDER,
+        type: DataSourceType.ECOMMERCE_PLATFORM,
+        config: {
+          path: ["shopDomain"],
+          equals: account.shopDomain
+        }
+      },
+      select: {
+        id: true,
+        config: true
+      }
+    });
+
+    const sourceConfig = shopifyDataSourceConfig({
+      existingConfig: reusableSource?.config ?? account.dataSource?.config,
+      shopDomain: account.shopDomain,
+      connectorAccountId: account.id,
+      grantedScopes,
+      requiredScopes,
+      scopeStatus,
+      missingScopes
+    });
+    const dataSource = reusableSource
+      ? await prisma.dataSourceConnection.update({
+          where: { id: reusableSource.id },
+          data: {
+            name: `Shopify - ${account.shopDomain}`,
+            provider: SHOPIFY_PROVIDER,
+            type: DataSourceType.ECOMMERCE_PLATFORM,
+            status: ConnectionStatus.CONNECTED,
+            isActive: true,
+            connectionMode: "oauth",
+            authMethod: "oauth",
+            config: sourceConfig,
+            connectedAt: new Date(),
+            lastErrorMessage: null
+          },
+          select: { id: true }
+        })
+      : await prisma.dataSourceConnection.create({
+          data: {
+            workspaceId,
+            name: `Shopify - ${account.shopDomain}`,
+            provider: SHOPIFY_PROVIDER,
+            type: DataSourceType.ECOMMERCE_PLATFORM,
+            status: ConnectionStatus.CONNECTED,
+            isActive: true,
+            connectionMode: "oauth",
+            authMethod: "oauth",
+            config: sourceConfig,
+            connectedAt: new Date()
+          },
+          select: { id: true }
+        });
+
+    await prisma.ecommerceConnectorAccount.update({
+      where: { id: account.id },
+      data: {
+        dataSourceId: dataSource.id,
+        grantedScopes,
+        requiredScopes,
+        scopeStatus
+      }
+    });
+  }
+}
+
 export async function GET() {
   try {
     const session = await requireWorkspace();
     const includeDeleted = true;
+    await repairConnectedShopifyDataSources(session.workspace.id);
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,

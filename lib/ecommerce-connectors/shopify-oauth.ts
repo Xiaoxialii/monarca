@@ -49,10 +49,33 @@ export function formatShopifyScopes(input: string | string[] | null | undefined)
   return parseShopifyScopes(Array.isArray(input) ? input.join(",") : input).join(",");
 }
 
+export function currentRequiredShopifyScopes() {
+  return formatShopifyScopes(process.env.SHOPIFY_SCOPES);
+}
+
+export function normalizeGrantedShopifyScopes(input: string | string[] | null | undefined) {
+  const raw = Array.isArray(input) ? input.join(",") : String(input ?? "");
+  return raw
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim().replace(/^["'\[]+|["'\]]+$/g, "").toLowerCase())
+    .filter((scope) => /^[a-z][a-z0-9_]*$/.test(scope));
+}
+
 export function missingRequiredShopifyScopes(grantedScopes: string | string[]) {
-  const granted = new Set(Array.isArray(grantedScopes) ? grantedScopes : parseShopifyScopes(grantedScopes));
+  const granted = new Set(normalizeGrantedShopifyScopes(grantedScopes));
 
   return REQUIRED_SHOPIFY_SCOPES.filter((scope) => !granted.has(scope));
+}
+
+export function missingConfiguredShopifyScopes(requiredScopes: string | string[], grantedScopes: string | string[]) {
+  const required = Array.isArray(requiredScopes) ? requiredScopes : parseShopifyScopes(requiredScopes);
+  const granted = new Set(normalizeGrantedShopifyScopes(grantedScopes));
+
+  return required.filter((scope) => !granted.has(scope));
+}
+
+export function shopifyScopeStatus(requiredScopes: string | string[], grantedScopes: string | string[]) {
+  return missingConfiguredShopifyScopes(requiredScopes, grantedScopes).length > 0 ? "NEEDS_REAUTHORIZATION" : "OK";
 }
 
 export function assertRequiredShopifyScopes(grantedScopes: string | string[]) {
@@ -60,7 +83,7 @@ export function assertRequiredShopifyScopes(grantedScopes: string | string[]) {
 
   if (missing.length > 0) {
     throw new ShopifyConnectorError(
-      `Shopify did not grant required Admin API scopes: ${missing.join(", ")}.`,
+      `Shopify permissions need update. Missing scopes: ${missing.join(", ")}.`,
       "SHOPIFY_SCOPES_NOT_GRANTED",
       400
     );

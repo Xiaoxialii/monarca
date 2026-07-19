@@ -10,8 +10,12 @@ import {
 import { writeR2ObjectText } from "@/lib/r2-storage";
 import {
   SHOPIFY_PROVIDER,
+  ShopifyConnectorError,
+  currentRequiredShopifyScopes,
   decryptConnectorToken,
   isShopifyProtectedDataAccessError,
+  missingConfiguredShopifyScopes,
+  shopifyScopeStatus,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
@@ -252,6 +256,43 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
 
   if (account.dataSource.workspaceId !== input.workspaceId || account.dataSource.provider !== SHOPIFY_PROVIDER) {
     throw new Error("Shopify connector account does not belong to the current workspace data source.");
+  }
+
+  const requiredScopes = account.requiredScopes ?? currentRequiredShopifyScopes();
+  const grantedScopes = account.grantedScopes ?? account.scopes;
+  const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
+  const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
+
+  if (missingScopes.length > 0) {
+    await prisma.$transaction([
+      prisma.ecommerceConnectorAccount.update({
+        where: { id: account.id },
+        data: {
+          grantedScopes,
+          requiredScopes,
+          scopeStatus
+        }
+      }),
+      prisma.dataSourceConnection.update({
+        where: { id: account.dataSourceId },
+        data: {
+          lastErrorMessage: `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
+          config: {
+            ...(account.dataSource.config && typeof account.dataSource.config === "object" && !Array.isArray(account.dataSource.config) ? account.dataSource.config : {}),
+            grantedScopes,
+            requiredScopes,
+            scopeStatus,
+            missingScopes
+          }
+        }
+      })
+    ]);
+
+    throw new ShopifyConnectorError(
+      `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
+      "SHOPIFY_NEEDS_REAUTHORIZATION",
+      409
+    );
   }
 
   const dataSource = account.dataSource;

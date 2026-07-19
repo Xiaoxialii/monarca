@@ -235,14 +235,6 @@ async function availableDateRangeFromActiveSource(source: {
         : null;
 
   try {
-    if (objectKey) {
-      const objectExtension = extension || fileExtension(objectKey);
-      const tables = objectExtension === "csv"
-        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
-        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
-      return availableDateRangeFromTables(tables);
-    }
-
     const inlineBuffer = inlineUploadBuffer(config);
 
     if (inlineBuffer) {
@@ -257,6 +249,14 @@ async function availableDateRangeFromActiveSource(source: {
       const tables = extension === "csv"
         ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
         : await inferTablesFromExcelBuffer(fileName, buffer);
+      return availableDateRangeFromTables(tables);
+    }
+
+    if (objectKey) {
+      const objectExtension = extension || fileExtension(objectKey);
+      const tables = objectExtension === "csv"
+        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
       return availableDateRangeFromTables(tables);
     }
   } catch {
@@ -300,15 +300,6 @@ async function kpiAssetLibraryFromActiveSource(source: {
         : null;
 
   try {
-    if (objectKey) {
-      const objectExtension = extension || fileExtension(objectKey);
-      const tables = objectExtension === "csv"
-        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
-        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
-
-      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
-    }
-
     const inlineBuffer = inlineUploadBuffer(config);
 
     if (inlineBuffer) {
@@ -324,6 +315,15 @@ async function kpiAssetLibraryFromActiveSource(source: {
       const tables = extension === "csv"
         ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
         : await inferTablesFromExcelBuffer(fileName, buffer);
+
+      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
+    }
+
+    if (objectKey) {
+      const objectExtension = extension || fileExtension(objectKey);
+      const tables = objectExtension === "csv"
+        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
 
       return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
     }

@@ -157,14 +157,6 @@ export async function tablesFromConnectedDataSourceFile(source: {
         ? storage.key
       : null;
 
-  if ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && objectKey) {
-    const objectExtension = extension || fileExtension(objectKey);
-    const tables = objectExtension === "csv"
-      ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
-      : inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
-    return normalizeUploadTables(await tables);
-  }
-
   const inlineBuffer = inlineUploadBuffer(config);
 
   if (inlineBuffer) {
@@ -179,6 +171,14 @@ export async function tablesFromConnectedDataSourceFile(source: {
     const tables = extension === "csv"
       ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
       : inferTablesFromExcelBuffer(fileName, buffer);
+    return normalizeUploadTables(await tables);
+  }
+
+  if ((storage.provider === "cloudflare-r2" || storageProvider === "r2") && objectKey) {
+    const objectExtension = extension || fileExtension(objectKey);
+    const tables = objectExtension === "csv"
+      ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
+      : inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
     return normalizeUploadTables(await tables);
   }
 

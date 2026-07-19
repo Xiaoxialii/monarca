@@ -68,19 +68,34 @@ export async function loadEcommerceSalesDashboardData(input: {
   }
 
   const artifactDatasets: CanonicalDataset[] = [];
+  const unavailableSnapshots: Array<{
+    snapshotId: string;
+    dataSourceId: string | null;
+    message: string;
+  }> = [];
 
   for (const snapshot of snapshots) {
     const schemaJson = objectValue(snapshot.schemaJson);
     try {
       artifactDatasets.push(await readCanonicalDatasetFromSnapshot(schemaJson));
     } catch (error) {
-      return {
-        data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(schemaJson)), { decisionMode: input.decisionMode }),
-        state: "unavailable",
-        message: error instanceof Error ? error.message : "Canonical ecommerce artifacts are unavailable.",
-        lineage: lineage(snapshot.id, snapshot.dataSourceId, schemaJson)
-      };
+      unavailableSnapshots.push({
+        snapshotId: snapshot.id,
+        dataSourceId: snapshot.dataSourceId,
+        message: readableArtifactError(error)
+      });
     }
+  }
+
+  if (!artifactDatasets.length) {
+    return {
+      data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(objectValue(snapshots[0]?.schemaJson))), { decisionMode: input.decisionMode }),
+      state: "unavailable",
+      message: unavailableSnapshots.length
+        ? "Canonical ecommerce artifacts are unavailable. Refresh the connected data source to regenerate canonical data."
+        : "No canonical ecommerce artifacts are available.",
+      lineage: lineage(snapshots[0].id, snapshots[0].dataSourceId, objectValue(snapshots[0].schemaJson))
+    };
   }
 
   const dataset = artifactDatasets.reduce((merged, current) => mergeCanonicalDatasets(merged, current));
@@ -206,6 +221,19 @@ function parseJsonl(input: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function readableArtifactError(error: unknown) {
+  if (!(error instanceof Error)) return "Canonical artifact is unavailable.";
+
+  if (
+    error.name === "NoSuchKey" ||
+    /specified key does not exist|nosuchkey/i.test(error.message)
+  ) {
+    return "Canonical artifact object is missing from storage.";
+  }
+
+  return error.message || "Canonical artifact is unavailable.";
 }
 
 function dedupeRows<T extends Record<string, unknown>>(rows: T[], key: string) {

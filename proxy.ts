@@ -19,6 +19,18 @@ function localeFromCountry(countryCode: string | null): Locale | null {
 }
 
 export default clerkMiddleware(async (auth, request) => {
+  const host = request.headers.get("host")?.toLowerCase();
+  const shouldCanonicalizeHost =
+    process.env.NODE_ENV === "production" &&
+    host === "monarcadata.com" &&
+    !request.nextUrl.pathname.startsWith("/api/");
+
+  if (shouldCanonicalizeHost) {
+    const url = request.nextUrl.clone();
+    url.hostname = "www.monarcadata.com";
+    return NextResponse.redirect(url, 308);
+  }
+
   const allowLocalDecisionReportFallback =
     process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true" &&
     request.nextUrl.pathname === "/api/dashboard/ecommerce/decision-report";

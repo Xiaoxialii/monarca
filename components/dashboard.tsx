@@ -9542,6 +9542,29 @@ function reportDateRangeQuery(range: SelectedReportDateRange) {
   return params.toString();
 }
 
+async function fetchReportJson<T>(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  fallbackMessage: string
+): Promise<{ response: Response; payload: T | null }> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      const payload = await response.json().catch(() => null) as T | null;
+      return { response, payload };
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+  }
+
+  throw new Error(lastError instanceof Error && lastError.message !== "Failed to fetch"
+    ? lastError.message
+    : fallbackMessage);
+}
+
 function ReportDateRangeSelector({
   selectedRange,
   customStartDate,
@@ -16426,17 +16449,25 @@ function ReportsPage({
 	    if (isLoadingConnectedSources) return null;
 	    setIsLoading(true);
 	    try {
-	      const response = await fetch(`/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=${analysisReportModeForRange(dateRange.preset)}`, { cache: "no-store" });
-	      const payload = await response.json().catch(() => null) as AnalysisReportData | null;
+	      const { response, payload } = await fetchReportJson<AnalysisReportData>(
+          `/api/dashboard/reports?${reportDateRangeQuery(dateRange)}&reportMode=${analysisReportModeForRange(dateRange.preset)}`,
+          { cache: "no-store" },
+          isZh
+            ? "无法连接到 Monarca 报表服务，请刷新页面后重试。"
+            : "Could not reach the Monarca report service. Refresh the page and try again."
+        );
 	      if (response.ok) {
 	        analysisReportsPageDataCache = payload;
 	        setReportData(payload);
       }
 	      return payload;
+	    } catch (error) {
+	      setStatusMessage(error instanceof Error ? error.message : (isZh ? "报表加载失败" : "Failed to load report"));
+	      return null;
 	    } finally {
 	      setIsLoading(false);
 	    }
-	  }, [isLoadingConnectedSources, selectedAnalysisDateRange]);
+	  }, [isLoadingConnectedSources, isZh, selectedAnalysisDateRange]);
 
   useEffect(() => {
     void loadAnalysisReport();
@@ -16448,16 +16479,29 @@ function ReportsPage({
     if (mode === "sku") setAnalysisDecisionReportPayload(null);
     try {
       const modeQuery = mode === "sku" ? "mode=sku&" : "";
-      const response = await fetch(`/api/dashboard/ecommerce/decision-report?${modeQuery}_=${Date.now()}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => null) as typeof analysisDecisionReportPayload;
+      const { response, payload } = await fetchReportJson<typeof analysisDecisionReportPayload>(
+        `/api/dashboard/ecommerce/decision-report?${modeQuery}_=${Date.now()}`,
+        { cache: "no-store" },
+        isZh
+          ? "无法连接到 Monarca 优化服务，请刷新页面后重试。"
+          : "Could not reach the Monarca optimization service. Refresh the page and try again."
+      );
       if (response.ok && payload?.ok) {
         setAnalysisDecisionReportPayload(payload);
       }
       return payload;
+    } catch (error) {
+      setAnalysisDecisionReportPayload({
+        ok: false,
+        state: "unavailable",
+        message: error instanceof Error ? error.message : (isZh ? "优化报表加载失败" : "Failed to load optimization report"),
+        decision_report: null
+      });
+      return null;
     } finally {
       setIsLoadingAnalysisDecisionReport(false);
     }
-  }, [isLoadingConnectedSources]);
+  }, [isLoadingConnectedSources, isZh]);
 
   useEffect(() => {
     void loadAnalysisDecisionReport(hasStartedProfitOptimization ? "full" : "sku");
@@ -16473,18 +16517,23 @@ function ReportsPage({
 	    setStatusMessage(null);
 	    const requestedAt = Date.now();
 	    try {
-      const response = await fetch("/api/dashboard/reports/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-	        body: JSON.stringify({
-	          locale,
-	          userRequested: true,
-	          reportMode: analysisReportModeForRange(dateRange.preset),
-	          dateRange,
-	          idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
-	        })
-	      });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; async?: boolean; message?: string; generatedAt?: string } | null;
+      const { response, payload } = await fetchReportJson<{ ok?: boolean; async?: boolean; message?: string; generatedAt?: string }>(
+        "/api/dashboard/reports/generate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locale,
+            userRequested: true,
+            reportMode: analysisReportModeForRange(dateRange.preset),
+            dateRange,
+            idempotencyKey: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+          })
+        },
+        isZh
+          ? "生成请求没有到达 Monarca 服务，请刷新页面后重试。"
+          : "The generate request did not reach the Monarca service. Refresh the page and try again."
+      );
 
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || (isZh ? "生成报告失败" : "Failed to generate report"));
@@ -16715,8 +16764,13 @@ function ReportPage({
     setDecisionReportError(null);
 
     try {
-      const response = await fetch(`/api/dashboard/ecommerce/decision-report?${cacheKey}&_=${Date.now()}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => null) as DecisionReportApiPayload | null;
+      const { response, payload } = await fetchReportJson<DecisionReportApiPayload>(
+        `/api/dashboard/ecommerce/decision-report?${cacheKey}&_=${Date.now()}`,
+        { cache: "no-store" },
+        isZh
+          ? "无法连接到 Monarca 报表服务，请刷新页面后重试。"
+          : "Could not reach the Monarca report service. Refresh the page and try again."
+      );
 
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || (isZh ? "经营报表加载失败" : "Failed to load decision report"));

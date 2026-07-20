@@ -130,7 +130,7 @@ export async function GET(request: Request) {
               provider: SHOPIFY_PROVIDER,
               type: DataSourceType.ECOMMERCE_PLATFORM,
               status: missingScopes.length ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
-              isActive: missingScopes.length ? false : true,
+              isActive: true,
               connectionMode: "oauth",
               authMethod: "oauth",
               config: nextConfig,
@@ -140,20 +140,21 @@ export async function GET(request: Request) {
                 : null
             }
           })
-        : missingScopes.length
-          ? null
-          : await tx.dataSourceConnection.create({
+        : await tx.dataSourceConnection.create({
             data: {
               workspaceId: state.workspaceId,
               name: `Shopify - ${state.shopDomain}`,
               provider: SHOPIFY_PROVIDER,
               type: DataSourceType.ECOMMERCE_PLATFORM,
-              status: ConnectionStatus.CONNECTED,
+              status: missingScopes.length ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
               isActive: true,
               connectionMode: "oauth",
               authMethod: "oauth",
               config: nextConfig,
-              connectedAt: new Date()
+              connectedAt: new Date(),
+              lastErrorMessage: missingScopes.length
+                ? `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`
+                : null
             }
           });
 

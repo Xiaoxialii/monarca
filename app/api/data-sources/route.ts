@@ -274,7 +274,7 @@ async function repairConnectedShopifyDataSources(workspaceId: string) {
           },
           data: {
             status: ConnectionStatus.PENDING,
-            isActive: false,
+            isActive: true,
             lastErrorMessage: `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
             config: shopifyDataSourceConfig({
               existingConfig: account.dataSource?.config,
@@ -378,7 +378,9 @@ export async function GET() {
       where: {
         workspaceId: session.workspace.id,
         isActive: true,
-        status: ConnectionStatus.CONNECTED
+        status: {
+          in: [ConnectionStatus.CONNECTED, ConnectionStatus.PENDING]
+        }
       },
       select: {
         id: true,

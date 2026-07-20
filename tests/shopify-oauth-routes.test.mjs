@@ -55,6 +55,9 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(callbackRoute, /formatShopifyScopes\(token\.scope\)/, "Callback should persist Shopify's normalized granted scopes");
   assert.match(callbackRoute, /grantedScopes[\s\S]*requiredScopes[\s\S]*scopeStatus/, "Callback should persist granted, required, and status scope metadata");
   assert.match(callbackRoute, /SHOPIFY_SCOPES_NOT_GRANTED/, "Callback should redirect with a stable scope migration code when permissions are incomplete");
+  assert.match(callbackRoute, /after\(\(\) => runInitialShopifySync/, "Callback should enqueue initial Shopify sync after OAuth succeeds");
+  assert.match(callbackRoute, /type: "SYNC_DATA_SOURCE"/, "Initial Shopify sync should be tracked as a background job");
+  assert.match(callbackRoute, /runShopifyProductionSync\(prisma/, "Initial Shopify sync should generate canonical Shopify snapshots");
   assert.match(callbackRoute, /encryptConnectorToken\(token\.accessToken\)/, "Callback should encrypt token before storing");
   assert.match(callbackRoute, /DataSourceType\.ECOMMERCE_PLATFORM/, "Callback should create an ecommerce platform data source");
   assert.doesNotMatch(callbackRoute, /workspaceId\s*=\s*url\.searchParams|get\("workspaceId"\)/, "Callback must not trust workspaceId from query");

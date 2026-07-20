@@ -1,6 +1,7 @@
-import { ConnectionStatus, DataSourceType } from "@prisma/client";
-import { NextResponse } from "next/server";
+import { ConnectionStatus, DataSourceType, Prisma } from "@prisma/client";
+import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { runShopifyProductionSync } from "@/lib/ecommerce-connectors/providers/shopify-sync-engine";
 import {
   SHOPIFY_PROVIDER,
   currentRequiredShopifyScopes,
@@ -39,6 +40,62 @@ function sanitizedConfig(input: {
   };
 }
 
+async function runInitialShopifySync(input: {
+  workspaceId: string;
+  dataSourceId: string;
+  shopDomain: string;
+}) {
+  const job = await prisma.backgroundJob.create({
+    data: {
+      workspaceId: input.workspaceId,
+      type: "SYNC_DATA_SOURCE",
+      status: "RUNNING",
+      startedAt: new Date(),
+      metadataJson: {
+        provider: SHOPIFY_PROVIDER,
+        dataSourceId: input.dataSourceId,
+        shopDomain: input.shopDomain,
+        trigger: "shopify_oauth_callback"
+      } as Prisma.InputJsonValue
+    }
+  });
+
+  try {
+    const result = await runShopifyProductionSync(prisma, {
+      workspaceId: input.workspaceId,
+      dataSourceId: input.dataSourceId
+    });
+
+    await prisma.backgroundJob.update({
+      where: { id: job.id },
+      data: {
+        status: "COMPLETED",
+        completedAt: new Date(),
+        metadataJson: {
+          provider: SHOPIFY_PROVIDER,
+          dataSourceId: input.dataSourceId,
+          shopDomain: input.shopDomain,
+          trigger: "shopify_oauth_callback",
+          syncRunId: result.syncRunId,
+          dataMode: result.dataMode,
+          confidenceScore: result.confidenceScore
+        } as Prisma.InputJsonValue
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Shopify initial sync failed.";
+    console.error("Failed to run initial Shopify sync", error);
+    await prisma.backgroundJob.update({
+      where: { id: job.id },
+      data: {
+        status: "FAILED",
+        completedAt: new Date(),
+        error: message
+      }
+    }).catch(() => undefined);
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -69,7 +126,7 @@ export async function GET(request: Request) {
     const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
     const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
 
-    await prisma.$transaction(async (tx) => {
+    const connectedDataSourceId = await prisma.$transaction(async (tx) => {
       const account = await tx.ecommerceConnectorAccount.upsert({
         where: {
           workspaceId_provider_shopDomain: {
@@ -173,10 +230,22 @@ export async function GET(request: Request) {
           }
         });
       }
+
+      return dataSource?.id ?? null;
     });
 
     if (missingScopes.length > 0) {
       return dashboardRedirect(request, "failed", "SHOPIFY_SCOPES_NOT_GRANTED", shopDomain);
+    }
+
+    if (connectedDataSourceId) {
+      after(() =>
+        runInitialShopifySync({
+          workspaceId: state.workspaceId,
+          dataSourceId: connectedDataSourceId,
+          shopDomain
+        })
+      );
     }
 
     return dashboardRedirect(request, "connected");

@@ -68,6 +68,7 @@ export async function loadEcommerceSalesDashboardData(input: {
   }
 
   const artifactDatasets: CanonicalDataset[] = [];
+  const dashboardSnapshots: EcommerceSalesDashboardData[] = [];
   const unavailableSnapshots: Array<{
     snapshotId: string;
     dataSourceId: string | null;
@@ -76,9 +77,11 @@ export async function loadEcommerceSalesDashboardData(input: {
 
   for (const snapshot of snapshots) {
     const schemaJson = objectValue(snapshot.schemaJson);
+    const embeddedDashboard = dashboardSnapshotValue(schemaJson.dashboardSnapshot);
     try {
       artifactDatasets.push(await readCanonicalDatasetFromSnapshot(schemaJson));
     } catch (error) {
+      if (embeddedDashboard) dashboardSnapshots.push(embeddedDashboard);
       unavailableSnapshots.push({
         snapshotId: snapshot.id,
         dataSourceId: snapshot.dataSourceId,
@@ -88,6 +91,16 @@ export async function loadEcommerceSalesDashboardData(input: {
   }
 
   if (!artifactDatasets.length) {
+    const dashboardSnapshot = dashboardSnapshots[0];
+    if (dashboardSnapshot) {
+      return {
+        data: dashboardSnapshot,
+        state: hasDashboardSnapshotRows(dashboardSnapshot) ? "ready" : "empty",
+        message: hasDashboardSnapshotRows(dashboardSnapshot) ? undefined : "Ecommerce canonical dashboard snapshot is empty.",
+        lineage: lineage(snapshots[0].id, snapshots[0].dataSourceId, objectValue(snapshots[0].schemaJson))
+      };
+    }
+
     return {
       data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(objectValue(snapshots[0]?.schemaJson))), { decisionMode: input.decisionMode }),
       state: "unavailable",
@@ -191,7 +204,8 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
           'missingFields', "schemaJson"->'missingFields',
           'confidenceScore', "schemaJson"->'confidenceScore',
           'canonicalDataset', "schemaJson"->'canonicalDataset',
-          'canonical_dataset', "schemaJson"->'canonical_dataset'
+          'canonical_dataset', "schemaJson"->'canonical_dataset',
+          'dashboardSnapshot', "schemaJson"->'dashboardSnapshot'
         ) as "schemaJson"
       from "SchemaSnapshot"
       where "workspaceId" = $1
@@ -293,6 +307,25 @@ function mergeCanonicalDatasets(left: CanonicalDataset, right: CanonicalDataset)
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function dashboardSnapshotValue(value: unknown): EcommerceSalesDashboardData | null {
+  const snapshot = objectValue(value);
+  const metadata = objectValue(snapshot.metadata);
+  if (metadata.schema_version !== ECOMMERCE_CANONICAL_SCHEMA_VERSION) return null;
+  if (!Object.keys(objectValue(snapshot.metrics)).length) return null;
+  if (!Object.keys(objectValue(snapshot.quality)).length) return null;
+
+  return snapshot as unknown as EcommerceSalesDashboardData;
+}
+
+function hasDashboardSnapshotRows(data: EcommerceSalesDashboardData) {
+  const metrics = objectValue(data.metrics);
+  const catalog = objectValue(data.catalog_health);
+  return Number(metrics.total_orders ?? 0) > 0 ||
+    Number(metrics.total_revenue ?? 0) > 0 ||
+    Number(catalog.catalog_row_count ?? 0) > 0 ||
+    Number(catalog.sku_count ?? 0) > 0;
 }
 
 function canonicalDatasetValue(value: unknown): CanonicalDataset | null {

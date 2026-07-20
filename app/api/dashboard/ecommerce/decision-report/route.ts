@@ -4,12 +4,20 @@ import {
   loadEcommerceSalesDashboardData,
   type LoadDashboardResult
 } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
+import {
+  findLatestDecisionSnapshot,
+  snapshotPerformance,
+  upsertDecisionSnapshot
+} from "@/lib/dashboard/snapshot-store";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   const url = new URL(request.url);
   const decisionMode = url.searchParams.get("mode") === "sku" ? "sku" : "full";
+  const optimizationType = decisionMode === "sku" ? "SKU_OPTIMIZATION" : "FULL_OPTIMIZATION";
 
   let session: Awaited<ReturnType<typeof syncCurrentClerkUser>>;
 
@@ -26,6 +34,23 @@ export async function GET(request: Request) {
     );
   }
 
+  const snapshot = await findLatestDecisionSnapshot(prisma, {
+    workspaceId: session.workspace.id,
+    optimizationType
+  });
+
+  if (snapshot?.recommendationsJson) {
+    return NextResponse.json({
+      ...(snapshot.recommendationsJson as Record<string, unknown>),
+      snapshot: {
+        id: snapshot.id,
+        type: "DecisionSnapshot",
+        createdAt: snapshot.createdAt.toISOString()
+      },
+      performance: snapshotPerformance(startedAt, "snapshot")
+    });
+  }
+
   let result: LoadDashboardResult;
 
   try {
@@ -38,11 +63,30 @@ export async function GET(request: Request) {
     throw error;
   }
 
-  return dashboardResponse(result);
+  const payload = dashboardPayload(result, {
+    warning: "SNAPSHOT_MISS_FALLBACK_LIVE_OPTIMIZATION"
+  });
+
+  void upsertDecisionSnapshot(prisma, {
+    workspaceId: session.workspace.id,
+    optimizationType,
+    content: payload,
+    assumptions: {
+      decisionMode,
+      fallbackGeneratedAt: new Date().toISOString()
+    }
+  }).catch((error) => {
+    console.warn("Failed to save decision snapshot fallback result", error);
+  });
+
+  return NextResponse.json({
+    ...payload,
+    performance: snapshotPerformance(startedAt, "fallback")
+  });
 }
 
-function dashboardResponse(result: LoadDashboardResult, fallbackReason?: unknown) {
-  return NextResponse.json({
+function dashboardPayload(result: LoadDashboardResult, options: { warning?: string; fallbackReason?: unknown } = {}) {
+  return {
     ok: true,
     state: result.state,
     hasConnectedDataSource: result.state === "ready",
@@ -56,6 +100,7 @@ function dashboardResponse(result: LoadDashboardResult, fallbackReason?: unknown
     generated_at: result.data.metadata.computed_at,
     source_platforms: result.data.metadata.source_platforms,
     lineage: result.lineage ?? null,
-    fallback_reason: fallbackReason instanceof Error ? fallbackReason.message : undefined
-  });
+    warning: options.warning,
+    fallback_reason: options.fallbackReason instanceof Error ? options.fallbackReason.message : undefined
+  };
 }

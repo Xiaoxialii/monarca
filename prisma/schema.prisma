@@ -201,6 +201,7 @@ model Workspace {
   reportGenerationLogs ReportGenerationLog[]
   reportMetricCaches ReportMetricCache[]
   metricSnapshots   MetricSnapshot[]
+  reportSnapshots   ReportSnapshot[]
   reportHistory     ReportHistory[]
   reportRuns        ReportRun[]
   inviteLinks       WorkspaceInviteLink[]
@@ -214,6 +215,7 @@ model Workspace {
   optimizationLearningRecords OptimizationLearningRecord[]
   decisionTrackingSnapshots DecisionTrackingSnapshot[]
   decisionSnapshots DecisionSnapshot[]
+  backgroundJobs    BackgroundJob[]
 }
 
 model SemanticMappingMemory {
@@ -560,14 +562,18 @@ model DecisionAction {
 model DecisionSnapshot {
   id               String   @id @default(cuid())
   workspaceId      String
-  skuId            String
+  skuId            String   @default("workspace")
   snapshotType     String
-  acceptedAction   String
+  acceptedAction   String   @default("snapshot")
+  optimizationType String?
   lifecycle        String?
   optimizationGoal String?
-  baselineMetrics  Json
-  predictedMetrics Json
-  alternatives     Json
+  assumptions      Json?
+  recommendationsJson Json?
+  expectedProfitImpact Float?
+  baselineMetrics  Json     @default("{}")
+  predictedMetrics Json     @default("{}")
+  alternatives     Json     @default("[]")
   reasoning         Json?
   confidence        Float   @default(0)
   createdAt         DateTime @default(now())
@@ -577,6 +583,7 @@ model DecisionSnapshot {
 
   @@index([workspaceId, skuId])
   @@index([workspaceId, snapshotType])
+  @@index([workspaceId, optimizationType, createdAt])
   @@index([createdAt])
 }
 
@@ -846,6 +853,11 @@ model MetricSnapshot {
   displayName     String?
   value           Float?
   valueJson       Json?
+  dimensions      Json?
+  period          String?
+  dataSourceId    String?
+  schemaVersion   Int?
+  cacheKey        String?
   unit            String?
   scope           String?
   grain           String?
@@ -862,6 +874,46 @@ model MetricSnapshot {
   @@index([workspaceId, metricName, snapshotDate])
   @@index([workspaceId, snapshotDate])
   @@index([workspaceId, dateRangePreset, startDate, endDate])
+  @@index([workspaceId, dataSourceId, schemaVersion, period])
+  @@unique([workspaceId, cacheKey])
+}
+
+model ReportSnapshot {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  reportType            String
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  contentJson           Json
+  sourceSnapshotId      String?
+  sourceSnapshotVersion Int?
+  cacheKey              String?
+  warning               String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, reportType, createdAt])
+  @@index([workspaceId, periodStart, periodEnd])
+  @@index([sourceSnapshotId])
+  @@unique([workspaceId, reportType, cacheKey])
+}
+
+model BackgroundJob {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  type         String
+  status       String    @default("PENDING")
+  startedAt    DateTime?
+  completedAt  DateTime?
+  error        String?
+  metadataJson Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, type, status])
+  @@index([workspaceId, createdAt])
 }
 
 model ReportHistory {

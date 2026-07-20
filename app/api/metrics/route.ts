@@ -49,14 +49,25 @@ function tableLabel(table: { name: string; schema?: string | null }) {
 export async function GET() {
   try {
     const session = await requireWorkspace();
-    const { primarySnapshot, tables: latestTables } = await getConnectedWorkspaceSchemaContext(prisma, session.workspace.id);
+    const { tables: latestTables } = await getConnectedWorkspaceSchemaContext(prisma, session.workspace.id);
     const activeTableLabels = new Set(latestTables.map(tableLabel));
-    let metrics = await prisma.metricDefinition.findMany({
+    const metrics = await prisma.metricDefinition.findMany({
       where: {
         workspaceId: session.workspace.id,
         isActive: true
       },
-      include: {
+      select: {
+        id: true,
+        layer: true,
+        category: true,
+        name: true,
+        definition: true,
+        formula: true,
+        mappingJson: true,
+        maintainerRole: true,
+        status: true,
+        tagsJson: true,
+        lineageJson: true,
         maintainedByUser: {
           select: {
             name: true,
@@ -69,42 +80,8 @@ export async function GET() {
         { createdAt: "asc" }
       ]
     });
-    let visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
-    let visibleRegistryMetrics = visibleMetrics.filter(isBusinessMetricRegistryMetric);
-
-    if (
-      visibleRegistryMetrics.length === 0 &&
-      (session.membership.role === WorkspaceRole.OWNER || session.membership.role === WorkspaceRole.ADMIN)
-    ) {
-      if (primarySnapshot) {
-        const result = await generateWorkspaceMetricsFromConnectedSources(prisma, {
-          workspaceId: session.workspace.id,
-          userId: session.user.id
-        });
-        const refreshedTableLabels = new Set(result.tables.map(tableLabel));
-
-        metrics = await prisma.metricDefinition.findMany({
-          where: {
-            workspaceId: session.workspace.id,
-            isActive: true
-          },
-          include: {
-            maintainedByUser: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          },
-          orderBy: [
-            { layer: "asc" },
-            { createdAt: "asc" }
-          ]
-        });
-        visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, refreshedTableLabels));
-        visibleRegistryMetrics = visibleMetrics.filter(isBusinessMetricRegistryMetric);
-      }
-    }
+    const visibleMetrics = metrics.filter((metric) => metricBelongsToTables(metric, activeTableLabels));
+    const visibleRegistryMetrics = visibleMetrics.filter(isBusinessMetricRegistryMetric);
     const displayMetrics = visibleRegistryMetrics.length > 0 ? visibleRegistryMetrics : visibleMetrics;
 
     return NextResponse.json({

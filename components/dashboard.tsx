@@ -6532,6 +6532,7 @@ function ConnectorPanel({
   type UploadResponsePayload = {
     ok?: boolean;
     message?: string;
+    error?: string;
     dataSource?: ConnectedSourceRow;
     schema?: {
       tableCount?: number;
@@ -6611,7 +6612,10 @@ function ConnectorPanel({
     });
 
     if (!presignResponse.ok || !presignPayload?.ok || !presignPayload.uploadUrl || !presignPayload.path) {
-      if (presignPayload?.message?.includes("R2 storage is not configured")) {
+      if (
+        presignPayload?.message?.includes("R2 storage is not configured") &&
+        file.size <= directApiUploadMaxBytes
+      ) {
         return uploadSmallFile(file);
       }
       throw new Error(presignPayload?.message || (isZh ? "无法准备大文件上传" : "Failed to prepare large file upload"));
@@ -6722,6 +6726,18 @@ function ConnectorPanel({
       const payload = await responsePayload(response);
 
       if (!response.ok || !payload?.ok || !payload?.dataSource) {
+        if (response.status === 401 || payload?.message === "Unauthorized" || payload?.error === "Unauthorized") {
+          throw new Error(isZh
+            ? "登录状态已失效。请在本地 3100 重新登录后再上传。"
+            : "Your session expired. Sign in again on local port 3100 before uploading.");
+        }
+
+        if (response.status === 403 || payload?.message === "Forbidden" || payload?.error === "Forbidden") {
+          throw new Error(isZh
+            ? "当前账号没有上传权限。请使用 Owner / Admin 账号登录后重试。"
+            : "Your account does not have upload permission. Sign in as an Owner or Admin and try again.");
+        }
+
         throw new Error(payload?.message || (isZh
           ? "文件上传失败，请稍后重试。"
           : "File upload failed. Please try again."));
@@ -16434,7 +16450,7 @@ function ReportsPage({
   const effectiveHasConnectedDatabase = hasConnectedDatabase || reportApiHasConnectedDatabase || decisionApiHasConnectedDatabase;
 
 	  useEffect(() => {
-	    if (isLoadingConnectedSources || effectiveHasConnectedDatabase || reportData === null) return;
+	    if (effectiveHasConnectedDatabase || reportData === null) return;
 	    analysisReportsPageDataCache = null;
 	    setReportData(null);
     setAnalysisDecisionReportPayload(null);
@@ -16443,10 +16459,9 @@ function ReportsPage({
     setHasStartedProfitOptimization(true);
 	    setIsGenerating(false);
 	    setStatusMessage(null);
-	  }, [effectiveHasConnectedDatabase, isLoadingConnectedSources, reportData]);
+	  }, [effectiveHasConnectedDatabase, reportData]);
 
 	  const loadAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
-	    if (isLoadingConnectedSources) return null;
 	    setIsLoading(true);
 	    try {
 	      const { response, payload } = await fetchReportJson<AnalysisReportData>(
@@ -16467,14 +16482,13 @@ function ReportsPage({
 	    } finally {
 	      setIsLoading(false);
 	    }
-	  }, [isLoadingConnectedSources, isZh, selectedAnalysisDateRange]);
+	  }, [isZh, selectedAnalysisDateRange]);
 
   useEffect(() => {
     void loadAnalysisReport();
   }, [loadAnalysisReport]);
 
   const loadAnalysisDecisionReport = useCallback(async (mode: "sku" | "full" = "sku") => {
-    if (isLoadingConnectedSources) return null;
     setIsLoadingAnalysisDecisionReport(true);
     if (mode === "sku") setAnalysisDecisionReportPayload(null);
     try {
@@ -16501,7 +16515,7 @@ function ReportsPage({
     } finally {
       setIsLoadingAnalysisDecisionReport(false);
     }
-  }, [isLoadingConnectedSources, isZh]);
+  }, [isZh]);
 
   useEffect(() => {
     void loadAnalysisDecisionReport(hasStartedProfitOptimization ? "full" : "sku");
@@ -16571,9 +16585,9 @@ function ReportsPage({
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
 	  const generatedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
 	  const isAnalysisCacheMiss = reportData?.briefing?.payloadJson?.cache?.status === "miss";
-	  const shouldShowEmptyAnalysisState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
-	  const shouldShowSkuTableEmptyState = !isLoadingConnectedSources && !effectiveHasConnectedDatabase;
-	  const shouldShowInitialAnalysisShell = isLoadingConnectedSources || isLoading || (isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload);
+	  const shouldShowEmptyAnalysisState = !effectiveHasConnectedDatabase;
+	  const shouldShowSkuTableEmptyState = !effectiveHasConnectedDatabase;
+	  const shouldShowInitialAnalysisShell = isLoading || (isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload);
 	  const entitlement = reportData?.reportEntitlement;
 	  const entitlementText = reportEntitlementMessage(entitlement, locale);
 	  const latestPayloadAudit = reportData?.briefing?.payloadJson?.reportDataAudit;
@@ -16657,20 +16671,7 @@ function ReportsPage({
         </div>
       ) : null}
 
-      {isLoadingConnectedSources ? (
-        <DecisionAnalysisEnginePanel
-          report={analysisDecisionReportPayload?.decision_report ?? null}
-          message={analysisDecisionReportPayload?.message}
-          locale={locale}
-          headerAction={reportHeaderAction}
-          optimizationStarted={hasStartedProfitOptimization}
-          onStartProfitOptimization={startProfitOptimization}
-          isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
-          showSkuTableEmptyState={false}
-          showInitialShell
-          isLoadingData
-        />
-      ) : shouldShowEmptyAnalysisState ? (
+      {shouldShowEmptyAnalysisState ? (
         <>
           <DecisionAnalysisEnginePanel
             report={analysisDecisionReportPayload?.decision_report ?? null}
@@ -17504,7 +17505,8 @@ export function Dashboard({
       setIsLoadingConnectedSources(true);
     }
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+    let loadedSources = false;
 
     try {
       const response = await fetch("/api/data-sources", {
@@ -17530,12 +17532,15 @@ export function Dashboard({
         writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId);
         setConnectedSources(nextSources);
         setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
+        loadedSources = true;
       }
     } catch (error) {
       console.warn("[dashboard] Failed to load connected sources", error);
     } finally {
       window.clearTimeout(timeoutId);
-      setIsLoadingConnectedSources(false);
+      if (loadedSources || connectedSourcesCache) {
+        setIsLoadingConnectedSources(false);
+      }
     }
   }, []);
 
@@ -17550,13 +17555,20 @@ export function Dashboard({
 
     const hydrateWorkspaceSources = async () => {
       let currentWorkspaceId: string | null = null;
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 5000);
 
       try {
-        const response = await fetch("/api/me", { cache: "no-store" });
+        const response = await fetch("/api/me", {
+          cache: "no-store",
+          signal: controller.signal
+        });
         const payload = await response.json().catch(() => null);
         currentWorkspaceId = typeof payload?.currentWorkspace?.id === "string" ? payload.currentWorkspace.id : null;
       } catch (error) {
         console.warn("[dashboard] Failed to resolve current workspace", error);
+      } finally {
+        window.clearTimeout(timeoutId);
       }
 
       if (!isActive) return;

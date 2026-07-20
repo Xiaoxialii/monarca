@@ -62,6 +62,17 @@ function publicConfig(configValue: unknown) {
   };
 }
 
+function syncStatusFromSource(source: {
+  status: ConnectionStatus;
+  lastSyncAt: Date | null;
+  updatedAt: Date;
+}) {
+  if (source.status !== ConnectionStatus.CONNECTED) return "needs_attention";
+  if (!source.lastSyncAt) return "pending";
+
+  return "ready";
+}
+
 function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshotReport: unknown) {
   const schemas = asRecord(sourceSchemas);
   const snapshot = asRecord(snapshotSchema);
@@ -362,7 +373,7 @@ export async function GET() {
   try {
     const session = await requireWorkspace();
     const includeDeleted = true;
-    await repairConnectedShopifyDataSources(session.workspace.id);
+
     const dataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -376,10 +387,6 @@ export async function GET() {
         type: true,
         isActive: true,
         status: true,
-        connectionMode: true,
-        authMethod: true,
-        config: true,
-        schemas: true,
         connectedAt: true,
         lastSyncAt: true,
         createdAt: true,
@@ -403,10 +410,6 @@ export async function GET() {
             type: true,
             isActive: true,
             status: true,
-            connectionMode: true,
-            authMethod: true,
-            config: true,
-            schemas: true,
             connectedAt: true,
             lastSyncAt: true,
             createdAt: true,
@@ -431,11 +434,9 @@ export async function GET() {
         provider: source.provider,
         type: source.type,
         status: source.status,
-        connectionMode: source.connectionMode,
-        authMethod: source.authMethod,
-        config: publicConfig(source.config),
+        syncStatus: syncStatusFromSource(source),
         schema: schemaSummary(
-          source.schemas,
+          null,
           null,
           null
         ),

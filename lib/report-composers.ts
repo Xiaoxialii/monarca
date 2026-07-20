@@ -2659,6 +2659,9 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
   metricResults: MetricResultLike[];
   timeConfig?: ReportComposerInput["timeConfig"];
   dateRange: DateRangeInput;
+  dataSourceId?: string | null;
+  schemaVersion?: number | null;
+  cacheKey?: string | null;
   generatedAt?: Date;
 }) {
   const metricSnapshotModel = (prisma as PrismaClient & {
@@ -2670,6 +2673,13 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
   const snapDate = asDate(snapshotDate({ timeConfig: input.timeConfig, dateRange: input.dateRange, generatedAt })) ?? generatedAt;
   const startDate = asDate(input.dateRange.startDate);
   const endDate = asDate(input.dateRange.endDate);
+  const period = [
+    input.dateRange.preset,
+    input.dateRange.startDate ?? "start",
+    input.dateRange.endDate ?? "end"
+  ].join(":");
+  const baseCacheKey = input.cacheKey ??
+    `${input.workspaceId}:${input.dataSourceId ?? "workspace"}:${input.schemaVersion ?? "schema"}:${period}`;
   const rows = input.metricResults
     .filter(isComputedMetric)
     .filter((result) => typeof result.value === "number" && Number.isFinite(result.value))
@@ -2685,6 +2695,15 @@ export async function saveMetricSnapshots(prisma: PrismaClient, input: {
         displayName: result.displayName ?? null,
         value: result.value as number,
         valueJson: metricValueJson(result) as never,
+        dimensions: {
+          businessType: result.businessType ?? null,
+          metricCategory: result.metricCategory ?? null,
+          sourceDataset: result.sourceDataset ?? null
+        },
+        period,
+        dataSourceId: input.dataSourceId ?? null,
+        schemaVersion: input.schemaVersion ?? null,
+        cacheKey: `${baseCacheKey}:${metricId}`,
         unit: result.unit ?? null,
         scope: input.dateRange.preset,
         grain: input.timeConfig?.selectedRange ?? input.dateRange.preset,

@@ -1006,6 +1006,8 @@ async function runReportGenerationJob(input: {
       workspaceId: input.workspaceId,
       metricResults,
       timeConfig: effectiveTimeConfig,
+      dataSourceId: latestSnapshot.dataSourceId ?? dataSources[0]?.id ?? null,
+      schemaVersion: latestSnapshot.version,
       dateRange: {
         preset: effectiveDateRange.preset,
         startDate: effectiveDateRange.startDate ?? null,

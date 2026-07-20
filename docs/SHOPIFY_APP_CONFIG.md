@@ -11,7 +11,7 @@ match Monarca's production host.
 
 ## Required production settings
 
-- App URL: `https://www.monarcadata.com/`
+- App URL: `https://shopify.dev/apps/default-app-home`
 - Embedded app: `false`
 - Allowed redirection URL: `https://www.monarcadata.com/api/connectors/shopify/callback`
 - Preferences URL: `https://www.monarcadata.com/dashboard/import-data`

@@ -62,15 +62,77 @@ function publicConfig(configValue: unknown) {
   };
 }
 
+type DataSourceSyncStatus =
+  | "CONNECTED"
+  | "SYNCING"
+  | "PENDING_PERMISSION"
+  | "PENDING_FIRST_SYNC"
+  | "FAILED_AUTH"
+  | "FAILED_SYNC"
+  | "DISCONNECTED";
+
+function missingScopeReason(missingScopes: string[]) {
+  if (!missingScopes.length) return null;
+  return `Missing ${missingScopes.join(", ")}`;
+}
+
+function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
+  if (syncStatus === "PENDING_PERMISSION" || syncStatus === "FAILED_AUTH") return "UPDATE_PERMISSION";
+  if (syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC") return "SYNC_NOW";
+  if (syncStatus === "DISCONNECTED") return "RECONNECT";
+
+  return null;
+}
+
 function syncStatusFromSource(source: {
   status: ConnectionStatus;
+  provider: string | null;
+  config: unknown;
+  lastErrorMessage: string | null;
   lastSyncAt: Date | null;
   updatedAt: Date;
-}) {
-  if (source.status !== ConnectionStatus.CONNECTED) return "needs_attention";
-  if (!source.lastSyncAt) return "pending";
+}): {
+  syncStatus: DataSourceSyncStatus;
+  statusReason: string | null;
+  statusAction: string | null;
+} {
+  const config = asRecord(source.config);
+  const missingScopes = Array.isArray(config?.missingScopes)
+    ? config.missingScopes.filter((scope): scope is string => typeof scope === "string" && Boolean(scope))
+    : [];
+  const scopeStatus = typeof config?.scopeStatus === "string" ? config.scopeStatus : null;
+  const lowerError = (source.lastErrorMessage ?? "").toLowerCase();
+  const isPermissionProblem =
+    missingScopes.length > 0 ||
+    scopeStatus === "NEEDS_REAUTHORIZATION" ||
+    lowerError.includes("permission") ||
+    lowerError.includes("scope") ||
+    lowerError.includes("auth") ||
+    lowerError.includes("token");
 
-  return "ready";
+  let syncStatus: DataSourceSyncStatus;
+  let statusReason: string | null = source.lastErrorMessage ?? null;
+
+  if (source.status === ConnectionStatus.DISCONNECTED) {
+    syncStatus = "DISCONNECTED";
+    statusReason ??= "Data source is disconnected.";
+  } else if (source.status === ConnectionStatus.FAILED) {
+    syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
+  } else if (source.status === ConnectionStatus.PENDING && isPermissionProblem) {
+    syncStatus = "PENDING_PERMISSION";
+    statusReason = missingScopeReason(missingScopes) ?? statusReason ?? "Permission update required.";
+  } else if (source.status === ConnectionStatus.PENDING || !source.lastSyncAt) {
+    syncStatus = "PENDING_FIRST_SYNC";
+    statusReason ??= "Waiting for the first data sync.";
+  } else {
+    syncStatus = "CONNECTED";
+  }
+
+  return {
+    syncStatus,
+    statusReason,
+    statusAction: statusActionForSyncStatus(syncStatus)
+  };
 }
 
 function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshotReport: unknown) {
@@ -389,6 +451,10 @@ export async function GET() {
         type: true,
         isActive: true,
         status: true,
+        connectionMode: true,
+        authMethod: true,
+        config: true,
+        lastErrorMessage: true,
         connectedAt: true,
         lastSyncAt: true,
         createdAt: true,
@@ -412,6 +478,10 @@ export async function GET() {
             type: true,
             isActive: true,
             status: true,
+            connectionMode: true,
+            authMethod: true,
+            config: true,
+            lastErrorMessage: true,
             connectedAt: true,
             lastSyncAt: true,
             createdAt: true,
@@ -429,14 +499,21 @@ export async function GET() {
       const retentionExpiresAt = source.isActive === false && source.updatedAt
         ? new Date(source.updatedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
         : null;
+      const detailedStatus = syncStatusFromSource(source);
 
       return {
         id: source.id,
         name: source.name,
         provider: source.provider,
         type: source.type,
-        status: source.status,
-        syncStatus: syncStatusFromSource(source),
+        status: detailedStatus.syncStatus,
+        connectionStatus: source.status,
+        syncStatus: detailedStatus.syncStatus,
+        statusReason: detailedStatus.statusReason,
+        statusAction: detailedStatus.statusAction,
+        connectionMode: source.connectionMode,
+        authMethod: source.authMethod,
+        config: publicConfig(source.config),
         schema: schemaSummary(
           null,
           null,

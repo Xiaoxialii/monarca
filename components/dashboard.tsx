@@ -1531,6 +1531,10 @@ type ConnectedSourceRow = {
   provider: string;
   type: string;
   status: string;
+  connectionStatus?: string | null;
+  syncStatus?: string | null;
+  statusReason?: string | null;
+  statusAction?: string | null;
   connectionMode?: string | null;
   authMethod?: string | null;
   config?: {
@@ -3775,6 +3779,51 @@ function sourceTypeLabel(copy: DashboardCopy, source: ConnectedSourceRow) {
   return catalogSource?.type ?? source.type;
 }
 
+function sourceStatusLabel(status: string | null | undefined, isZh: boolean) {
+  const normalized = (status ?? "").toUpperCase();
+  const labels: Record<string, string> = isZh
+    ? {
+        CONNECTED: "已连接",
+        SYNCING: "同步中",
+        PENDING_PERMISSION: "等待授权",
+        PENDING_FIRST_SYNC: "等待首次同步",
+        FAILED_AUTH: "授权失败",
+        FAILED_SYNC: "同步失败",
+        DISCONNECTED: "已断开"
+      }
+    : {
+        CONNECTED: "Connected",
+        SYNCING: "Syncing",
+        PENDING_PERMISSION: "Permission needed",
+        PENDING_FIRST_SYNC: "Pending first sync",
+        FAILED_AUTH: "Auth failed",
+        FAILED_SYNC: "Sync failed",
+        DISCONNECTED: "Disconnected"
+      };
+
+  return labels[normalized] ?? (status || (isZh ? "未知" : "Unknown"));
+}
+
+function sourceStatusBadgeClass(status: string | null | undefined) {
+  const normalized = (status ?? "").toUpperCase();
+
+  if (normalized === "CONNECTED") return "bg-emerald-50 text-emerald-800";
+  if (normalized === "SYNCING" || normalized === "PENDING_FIRST_SYNC") return "bg-sky-50 text-sky-800";
+  if (normalized === "PENDING_PERMISSION") return "bg-amber-50 text-amber-800";
+  if (normalized === "FAILED_AUTH" || normalized === "FAILED_SYNC") return "bg-rose-50 text-rose-800";
+  if (normalized === "DISCONNECTED") return "bg-slate-100 text-slate-600";
+
+  return "bg-slate-100 text-slate-700";
+}
+
+function sourceStatusActionLabel(action: string | null | undefined, isZh: boolean) {
+  if (action === "UPDATE_PERMISSION") return isZh ? "更新权限" : "Update Permission";
+  if (action === "SYNC_NOW") return isZh ? "立即同步" : "Sync Now";
+  if (action === "RECONNECT") return isZh ? "重新连接" : "Reconnect";
+
+  return null;
+}
+
 function mappingRowsForSource(source: ConnectedSourceRow) {
   const details = source.schema?.unifiedIngestion?.semantic?.mapping_details ?? [];
   const fields = source.schema?.unifiedIngestion?.detectedSchema?.fields ?? [];
@@ -4358,6 +4407,12 @@ function SettingsConnectedSourcesPanel({
               const metaSyncResult = metaSyncResults[source.id];
               const semanticMappingRows = mappingRowsForSource(source);
               const unifiedIngestion = source.schema?.unifiedIngestion ?? null;
+              const displayStatus = source.syncStatus || source.status;
+              const statusActionLabel = sourceStatusActionLabel(source.statusAction, isZh);
+              const shopDomain = source.config?.shopDomain;
+              const statusActionHref = isShopifySource && source.statusAction === "UPDATE_PERMISSION" && shopDomain
+                ? `/api/connectors/shopify/start?shop=${encodeURIComponent(shopDomain)}`
+                : null;
 
               return (
                 <div key={source.id} className="rounded-lg border bg-secondary/10 p-4">
@@ -4369,10 +4424,15 @@ function SettingsConnectedSourcesPanel({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="truncate text-base font-semibold">{source.name}</p>
-                          <Badge variant="secondary" className="bg-emerald-50 text-emerald-800">
-                            {source.status || copy.connectors.connectedStatus}
+                          <Badge variant="secondary" className={sourceStatusBadgeClass(displayStatus)}>
+                            {sourceStatusLabel(displayStatus, isZh)}
                           </Badge>
                         </div>
+                        {source.statusReason ? (
+                          <p className="mt-1 text-sm font-medium text-amber-800">
+                            {source.statusReason}
+                          </p>
+                        ) : null}
                         <p className="mt-1 text-sm text-muted-foreground">
                           {source.schema?.tableCount ?? 0} tables · {source.schema?.columnCount ?? 0} columns
                         </p>
@@ -4396,6 +4456,13 @@ function SettingsConnectedSourcesPanel({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      {statusActionLabel && statusActionHref ? (
+                        <Button asChild type="button" variant="outline" size="sm">
+                          <a href={statusActionHref}>
+                            {statusActionLabel}
+                          </a>
+                        </Button>
+                      ) : null}
                       {isShopifySource ? (
                         <Button
                           type="button"
@@ -5787,6 +5854,7 @@ type BusinessSourceView = {
   id: string;
   name: string;
   typeLabel: string;
+  status: string;
   statusLabel: string;
   lastSyncLabel: string;
   datasets: BusinessDatasetView[];
@@ -5836,6 +5904,13 @@ function businessDatasetRows(source: ConnectedSourceRow) {
 
 function formatBusinessNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function businessSourceStatus(rows: ConnectedSourceRow[]) {
+  return rows.find((source) => {
+    const status = (source.syncStatus || source.status || "").toUpperCase();
+    return status !== "CONNECTED";
+  })?.syncStatus || rows[0]?.syncStatus || rows[0]?.status || "CONNECTED";
 }
 
 function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: boolean): BusinessSourceView[] {
@@ -5938,9 +6013,12 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       };
     });
 
+    const status = businessSourceStatus(rows);
+
     return [{
       ...definition,
-      statusLabel: isZh ? "已连接" : "Connected",
+      status,
+      statusLabel: sourceStatusLabel(status, isZh),
       lastSyncLabel: isZh ? "今天" : "Today",
       datasets: detectedDatasets.length > 0 ? detectedDatasets : definition.fallbackDatasets,
       sourceRows: rows
@@ -5957,7 +6035,8 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       name: sourceName,
       typeLabel,
       summaryLabel: isZh ? "已连接业务数据源" : "Connected business data source",
-      statusLabel: isZh ? "已连接" : "Connected",
+      status: source.syncStatus || source.status,
+      statusLabel: sourceStatusLabel(source.syncStatus || source.status, isZh),
       lastSyncLabel: source.lastSyncAt
         ? new Date(source.lastSyncAt).toLocaleDateString(isZh ? "zh-CN" : "en-US")
         : (isZh ? "今天" : "Today"),
@@ -6074,7 +6153,7 @@ function DataSourcesWorkspace({
                         <h4 className="truncate text-base font-semibold text-slate-950">{source.name}</h4>
                         <p className="mt-1 truncate text-sm font-medium text-slate-500">{source.typeLabel}</p>
                       </div>
-                      <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                      <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold", sourceStatusBadgeClass(source.status))}>
                         {source.statusLabel}
                       </span>
                     </div>

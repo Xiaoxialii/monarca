@@ -8,6 +8,7 @@ type SnapshotPrismaClient = SnapshotClient & {
   };
   decisionSnapshot?: {
     findFirst: (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+    findMany: (args: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
     create: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
 };
@@ -27,6 +28,13 @@ export function snapshotPerformance(startedAt: number, source: "snapshot" | "fal
     source,
     durationMs: Date.now() - startedAt
   };
+}
+
+function isFallbackDecisionSnapshot(snapshot: Record<string, unknown> | null) {
+  const assumptions = asRecord(snapshot?.assumptions);
+  const reasoning = asRecord(snapshot?.reasoning);
+
+  return Boolean(assumptions.fallbackGeneratedAt) || reasoning.generatedFrom === "dashboard_snapshot_fallback";
 }
 
 export async function findLatestReportSnapshot(
@@ -136,15 +144,18 @@ export async function findLatestDecisionSnapshot(
 
   if (!decisionSnapshot) return null;
 
-  return decisionSnapshot.findFirst({
+  const snapshots = await decisionSnapshot.findMany({
     where: {
       workspaceId: input.workspaceId,
       optimizationType: input.optimizationType
     },
     orderBy: {
       createdAt: "desc"
-    }
+    },
+    take: 5
   });
+
+  return snapshots.find((snapshot) => !isFallbackDecisionSnapshot(snapshot)) ?? null;
 }
 
 export async function upsertDecisionSnapshot(

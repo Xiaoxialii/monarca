@@ -33,6 +33,8 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(helper, /REQUIRED_SHOPIFY_SCOPES = \["read_orders", "read_products", "read_customers"\]/, "Shopify OAuth should declare required Admin API data scopes");
   assert.match(helper, /function parseShopifyScopes/, "Shopify scopes should be normalized before authorization");
   assert.match(helper, /split\(\/\[\\s,\]\+\//, "Shopify scopes should accept comma or whitespace separated env values");
+  assert.match(helper, /function shopifyScopeGranted/, "Shopify scope comparison should centralize implied scope handling");
+  assert.match(helper, /requiredScope\.startsWith\("read_"\)/, "Shopify write scopes should satisfy matching read scope requirements");
   assert.match(helper, /assertRequiredShopifyScopes\(scopes\)/, "Shopify env validation should require orders, products, and customers scopes");
   assert.match(helper, /function isShopifyProtectedDataAccessError/, "Shopify connector should classify protected customer data access errors");
   assert.match(helper, /SHOPIFY_PROTECTED_CUSTOMER_DATA_REQUIRED/, "Shopify connector should expose a stable protected data access error code");
@@ -94,9 +96,10 @@ test("Shopify scope migration supports reauthorization without uninstalling", ()
   assert.match(syncEngine, /lastErrorMessage: `Shopify permissions need update/, "Sync should store a user-actionable permission message");
 
   assert.match(callbackRoute, /update:\s*\{[\s\S]*encryptedAccessToken[\s\S]*grantedScopes[\s\S]*requiredScopes[\s\S]*scopeStatus/, "Reauthorization callback should update token and granted scopes");
+  assert.match(callbackRoute, /dataSourceConnection\.create\([\s\S]*Shopify - \$\{state\.shopDomain\}/, "Callback should create a Shopify data source during authorization");
   assert.match(statusRoute, /const isConnected = scopeStatus === "OK" && hasConnectedDataSource/, "Status should require both current scopes and an active connected data source");
-  assert.match(dataSourcesRoute, /repairConnectedShopifyDataSources\(session\.workspace\.id\)/, "Data source list should repair connected Shopify accounts before rendering connected sources");
-  assert.match(dataSourcesRoute, /prisma\.dataSourceConnection\.create\([\s\S]*Shopify - \$\{account\.shopDomain\}/, "Shopify account repair should recreate a missing data source without reinstall");
+  assert.doesNotMatch(dataSourcesRoute, /repairConnectedShopifyDataSources\(session\.workspace\.id\)/, "Data source list should not trigger Shopify repair side effects");
+  assert.doesNotMatch(dataSourcesRoute, /dataSourceConnection\.(create|update|upsert|delete)/, "Data source list should remain read-only");
   assert.match(dashboard, /const genericSources = ungrouped\.map/, "Connected source UI should not drop unknown active data sources");
 
   assert.match(dashboard, /Shopify permissions need update/, "UI should show a user-friendly permission migration title");

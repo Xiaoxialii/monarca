@@ -64,14 +64,25 @@ export function normalizeGrantedShopifyScopes(input: string | string[] | null | 
 export function missingRequiredShopifyScopes(grantedScopes: string | string[]) {
   const granted = new Set(normalizeGrantedShopifyScopes(grantedScopes));
 
-  return REQUIRED_SHOPIFY_SCOPES.filter((scope) => !granted.has(scope));
+  return REQUIRED_SHOPIFY_SCOPES.filter((scope) => !shopifyScopeGranted(scope, granted));
 }
 
 export function missingConfiguredShopifyScopes(requiredScopes: string | string[], grantedScopes: string | string[]) {
   const required = Array.isArray(requiredScopes) ? requiredScopes : parseShopifyScopes(requiredScopes);
   const granted = new Set(normalizeGrantedShopifyScopes(grantedScopes));
 
-  return required.filter((scope) => !granted.has(scope));
+  return required.filter((scope) => !shopifyScopeGranted(scope, granted));
+}
+
+function shopifyScopeGranted(requiredScope: string, grantedScopes: Set<string>) {
+  if (grantedScopes.has(requiredScope)) return true;
+
+  if (requiredScope.startsWith("read_")) {
+    const writeEquivalent = requiredScope.replace(/^read_/, "write_");
+    if (grantedScopes.has(writeEquivalent)) return true;
+  }
+
+  return false;
 }
 
 export function shopifyScopeStatus(requiredScopes: string | string[], grantedScopes: string | string[]) {

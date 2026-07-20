@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
-import { ConnectionStatus, DataSourceType } from "@prisma/client";
+import { ConnectionStatus } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
-import {
-  SHOPIFY_PROVIDER,
-  currentRequiredShopifyScopes,
-  missingConfiguredShopifyScopes,
-  shopifyScopeStatus
-} from "@/lib/ecommerce-connectors/shopify-oauth";
+import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopify-oauth";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -76,6 +71,19 @@ function missingScopeReason(missingScopes: string[]) {
   return `Missing ${missingScopes.join(", ")}`;
 }
 
+function currentMissingScopesFromConfig(config: Record<string, unknown> | null) {
+  const requiredScopes = typeof config?.requiredScopes === "string" ? config.requiredScopes : null;
+  const grantedScopes = typeof config?.grantedScopes === "string" ? config.grantedScopes : null;
+
+  if (!requiredScopes || !grantedScopes) return null;
+
+  try {
+    return missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
+  } catch {
+    return null;
+  }
+}
+
 function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   if (syncStatus === "PENDING_PERMISSION" || syncStatus === "FAILED_AUTH") return "UPDATE_PERMISSION";
   if (syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC") return "SYNC_NOW";
@@ -97,18 +105,23 @@ function syncStatusFromSource(source: {
   statusAction: string | null;
 } {
   const config = asRecord(source.config);
-  const missingScopes = Array.isArray(config?.missingScopes)
+  const configMissingScopes = Array.isArray(config?.missingScopes)
     ? config.missingScopes.filter((scope): scope is string => typeof scope === "string" && Boolean(scope))
     : [];
+  const currentMissingScopes = currentMissingScopesFromConfig(config);
+  const missingScopes = currentMissingScopes ?? configMissingScopes;
   const scopeStatus = typeof config?.scopeStatus === "string" ? config.scopeStatus : null;
   const lowerError = (source.lastErrorMessage ?? "").toLowerCase();
+  const canTrustCurrentScopeComparison = currentMissingScopes !== null;
   const isPermissionProblem =
     missingScopes.length > 0 ||
-    scopeStatus === "NEEDS_REAUTHORIZATION" ||
-    lowerError.includes("permission") ||
-    lowerError.includes("scope") ||
-    lowerError.includes("auth") ||
-    lowerError.includes("token");
+    (!canTrustCurrentScopeComparison && (
+      scopeStatus === "NEEDS_REAUTHORIZATION" ||
+      lowerError.includes("permission") ||
+      lowerError.includes("scope") ||
+      lowerError.includes("auth") ||
+      lowerError.includes("token")
+    ));
 
   let syncStatus: DataSourceSyncStatus;
   let statusReason: string | null = source.lastErrorMessage ?? null;
@@ -123,7 +136,7 @@ function syncStatusFromSource(source: {
     statusReason = missingScopeReason(missingScopes) ?? statusReason ?? "Permission update required.";
   } else if (source.status === ConnectionStatus.PENDING || !source.lastSyncAt) {
     syncStatus = "PENDING_FIRST_SYNC";
-    statusReason ??= "Waiting for the first data sync.";
+    statusReason = "Waiting for the first data sync.";
   } else {
     syncStatus = "CONNECTED";
   }
@@ -260,175 +273,6 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
       };
     }).filter((table) => table.name)
   };
-}
-
-function resolveShopifyRequiredScopes(accountRequiredScopes: string | null, accountGrantedScopes: string) {
-  try {
-    return currentRequiredShopifyScopes();
-  } catch {
-    return accountRequiredScopes ?? accountGrantedScopes;
-  }
-}
-
-function shopifyDataSourceConfig(input: {
-  existingConfig?: unknown;
-  shopDomain: string;
-  connectorAccountId: string;
-  grantedScopes: string;
-  requiredScopes: string;
-  scopeStatus: string;
-  missingScopes: string[];
-}) {
-  return {
-    ...asRecord(input.existingConfig),
-    shopDomain: input.shopDomain,
-    connectorAccountId: input.connectorAccountId,
-    schemaVersion: "ecommerce_canonical_v1",
-    provider: SHOPIFY_PROVIDER,
-    businessType: "ecommerce",
-    grantedScopes: input.grantedScopes,
-    requiredScopes: input.requiredScopes,
-    scopeStatus: input.scopeStatus,
-    missingScopes: input.missingScopes
-  };
-}
-
-async function repairConnectedShopifyDataSources(workspaceId: string) {
-  const accounts = await prisma.ecommerceConnectorAccount.findMany({
-    where: {
-      workspaceId,
-      provider: SHOPIFY_PROVIDER,
-      status: "connected"
-    },
-    include: {
-      dataSource: {
-        select: {
-          id: true,
-          status: true,
-          isActive: true,
-          config: true
-        }
-      }
-    }
-  });
-
-  for (const account of accounts) {
-    const grantedScopes = account.grantedScopes ?? account.scopes;
-    const requiredScopes = resolveShopifyRequiredScopes(account.requiredScopes, grantedScopes);
-    const missingScopes = missingConfiguredShopifyScopes(requiredScopes, grantedScopes);
-    const scopeStatus = shopifyScopeStatus(requiredScopes, grantedScopes);
-
-    if (scopeStatus !== "OK") {
-      await prisma.ecommerceConnectorAccount.update({
-        where: { id: account.id },
-        data: {
-          grantedScopes,
-          requiredScopes,
-          scopeStatus
-        }
-      });
-
-      if (account.dataSourceId) {
-        await prisma.dataSourceConnection.updateMany({
-          where: {
-            id: account.dataSourceId,
-            workspaceId
-          },
-          data: {
-            status: ConnectionStatus.PENDING,
-            isActive: true,
-            lastErrorMessage: `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
-            config: shopifyDataSourceConfig({
-              existingConfig: account.dataSource?.config,
-              shopDomain: account.shopDomain,
-              connectorAccountId: account.id,
-              grantedScopes,
-              requiredScopes,
-              scopeStatus,
-              missingScopes
-            })
-          }
-        });
-      }
-
-      continue;
-    }
-
-    const activeLinkedSource =
-      account.dataSource?.id &&
-      account.dataSource.isActive &&
-      account.dataSource.status === ConnectionStatus.CONNECTED
-        ? account.dataSource
-        : null;
-
-    const reusableSource = activeLinkedSource ?? await prisma.dataSourceConnection.findFirst({
-      where: {
-        workspaceId,
-        provider: SHOPIFY_PROVIDER,
-        type: DataSourceType.ECOMMERCE_PLATFORM,
-        config: {
-          path: ["shopDomain"],
-          equals: account.shopDomain
-        }
-      },
-      select: {
-        id: true,
-        config: true
-      }
-    });
-
-    const sourceConfig = shopifyDataSourceConfig({
-      existingConfig: reusableSource?.config ?? account.dataSource?.config,
-      shopDomain: account.shopDomain,
-      connectorAccountId: account.id,
-      grantedScopes,
-      requiredScopes,
-      scopeStatus,
-      missingScopes
-    });
-    const dataSource = reusableSource
-      ? await prisma.dataSourceConnection.update({
-          where: { id: reusableSource.id },
-          data: {
-            name: `Shopify - ${account.shopDomain}`,
-            provider: SHOPIFY_PROVIDER,
-            type: DataSourceType.ECOMMERCE_PLATFORM,
-            status: ConnectionStatus.CONNECTED,
-            isActive: true,
-            connectionMode: "oauth",
-            authMethod: "oauth",
-            config: sourceConfig,
-            connectedAt: new Date(),
-            lastErrorMessage: null
-          },
-          select: { id: true }
-        })
-      : await prisma.dataSourceConnection.create({
-          data: {
-            workspaceId,
-            name: `Shopify - ${account.shopDomain}`,
-            provider: SHOPIFY_PROVIDER,
-            type: DataSourceType.ECOMMERCE_PLATFORM,
-            status: ConnectionStatus.CONNECTED,
-            isActive: true,
-            connectionMode: "oauth",
-            authMethod: "oauth",
-            config: sourceConfig,
-            connectedAt: new Date()
-          },
-          select: { id: true }
-        });
-
-    await prisma.ecommerceConnectorAccount.update({
-      where: { id: account.id },
-      data: {
-        dataSourceId: dataSource.id,
-        grantedScopes,
-        requiredScopes,
-        scopeStatus
-      }
-    });
-  }
 }
 
 export async function GET() {

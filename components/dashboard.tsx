@@ -16833,8 +16833,7 @@ function ReportPage({
     && decisionReportPayload.state === "ready"
     && Boolean(decisionReportPayload.decision_report);
   const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
-    && !decisionReportIsReady
-    && decisionReportPayload?.state !== "ready";
+    && !decisionReportIsReady;
 
   const loadDecisionReport = useCallback(async () => {
     if (isLoadingConnectedSources || !hasConnectedDatabase) return;

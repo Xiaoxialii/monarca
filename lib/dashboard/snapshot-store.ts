@@ -191,7 +191,7 @@ export async function upsertDecisionSnapshot(
       predictedMetrics: {},
       alternatives: [],
       reasoning: {
-        generatedFrom: "dashboard_snapshot_fallback"
+        generatedFrom: "canonical_snapshot"
       },
       confidence: typeof report.confidence === "number" ? report.confidence : 0
     }

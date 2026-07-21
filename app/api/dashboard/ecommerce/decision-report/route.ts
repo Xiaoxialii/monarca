@@ -8,6 +8,9 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
+  "Connected, but optimization needs sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable profit recommendations.";
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const url = new URL(request.url);
@@ -50,7 +53,7 @@ export async function GET(request: Request) {
     ok: true,
     state: "empty",
     hasConnectedDataSource: false,
-    message: "No generated optimization snapshot is available yet.",
+    message: OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE,
     decision_report: null,
     portfolioSummary: null,
     allocationRecommendation: null,
@@ -60,6 +63,16 @@ export async function GET(request: Request) {
     generated_at: null,
     source_platforms: [],
     lineage: null,
+    missingDataRequirements: [
+      "sales_order_history",
+      "order_line_items",
+      "refunds",
+      "customers",
+      "inventory",
+      "unit_costs",
+      "fulfillment_costs",
+      "ad_spend"
+    ],
     warning: "DECISION_SNAPSHOT_MISS",
     performance: snapshotPerformance(startedAt, "snapshot")
   });

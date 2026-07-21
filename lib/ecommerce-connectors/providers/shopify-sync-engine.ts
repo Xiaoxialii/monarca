@@ -30,6 +30,7 @@ import {
   buildCanonicalSnapshotJson,
   storeCanonicalSchemaSnapshot
 } from "@/lib/snapshot/canonical-snapshot-generator";
+import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { buildCanonicalSku } from "@/lib/sku/sku-intelligence-engine";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 
@@ -649,6 +650,14 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       timeout: 60_000
     });
 
+    const decisionSnapshots = await generateEcommerceDecisionSnapshots(prisma, {
+      workspaceId: input.workspaceId,
+      dataSourceId: account.dataSourceId
+    }).catch((error) => {
+      console.warn("Failed to generate Shopify decision snapshots", error);
+      return null;
+    });
+
     return {
       ok: true,
       reused: false,
@@ -660,7 +669,8 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       confidenceScore: analytics.confidence,
       missingFields: analytics.missingFields,
       estimationUsed: analytics.estimation_used,
-      analytics
+      analytics,
+      decisionSnapshots
     };
   } catch (error) {
     await prisma.ecommerceSyncRun.update({

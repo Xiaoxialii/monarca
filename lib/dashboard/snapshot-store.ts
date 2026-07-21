@@ -9,6 +9,7 @@ type SnapshotPrismaClient = SnapshotClient & {
   decisionSnapshot?: {
     findFirst: (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
     findMany: (args: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
+    findUnique: (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
     create: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
 };
@@ -149,13 +150,25 @@ export async function findLatestDecisionSnapshot(
       workspaceId: input.workspaceId,
       optimizationType: input.optimizationType
     },
+    select: {
+      id: true,
+      assumptions: true,
+      reasoning: true
+    },
     orderBy: {
       createdAt: "desc"
     },
-    take: 5
+    take: 10
   });
+  const latest = snapshots.find((snapshot) => !isFallbackDecisionSnapshot(snapshot));
 
-  return snapshots.find((snapshot) => !isFallbackDecisionSnapshot(snapshot)) ?? null;
+  if (!latest?.id) return null;
+
+  return decisionSnapshot.findUnique({
+    where: {
+      id: latest.id
+    }
+  });
 }
 
 export async function upsertDecisionSnapshot(

@@ -504,6 +504,40 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       ...Object.entries(normalizedArtifacts).map(([name, artifact]) => ({ name, type: "normalized", artifact })),
       { name: "manifest", type: "manifest", artifact: manifestArtifact }
     ];
+    const canonicalDataset = buildCanonicalDatasetFromArtifact(deduped.artifact, {
+      sourceProvider: SHOPIFY_PROVIDER,
+      normalizedAt: manifest.sync_finished_at,
+      validationWarnings: manifest.missing_fields,
+      duplicateCount: Object.values(deduped.duplicateCounts).reduce((sum, count) => sum + count, 0),
+      confidence: manifest.confidence_score
+    });
+    const snapshotJson = buildCanonicalSnapshotJson({
+      manifest: {
+        businessType: "ecommerce",
+        sourceProvider: SHOPIFY_PROVIDER,
+        manifestKey: manifest.manifest_key,
+        syncRunId: manifest.sync_run_id,
+        checksum: manifest.checksum,
+        latestBusinessDate: manifest.latest_business_date,
+        dataMode: manifest.data_mode,
+        confidenceScore: manifest.confidence_score,
+        missingFields: manifest.missing_fields,
+        estimationUsed: manifest.estimation_used,
+        syncStartedAt: manifest.sync_started_at,
+        syncFinishedAt: manifest.sync_finished_at,
+        analytics: manifest.analytics,
+        semanticLearning: manifest.semantic_learning,
+        guardrailReport: manifest.guardrailReport
+      },
+      artifacts: Object.fromEntries(Object.entries(normalizedArtifacts).map(([name, artifact]) => [
+        name,
+        {
+          ...artifact,
+          columns: canonicalColumns(name)
+        }
+      ])),
+      canonicalDataset
+    });
 
     await prisma.$transaction(async (tx) => {
       await tx.ecommerceSyncArtifact.createMany({
@@ -541,39 +575,6 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       await tx.ecommerceConnectorAccount.update({
         where: { id: account.id },
         data: { lastSyncedAt: syncWindowEnd }
-      });
-      const snapshotJson = buildCanonicalSnapshotJson({
-        manifest: {
-          businessType: "ecommerce",
-          sourceProvider: SHOPIFY_PROVIDER,
-          manifestKey: manifest.manifest_key,
-          syncRunId: manifest.sync_run_id,
-          checksum: manifest.checksum,
-          latestBusinessDate: manifest.latest_business_date,
-          dataMode: manifest.data_mode,
-          confidenceScore: manifest.confidence_score,
-          missingFields: manifest.missing_fields,
-          estimationUsed: manifest.estimation_used,
-          syncStartedAt: manifest.sync_started_at,
-          syncFinishedAt: manifest.sync_finished_at,
-          analytics: manifest.analytics,
-          semanticLearning: manifest.semantic_learning,
-          guardrailReport: manifest.guardrailReport
-        },
-        artifacts: Object.fromEntries(Object.entries(normalizedArtifacts).map(([name, artifact]) => [
-          name,
-          {
-            ...artifact,
-            columns: canonicalColumns(name)
-          }
-        ])),
-        canonicalDataset: buildCanonicalDatasetFromArtifact(deduped.artifact, {
-          sourceProvider: SHOPIFY_PROVIDER,
-          normalizedAt: manifest.sync_finished_at,
-          validationWarnings: manifest.missing_fields,
-          duplicateCount: Object.values(deduped.duplicateCounts).reduce((sum, count) => sum + count, 0),
-          confidence: manifest.confidence_score
-        })
       });
       const snapshot = await storeCanonicalSchemaSnapshot({
         prisma: tx,

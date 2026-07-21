@@ -216,6 +216,7 @@ model Workspace {
   decisionTrackingSnapshots DecisionTrackingSnapshot[]
   decisionSnapshots DecisionSnapshot[]
   backgroundJobs    BackgroundJob[]
+  unifiedIngestionJobs UnifiedIngestionJob[]
 }
 
 model SemanticMappingMemory {
@@ -432,6 +433,9 @@ model SchemaSnapshot {
   dataSourceId  String?
   version       Int
   status        ConnectionStatus      @default(PENDING)
+  schemaStatus  String                @default("PENDING")
+  canonicalStatus String              @default("NOT_STARTED")
+  canonicalVersion String?
   schemaJson    Json
   qualityReport Json?
   createdAt     DateTime              @default(now())
@@ -914,6 +918,27 @@ model BackgroundJob {
 
   @@index([workspaceId, type, status])
   @@index([workspaceId, createdAt])
+}
+
+model UnifiedIngestionJob {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  dataSourceId  String
+  fileId        String?
+  status        String    @default("QUEUED")
+  progress      Int       @default(0)
+  currentStep   String?
+  errorMessage  String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  metadataJson  Json?
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+  @@index([dataSourceId])
 }
 
 model ReportHistory {

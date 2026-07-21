@@ -17,7 +17,7 @@ type GenerateDecisionSnapshotsResult = {
 };
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
-  "Connected, but optimization needs sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable profit recommendations.";
+  "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
 
 const OPTIMIZATION_DATA_REQUIREMENTS = [
   "sales_order_history",

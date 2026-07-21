@@ -16834,6 +16834,9 @@ function ReportPage({
     && Boolean(decisionReportPayload.decision_report);
   const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
     && !decisionReportIsReady;
+  const decisionReportEmptyMessage = isZh
+    ? "已连接数据源，但运营报告还需要销售/订单历史、订单明细、退款、客户、库存、单位成本、履约成本和广告花费，才能生成可靠的 KPI 和运营建议。"
+    : "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
 
   const loadDecisionReport = useCallback(async () => {
     if (isLoadingConnectedSources || !hasConnectedDatabase) return;
@@ -16952,9 +16955,7 @@ function ReportPage({
       ) : shouldShowDecisionReportEmpty ? (
         <Card className="border bg-white shadow-sm">
           <CardContent className="p-5 text-sm text-muted-foreground">
-            {decisionReportPayload?.message ?? (isZh
-              ? "当前没有可用的经营报表数据。请确认统一后的电商数据已生成，然后刷新报表。"
-              : "No operating report data is available. Confirm the normalized ecommerce data has been generated, then refresh this report.")}
+            {decisionReportEmptyMessage}
           </CardContent>
         </Card>
       ) : (

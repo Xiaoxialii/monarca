@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
-  "Connected, but optimization needs sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable profit recommendations.";
+  "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
 
 export async function GET(request: Request) {
   const startedAt = Date.now();

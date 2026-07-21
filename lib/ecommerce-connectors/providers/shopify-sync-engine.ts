@@ -580,7 +580,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
         prisma: tx,
         workspaceId: input.workspaceId,
         dataSourceId: account.dataSourceId!,
-        status: guardrails.guardrailReport.paginationIncomplete ? ConnectionStatus.PENDING : ConnectionStatus.CONNECTED,
+        status: ConnectionStatus.CONNECTED,
         schemaJson: snapshotJson,
         qualityReport: {
           guardrailReport: guardrails.guardrailReport,
@@ -623,6 +623,9 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       await tx.dataSourceConnection.update({
         where: { id: account.dataSourceId! },
         data: {
+          status: ConnectionStatus.CONNECTED,
+          isActive: true,
+          lastErrorMessage: null,
           lastSyncAt: syncWindowEnd,
           schemas: snapshotJson as Prisma.InputJsonValue,
           config: {

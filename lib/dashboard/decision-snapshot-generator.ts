@@ -80,6 +80,7 @@ function decisionSnapshotContent(loaded: LoadDashboardResult) {
   const needsProfitInputs = missingFields.some((field) =>
     /orders|lineItems|refunds|customers|inventory|cost|ads|spend/i.test(field)
   );
+  const exposedReport = needsProfitInputs ? null : report;
 
   return {
     ok: true,
@@ -88,12 +89,12 @@ function decisionSnapshotContent(loaded: LoadDashboardResult) {
     message: needsProfitInputs
       ? OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE
       : loaded.message ?? null,
-    decision_report: report,
-    portfolioSummary: report.portfolioSummary ?? null,
-    allocationRecommendation: report.allocationRecommendation ?? null,
-    skuDecisions: report.skuDecisions ?? [],
-    riskAlerts: report.riskAlerts ?? [],
-    executionPlan: report.executionPlan ?? [],
+    decision_report: exposedReport,
+    portfolioSummary: exposedReport?.portfolioSummary ?? null,
+    allocationRecommendation: exposedReport?.allocationRecommendation ?? null,
+    skuDecisions: exposedReport?.skuDecisions ?? [],
+    riskAlerts: exposedReport?.riskAlerts ?? [],
+    executionPlan: exposedReport?.executionPlan ?? [],
     generated_at: new Date().toISOString(),
     source_platforms: loaded.data.metadata.source_platforms,
     lineage: loaded.lineage ?? null,

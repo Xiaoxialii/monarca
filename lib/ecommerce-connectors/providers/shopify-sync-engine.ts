@@ -642,6 +642,8 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
           } as Prisma.InputJsonValue
         }
       });
+    }, {
+      timeout: 60_000
     });
 
     return {

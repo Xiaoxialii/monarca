@@ -56,8 +56,10 @@ test("worker owns canonicalization and commits schema state without long interac
 
   assert.match(worker, /export async function processIngestionJob/);
   assert.match(worker, /STALE_INGESTION_JOB_MS/);
+  assert.match(worker, /QUEUED_INGESTION_JOB_MS/);
   assert.match(worker, /ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["PROCESSING", "SCHEMA_READY", "CANONICALIZING"\]/);
   assert.match(worker, /staleActiveJobWhere/);
+  assert.match(worker, /staleQueuedJobWhere/);
   assert.match(worker, /retryCount:\s*\{\s*increment:/);
   assert.match(worker, /startHeartbeat/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);

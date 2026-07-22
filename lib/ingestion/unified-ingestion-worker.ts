@@ -17,6 +17,7 @@ import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifac
 const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
 const ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
 const DEFAULT_STALE_INGESTION_JOB_MS = 10 * 60 * 1000;
+const DEFAULT_QUEUED_INGESTION_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 
 function configuredDurationMs(value: string | undefined, fallback: number) {
@@ -27,6 +28,10 @@ function configuredDurationMs(value: string | undefined, fallback: number) {
 export const STALE_INGESTION_JOB_MS = configuredDurationMs(
   process.env.UNIFIED_INGESTION_STALE_MS,
   DEFAULT_STALE_INGESTION_JOB_MS
+);
+export const QUEUED_INGESTION_JOB_MS = configuredDurationMs(
+  process.env.UNIFIED_INGESTION_QUEUED_MS,
+  DEFAULT_QUEUED_INGESTION_JOB_MS
 );
 const HEARTBEAT_INTERVAL_MS = configuredDurationMs(
   process.env.UNIFIED_INGESTION_HEARTBEAT_MS,
@@ -39,6 +44,10 @@ function workerId() {
 
 function staleBeforeDate(now = new Date()) {
   return new Date(now.getTime() - STALE_INGESTION_JOB_MS);
+}
+
+function queuedBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - QUEUED_INGESTION_JOB_MS);
 }
 
 function staleActiveJobWhere(now = new Date()) {
@@ -64,12 +73,22 @@ function staleActiveJobWhere(now = new Date()) {
   };
 }
 
+function staleQueuedJobWhere(now = new Date()) {
+  return {
+    status: "QUEUED",
+    updatedAt: {
+      lt: queuedBeforeDate(now)
+    }
+  };
+}
+
 export function retryableIngestionJobWhere(now = new Date()) {
   return {
     OR: [
       {
         status: "FAILED"
       },
+      staleQueuedJobWhere(now),
       staleActiveJobWhere(now)
     ]
   };
@@ -624,7 +643,10 @@ export async function recoverStaleIngestionJobs(
   const jobs = await client.unifiedIngestionJob.findMany({
     where: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-      ...staleActiveJobWhere()
+      OR: [
+        staleQueuedJobWhere(),
+        staleActiveJobWhere()
+      ]
     },
     select: {
       id: true,

@@ -3824,6 +3824,134 @@ function sourceStatusActionLabel(action: string | null | undefined, isZh: boolea
   return null;
 }
 
+function valueAsRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function valueAsNumber(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["schema"] | null {
+  const response = valueAsRecord(payload);
+  const snapshot = valueAsRecord(response.snapshot);
+  const snapshotJson = valueAsRecord(snapshot.schemaJson);
+  const sourceSchema = valueAsRecord(response.schema);
+  const rawUploadSchema = valueAsRecord(snapshotJson.rawUploadSchema);
+  const schema = Object.keys(sourceSchema).length > 0
+    ? sourceSchema
+    : Object.keys(rawUploadSchema).length > 0
+      ? rawUploadSchema
+      : snapshotJson;
+  const unifiedIngestion = valueAsRecord(schema.unifiedIngestion ?? rawUploadSchema.unifiedIngestion ?? snapshotJson.unifiedIngestion);
+  const semantic = valueAsRecord(unifiedIngestion.semantic);
+  const detectedSchema = valueAsRecord(unifiedIngestion.detectedSchema);
+  const canonical = valueAsRecord(unifiedIngestion.canonical);
+  const learning = valueAsRecord(unifiedIngestion.learning);
+  const tables = Array.isArray(schema.tables) ? schema.tables : [];
+  const tableRows = tables.map((table) => {
+    const tableRecord = valueAsRecord(table);
+    const columns = Array.isArray(tableRecord.columns) ? tableRecord.columns : [];
+
+    return {
+      name: typeof tableRecord.name === "string" ? tableRecord.name : "",
+      schema: typeof tableRecord.schema === "string" ? tableRecord.schema : null,
+      columns: columns.map((column) => {
+        const columnRecord = valueAsRecord(column);
+
+        return {
+          name: typeof columnRecord.name === "string" ? columnRecord.name : "",
+          displayName: typeof columnRecord.displayName === "string" ? columnRecord.displayName : null,
+          semanticName: typeof columnRecord.semanticName === "string" ? columnRecord.semanticName : null,
+          rawHeaderPath: Array.isArray(columnRecord.rawHeaderPath)
+            ? columnRecord.rawHeaderPath.filter((item): item is string => typeof item === "string")
+            : null,
+          type: typeof columnRecord.type === "string" ? columnRecord.type : null,
+          nullable: typeof columnRecord.nullable === "boolean" ? columnRecord.nullable : null
+        };
+      }).filter((column) => column.name)
+    };
+  }).filter((table) => table.name);
+  const detectedFields = Array.isArray(detectedSchema.fields) ? detectedSchema.fields : [];
+  const mappingDetails = Array.isArray(semantic.mapping_details)
+    ? semantic.mapping_details
+    : Array.isArray(semantic.mappingDetails)
+      ? semantic.mappingDetails
+      : [];
+  const semanticMappings = Object.fromEntries(
+    Object.entries(valueAsRecord(semantic.mappings)).map(([field, canonical]) => [
+      field,
+      typeof canonical === "string" ? canonical : String(canonical)
+    ])
+  );
+
+  return {
+    tableCount: valueAsNumber(schema.tableCount) ?? tableRows.length,
+    columnCount: valueAsNumber(schema.columnCount) ?? tableRows.reduce((sum, table) => sum + table.columns.length, 0),
+    scannedAt: typeof schema.scannedAt === "string"
+      ? schema.scannedAt
+      : typeof snapshot.createdAt === "string"
+        ? snapshot.createdAt
+        : null,
+    unifiedIngestion: Object.keys(unifiedIngestion).length > 0
+      ? {
+          status: typeof unifiedIngestion.status === "string" ? unifiedIngestion.status : null,
+          source: typeof unifiedIngestion.source === "string" ? unifiedIngestion.source : null,
+          sampledRows: valueAsNumber(unifiedIngestion.sampledRows),
+          totalParsedRows: valueAsNumber(unifiedIngestion.totalParsedRows),
+          detectedSchema: {
+            detected_type: typeof detectedSchema.detected_type === "string" ? detectedSchema.detected_type : null,
+            confidence: valueAsNumber(detectedSchema.confidence),
+            fields: detectedFields.map((field) => {
+              const record = valueAsRecord(field);
+              return {
+                name: typeof record.name === "string" ? record.name : "",
+                path: typeof record.path === "string" ? record.path : "",
+                type: typeof record.type === "string" ? record.type : null
+              };
+            }).filter((field) => field.name)
+          },
+          semantic: {
+            confidence: valueAsNumber(semantic.confidence),
+            memory_hits: valueAsNumber(semantic.memory_hits),
+            engine_candidates: valueAsNumber(semantic.engine_candidates),
+            mappings: semanticMappings,
+            mapping_details: mappingDetails.map((mapping) => {
+              const record = valueAsRecord(mapping);
+              return {
+                field: typeof record.field === "string" ? record.field : "",
+                canonical: typeof record.canonical === "string" ? record.canonical : "",
+                confidence: valueAsNumber(record.confidence),
+                source: typeof record.source === "string" ? record.source : "engine"
+              };
+            }).filter((mapping) => mapping.field),
+            unknown_fields: Array.isArray(semantic.unknown_fields)
+              ? semantic.unknown_fields.filter((field): field is string => typeof field === "string")
+              : []
+          },
+          canonical: {
+            schemaVersion: typeof canonical.schemaVersion === "string" ? canonical.schemaVersion : null,
+            rowCounts: valueAsRecord(canonical.rowCounts),
+            mappingConfidence: valueAsNumber(canonical.mappingConfidence),
+            unknownFieldCount: valueAsNumber(canonical.unknownFieldCount)
+          },
+          learning: {
+            records_updated: valueAsNumber(learning.records_updated),
+            memory_size: valueAsNumber(learning.memory_size),
+            average_memory_confidence: valueAsNumber(learning.average_memory_confidence)
+          }
+        }
+      : null,
+    tables: tableRows
+  };
+}
+
 function mappingRowsForSource(source: ConnectedSourceRow) {
   const details = source.schema?.unifiedIngestion?.semantic?.mapping_details ?? [];
   const fields = source.schema?.unifiedIngestion?.detectedSchema?.fields ?? [];
@@ -3923,6 +4051,8 @@ function SettingsConnectedSourcesPanel({
 }) {
   const [expandedSourceIds, setExpandedSourceIds] = useState<string[]>([]);
   const [expandedTableKeys, setExpandedTableKeys] = useState<string[]>([]);
+  const [loadingSchemaSourceIds, setLoadingSchemaSourceIds] = useState<string[]>([]);
+  const [schemaLoadErrors, setSchemaLoadErrors] = useState<Record<string, string>>({});
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
   const [fetchingShopifySourceId, setFetchingShopifySourceId] = useState<string | null>(null);
   const [syncingShopifySourceId, setSyncingShopifySourceId] = useState<string | null>(null);
@@ -4067,12 +4197,52 @@ function SettingsConnectedSourcesPanel({
         off: "Off"
       };
 
-  const toggleSourceSchema = (sourceId: string) => {
+  const loadSourceSchema = async (source: ConnectedSourceRow) => {
+    setLoadingSchemaSourceIds((current) => current.includes(source.id) ? current : [...current, source.id]);
+    setSchemaLoadErrors((current) => {
+      const next = { ...current };
+      delete next[source.id];
+      return next;
+    });
+
+    try {
+      const response = await fetch(`/api/data-sources/${source.id}/schema`, {
+        cache: "no-store"
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "读取数据源结构失败" : "Failed to load source schema"));
+      }
+
+      const schema = schemaFromSchemaEndpointPayload(payload);
+      onUpdateConnectedSource({
+        ...source,
+        schema: schema ?? source.schema
+      });
+    } catch (error) {
+      setSchemaLoadErrors((current) => ({
+        ...current,
+        [source.id]: error instanceof Error ? error.message : (isZh ? "读取数据源结构失败" : "Failed to load source schema")
+      }));
+    } finally {
+      setLoadingSchemaSourceIds((current) => current.filter((id) => id !== source.id));
+    }
+  };
+
+  const toggleSourceSchema = (source: ConnectedSourceRow) => {
+    const sourceId = source.id;
+    const willExpand = !expandedSourceIds.includes(sourceId);
+
     setExpandedSourceIds((current) =>
       current.includes(sourceId)
         ? current.filter((id) => id !== sourceId)
         : [...current, sourceId]
     );
+
+    if (willExpand && !source.schema?.unifiedIngestion && (source.schema?.tables ?? []).length === 0) {
+      void loadSourceSchema(source);
+    }
   };
 
   const toggleTable = (sourceId: string, tableName: string) => {
@@ -4407,6 +4577,8 @@ function SettingsConnectedSourcesPanel({
               const metaSyncResult = metaSyncResults[source.id];
               const semanticMappingRows = mappingRowsForSource(source);
               const unifiedIngestion = source.schema?.unifiedIngestion ?? null;
+              const isLoadingSchema = loadingSchemaSourceIds.includes(source.id);
+              const schemaLoadError = schemaLoadErrors[source.id];
               const displayStatus = source.syncStatus || source.status;
               const statusActionLabel = sourceStatusActionLabel(source.statusAction, isZh);
               const shopDomain = source.config?.shopDomain;
@@ -4499,14 +4671,18 @@ function SettingsConnectedSourcesPanel({
                           {fetchingShopifySourceId === source.id ? labels.fetchingShopify : labels.fetchShopify}
                         </Button>
                       ) : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => toggleSourceSchema(source.id)}
-                      >
-                        {isExpanded ? labels.hideSchema : labels.viewSchema}
-                      </Button>
+	                      <Button
+	                        type="button"
+	                        variant="outline"
+	                        size="sm"
+	                        disabled={isLoadingSchema}
+	                        onClick={() => toggleSourceSchema(source)}
+	                      >
+	                        {isLoadingSchema ? (
+	                          <RefreshCw className="size-4 animate-spin" />
+	                        ) : null}
+	                        {isLoadingSchema ? (isZh ? "读取结构" : "Loading schema") : isExpanded ? labels.hideSchema : labels.viewSchema}
+	                      </Button>
                       <Button
                         type="button"
                         variant="outline"
@@ -4619,13 +4795,23 @@ function SettingsConnectedSourcesPanel({
                     </div>
                   ) : null}
 
-                  {isExpanded ? (
-                    <div className="mt-4 rounded-lg border bg-white p-3">
+	                  {isExpanded ? (
+	                    <div className="mt-4 rounded-lg border bg-white p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         tables
                       </p>
-                      {tables.length > 0 ? (
-                        <div className="mt-3 grid gap-2">
+	                      {schemaLoadError ? (
+	                        <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+	                          {schemaLoadError}
+	                        </p>
+	                      ) : null}
+	                      {isLoadingSchema && tables.length === 0 ? (
+	                        <p className="mt-3 rounded-md border border-dashed bg-secondary/20 px-3 py-2 text-sm text-muted-foreground">
+	                          <Loader2 className="mr-2 inline size-4 animate-spin" />
+	                          {isZh ? "正在读取表结构" : "Loading schema"}
+	                        </p>
+	                      ) : tables.length > 0 ? (
+	                        <div className="mt-3 grid gap-2">
                           {tables.map((table) => {
                             const tableName = table.schema ? `${table.schema}.${table.name}` : table.name;
                             const tableKey = `${source.id}:${tableName}`;

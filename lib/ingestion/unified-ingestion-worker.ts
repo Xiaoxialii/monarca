@@ -319,6 +319,24 @@ export async function processIngestionJob(
       select: { config: true }
     }))?.config);
 
+    await client.dataSourceConnection.update({
+      where: { id: dataSourceId },
+      data: {
+        schemas: completedSchemaPayload as Prisma.InputJsonValue
+      }
+    });
+
+    await client.schemaSnapshot.update({
+      where: { id: schemaSnapshotId },
+      data: {
+        schemaJson,
+        qualityReport: {
+          ...qualityReport,
+          canonicalArtifactBacked: true
+        } as Prisma.InputJsonValue
+      }
+    });
+
     await client.$transaction(async (tx) => {
       await tx.dataSourceConnection.update({
         where: { id: dataSourceId },
@@ -326,7 +344,6 @@ export async function processIngestionJob(
           isActive: true,
           status: ConnectionStatus.CONNECTED,
           lastErrorMessage: null,
-          schemas: completedSchemaPayload as Prisma.InputJsonValue,
           config: {
             ...existingDataSourceConfig,
             schemaSnapshotId,
@@ -342,12 +359,7 @@ export async function processIngestionJob(
           status: ConnectionStatus.CONNECTED,
           schemaStatus: "READY",
           canonicalStatus: "READY",
-          canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-          schemaJson,
-          qualityReport: {
-            ...qualityReport,
-            canonicalArtifactBacked: true
-          } as Prisma.InputJsonValue
+          canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
         }
       });
 
@@ -362,7 +374,7 @@ export async function processIngestionJob(
         }
       });
     }, {
-      timeout: 1_000
+      timeout: 5_000
     });
 
     if (metadata.userId) {

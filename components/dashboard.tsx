@@ -5907,6 +5907,10 @@ function formatBusinessNumber(value: number) {
 }
 
 function businessSourceStatus(rows: ConnectedSourceRow[]) {
+  if (rows.some((source) => (source.syncStatus || source.status || "").toUpperCase() === "CONNECTED")) {
+    return "CONNECTED";
+  }
+
   return rows.find((source) => {
     const status = (source.syncStatus || source.status || "").toUpperCase();
     return status !== "CONNECTED";

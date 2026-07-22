@@ -95,7 +95,7 @@ function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
 function syncStatusFromSource(source: {
   status: ConnectionStatus;
   provider: string | null;
-  config: unknown;
+  config?: unknown;
   lastErrorMessage: string | null;
   lastSyncAt: Date | null;
   updatedAt: Date;
@@ -297,7 +297,6 @@ export async function GET() {
         status: true,
         connectionMode: true,
         authMethod: true,
-        config: true,
         lastErrorMessage: true,
         connectedAt: true,
         lastSyncAt: true,
@@ -324,7 +323,6 @@ export async function GET() {
             status: true,
             connectionMode: true,
             authMethod: true,
-            config: true,
             lastErrorMessage: true,
             connectedAt: true,
             lastSyncAt: true,
@@ -357,7 +355,7 @@ export async function GET() {
         statusAction: detailedStatus.statusAction,
         connectionMode: source.connectionMode,
         authMethod: source.authMethod,
-        config: publicConfig(source.config),
+        config: publicConfig(null),
         schema: schemaSummary(
           null,
           null,

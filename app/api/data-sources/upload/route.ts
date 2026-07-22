@@ -13,7 +13,7 @@ import { fileExtension } from "@/lib/file-upload-schema";
 import { storeUploadLocally } from "@/lib/local-upload-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
-import { processIngestionJob } from "@/lib/ingestion/unified-ingestion-worker";
+import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
 
 export const runtime = "nodejs";
 
@@ -287,10 +287,20 @@ export async function POST(request: Request) {
         } as Prisma.InputJsonValue
       }
     });
+    const asyncJob = await createAsyncJob(prisma, {
+      workspaceId: session.workspace.id,
+      type: "INGESTION",
+      currentStep: "Queued for ingestion",
+      payload: {
+        unifiedIngestionJobId: ingestionJob.id,
+        dataSourceId: result.dataSource.id,
+        schemaSnapshotId: result.schemaSnapshot.id
+      } as Prisma.InputJsonValue
+    });
 
     after(() => {
-      void processIngestionJob(ingestionJob.id).catch((error) => {
-        console.error("Failed to process upload ingestion job", error);
+      void processJob(asyncJob.id).catch((error) => {
+        console.error("Failed to process upload async ingestion job", error);
       });
     });
 
@@ -298,6 +308,7 @@ export async function POST(request: Request) {
       ok: true,
       status: "PROCESSING",
       jobId: ingestionJob.id,
+      asyncJobId: asyncJob.id,
       dataSource: {
         id: result.dataSource.id,
         name: result.dataSource.name,

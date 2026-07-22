@@ -10,6 +10,7 @@ test("unified ingestion uses a dedicated async job model and schema status field
   const schema = read("prisma/schema.prisma");
   const migration = read("prisma/migrations/20260721_add_unified_ingestion_jobs/migration.sql");
   const recoveryMigration = read("prisma/migrations/20260722_add_ingestion_job_recovery/migration.sql");
+  const asyncMigration = read("prisma/migrations/20260723_add_unified_async_jobs/migration.sql");
 
   assert.match(schema, /model UnifiedIngestionJob \{[\s\S]*status\s+String\s+@default\("QUEUED"\)/);
   assert.match(schema, /progress\s+Int\s+@default\(0\)/);
@@ -28,6 +29,17 @@ test("unified ingestion uses a dedicated async job model and schema status field
   assert.match(migration, /ADD COLUMN IF NOT EXISTS "canonicalStatus"/);
   assert.match(recoveryMigration, /ADD COLUMN IF NOT EXISTS "heartbeatAt"/);
   assert.match(recoveryMigration, /ADD COLUMN IF NOT EXISTS "retryCount"/);
+
+  assert.match(schema, /model AsyncJob \{/);
+  assert.match(schema, /type\s+String/);
+  assert.match(schema, /status\s+String\s+@default\("QUEUED"\)/);
+  assert.match(schema, /payload\s+Json\?/);
+  assert.match(schema, /resultReference\s+Json\?/);
+  assert.match(schema, /model Snapshot \{/);
+  assert.match(schema, /sourceJobId\s+String\?/);
+  assert.match(schema, /dataReference\s+Json\?/);
+  assert.match(asyncMigration, /CREATE TABLE IF NOT EXISTS "AsyncJob"/);
+  assert.match(asyncMigration, /CREATE TABLE IF NOT EXISTS "Snapshot"/);
 });
 
 test("upload routes enqueue ingestion jobs instead of running legacy post-processing", () => {
@@ -36,9 +48,13 @@ test("upload routes enqueue ingestion jobs instead of running legacy post-proces
 
   for (const source of [uploadRoute, completeRoute]) {
     assert.match(source, /unifiedIngestionJob\.create/);
+    assert.match(source, /createAsyncJob\(prisma/);
+    assert.match(source, /type:\s*"INGESTION"/);
+    assert.match(source, /unifiedIngestionJobId:\s*ingestionJob\.id/);
     assert.match(source, /status:\s*"QUEUED"/);
-    assert.match(source, /after\(\(\) => \{\s*void processIngestionJob\(ingestionJob\.id\)/);
+    assert.match(source, /after\(\(\) => \{\s*void processJob\(asyncJob\.id\)/);
     assert.match(source, /status:\s*"PROCESSING"/);
+    assert.match(source, /asyncJobId:\s*asyncJob\.id/);
     assert.doesNotMatch(source, /runUploadPostProcessing\(/);
     assert.doesNotMatch(source, /runDirectUploadPostProcessing\(/);
     assert.doesNotMatch(source, /writeCanonicalDatasetArtifacts\(/);
@@ -46,6 +62,36 @@ test("upload routes enqueue ingestion jobs instead of running legacy post-proces
     assert.doesNotMatch(source, /inferTablesFromExcelBuffer\(/);
     assert.doesNotMatch(source, /inferTablesFromCsvText\(/);
   }
+});
+
+test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery", () => {
+  const runner = read("lib/jobs/async-job-runner.ts");
+  const statusRoute = read("app/api/jobs/[jobId]/route.ts");
+  const retryRoute = read("app/api/jobs/[jobId]/retry/route.ts");
+  const recoveryRoute = read("app/api/jobs/recover/route.ts");
+
+  assert.match(runner, /export const ASYNC_JOB_TYPES\s*=\s*\[/);
+  assert.match(runner, /"INGESTION"/);
+  assert.match(runner, /"SYNC_CONNECTOR"/);
+  assert.match(runner, /"CALCULATE_METRICS"/);
+  assert.match(runner, /"GENERATE_REPORT"/);
+  assert.match(runner, /"SKU_OPTIMIZATION"/);
+  assert.match(runner, /export async function processJob/);
+  assert.match(runner, /client\.asyncJob\.updateMany/);
+  assert.match(runner, /startHeartbeat/);
+  assert.match(runner, /executeJobHandler/);
+  assert.match(runner, /processIngestionJob\(ingestionJobId/);
+  assert.match(runner, /client\.snapshot\.create/);
+  assert.match(runner, /staleQueuedJobWhere/);
+  assert.match(runner, /staleResumableJobWhere/);
+  assert.match(runner, /export async function recoverAsyncJobs/);
+  assert.doesNotMatch(runner, /\$transaction\(/);
+
+  assert.match(statusRoute, /workspaceId:\s*session\.workspace\.id/);
+  assert.match(retryRoute, /retryableAsyncJobWhere/);
+  assert.match(retryRoute, /processJob\(jobId\)/);
+  assert.match(recoveryRoute, /recoverAsyncJobs/);
+  assert.match(recoveryRoute, /RECOVERY_QUEUED/);
 });
 
 test("worker owns canonicalization and commits schema state without long interactive transactions", () => {

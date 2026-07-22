@@ -215,6 +215,8 @@ model Workspace {
   optimizationLearningRecords OptimizationLearningRecord[]
   decisionTrackingSnapshots DecisionTrackingSnapshot[]
   decisionSnapshots DecisionSnapshot[]
+  asyncJobs        AsyncJob[]
+  snapshots        Snapshot[]
   backgroundJobs    BackgroundJob[]
   unifiedIngestionJobs UnifiedIngestionJob[]
 }
@@ -901,6 +903,52 @@ model ReportSnapshot {
   @@index([workspaceId, periodStart, periodEnd])
   @@index([sourceSnapshotId])
   @@unique([workspaceId, reportType, cacheKey])
+}
+
+model AsyncJob {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  type            String
+  status          String    @default("QUEUED")
+  progress        Int       @default(0)
+  currentStep     String?
+  payload         Json?
+  resultReference Json?
+  errorMessage    String?
+  retryCount      Int       @default(0)
+  maxRetries      Int       @default(3)
+  heartbeatAt     DateTime?
+  lockedAt        DateTime?
+  lockedBy        String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snapshots       Snapshot[]
+
+  @@index([workspaceId, type, status])
+  @@index([workspaceId, createdAt])
+  @@index([status, heartbeatAt])
+  @@index([status, updatedAt])
+}
+
+model Snapshot {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  sourceJobId   String?
+  type          String
+  version       String
+  status        String    @default("READY")
+  dataReference Json?
+  metadataJson  Json?
+  createdAt     DateTime  @default(now())
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceJob     AsyncJob?  @relation(fields: [sourceJobId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, type, createdAt])
+  @@index([sourceJobId])
+  @@index([workspaceId, status])
 }
 
 model BackgroundJob {

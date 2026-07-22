@@ -74,6 +74,7 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(runner, /"INGESTION"/);
   assert.match(runner, /"SYNC_CONNECTOR"/);
   assert.match(runner, /"CALCULATE_METRICS"/);
+  assert.match(runner, /"PROFIT_ANALYSIS"/);
   assert.match(runner, /"GENERATE_REPORT"/);
   assert.match(runner, /"SKU_OPTIMIZATION"/);
   assert.match(runner, /export async function processJob/);
@@ -81,6 +82,9 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(runner, /startHeartbeat/);
   assert.match(runner, /executeJobHandler/);
   assert.match(runner, /processIngestionJob\(ingestionJobId/);
+  assert.match(runner, /generateWorkspaceMetricsFromConnectedSources/);
+  assert.match(runner, /normalizeProfitInputs/);
+  assert.match(runner, /generateEcommerceDecisionSnapshots\(client/);
   assert.match(runner, /client\.snapshot\.create/);
   assert.match(runner, /staleQueuedJobWhere/);
   assert.match(runner, /staleResumableJobWhere/);
@@ -110,7 +114,8 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /startHeartbeat/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
-  assert.match(worker, /generateEcommerceDecisionSnapshots\(client/);
+  assert.doesNotMatch(worker, /generateEcommerceDecisionSnapshots\(client/);
+  assert.doesNotMatch(worker, /generateWorkspaceMetricsFromConnectedSources/);
   assert.match(worker, /canonicalVersion:\s*ECOMMERCE_CANONICAL_SCHEMA_VERSION/);
   assert.match(worker, /schemaJson,/);
   assert.doesNotMatch(worker, /\$transaction\(/);
@@ -127,4 +132,26 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(retryRoute, /processIngestionJob\(jobId\)/);
   assert.match(recoveryRoute, /recoverStaleIngestionJobs/);
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
+});
+
+test("decision snapshots degrade gracefully when profit inputs are incomplete", () => {
+  const generator = read("lib/dashboard/decision-snapshot-generator.ts");
+  const normalizer = read("lib/profit/profit-input-normalizer.ts");
+
+  assert.match(normalizer, /export type ProfitInputModel/);
+  assert.match(normalizer, /profitDataCoverage/);
+  assert.match(normalizer, /optimizationLevel/);
+  assert.match(normalizer, /gross_profit/);
+  assert.match(normalizer, /contribution_margin/);
+  assert.match(generator, /normalizeProfitInputs/);
+  assert.match(generator, /profitInputModel/);
+  assert.match(generator, /profitDataCoverage/);
+  assert.match(generator, /PARTIAL_OPTIMIZATION_INPUTS/);
+  assert.match(generator, /partialSkuRecommendations/);
+  assert.match(generator, /SNAPSHOT_ROW_LIMIT/);
+  assert.match(generator, /compactDecisionReport/);
+  assert.match(generator, /compactSkuOptimizationAlgorithm/);
+  assert.match(generator, /profitInputModel\.rows\.slice\(0, SNAPSHOT_ROW_LIMIT\)/);
+  assert.doesNotMatch(generator, /OPTIMIZATION_INPUTS_INCOMPLETE/);
+  assert.doesNotMatch(generator, /const exposedReport = needsProfitInputs \? null : report/);
 });

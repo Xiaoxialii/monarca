@@ -1,12 +1,17 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
+import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { processIngestionJob } from "@/lib/ingestion/unified-ingestion-worker";
 import { prisma } from "@/lib/prisma";
+import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
+import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 
 export const ASYNC_JOB_TYPES = [
   "INGESTION",
   "SYNC_CONNECTOR",
   "CALCULATE_METRICS",
+  "PROFIT_ANALYSIS",
   "GENERATE_REPORT",
   "GENERATE_INSIGHT",
   "SKU_OPTIMIZATION",
@@ -45,6 +50,11 @@ type JobHandlerResult = {
   snapshotVersion?: string;
   dataReference?: Record<string, unknown>;
   metadataJson?: Record<string, unknown>;
+  nextJobs?: Array<{
+    type: AsyncJobType;
+    payload?: Prisma.InputJsonValue | null;
+    currentStep?: string;
+  }>;
 };
 
 function configuredDurationMs(value: string | undefined, fallback: number) {
@@ -332,7 +342,24 @@ export async function processJob(
       resultReference: resultReference as Prisma.InputJsonValue
     });
 
-    return { ok: true, jobId, resultReference };
+    const downstreamJobs = [];
+    for (const nextJob of result.nextJobs ?? []) {
+      const created = await createAsyncJob(client, {
+        workspaceId: job.workspaceId,
+        type: nextJob.type,
+        payload: nextJob.payload,
+        currentStep: nextJob.currentStep
+      });
+      downstreamJobs.push(created.id);
+    }
+
+    for (const downstreamJobId of downstreamJobs) {
+      void processJob(downstreamJobId, { client }).catch((error) => {
+        console.warn("Failed to process downstream async job", { downstreamJobId, error });
+      });
+    }
+
+    return { ok: true, jobId, resultReference, downstreamJobs };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Async job failed.";
     console.error("Async job failed", { jobId, message });
@@ -370,11 +397,15 @@ async function executeJobHandler(
   switch (input.type) {
     case "INGESTION":
       return processIngestionAsyncJob(client, input);
-    case "SYNC_CONNECTOR":
     case "CALCULATE_METRICS":
+      return processMetricCalculationAsyncJob(client, input);
+    case "PROFIT_ANALYSIS":
+      return processProfitAnalysisAsyncJob(client, input);
+    case "SKU_OPTIMIZATION":
+      return processSkuOptimizationAsyncJob(client, input);
+    case "SYNC_CONNECTOR":
     case "GENERATE_REPORT":
     case "GENERATE_INSIGHT":
-    case "SKU_OPTIMIZATION":
     case "SIMULATION":
       throw new Error(`${input.type} handler is registered but has not been migrated to AsyncJob yet.`);
   }
@@ -490,6 +521,193 @@ async function processIngestionAsyncJob(
       schemaStatus: schemaSnapshot?.schemaStatus ?? null,
       canonicalStatus: schemaSnapshot?.canonicalStatus ?? null,
       migratedFrom: "UnifiedIngestionJob"
+    },
+    nextJobs: [
+      {
+        type: "CALCULATE_METRICS",
+        currentStep: "Queued for metric calculation",
+        payload: {
+          dataSourceId: schemaSnapshot?.dataSourceId ?? refreshedIngestionJob.dataSourceId,
+          schemaSnapshotId: schemaSnapshot?.id ?? payloadSchemaSnapshotId
+        } as Prisma.InputJsonValue
+      }
+    ]
+  };
+}
+
+async function processMetricCalculationAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const triggerDataSourceId = typeof input.payload.dataSourceId === "string" ? input.payload.dataSourceId : null;
+  const schemaSnapshotId = typeof input.payload.schemaSnapshotId === "string" ? input.payload.schemaSnapshotId : null;
+  const source = triggerDataSourceId
+    ? await client.dataSourceConnection.findFirst({
+        where: {
+          id: triggerDataSourceId,
+          workspaceId: input.workspaceId
+        },
+        select: {
+          id: true
+        }
+      })
+    : null;
+
+  if (triggerDataSourceId && !source) {
+    throw new Error("Metric calculation source was not found for this workspace.");
+  }
+
+  await input.setJobState({
+    progress: 25,
+    currentStep: "Calculating metric snapshots"
+  });
+
+  const generated = await generateWorkspaceMetricsFromConnectedSources(client, {
+    workspaceId: input.workspaceId
+  }).catch((error) => {
+    console.warn("Metric calculation job completed with degraded metric output", error);
+    return { generatedMetricCount: 0 };
+  });
+
+  await input.setJobState({
+    progress: 85,
+    currentStep: "Metric snapshot ready"
+  });
+
+  return {
+    snapshotType: "METRIC_SNAPSHOT",
+    snapshotVersion: schemaSnapshotId ?? ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+    dataReference: {
+      triggerDataSourceId,
+      schemaSnapshotId,
+      generatedMetricCount: generated.generatedMetricCount ?? 0
+    },
+    metadataJson: {
+      calculationVersion: "metrics_from_canonical_v1"
+    },
+    nextJobs: [
+      {
+        type: "PROFIT_ANALYSIS",
+        currentStep: "Queued for profit analysis",
+        payload: {
+          triggerDataSourceId,
+          schemaSnapshotId
+        } as Prisma.InputJsonValue
+      }
+    ]
+  };
+}
+
+async function processProfitAnalysisAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const triggerDataSourceId = typeof input.payload.triggerDataSourceId === "string"
+    ? input.payload.triggerDataSourceId
+    : typeof input.payload.dataSourceId === "string"
+      ? input.payload.dataSourceId
+      : null;
+  const schemaSnapshotId = typeof input.payload.schemaSnapshotId === "string" ? input.payload.schemaSnapshotId : null;
+
+  await input.setJobState({
+    progress: 25,
+    currentStep: "Normalizing profit inputs"
+  });
+
+  const loaded = await loadEcommerceSalesDashboardData({
+    workspaceId: input.workspaceId,
+    dataSourceId: null,
+    decisionMode: "full"
+  });
+  const profitInputModel = normalizeProfitInputs(loaded.data);
+
+  await input.setJobState({
+    progress: 85,
+    currentStep: "Profit analysis ready"
+  });
+
+  return {
+    snapshotType: "INSIGHT_SNAPSHOT",
+    snapshotVersion: "profit_input_model_v1",
+    dataReference: {
+      triggerDataSourceId,
+      schemaSnapshotId,
+      profitDataCoverage: profitInputModel.profitDataCoverage,
+      optimizationLevel: profitInputModel.optimizationLevel,
+      missingFields: profitInputModel.missingFields
+    },
+    metadataJson: {
+      state: loaded.state,
+      confidenceScore: profitInputModel.confidenceScore,
+      rowCount: profitInputModel.rows.length
+    },
+    nextJobs: [
+      {
+        type: "SKU_OPTIMIZATION",
+        currentStep: "Queued for decision optimization",
+        payload: {
+          triggerDataSourceId,
+          schemaSnapshotId,
+          profitDataCoverage: profitInputModel.profitDataCoverage,
+          optimizationLevel: profitInputModel.optimizationLevel
+        } as Prisma.InputJsonValue
+      }
+    ]
+  };
+}
+
+async function processSkuOptimizationAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const triggerDataSourceId = typeof input.payload.triggerDataSourceId === "string"
+    ? input.payload.triggerDataSourceId
+    : typeof input.payload.dataSourceId === "string"
+      ? input.payload.dataSourceId
+      : null;
+  const schemaSnapshotId = typeof input.payload.schemaSnapshotId === "string" ? input.payload.schemaSnapshotId : null;
+
+  await input.setJobState({
+    progress: 35,
+    currentStep: "Generating decision snapshot"
+  });
+
+  const decisionSnapshots = await generateEcommerceDecisionSnapshots(client, {
+    workspaceId: input.workspaceId,
+    dataSourceId: null
+  });
+
+  await input.setJobState({
+    progress: 90,
+    currentStep: "Decision snapshot ready"
+  });
+
+  return {
+    snapshotType: "DECISION_SNAPSHOT",
+    snapshotVersion: "decision_snapshot_v1",
+    dataReference: {
+      triggerDataSourceId,
+      schemaSnapshotId,
+      generated: decisionSnapshots.generated
+    },
+    metadataJson: {
+      optimizationType: "SKU_OPTIMIZATION",
+      generatedSnapshotCount: decisionSnapshots.generated.length
     }
   };
 }

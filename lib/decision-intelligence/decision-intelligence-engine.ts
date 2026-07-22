@@ -263,6 +263,9 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
   const metrics = metricOutput.metrics;
   const metadata = metricOutput.metadata;
   const isSkuOnlyMode = metricOutput.decisionMode === "sku";
+  const normalizedDataCoverage = metadata.data_coverage > 1 ? metadata.data_coverage / 100 : metadata.data_coverage;
+  const normalizedProfitConfidence = metadata.profit_confidence > 1 ? metadata.profit_confidence / 100 : metadata.profit_confidence;
+  const shouldDeferPortfolioOptimization = isSkuOnlyMode || normalizedDataCoverage < 0.7 || normalizedProfitConfidence < 0.7;
   const totalSkuRevenue = metrics.core.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
   const topRevenueSkus = metrics.core.sku_revenue.map((row) => ({
     sku: row.sku,
@@ -330,8 +333,9 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     confidence: metadata.confidence_score,
     dataCoverage: metadata.data_coverage
   });
+  const analysisSkuRows = shouldDeferPortfolioOptimization ? topProfitSkus.slice(0, 100) : topProfitSkus;
   const profitControlInsights = buildProfitControlInsights({
-    skuRows: topProfitSkus,
+    skuRows: analysisSkuRows,
     totalRevenue: metrics.core.revenue,
     totalNetProfit: metrics.business.net_profit,
     portfolioMargin: metrics.business.margin,
@@ -339,7 +343,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     overallOrderGrowthRate: metrics.growth.order_growth_rate,
     confidence: metadata.confidence_score
   });
-  const skuClassificationSignals = buildSkuClassificationSignals(topProfitSkus);
+  const skuClassificationSignals = buildSkuClassificationSignals(analysisSkuRows);
   const decisionIntelligenceV2 = buildDecisionIntelligenceV2(profitControlInsights);
   const autonomousCommerceRuntime = buildAutonomousCommerceRuntime({
     decision_intelligence_v2: decisionIntelligenceV2,
@@ -348,30 +352,32 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     confidence_score: metadata.confidence_score
   });
   const skuOptimizationAlgorithm = buildSkuOptimizationAlgorithm({
-    rows: topProfitSkus.map((row) => ({
-      sku: row.sku,
-      revenue: row.revenue,
-      quantity: row.quantity,
-      price: row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0,
-      cogs: row.cost_breakdown.cogs,
-      ads_spend: row.ad_cost_allocated,
-      inventory: row.available_stock ?? row.stock_level ?? 0,
-      sales_velocity: row.sales_velocity ?? 0,
-      margin: row.margin
-    })),
+    rows: shouldDeferPortfolioOptimization
+      ? []
+      : topProfitSkus.map((row) => ({
+        sku: row.sku,
+        revenue: row.revenue,
+        quantity: row.quantity,
+        price: row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0,
+        cogs: row.cost_breakdown.cogs,
+        ads_spend: row.ad_cost_allocated,
+        inventory: row.available_stock ?? row.stock_level ?? 0,
+        sales_velocity: row.sales_velocity ?? 0,
+        margin: row.margin
+      })),
     total_ad_budget: metrics.ads.ad_spend
   });
-  const portfolioInputSkus = isSkuOnlyMode ? [] : buildPortfolioOptimizationSkuInputs({
+  const portfolioInputSkus = shouldDeferPortfolioOptimization ? [] : buildPortfolioOptimizationSkuInputs({
     profitRows: topProfitSkus,
     revenueRows: topRevenueSkus,
     metrics,
     confidence: metadata.confidence_score
   });
-  const portfolioAdsBudget = isSkuOnlyMode ? metrics.ads.ad_spend : Math.max(
+  const portfolioAdsBudget = shouldDeferPortfolioOptimization ? metrics.ads.ad_spend : Math.max(
     metrics.ads.ad_spend,
     portfolioInputSkus.reduce((sum, row) => sum + row.ads_spend, 0)
   );
-  const skuPortfolioOptimization = isSkuOnlyMode
+  const skuPortfolioOptimization = shouldDeferPortfolioOptimization
     ? buildDeferredPortfolioOptimization({
         inputSkuCount: metrics.total_sku_count ?? topRevenueSkus.length,
         currentProfit: metrics.business.net_profit,
@@ -399,7 +405,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
           simulation_horizon_days: 30
         }
       });
-  const skuPortfolioReport = isSkuOnlyMode
+  const skuPortfolioReport = shouldDeferPortfolioOptimization
     ? buildDeferredPortfolioOptimizationReport()
     : generatePortfolioOptimizationReport(skuPortfolioOptimization);
 

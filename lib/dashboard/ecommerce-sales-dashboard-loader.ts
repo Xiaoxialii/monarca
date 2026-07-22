@@ -188,34 +188,41 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
   }>>(
     `
       select
-        id,
-        "dataSourceId",
+        snapshot.id,
+        snapshot."dataSourceId",
         jsonb_build_object(
-          'schemaVersion', "schemaJson"->>'schemaVersion',
-          'schema_version', "schemaJson"->>'schema_version',
-          'tables', "schemaJson"->'tables',
-          'sourceProvider', "schemaJson"->>'sourceProvider',
-          'sourcePlatforms', "schemaJson"->'sourcePlatforms',
-          'source_platforms', "schemaJson"->'source_platforms',
-          'syncFinishedAt', "schemaJson"->>'syncFinishedAt',
-          'syncRunId', "schemaJson"->>'syncRunId',
-          'manifestKey', "schemaJson"->>'manifestKey',
-          'checksum', "schemaJson"->'checksum',
-          'missingFields', "schemaJson"->'missingFields',
-          'confidenceScore', "schemaJson"->'confidenceScore',
-          'canonicalDataset', "schemaJson"->'canonicalDataset',
-          'canonical_dataset', "schemaJson"->'canonical_dataset',
-          'dashboardSnapshot', "schemaJson"->'dashboardSnapshot'
+          'schemaVersion', snapshot."schemaJson"->>'schemaVersion',
+          'schema_version', snapshot."schemaJson"->>'schema_version',
+          'tables', snapshot."schemaJson"->'tables',
+          'sourceProvider', snapshot."schemaJson"->>'sourceProvider',
+          'sourcePlatforms', snapshot."schemaJson"->'sourcePlatforms',
+          'source_platforms', snapshot."schemaJson"->'source_platforms',
+          'syncFinishedAt', snapshot."schemaJson"->>'syncFinishedAt',
+          'syncRunId', snapshot."schemaJson"->>'syncRunId',
+          'manifestKey', snapshot."schemaJson"->>'manifestKey',
+          'checksum', snapshot."schemaJson"->'checksum',
+          'missingFields', snapshot."schemaJson"->'missingFields',
+          'confidenceScore', snapshot."schemaJson"->'confidenceScore',
+          'canonicalDataset', snapshot."schemaJson"->'canonicalDataset',
+          'canonical_dataset', snapshot."schemaJson"->'canonical_dataset',
+          'dashboardSnapshot', snapshot."schemaJson"->'dashboardSnapshot'
         ) as "schemaJson"
-      from "SchemaSnapshot"
-      where "workspaceId" = $1
-        ${dataSourceFilter}
+      from "SchemaSnapshot" snapshot
+      left join "DataSourceConnection" source
+        on source.id = snapshot."dataSourceId"
+        and source."workspaceId" = snapshot."workspaceId"
+      where snapshot."workspaceId" = $1
+        ${dataSourceFilter.replaceAll('"dataSourceId"', 'snapshot."dataSourceId"')}
+        and snapshot."dataSourceId" is not null
+        and source."isActive" = true
+        and snapshot."canonicalStatus" = 'READY'
+        and snapshot."canonicalVersion" = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
         and (
-          "schemaJson"->>'schemaVersion' = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
-          or "schemaJson"->>'schema_version' = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
+          snapshot."schemaJson"->>'schemaVersion' = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
+          or snapshot."schemaJson"->>'schema_version' = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
         )
-      order by "createdAt" desc
-      limit 80
+      order by snapshot."createdAt" desc
+      limit 40
     `,
     ...(input.dataSourceId ? [input.workspaceId, input.dataSourceId] : [input.workspaceId])
   );

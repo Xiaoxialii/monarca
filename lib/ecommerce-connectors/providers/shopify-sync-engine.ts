@@ -30,7 +30,7 @@ import {
   buildCanonicalSnapshotJson,
   storeCanonicalSchemaSnapshot
 } from "@/lib/snapshot/canonical-snapshot-generator";
-import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
+import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
 import { buildCanonicalSku } from "@/lib/sku/sku-intelligence-engine";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 
@@ -540,7 +540,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       canonicalDataset
     });
 
-    await prisma.$transaction(async (tx) => {
+    const syncCommit = await prisma.$transaction(async (tx) => {
       await tx.ecommerceSyncArtifact.createMany({
         data: allArtifacts.map((item) => ({
           workspaceId: input.workspaceId,
@@ -646,17 +646,32 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
           } as Prisma.InputJsonValue
         }
       });
+
+      return {
+        schemaSnapshotId: snapshot.id
+      };
     }, {
       timeout: 60_000
     });
 
-    const decisionSnapshots = await generateEcommerceDecisionSnapshots(prisma, {
+    const downstreamJob = await createAsyncJob(prisma, {
       workspaceId: input.workspaceId,
-      dataSourceId: account.dataSourceId
+      type: "CALCULATE_METRICS",
+      currentStep: "Queued after Shopify sync",
+      payload: {
+        dataSourceId: account.dataSourceId,
+        schemaSnapshotId: syncCommit.schemaSnapshotId,
+        syncRunId
+      } as Prisma.InputJsonValue
     }).catch((error) => {
-      console.warn("Failed to generate Shopify decision snapshots", error);
+      console.warn("Failed to create Shopify downstream metric job", error);
       return null;
     });
+    if (downstreamJob?.id) {
+      void processJob(downstreamJob.id).catch((error) => {
+        console.warn("Failed to process Shopify downstream metric job", error);
+      });
+    }
 
     return {
       ok: true,
@@ -670,7 +685,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       missingFields: analytics.missingFields,
       estimationUsed: analytics.estimation_used,
       analytics,
-      decisionSnapshots
+      downstreamJobId: downstreamJob?.id ?? null
     };
   } catch (error) {
     await prisma.ecommerceSyncRun.update({

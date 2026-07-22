@@ -3,10 +3,8 @@ import { readFile } from "node:fs/promises";
 import { csvRowsFromText, excelRowsFromBuffer } from "@/lib/csv-upload-rows";
 import { inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
 import { runUnifiedIngestionPipeline } from "@/lib/ingestion/unified-ingestion-engine";
-import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { prisma } from "@/lib/prisma";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
-import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
@@ -557,21 +555,6 @@ export async function processIngestionJob(
         completedAt: new Date(),
         errorMessage: null
       }
-    });
-
-    if (metadata.userId) {
-      await generateWorkspaceMetricsFromConnectedSources(client, {
-        workspaceId,
-        userId: metadata.userId,
-        dataSourceIds: [dataSourceId]
-      });
-    }
-
-    await generateEcommerceDecisionSnapshots(client, {
-      workspaceId,
-      dataSourceId
-    }).catch((decisionSnapshotError) => {
-      console.warn("Failed to generate upload decision snapshots after ingestion job", decisionSnapshotError);
     });
 
     await clearWorkspaceReportCaches(client, workspaceId).catch((cacheError) => {

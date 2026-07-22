@@ -58,7 +58,7 @@ export async function writeCanonicalDatasetArtifacts(input: {
     };
   }
 
-  return buildCanonicalSnapshotJson({
+  const snapshotJson = buildCanonicalSnapshotJson({
     manifest: {
       sourceProvider: input.sourceProvider,
       businessType: "ecommerce",
@@ -72,4 +72,11 @@ export async function writeCanonicalDatasetArtifacts(input: {
     artifacts,
     canonicalDataset: input.canonicalDataset
   });
+
+  return {
+    ...snapshotJson,
+    canonicalDataset: null,
+    dashboardSnapshot: null,
+    metrics: null
+  };
 }

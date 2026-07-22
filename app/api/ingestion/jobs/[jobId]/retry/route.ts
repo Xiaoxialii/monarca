@@ -1,6 +1,6 @@
 import { WorkspaceRole } from "@prisma/client";
 import { after, NextResponse } from "next/server";
-import { processIngestionJob } from "@/lib/ingestion/unified-ingestion-worker";
+import { processIngestionJob, retryableIngestionJobWhere } from "@/lib/ingestion/unified-ingestion-worker";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -18,13 +18,16 @@ export async function POST(
       where: {
         id: jobId,
         workspaceId: session.workspace.id,
-        status: "FAILED"
+        ...retryableIngestionJobWhere()
       },
       data: {
         status: "QUEUED",
         progress: 0,
         currentStep: "Queued for retry",
         errorMessage: null,
+        heartbeatAt: null,
+        lockedAt: null,
+        lockedBy: null,
         startedAt: null,
         completedAt: null
       }
@@ -32,7 +35,7 @@ export async function POST(
 
     if (reset.count !== 1) {
       return NextResponse.json(
-        { ok: false, message: "Only failed ingestion jobs can be retried." },
+        { ok: false, message: "Only failed or stalled ingestion jobs can be retried." },
         { status: 409 }
       );
     }

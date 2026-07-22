@@ -6,7 +6,6 @@ import { runUnifiedIngestionPipeline } from "@/lib/ingestion/unified-ingestion-e
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { prisma } from "@/lib/prisma";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
-import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
@@ -16,6 +15,65 @@ import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-sna
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
 
 const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
+const ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
+const DEFAULT_STALE_INGESTION_JOB_MS = 10 * 60 * 1000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+
+function configuredDurationMs(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export const STALE_INGESTION_JOB_MS = configuredDurationMs(
+  process.env.UNIFIED_INGESTION_STALE_MS,
+  DEFAULT_STALE_INGESTION_JOB_MS
+);
+const HEARTBEAT_INTERVAL_MS = configuredDurationMs(
+  process.env.UNIFIED_INGESTION_HEARTBEAT_MS,
+  DEFAULT_HEARTBEAT_INTERVAL_MS
+);
+
+function workerId() {
+  return `ingestion-worker-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function staleBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - STALE_INGESTION_JOB_MS);
+}
+
+function staleActiveJobWhere(now = new Date()) {
+  const staleBefore = staleBeforeDate(now);
+
+  return {
+    status: {
+      in: [...ACTIVE_INGESTION_JOB_STATUSES]
+    },
+    OR: [
+      {
+        heartbeatAt: {
+          lt: staleBefore
+        }
+      },
+      {
+        heartbeatAt: null,
+        updatedAt: {
+          lt: staleBefore
+        }
+      }
+    ]
+  };
+}
+
+export function retryableIngestionJobWhere(now = new Date()) {
+  return {
+    OR: [
+      {
+        status: "FAILED"
+      },
+      staleActiveJobWhere(now)
+    ]
+  };
+}
 
 type UploadSource = "csv" | "excel";
 
@@ -43,6 +101,30 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function metadataValue(value: unknown): IngestionJobMetadata {
   return objectValue(value) as IngestionJobMetadata;
+}
+
+function compactDataSourceConfig(configValue: unknown, metadata: IngestionJobMetadata) {
+  const config = objectValue(configValue);
+  const storage = objectValue(config.storage);
+  const metadataStorage = metadata.storage ?? {};
+
+  return {
+    type: typeof config.type === "string" ? config.type : metadata.source,
+    fileName: typeof config.fileName === "string" ? config.fileName : metadata.fileName,
+    fileSize: typeof config.fileSize === "number" ? config.fileSize : metadata.fileSize,
+    mimeType: typeof config.mimeType === "string" ? config.mimeType : metadata.mimeType ?? null,
+    extension: typeof config.extension === "string" ? config.extension : metadata.extension,
+    storage: {
+      provider: typeof storage.provider === "string" ? storage.provider : metadataStorage.provider ?? null,
+      key: typeof storage.key === "string" ? storage.key : metadataStorage.key ?? null,
+      path: typeof storage.path === "string" ? storage.path : metadataStorage.path ?? null,
+      bucket: typeof storage.bucket === "string" ? storage.bucket : metadataStorage.bucket ?? null
+    },
+    storageProvider: typeof config.storageProvider === "string" ? config.storageProvider : metadataStorage.provider ?? null,
+    objectKey: typeof config.objectKey === "string" ? config.objectKey : metadataStorage.key ?? null,
+    storagePath: typeof config.storagePath === "string" ? config.storagePath : metadataStorage.path ?? null,
+    storedFilePath: typeof config.storedFilePath === "string" ? config.storedFilePath : null
+  };
 }
 
 function publicTables(tables: Array<{
@@ -95,9 +177,7 @@ function canonicalSummary(input: {
       mappingConfidence: input.result.canonical_data.metadata.mapping_confidence,
       unknownFieldCount: input.result.canonical_data.metadata.unknown_fields.length
     },
-    metrics: input.result.metrics,
-    learning: input.result.learning,
-    audit: input.result.metadata.audit
+    learning: input.result.learning
   };
 }
 
@@ -122,14 +202,51 @@ async function updateJob(
     progress?: number;
     currentStep?: string | null;
     errorMessage?: string | null;
+    heartbeatAt?: Date | null;
+    lockedAt?: Date | null;
+    lockedBy?: string | null;
     startedAt?: Date;
     completedAt?: Date | null;
   }
 ) {
-  await client.unifiedIngestionJob.update({
+  await client.unifiedIngestionJob.updateMany({
     where: { id: jobId },
-    data
+    data: {
+      ...data,
+      heartbeatAt: data.heartbeatAt === undefined ? new Date() : data.heartbeatAt
+    }
   });
+}
+
+function startHeartbeat(
+  client: PrismaClient,
+  jobId: string,
+  getState: () => { currentStep: string | null; progress: number }
+) {
+  const interval = setInterval(() => {
+    const state = getState();
+    void client.unifiedIngestionJob.updateMany({
+      where: {
+        id: jobId,
+        status: {
+          in: [...ACTIVE_INGESTION_JOB_STATUSES]
+        }
+      },
+      data: {
+        heartbeatAt: new Date(),
+        currentStep: state.currentStep,
+        progress: state.progress
+      }
+    }).catch((error) => {
+      console.warn("Failed to update ingestion job heartbeat", { jobId, error });
+    });
+  }, HEARTBEAT_INTERVAL_MS);
+
+  if (typeof interval.unref === "function") {
+    interval.unref();
+  }
+
+  return () => clearInterval(interval);
 }
 
 async function readUploadedFile(metadata: IngestionJobMetadata, source: UploadSource) {
@@ -169,18 +286,39 @@ export async function processIngestionJob(
   options: { client?: PrismaClient } = {}
 ) {
   const client = options.client ?? prisma;
+  const owner = workerId();
+  const previousJob = await client.unifiedIngestionJob.findUnique({
+    where: { id: jobId },
+    select: {
+      status: true,
+      retryCount: true
+    }
+  });
+  const shouldIncrementRetryCount = Boolean(previousJob && previousJob.status !== "QUEUED");
   const lock = await client.unifiedIngestionJob.updateMany({
     where: {
       id: jobId,
-      status: {
-        in: ["QUEUED", "FAILED"]
-      }
+      OR: [
+        {
+          status: "QUEUED"
+        },
+        {
+          status: "FAILED"
+        },
+        staleActiveJobWhere()
+      ]
     },
     data: {
       status: "PROCESSING",
       progress: 5,
       currentStep: "Loading uploaded file",
       errorMessage: null,
+      heartbeatAt: new Date(),
+      lockedAt: new Date(),
+      lockedBy: owner,
+      retryCount: {
+        increment: shouldIncrementRetryCount ? 1 : 0
+      },
       startedAt: new Date(),
       completedAt: null
     }
@@ -200,6 +338,28 @@ export async function processIngestionJob(
   const fileName = metadata.fileName;
   const schemaSnapshotId = metadata.schemaSnapshotId;
   const provider = metadata.provider ?? (source === "csv" ? "CSV" : "Excel");
+  let currentStep: string | null = "Loading uploaded file";
+  let currentProgress = 5;
+  const stopHeartbeat = startHeartbeat(client, jobId, () => ({
+    currentStep,
+    progress: currentProgress
+  }));
+  let heartbeatStopped = false;
+  const stopJobHeartbeat = () => {
+    if (heartbeatStopped) return;
+    heartbeatStopped = true;
+    stopHeartbeat();
+  };
+
+  const setJobState = async (data: Parameters<typeof updateJob>[2]) => {
+    if (typeof data.currentStep !== "undefined") {
+      currentStep = data.currentStep;
+    }
+    if (typeof data.progress === "number") {
+      currentProgress = data.progress;
+    }
+    await updateJob(client, jobId, data);
+  };
 
   try {
     if (!job || !workspaceId || !dataSourceId || !schemaSnapshotId || (source !== "csv" && source !== "excel") || !fileName) {
@@ -208,7 +368,7 @@ export async function processIngestionJob(
 
     const content = await readUploadedFile(metadata, source);
 
-    await updateJob(client, jobId, {
+    await setJobState({
       status: "PROCESSING",
       progress: 20,
       currentStep: "Inferring source schema"
@@ -217,30 +377,26 @@ export async function processIngestionJob(
     const tables = await inferSchema(source, fileName, content);
     const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
-    const analysisReport = generateUniversalDataAnalysisReport(schemaTables);
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const schemaPayload = {
       scannedAt: new Date().toISOString(),
       fileName,
       fileSize: metadata.fileSize ?? 0,
       tables: schemaTables,
-      semanticLayer,
       unifiedIngestion: pendingUnifiedIngestionSummary({
         source,
         totalParsedRows: tables.reduce((sum, table) => sum + (table.rowCount ?? 0), 0)
-      }),
-      analysisReport
+      })
     };
     const qualityReport = {
       tableCount: tables.length,
       columnCount,
       semanticFieldCount: semanticLayer.fields.length,
       businessEntityCount: semanticLayer.entities.length,
-      generatedMetricCount: semanticLayer.metrics.length,
-      analysisReport
+      generatedMetricCount: semanticLayer.metrics.length
     };
 
-    if (schemaSnapshotId) await client.schemaSnapshot.update({
+    if (schemaSnapshotId) await client.schemaSnapshot.updateMany({
       where: { id: schemaSnapshotId },
       data: {
         schemaStatus: "PROCESSING",
@@ -256,7 +412,7 @@ export async function processIngestionJob(
       }
     });
 
-    await updateJob(client, jobId, {
+    await setJobState({
       status: "CANONICALIZING",
       progress: 45,
       currentStep: "Building canonical model"
@@ -282,7 +438,7 @@ export async function processIngestionJob(
       result: ingestionResult
     });
 
-    await updateJob(client, jobId, {
+    await setJobState({
       status: "CANONICALIZING",
       progress: 75,
       currentStep: "Generating canonical artifact"
@@ -308,25 +464,29 @@ export async function processIngestionJob(
       ...canonicalSchemaJson
     } as Prisma.InputJsonValue;
 
-    await updateJob(client, jobId, {
+    await setJobState({
       status: "SCHEMA_READY",
       progress: 90,
       currentStep: "Saving schema snapshot"
     });
 
-    const existingDataSourceConfig = objectValue((await client.dataSourceConnection.findUnique({
-      where: { id: dataSourceId },
-      select: { config: true }
-    }))?.config);
-
-    await client.dataSourceConnection.update({
+    await client.dataSourceConnection.updateMany({
       where: { id: dataSourceId },
       data: {
-        schemas: completedSchemaPayload as Prisma.InputJsonValue
+        schemas: {
+          scannedAt: completedSchemaPayload.scannedAt,
+          fileName,
+          fileSize: metadata.fileSize ?? 0,
+          tableCount: qualityReport.tableCount,
+          columnCount: qualityReport.columnCount,
+          canonicalStatus: "READY",
+          canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+          schemaSnapshotId
+        } as Prisma.InputJsonValue
       }
     });
 
-    await client.schemaSnapshot.update({
+    await client.schemaSnapshot.updateMany({
       where: { id: schemaSnapshotId },
       data: {
         schemaJson,
@@ -337,44 +497,47 @@ export async function processIngestionJob(
       }
     });
 
-    await client.$transaction(async (tx) => {
-      await tx.dataSourceConnection.update({
-        where: { id: dataSourceId },
-        data: {
-          isActive: true,
-          status: ConnectionStatus.CONNECTED,
-          lastErrorMessage: null,
-          config: {
-            ...existingDataSourceConfig,
-            schemaSnapshotId,
-            schemaVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-            canonicalStatus: "READY"
-          } as Prisma.InputJsonValue
-        }
-      });
+    await client.schemaSnapshot.updateMany({
+      where: { id: schemaSnapshotId },
+      data: {
+        status: ConnectionStatus.CONNECTED,
+        schemaStatus: "READY",
+        canonicalStatus: "READY",
+        canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
+      }
+    });
 
-      await tx.schemaSnapshot.update({
-        where: { id: schemaSnapshotId },
-        data: {
-          status: ConnectionStatus.CONNECTED,
-          schemaStatus: "READY",
-          canonicalStatus: "READY",
-          canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
-        }
-      });
+    await client.dataSourceConnection.updateMany({
+      where: { id: dataSourceId },
+      data: {
+        isActive: true,
+        status: ConnectionStatus.CONNECTED,
+        lastErrorMessage: null,
+        config: {
+          ...compactDataSourceConfig({}, metadata),
+          schemaSnapshotId,
+          schemaVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+          canonicalStatus: "READY"
+        } as Prisma.InputJsonValue
+      }
+    });
 
-      await tx.unifiedIngestionJob.update({
-        where: { id: jobId },
-        data: {
-          status: "COMPLETED",
-          progress: 100,
-          currentStep: "Ready",
-          completedAt: new Date(),
-          errorMessage: null
-        }
-      });
-    }, {
-      timeout: 5_000
+    currentStep = "Completing ingestion job";
+    currentProgress = 95;
+    stopJobHeartbeat();
+
+    await client.unifiedIngestionJob.updateMany({
+      where: { id: jobId },
+      data: {
+        status: "COMPLETED",
+        progress: 100,
+        currentStep: "Ready",
+        heartbeatAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: new Date(),
+        errorMessage: null
+      }
     });
 
     if (metadata.userId) {
@@ -401,7 +564,7 @@ export async function processIngestionJob(
     const message = error instanceof Error ? error.message : "Unified ingestion failed.";
     console.error("Unified ingestion job failed", { jobId, message });
 
-    await client.schemaSnapshot.update({
+    await client.schemaSnapshot.updateMany({
       where: { id: schemaSnapshotId },
       data: {
         status: ConnectionStatus.FAILED,
@@ -417,32 +580,26 @@ export async function processIngestionJob(
     });
 
     if (dataSourceId) {
-      const existingDataSourceConfig = objectValue((await client.dataSourceConnection.findUnique({
-        where: { id: dataSourceId },
-        select: { config: true }
-      }))?.config);
-
-      await client.dataSourceConnection.update({
+      await client.dataSourceConnection.updateMany({
         where: { id: dataSourceId },
         data: {
           status: ConnectionStatus.FAILED,
-          lastErrorMessage: message,
-          config: {
-            ...existingDataSourceConfig,
-            canonicalStatus: "FAILED"
-          } as Prisma.InputJsonValue
+          lastErrorMessage: message
         }
       }).catch((updateError) => {
         console.error("Failed to mark data source ingestion failure", updateError);
       });
     }
 
-    await client.unifiedIngestionJob.update({
+    await client.unifiedIngestionJob.updateMany({
       where: { id: jobId },
       data: {
         status: "FAILED",
         progress: 100,
         currentStep: "Failed",
+        heartbeatAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
         completedAt: new Date(),
         errorMessage: message
       }
@@ -451,5 +608,52 @@ export async function processIngestionJob(
     });
 
     return { ok: false, jobId, error: message };
+  } finally {
+    stopJobHeartbeat();
   }
+}
+
+export async function recoverStaleIngestionJobs(
+  options: {
+    client?: PrismaClient;
+    workspaceId?: string;
+    limit?: number;
+  } = {}
+) {
+  const client = options.client ?? prisma;
+  const jobs = await client.unifiedIngestionJob.findMany({
+    where: {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...staleActiveJobWhere()
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      dataSourceId: true,
+      status: true,
+      progress: true,
+      currentStep: true,
+      heartbeatAt: true,
+      updatedAt: true
+    },
+    orderBy: {
+      updatedAt: "asc"
+    },
+    take: options.limit ?? 10
+  });
+  const results = [];
+
+  for (const job of jobs) {
+    const result = await processIngestionJob(job.id, { client });
+    results.push({
+      job,
+      result
+    });
+  }
+
+  return {
+    recovered: results.filter((item) => item.result.ok).length,
+    attempted: results.length,
+    results
+  };
 }

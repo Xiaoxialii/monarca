@@ -929,6 +929,10 @@ model UnifiedIngestionJob {
   progress      Int       @default(0)
   currentStep   String?
   errorMessage  String?
+  heartbeatAt   DateTime?
+  lockedAt      DateTime?
+  lockedBy      String?
+  retryCount    Int       @default(0)
   startedAt     DateTime?
   completedAt   DateTime?
   createdAt     DateTime  @default(now())
@@ -937,6 +941,7 @@ model UnifiedIngestionJob {
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, status])
+  @@index([status, heartbeatAt])
   @@index([workspaceId, createdAt])
   @@index([dataSourceId])
 }

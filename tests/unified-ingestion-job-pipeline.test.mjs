@@ -50,6 +50,7 @@ test("worker owns canonicalization and commits schema state in a short transacti
   assert.match(worker, /status:\s*\{\s*in:\s*\["QUEUED", "FAILED"\]/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
+  assert.match(worker, /generateEcommerceDecisionSnapshots\(client/);
   assert.match(worker, /canonicalVersion:\s*ECOMMERCE_CANONICAL_SCHEMA_VERSION/);
   assert.match(worker, /\$transaction\([\s\S]*timeout:\s*1_000/);
   assert.match(worker, /status:\s*"FAILED"/);

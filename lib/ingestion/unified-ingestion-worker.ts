@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { csvRowsFromText, excelRowsFromBuffer } from "@/lib/csv-upload-rows";
 import { inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
 import { runUnifiedIngestionPipeline } from "@/lib/ingestion/unified-ingestion-engine";
+import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { prisma } from "@/lib/prisma";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
@@ -371,6 +372,13 @@ export async function processIngestionJob(
         dataSourceIds: [dataSourceId]
       });
     }
+
+    await generateEcommerceDecisionSnapshots(client, {
+      workspaceId,
+      dataSourceId
+    }).catch((decisionSnapshotError) => {
+      console.warn("Failed to generate upload decision snapshots after ingestion job", decisionSnapshotError);
+    });
 
     await clearWorkspaceReportCaches(client, workspaceId).catch((cacheError) => {
       console.warn("Failed to clear report caches after ingestion job", cacheError);

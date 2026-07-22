@@ -17585,7 +17585,6 @@ export function Dashboard({
     }
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 120000);
-    let loadedSources = false;
 
     try {
       const response = await fetch("/api/data-sources", {
@@ -17611,15 +17610,12 @@ export function Dashboard({
         writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId);
         setConnectedSources(nextSources);
         setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
-        loadedSources = true;
       }
     } catch (error) {
       console.warn("[dashboard] Failed to load connected sources", error);
     } finally {
       window.clearTimeout(timeoutId);
-      if (loadedSources || connectedSourcesCache) {
-        setIsLoadingConnectedSources(false);
-      }
+      setIsLoadingConnectedSources(false);
     }
   }, []);
 

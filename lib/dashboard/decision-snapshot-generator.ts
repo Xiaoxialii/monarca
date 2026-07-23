@@ -111,6 +111,8 @@ function compactDecisionReport(
   report: NonNullable<LoadDashboardResult["data"]["decision_report"]>,
   skuDecisions: unknown[]
 ) {
+  const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions);
+
   return {
     ...report,
     sku_breakdown: {
@@ -119,11 +121,13 @@ function compactDecisionReport(
       top_profit_skus: report.sku_breakdown.top_profit_skus.slice(0, SNAPSHOT_ROW_LIMIT)
     },
     sku_optimization_algorithm: compactSkuOptimizationAlgorithm(report.sku_optimization_algorithm),
-    sku_portfolio_optimization: compactPortfolioOptimization(report.sku_portfolio_optimization),
+    sku_portfolio_optimization: compactPortfolio,
     sku_portfolio_report: compactPortfolioReport(report.sku_portfolio_report),
     skuDecisions: skuDecisions.slice(0, SNAPSHOT_ROW_LIMIT),
-    riskAlerts: report.riskAlerts.slice(0, 50),
-    executionPlan: report.executionPlan.slice(0, 50),
+    portfolioSummary: compactPortfolio.portfolioSummary,
+    allocationRecommendation: compactPortfolio.allocationRecommendation,
+    riskAlerts: compactPortfolio.riskAlerts,
+    executionPlan: compactPortfolio.executionPlan,
     profit_control_insights: report.profit_control_insights.slice(0, SNAPSHOT_ROW_LIMIT),
     sku_classification_signals: report.sku_classification_signals.slice(0, SNAPSHOT_ROW_LIMIT)
   };
@@ -150,11 +154,41 @@ function compactSkuOptimizationAlgorithm(
 }
 
 function compactPortfolioOptimization(
-  optimization: LoadDashboardResult["data"]["decision_report"]["sku_portfolio_optimization"]
+  optimization: LoadDashboardResult["data"]["decision_report"]["sku_portfolio_optimization"],
+  fallbackSkuDecisions: unknown[] = []
 ) {
+  const portfolioSkuDecisions = optimization.skuDecisions.length
+    ? optimization.skuDecisions
+    : fallbackSkuDecisions;
+  const compactSkuDecisions = portfolioSkuDecisions.slice(0, SNAPSHOT_ROW_LIMIT);
+  const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
+  const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
+    const record = asRecord(row);
+    return sum + (toNumber(record?.expectedProfitImpact) ?? toNumber(record?.estimatedProfitImpact) ?? 0);
+  }, 0);
+
   return {
     ...optimization,
+    optimization_summary: {
+      ...optimization.optimization_summary,
+      total_opportunities: Math.max(optimization.optimization_summary.total_opportunities, compactSkuDecisions.length),
+      selected_sku_count: Math.max(optimization.optimization_summary.selected_sku_count, compactSkuDecisions.length),
+      expected_profit_gain: optimization.optimization_summary.expected_profit_gain || totalProfitImpact,
+      total_expected_profit_gain: optimization.optimization_summary.total_expected_profit_gain || totalProfitImpact,
+      constraints_applied: Array.from(new Set([
+        ...optimization.optimization_summary.constraints_applied,
+        ...(optimization.skuDecisions.length ? [] : ["partial_recommendations_from_profit_input_model"])
+      ]))
+    },
     recommended_portfolio: optimization.recommended_portfolio.slice(0, SNAPSHOT_ROW_LIMIT),
+    portfolioSummary: optimization.portfolioSummary.totalProfitImpact || compactSkuDecisions.length
+      ? {
+        ...optimization.portfolioSummary,
+        totalProfitImpact: optimization.portfolioSummary.totalProfitImpact || totalProfitImpact,
+        monitorCount: Math.max(optimization.portfolioSummary.monitorCount, monitorCount),
+        optimizeCount: optimization.portfolioSummary.optimizeCount || Math.max(0, compactSkuDecisions.length - monitorCount)
+      }
+      : optimization.portfolioSummary,
     lifecycleClassifications: optimization.lifecycleClassifications.slice(0, SNAPSHOT_ROW_LIMIT),
     currentPortfolio: Array.isArray((optimization as unknown as Record<string, unknown>).currentPortfolio)
       ? ((optimization as unknown as Record<string, unknown>).currentPortfolio as unknown[]).slice(0, SNAPSHOT_ROW_LIMIT)
@@ -164,9 +198,19 @@ function compactPortfolioOptimization(
       current: optimization.allocationRecommendation.current.slice(0, SNAPSHOT_ROW_LIMIT),
       recommended: optimization.allocationRecommendation.recommended.slice(0, SNAPSHOT_ROW_LIMIT)
     },
-    skuDecisions: optimization.skuDecisions.slice(0, SNAPSHOT_ROW_LIMIT),
+    skuDecisions: compactSkuDecisions,
     riskAlerts: optimization.riskAlerts.slice(0, 50),
-    executionPlan: optimization.executionPlan.slice(0, 50),
+    executionPlan: optimization.executionPlan.length
+      ? optimization.executionPlan.slice(0, 50)
+      : compactSkuDecisions.length
+        ? [{
+          step: 1,
+          action: "MONITOR",
+          description: "Review partial optimization recommendations after enriching cost, refund, inventory, and ad spend inputs.",
+          skuIds: compactSkuDecisions.map((row) => String(asRecord(row)?.skuId ?? "")).filter(Boolean),
+          estimatedProfitImpact: totalProfitImpact
+        }]
+        : [],
     budget_plan: optimization.budget_plan.slice(0, SNAPSHOT_ROW_LIMIT),
     pricing_plan: optimization.pricing_plan.slice(0, SNAPSHOT_ROW_LIMIT),
     inventory_plan: optimization.inventory_plan.slice(0, SNAPSHOT_ROW_LIMIT),
@@ -209,25 +253,152 @@ function partialSkuRecommendations(
   return topRows.slice(0, 10).map((row, index) => {
     const profitRow = profitInputModel.rows.find((item) => item.sku === row.sku);
     const confidence = Math.max(0.25, profitRow?.confidence ?? profitInputModel.confidenceScore);
+    const action = "OPTIMIZE";
+    const sourceAction = profitInputModel.profitDataCoverage >= 70 ? "VALIDATE_AND_SCALE" : "ENRICH_PROFIT_INPUTS";
+    const recommendation = profitInputModel.profitDataCoverage >= 70
+      ? "Revenue and demand signals are available, but missing cost inputs reduce profit certainty. Validate unit costs and fulfillment costs before increasing spend materially."
+      : "Sales activity is present, but profit inputs are incomplete. Track this SKU and enrich cost, inventory, refund, and ad spend data before running full optimization.";
+    const title = profitInputModel.profitDataCoverage >= 70
+      ? `Review growth opportunity for ${row.sku}`
+      : `Enrich profit inputs for ${row.sku}`;
+    const missingFields = profitRow?.missingFields.length ? profitRow.missingFields : profitInputModel.missingFields;
 
     return {
       id: `partial-${row.sku}-${index}`,
+      skuId: row.sku,
       sku: row.sku,
-      action: profitInputModel.profitDataCoverage >= 70 ? "MONITOR_AND_SCALE" : "MONITOR_TREND",
-      title: profitInputModel.profitDataCoverage >= 70
-        ? `Review growth opportunity for ${row.sku}`
-        : `Monitor sales trend for ${row.sku}`,
-      recommendation: profitInputModel.profitDataCoverage >= 70
-        ? "Revenue and demand signals are available, but missing cost inputs reduce profit certainty. Validate unit costs and fulfillment costs before increasing spend materially."
-        : "Sales activity is present, but profit inputs are incomplete. Track this SKU and enrich cost, inventory, refund, and ad spend data before running full optimization.",
-      expectedProfitImpact: null,
+      action,
+      skuRole: "GROWTH",
+      sourceAction,
+      inventoryRisk: false,
+      budgetOpportunity: profitInputModel.profitDataCoverage >= 70,
+      expectedProfitImpact: 0,
+      estimatedProfitImpact: 0,
       revenue: row.revenue,
       units: row.quantity,
       confidence,
       confidenceScore: confidence,
-      missingFields: profitRow?.missingFields.length ? profitRow.missingFields : profitInputModel.missingFields,
+      action_score: confidence,
+      risk: 1 - confidence,
+      risk_level: "medium",
+      cash_impact: 0,
+      time_to_impact: "After profit inputs are enriched",
+      optimization_goal: profitInputModel.profitDataCoverage >= 70 ? "GROWTH_VALIDATION" : "INPUT_ENRICHMENT",
+      unified_action: sourceAction,
+      display: {
+        title,
+        icon: "trend",
+        category: profitInputModel.profitDataCoverage >= 70 ? "growth" : "portfolio-health",
+        description: recommendation,
+        subtitle: "Partial optimization",
+        reason: missingFields.slice(0, 3).join(", ") || "Profit inputs are incomplete.",
+        impact_label: "Input enrichment required"
+      },
+      reasoning: {
+        title: "Partial recommendation generated from available sales signals.",
+        reasons: missingFields.slice(0, 3).map((field) => ({
+          signal: "Missing input",
+          metric: field,
+          explanation: "This field is required before generating reliable profit impact."
+        })),
+        summary: recommendation
+      },
+      priority: index + 1,
+      reasons: [recommendation],
+      decisionDrivers: [],
+      causalExplanation: {
+        summary: recommendation,
+        primaryDriver: "Data completeness",
+        supportingSignals: missingFields.slice(0, 5)
+      },
+      risks: missingFields.slice(0, 5),
+      comparisonInsights: [],
+      recommendedActions: [recommendation],
+      recommendedExecution: [recommendation],
+      evidence: {
+        margin: profitRow?.contribution_margin ?? 0,
+        roas: null,
+        inventoryRunwayDays: null,
+        revenueDelta: 0,
+        marginChange: 0
+      },
+      simulation_horizon: {
+        days: 30,
+        start_date: new Date().toISOString().slice(0, 10),
+        end_date: new Date(Date.now() + 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      },
+      timing: {
+        action_start_at: new Date().toISOString(),
+        simulation_window_days: 30,
+        simulation_window_start: new Date().toISOString().slice(0, 10),
+        simulation_window_end: new Date(Date.now() + 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        baseline_period_start: new Date().toISOString().slice(0, 10),
+        baseline_period_end: new Date().toISOString().slice(0, 10),
+        tracking_window_days: 30,
+        tracking_window_start: new Date().toISOString().slice(0, 10),
+        tracking_window_end: new Date(Date.now() + 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        timing_source: "fallback_today"
+      },
+      confidence_breakdown: {
+        data_quality: confidence,
+        model_confidence: confidence,
+        action_confidence: confidence,
+        risk_confidence: confidence
+      },
+      constraints_passed: ["partial_recommendation"],
+      ai_evidence: [],
+      scenarios: [],
+      alternative_actions: [],
+      selected_scenario: {
+        action: sourceAction,
+        profit_delta: 0,
+        confidence,
+        selected: true,
+        status: "Selected"
+      },
+      decision_explanation: {
+        selected_action: sourceAction,
+        selection_reason: recommendation,
+        rejected_actions: []
+      },
+      tracking_status: "RECOMMENDED",
+      feedback: {
+        prediction_error: null,
+        actual_profit_lift: null,
+        learned: false
+      },
+      sku_decision_object: {
+        sku: row.sku,
+        action: sourceAction,
+        recommendation,
+        expected_profit_impact: 0,
+        confidence,
+        scenarios: []
+      },
+      title,
+      recommendation,
+      missingFields,
       optimizationLevel: profitInputModel.optimizationLevel,
       estimated: true
     };
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
 }

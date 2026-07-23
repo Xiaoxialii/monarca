@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
 import jitiFactory from "jiti";
 
 const require = createRequire(import.meta.url);
+const Module = require("module");
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
+  if (typeof request === "string" && request.startsWith("@/")) {
+    return originalResolveFilename.call(this, join(process.cwd(), request.slice(2)), parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+
 const jiti = jitiFactory(process.cwd() + "/");
 const { calculateCostIntelligence } = jiti("./lib/cost/cost-intelligence-engine.ts");
 const { resolveCogsSemantic } = jiti("./lib/semantic/cost/cogs-semantic-resolver.ts");
@@ -260,6 +271,32 @@ test("SKU profit allocation computes full P&L with campaign ad allocation and ch
   assert.equal(skuB?.channel_breakdown.amazon, 300);
   assert.equal(skuB?.ad_allocation_method, "campaign_window");
   assert.equal(skuB?.cost_breakdown.ads, 60);
+});
+
+test("SKU channel breakdown excludes inventory and file transport sources", () => {
+  const result = calculateCostIntelligence({
+    revenue: 300,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU-A", quantity: 1, price: 100, unit_cost: 40, platform: "shopify" },
+      { order_id: "O-2", sku: "SKU-A", quantity: 1, price: 100, unit_cost: 40, platform: "inventory" },
+      { order_id: "O-3", sku: "SKU-A", quantity: 1, price: 100, unit_cost: 40, platform: "excel" }
+    ],
+    products: [],
+    orders: [
+      { order_id: "O-1", revenue: 100, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "O-2", revenue: 100, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "O-3", revenue: 100, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 }
+    ],
+    ads: []
+  });
+
+  const row = result.sku_unit_economics.find((item) => item.sku === "SKU-A");
+  assert.equal(row?.channel_breakdown.shopify, 100);
+  assert.equal(row?.channel_breakdown.inventory, undefined);
+  assert.equal(row?.channel_breakdown.excel, undefined);
+  assert.deepEqual(row?.channel_details.map((channel) => channel.platform), ["shopify"]);
 });
 
 test("time-aware ad attribution excludes orders before campaign start", () => {

@@ -28,6 +28,7 @@ import {
   YAxis
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
 import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 import { cn } from "@/lib/utils";
 
@@ -328,7 +329,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
     const showsAllSkus = skuChannel === "all";
 
     return skuRows
-      .filter((row) => showsAllSkus || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
+      .filter((row) => showsAllSkus || skuRowHasRevenueChannel(row, skuChannel))
       .sort((a, b) => {
         const aRankValue = showsAllSkus ? a.revenue : getSkuChannelRevenue(a, skuChannel);
         const bRankValue = showsAllSkus ? b.revenue : getSkuChannelRevenue(b, skuChannel);
@@ -339,8 +340,14 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   const skuChannelTags = useMemo(() => {
     const channels = new Set<string>();
     for (const row of skuRows) {
-      for (const channel of row.channel_details) channels.add(channel.platform);
-      for (const channel of Object.keys(row.channel_breakdown)) channels.add(channel);
+      for (const channel of row.channel_details) {
+        const platform = normalizeRevenueChannel(channel.platform);
+        if (isRevenueChannel(platform)) channels.add(platform);
+      }
+      for (const channel of Object.keys(row.channel_breakdown)) {
+        const platform = normalizeRevenueChannel(channel);
+        if (isRevenueChannel(platform) && row.channel_breakdown[channel] > 0) channels.add(platform);
+      }
     }
     return ["all", ...Array.from(channels).filter(Boolean).sort()];
   }, [skuRows]);
@@ -731,9 +738,10 @@ function summarizeInventoryRows(rows: InventoryBreakdownRow[]): InventorySummary
 }
 
 function primaryInventoryChannel(row: SkuReportRow) {
-  if (row.channel_details.length > 1) return "multi-channel";
-  if (row.channel_details.length === 1) return row.channel_details[0].platform || "unknown";
-  const channels = Object.entries(row.channel_breakdown).filter(([, revenue]) => revenue > 0);
+  const details = row.channel_details.filter((channel) => isRevenueChannel(channel.platform));
+  if (details.length > 1) return "multi-channel";
+  if (details.length === 1) return details[0].platform || "unknown";
+  const channels = Object.entries(row.channel_breakdown).filter(([channel, revenue]) => isRevenueChannel(channel) && revenue > 0);
   if (channels.length > 1) return "multi-channel";
   return channels[0]?.[0] || "unknown";
 }
@@ -1251,7 +1259,7 @@ function SkuPortfolioOptimizationPanel({
     const showsAllSkus = skuChannel === "all";
 
     return skuRows
-      .filter((row) => showsAllSkus || row.channel_details.some((channel) => channel.platform === skuChannel) || row.channel_breakdown[skuChannel] > 0)
+      .filter((row) => showsAllSkus || skuRowHasRevenueChannel(row, skuChannel))
       .sort((a, b) => {
         const aRankValue = showsAllSkus ? a.revenue : getSkuChannelRevenue(a, skuChannel);
         const bRankValue = showsAllSkus ? b.revenue : getSkuChannelRevenue(b, skuChannel);
@@ -1261,8 +1269,14 @@ function SkuPortfolioOptimizationPanel({
   const skuChannelTags = useMemo(() => {
     const channels = new Set<string>();
     for (const row of skuRows) {
-      for (const channel of row.channel_details) channels.add(channel.platform);
-      for (const channel of Object.keys(row.channel_breakdown)) channels.add(channel);
+      for (const channel of row.channel_details) {
+        const platform = normalizeRevenueChannel(channel.platform);
+        if (isRevenueChannel(platform)) channels.add(platform);
+      }
+      for (const channel of Object.keys(row.channel_breakdown)) {
+        const platform = normalizeRevenueChannel(channel);
+        if (isRevenueChannel(platform) && row.channel_breakdown[channel] > 0) channels.add(platform);
+      }
     }
     return ["all", ...Array.from(channels).filter(Boolean).sort()];
   }, [skuRows]);
@@ -5492,10 +5506,11 @@ function DetailMuted({ children }: { children: ReactNode }) {
 }
 
 function ChannelMix({ row }: { row: SkuReportRow }) {
-  const details = row.channel_details.length ? row.channel_details : Object.entries(row.channel_breakdown)
-    .filter(([, revenue]) => revenue > 0)
+  const revenueDetails = row.channel_details.filter((channel) => isRevenueChannel(channel.platform) && channel.revenue > 0);
+  const details = revenueDetails.length ? revenueDetails : Object.entries(row.channel_breakdown)
+    .filter(([channel, revenue]) => isRevenueChannel(channel) && revenue > 0)
     .map(([platform, revenue]) => ({
-      platform,
+      platform: normalizeRevenueChannel(platform),
       revenue,
       quantity: 0,
       profit: 0,
@@ -5596,9 +5611,15 @@ function reportRendererLocale() {
 }
 
 function getSkuChannelRevenue(row: SkuReportRow, channel: string) {
-  const detail = row.channel_details.find((item) => item.platform === channel);
+  if (!isRevenueChannel(channel)) return 0;
+  const normalizedChannel = normalizeRevenueChannel(channel);
+  const detail = row.channel_details.find((item) => normalizeRevenueChannel(item.platform) === normalizedChannel && isRevenueChannel(item.platform));
   if (detail) return detail.revenue;
-  return row.channel_breakdown[channel] ?? 0;
+  return row.channel_breakdown[normalizedChannel] ?? row.channel_breakdown[channel] ?? 0;
+}
+
+function skuRowHasRevenueChannel(row: SkuReportRow, channel: string) {
+  return getSkuChannelRevenue(row, channel) > 0;
 }
 
 function EmptyBlock({ label }: { label: string }) {

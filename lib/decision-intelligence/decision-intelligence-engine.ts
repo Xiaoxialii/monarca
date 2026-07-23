@@ -15,6 +15,7 @@ import { buildDynamicThresholdProfile } from "@/lib/optimization/dynamic-thresho
 import type { PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
+import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
 
 type MetricOutput = CanonicalEcommerceMetricOutput & {
   metrics: CanonicalEcommerceMetricOutput["metrics"] & {
@@ -850,7 +851,8 @@ function buildRootCauses(input: {
   const costRatio = safeRatio(row.total_cost, row.revenue);
   const adRatio = safeRatio(row.ad_cost_allocated, row.revenue);
   const refundRatio = row.refund_rate ?? 0;
-  const channelConcentration = Math.max(0, ...Object.values(row.channel_breakdown ?? {}).map((value) => safeRatio(value, row.revenue)));
+  const revenueChannels = revenueChannelEntries(row.channel_breakdown);
+  const channelConcentration = Math.max(0, ...revenueChannels.map(([, value]) => safeRatio(value, row.revenue)));
   const inventoryPressure = row.stockout_risk === "high" || row.stockout_risk === "medium" || row.overstock_risk === "high";
 
   const revenueEffect = roundCurrency(row.revenue - input.avgSkuRevenue);
@@ -870,7 +872,7 @@ function buildRootCauses(input: {
     const impact = row.stockout_risk === "high" ? -Math.abs(row.revenue * 0.08) : -Math.abs(row.revenue * 0.04);
     causes.push(driverCause("Inventory", impact, "negative", affectedChannel, row.sku));
   }
-  if (channelConcentration > 0.7 && Object.keys(row.channel_breakdown ?? {}).length > 1) {
+  if (channelConcentration > 0.7 && revenueChannels.length > 1) {
     causes.push(driverCause("Channel Mix", profitDelta * 0.2, profitDelta >= 0 ? "positive" : "negative", affectedChannel, row.sku));
   }
   if (!causes.length && row.net_profit > 0) {
@@ -924,7 +926,7 @@ function buildCausalChain(
 }
 
 function buildCrossChannelEffects(row: DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"][number]) {
-  const channels = Object.entries(row.channel_breakdown ?? {})
+  const channels = revenueChannelEntries(row.channel_breakdown)
     .filter(([, revenue]) => revenue > 0)
     .sort((left, right) => right[1] - left[1]);
   if (channels.length < 2) return [];
@@ -983,8 +985,15 @@ function skuLabel(
 }
 
 function primaryChannel(row: DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"][number]) {
-  const channels = Object.entries(row.channel_breakdown ?? {}).sort((left, right) => right[1] - left[1]);
-  return channels[0]?.[0] ?? row.channel_details?.[0]?.platform ?? "all";
+  const channels = revenueChannelEntries(row.channel_breakdown).sort((left, right) => right[1] - left[1]);
+  const detail = row.channel_details?.find((channel) => isRevenueChannel(channel.platform));
+  return channels[0]?.[0] ?? detail?.platform ?? "all";
+}
+
+function revenueChannelEntries(record: Record<string, number> | undefined) {
+  return Object.entries(record ?? {})
+    .map(([channel, revenue]) => [normalizeRevenueChannel(channel), revenue] as const)
+    .filter(([channel]) => isRevenueChannel(channel));
 }
 
 function insightSeverity(changePct: number, causeCount: number, riskScore: number): ProfitControlInsight["severity"] {

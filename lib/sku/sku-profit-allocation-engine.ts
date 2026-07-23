@@ -1,4 +1,5 @@
 import { allocateAdSpendToSkus } from "./sku-ad-allocation-engine";
+import { revenueChannelOrNull } from "@/lib/channels/revenue-channel";
 
 export type SkuProfitInputRow = {
   sku: string;
@@ -253,9 +254,11 @@ function buildChannelBreakdowns(orderItems: Array<Record<string, unknown>>) {
   for (const item of orderItems) {
     const sku = stringValue(item.sku);
     if (!sku) continue;
-    const platform = normalizeChannel(firstString(item.platform, item.source_provider, item.channel, "unknown"));
+    const platform = revenueChannelOrNull(firstString(item.platform, item.source_provider, item.channel));
+    if (!platform) continue;
     const quantity = numberValue(item.quantity, 1);
     const revenue = firstNumber(item.revenue, item.net_sales, firstNumber(item.price, item.unit_price) * quantity);
+    if (revenue <= 0) continue;
     const current = bySku.get(sku) ?? {};
     current[platform] = roundCurrency((current[platform] ?? 0) + revenue);
     bySku.set(sku, current);
@@ -484,10 +487,6 @@ function firstString(...values: unknown[]) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function normalizeChannel(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
 }
 
 function firstNumber(...values: unknown[]) {

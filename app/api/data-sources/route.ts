@@ -99,6 +99,12 @@ function syncStatusFromSource(source: {
   lastErrorMessage: string | null;
   lastSyncAt: Date | null;
   updatedAt: Date;
+  latestSnapshot?: {
+    status: ConnectionStatus;
+    schemaStatus: string | null;
+    canonicalStatus: string | null;
+    canonicalVersion: string | null;
+  } | null;
 }): {
   syncStatus: DataSourceSyncStatus;
   statusReason: string | null;
@@ -125,8 +131,25 @@ function syncStatusFromSource(source: {
 
   let syncStatus: DataSourceSyncStatus;
   let statusReason: string | null = source.lastErrorMessage ?? null;
+  const snapshot = source.latestSnapshot ?? null;
+  const schemaStatus = snapshot?.schemaStatus?.toUpperCase() ?? null;
+  const canonicalStatus = snapshot?.canonicalStatus?.toUpperCase() ?? null;
+  const hasReadyCanonicalSnapshot =
+    snapshot?.status === ConnectionStatus.CONNECTED &&
+    schemaStatus === "READY" &&
+    canonicalStatus === "READY" &&
+    Boolean(snapshot.canonicalVersion);
 
-  if (source.status === ConnectionStatus.DISCONNECTED) {
+  if (hasReadyCanonicalSnapshot) {
+    syncStatus = "CONNECTED";
+    statusReason = null;
+  } else if (schemaStatus === "PROCESSING" || canonicalStatus === "GENERATING") {
+    syncStatus = "SYNCING";
+    statusReason = "Data source is syncing.";
+  } else if (schemaStatus === "FAILED" || canonicalStatus === "FAILED") {
+    syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
+    statusReason ??= "Data source sync failed.";
+  } else if (source.status === ConnectionStatus.DISCONNECTED) {
     syncStatus = "DISCONNECTED";
     statusReason ??= "Data source is disconnected.";
   } else if (source.status === ConnectionStatus.FAILED) {
@@ -285,7 +308,7 @@ export async function GET() {
         workspaceId: session.workspace.id,
         isActive: true,
         status: {
-          in: [ConnectionStatus.CONNECTED, ConnectionStatus.PENDING]
+          in: [ConnectionStatus.CONNECTED, ConnectionStatus.PENDING, ConnectionStatus.FAILED]
         }
       },
       select: {
@@ -307,6 +330,34 @@ export async function GET() {
         createdAt: "desc"
       }
     });
+    const latestSnapshots = dataSources.length
+      ? await prisma.schemaSnapshot.findMany({
+          where: {
+            workspaceId: session.workspace.id,
+            dataSourceId: {
+              in: dataSources.map((source) => source.id)
+            }
+          },
+          select: {
+            id: true,
+            dataSourceId: true,
+            status: true,
+            schemaStatus: true,
+            canonicalStatus: true,
+            canonicalVersion: true,
+            createdAt: true
+          },
+          orderBy: {
+            createdAt: "desc"
+          }
+        })
+      : [];
+    const latestSnapshotBySourceId = new Map<string, typeof latestSnapshots[number]>();
+    for (const snapshot of latestSnapshots) {
+      if (snapshot.dataSourceId && !latestSnapshotBySourceId.has(snapshot.dataSourceId)) {
+        latestSnapshotBySourceId.set(snapshot.dataSourceId, snapshot);
+      }
+    }
     const deletedDataSources = includeDeleted
       ? await prisma.dataSourceConnection.findMany({
           where: {
@@ -341,7 +392,10 @@ export async function GET() {
       const retentionExpiresAt = source.isActive === false && source.updatedAt
         ? new Date(source.updatedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
         : null;
-      const detailedStatus = syncStatusFromSource(source);
+      const detailedStatus = syncStatusFromSource({
+        ...source,
+        latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null
+      });
 
       return {
         id: source.id,

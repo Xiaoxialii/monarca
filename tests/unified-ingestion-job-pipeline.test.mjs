@@ -86,6 +86,9 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(runner, /normalizeProfitInputs/);
   assert.match(runner, /generateEcommerceDecisionSnapshots\(client/);
   assert.match(runner, /client\.snapshot\.create/);
+  assert.match(runner, /enqueueMissingIngestionAsyncJobs/);
+  assert.match(runner, /retryableIngestionJobWhere/);
+  assert.match(runner, /Recovered legacy ingestion job/);
   assert.match(runner, /staleQueuedJobWhere/);
   assert.match(runner, /staleResumableJobWhere/);
   assert.match(runner, /export async function recoverAsyncJobs/);

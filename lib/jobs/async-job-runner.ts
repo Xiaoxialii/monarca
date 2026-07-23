@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
-import { processIngestionJob } from "@/lib/ingestion/unified-ingestion-worker";
+import { processIngestionJob, retryableIngestionJobWhere } from "@/lib/ingestion/unified-ingestion-worker";
 import { prisma } from "@/lib/prisma";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
@@ -354,7 +354,7 @@ export async function processJob(
     }
 
     for (const downstreamJobId of downstreamJobs) {
-      void processJob(downstreamJobId, { client }).catch((error) => {
+      void processJob(downstreamJobId).catch((error) => {
         console.warn("Failed to process downstream async job", { downstreamJobId, error });
       });
     }
@@ -720,6 +720,11 @@ export async function recoverAsyncJobs(
   } = {}
 ) {
   const client = options.client ?? prisma;
+  const limit = Math.max(1, Math.min(options.limit ?? 10, DEFAULT_MAX_RECOVERY_BATCH));
+  const bridgedIngestionJobs = await enqueueMissingIngestionAsyncJobs(client, {
+    workspaceId: options.workspaceId,
+    limit
+  });
   const jobs = await client.asyncJob.findMany({
     where: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
@@ -749,11 +754,14 @@ export async function recoverAsyncJobs(
     orderBy: {
       updatedAt: "asc"
     },
-    take: Math.max(1, Math.min(options.limit ?? 10, DEFAULT_MAX_RECOVERY_BATCH))
+    take: limit
   });
   const results = [];
 
-  for (const job of jobs.filter((item) => item.status !== "FAILED" || item.retryCount < item.maxRetries)) {
+  for (const job of [
+    ...bridgedIngestionJobs,
+    ...jobs.filter((item) => item.status !== "FAILED" || item.retryCount < item.maxRetries)
+  ]) {
     const result = await processJob(job.id, { client });
     results.push({
       job,
@@ -764,6 +772,89 @@ export async function recoverAsyncJobs(
   return {
     recovered: results.filter((item) => item.result.ok).length,
     attempted: results.length,
+    bridgedIngestionJobs: bridgedIngestionJobs.length,
     results
   };
+}
+
+async function enqueueMissingIngestionAsyncJobs(
+  client: PrismaClient,
+  options: {
+    workspaceId?: string;
+    limit: number;
+  }
+) {
+  const ingestionJobs = await client.unifiedIngestionJob.findMany({
+    where: {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...retryableIngestionJobWhere()
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      dataSourceId: true,
+      status: true,
+      updatedAt: true
+    },
+    orderBy: {
+      updatedAt: "asc"
+    },
+    take: options.limit
+  });
+
+  if (!ingestionJobs.length) return [];
+
+  const existingAsyncJobs = await client.asyncJob.findMany({
+    where: {
+      workspaceId: {
+        in: Array.from(new Set(ingestionJobs.map((job) => job.workspaceId)))
+      },
+      type: "INGESTION",
+      status: {
+        notIn: ["CANCELLED"]
+      }
+    },
+    select: {
+      payload: true
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: 500
+  });
+  const coveredIngestionJobIds = new Set(
+    existingAsyncJobs
+      .map((job) => asRecord(job.payload).unifiedIngestionJobId)
+      .filter((value): value is string => typeof value === "string")
+  );
+  const createdJobs = [];
+
+  for (const ingestionJob of ingestionJobs) {
+    if (coveredIngestionJobIds.has(ingestionJob.id)) continue;
+
+    const asyncJob = await createAsyncJob(client, {
+      workspaceId: ingestionJob.workspaceId,
+      type: "INGESTION",
+      currentStep: "Recovered legacy ingestion job",
+      payload: {
+        unifiedIngestionJobId: ingestionJob.id,
+        dataSourceId: ingestionJob.dataSourceId
+      } as Prisma.InputJsonValue
+    });
+    createdJobs.push({
+      id: asyncJob.id,
+      workspaceId: asyncJob.workspaceId,
+      type: asyncJob.type,
+      status: asyncJob.status,
+      progress: asyncJob.progress,
+      currentStep: asyncJob.currentStep,
+      errorMessage: asyncJob.errorMessage,
+      retryCount: asyncJob.retryCount,
+      maxRetries: asyncJob.maxRetries,
+      heartbeatAt: asyncJob.heartbeatAt,
+      updatedAt: asyncJob.updatedAt
+    });
+  }
+
+  return createdJobs;
 }

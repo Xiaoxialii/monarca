@@ -98,6 +98,7 @@ type IngestionJobMetadata = {
   userId?: string;
   source?: UploadSource;
   provider?: string;
+  businessSource?: string;
   fileName?: string;
   fileSize?: number;
   mimeType?: string | null;
@@ -124,9 +125,16 @@ function compactDataSourceConfig(configValue: unknown, metadata: IngestionJobMet
   const config = objectValue(configValue);
   const storage = objectValue(config.storage);
   const metadataStorage = metadata.storage ?? {};
+  const businessSource = inferBusinessSource({
+    source: metadata.source,
+    provider: metadata.provider,
+    businessSource: metadata.businessSource,
+    fileName: metadata.fileName
+  });
 
   return {
     type: typeof config.type === "string" ? config.type : metadata.source,
+    businessSource,
     fileName: typeof config.fileName === "string" ? config.fileName : metadata.fileName,
     fileSize: typeof config.fileSize === "number" ? config.fileSize : metadata.fileSize,
     mimeType: typeof config.mimeType === "string" ? config.mimeType : metadata.mimeType ?? null,
@@ -142,6 +150,45 @@ function compactDataSourceConfig(configValue: unknown, metadata: IngestionJobMet
     storagePath: typeof config.storagePath === "string" ? config.storagePath : metadataStorage.path ?? null,
     storedFilePath: typeof config.storedFilePath === "string" ? config.storedFilePath : null
   };
+}
+
+export function inferBusinessSource(input: {
+  source?: UploadSource;
+  provider?: string | null;
+  businessSource?: string | null;
+  fileName?: string | null;
+}) {
+  const explicit = normalizeBusinessSource(input.businessSource);
+  if (explicit && !isTransportSource(explicit)) return explicit;
+
+  const provider = normalizeBusinessSource(input.provider);
+  if (provider && !isTransportSource(provider)) return provider;
+
+  const value = normalizeBusinessSource(`${input.provider ?? ""} ${input.fileName ?? ""}`) ?? "";
+  if (hasBusinessToken(value, ["meta", "facebook", "fb", "meta_ads", "facebook_ads"])) return "meta_ads";
+  if (hasBusinessToken(value, ["amazon", "amz"])) return "amazon";
+  if (hasBusinessToken(value, ["shopify"])) return "shopify";
+  if (hasBusinessToken(value, ["inventory", "warehouse", "stock"])) return "inventory";
+  if (hasBusinessToken(value, ["ads", "ad", "advertising", "campaign"])) return "ads";
+
+  return input.source ?? "upload";
+}
+
+function isTransportSource(value: string) {
+  return value === "excel" || value === "csv" || value === "upload" || value === "file";
+}
+
+function hasBusinessToken(value: string, tokens: string[]) {
+  return tokens.some((token) => value === token || value.startsWith(`${token}_`) || value.endsWith(`_${token}`) || value.includes(`_${token}_`));
+}
+
+function normalizeBusinessSource(value?: string | null) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!normalized) return null;
+  if (normalized === "facebook" || normalized === "facebook_ads" || normalized === "fb_ads") return "meta_ads";
+  if (normalized === "amz") return "amazon";
+  return normalized;
 }
 
 function publicTables(tables: Array<{
@@ -173,13 +220,15 @@ function publicTables(tables: Array<{
 }
 
 function canonicalSummary(input: {
-  source: UploadSource;
+  source: string;
+  transportSource: UploadSource;
   rows: Array<Record<string, unknown>>;
   result: Awaited<ReturnType<typeof runUnifiedIngestionPipeline>>;
 }) {
   return {
     status: "ready",
     source: input.result.source,
+    transportSource: input.transportSource,
     sampledRows: Math.min(input.rows.length, MAX_UNIFIED_INGESTION_SAMPLE_ROWS),
     totalParsedRows: input.rows.length,
     detectedSchema: input.result.detected_schema,
@@ -199,12 +248,14 @@ function canonicalSummary(input: {
 }
 
 function pendingUnifiedIngestionSummary(input: {
-  source: UploadSource;
+  source: string;
+  transportSource: UploadSource;
   totalParsedRows: number;
 }) {
   return {
     status: "processing",
     source: input.source,
+    transportSource: input.transportSource,
     sampledRows: Math.min(input.totalParsedRows, MAX_UNIFIED_INGESTION_SAMPLE_ROWS),
     totalParsedRows: input.totalParsedRows,
     message: "Unified ingestion is running in the background."
@@ -355,6 +406,12 @@ export async function processIngestionJob(
   const fileName = metadata.fileName;
   const schemaSnapshotId = metadata.schemaSnapshotId;
   const provider = metadata.provider ?? (source === "csv" ? "CSV" : "Excel");
+  const businessSource = inferBusinessSource({
+    source,
+    provider,
+    businessSource: metadata.businessSource,
+    fileName
+  });
   let currentStep: string | null = "Loading uploaded file";
   let currentProgress = 5;
   const stopHeartbeat = startHeartbeat(client, jobId, () => ({
@@ -401,7 +458,8 @@ export async function processIngestionJob(
       fileSize: metadata.fileSize ?? 0,
       tables: schemaTables,
       unifiedIngestion: pendingUnifiedIngestionSummary({
-        source,
+        source: businessSource,
+        transportSource: source,
         totalParsedRows: tables.reduce((sum, table) => sum + (table.rowCount ?? 0), 0)
       })
     };
@@ -438,11 +496,13 @@ export async function processIngestionJob(
     const uploadRows = await parseRows(source, content);
     const sampledRows = uploadRows.slice(0, MAX_UNIFIED_INGESTION_SAMPLE_ROWS);
     const ingestionResult = await runUnifiedIngestionPipeline({
-      source,
+      source: businessSource,
       workspace_id: workspaceId,
       payload: sampledRows,
       metadata: {
         fileName,
+        transportSource: source,
+        businessSource,
         sampledRows: sampledRows.length,
         totalParsedRows: uploadRows.length,
         samplingStrategy: "first_n_rows"
@@ -450,7 +510,8 @@ export async function processIngestionJob(
       memory: new PrismaSemanticMemoryStore(client, { workspaceId })
     });
     const unifiedIngestion = canonicalSummary({
-      source,
+      source: businessSource,
+      transportSource: source,
       rows: uploadRows,
       result: ingestionResult
     });
@@ -464,7 +525,7 @@ export async function processIngestionJob(
     const canonicalSchemaJson = await writeCanonicalDatasetArtifacts({
       workspaceId,
       dataSourceId,
-      sourceProvider: provider.toLowerCase(),
+      sourceProvider: businessSource,
       fileName,
       canonicalDataset: ingestionResult.canonical_data as CanonicalDataset,
       manifest: {
@@ -535,6 +596,7 @@ export async function processIngestionJob(
         lastErrorMessage: canonicalRowCount > 0 ? null : "Canonical generation produced no rows",
         config: {
           ...compactDataSourceConfig({}, metadata),
+          businessSource,
           schemaSnapshotId,
           schemaVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
           canonicalStatus

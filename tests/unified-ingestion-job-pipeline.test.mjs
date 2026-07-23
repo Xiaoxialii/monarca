@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import jitiFactory from "jiti";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const Module = require("module");
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
+  if (typeof request === "string" && request.startsWith("@/")) {
+    return originalResolveFilename.call(this, join(process.cwd(), request.slice(2)), parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+
+const jiti = jitiFactory(new URL("../", import.meta.url).pathname);
+process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/monarca_test";
 
 function read(path) {
   return fs.readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -117,6 +134,10 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /startHeartbeat/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
+  assert.match(worker, /export function inferBusinessSource/);
+  assert.match(worker, /sourceProvider:\s*businessSource/);
+  assert.match(worker, /businessSource,\s*\n\s*sampledRows:/);
+  assert.match(worker, /transportSource:\s*source/);
   assert.doesNotMatch(worker, /generateEcommerceDecisionSnapshots\(client/);
   assert.doesNotMatch(worker, /generateWorkspaceMetricsFromConnectedSources/);
   assert.match(worker, /canonicalVersion:\s*ECOMMERCE_CANONICAL_SCHEMA_VERSION/);
@@ -135,6 +156,16 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(retryRoute, /processIngestionJob\(jobId\)/);
   assert.match(recoveryRoute, /recoverStaleIngestionJobs/);
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
+});
+
+test("uploaded Excel files infer business platform instead of using transport source", () => {
+  const { inferBusinessSource } = jiti("./lib/ingestion/unified-ingestion-worker.ts");
+
+  assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "shopify_enriched.xlsx" }), "shopify");
+  assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "amazon_enriched.xlsx" }), "amazon");
+  assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "meta_ads_enriched.xlsx" }), "meta_ads");
+  assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "inventory_enriched.xlsx" }), "inventory");
+  assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", businessSource: "excel", fileName: "shopify_enriched.xlsx" }), "shopify");
 });
 
 test("decision snapshots degrade gracefully when profit inputs are incomplete", () => {

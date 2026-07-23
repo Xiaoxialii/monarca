@@ -19,7 +19,7 @@ type GenerateDecisionSnapshotsResult = {
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
   "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
-const SNAPSHOT_ROW_LIMIT = 100;
+const SNAPSHOT_ROW_LIMIT = 250;
 
 export async function generateEcommerceDecisionSnapshots(
   prisma: PrismaClient,
@@ -246,11 +246,13 @@ function partialSkuRecommendations(
   loaded: LoadDashboardResult,
   profitInputModel: ReturnType<typeof normalizeProfitInputs>
 ) {
-  const topRows = loaded.data.sku_analysis.top_skus.length
-    ? loaded.data.sku_analysis.top_skus
-    : loaded.data.decision_report.sku_breakdown.top_revenue_skus;
+  const topRows = loaded.data.decision_report.sku_breakdown.top_profit_skus.length
+    ? loaded.data.decision_report.sku_breakdown.top_profit_skus
+    : loaded.data.decision_report.sku_breakdown.top_revenue_skus.length
+      ? loaded.data.decision_report.sku_breakdown.top_revenue_skus
+      : loaded.data.sku_analysis.top_skus;
 
-  return topRows.slice(0, 10).map((row, index) => {
+  return topRows.slice(0, SNAPSHOT_ROW_LIMIT).map((row, index) => {
     const profitRow = profitInputModel.rows.find((item) => item.sku === row.sku);
     const confidence = Math.max(0.25, profitRow?.confidence ?? profitInputModel.confidenceScore);
     const action = "OPTIMIZE";

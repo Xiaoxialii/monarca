@@ -1275,7 +1275,7 @@ function SkuPortfolioOptimizationPanel({
   const sourceSkuIds = sourceRows.length
     ? sourceRows.map((row) => row.sku)
     : Array.from(new Set(optimization.simulations.map((row) => row.sku)));
-  const currentSkuCount = sourceRows.length || summary.input_sku_count || sourceSkuIds.length;
+  const currentSkuCount = summary.input_sku_count || sourceRows.length || sourceSkuIds.length;
   const liftRate = summary.current_portfolio_profit > 0 ? optimization.total_expected_profit_gain / summary.current_portfolio_profit : 0;
   const simulationHorizonDays = summary.simulation_horizon_days ?? optimization.recommended_portfolio[0]?.simulation_horizon?.days ?? 30;
   const [actionStatuses, setActionStatuses] = useState<Record<string, "pending" | "accepted" | "rejected">>({});
@@ -1862,7 +1862,7 @@ const optimizationActionFilters: Record<OptimizationGoal, string[]> = {
   GROWTH: ["Scale Ads", "Expand Channel"],
   PROFIT: ["Increase Price", "Decrease Price", "Run Promotion"],
   INVENTORY: ["Restock Inventory", "Clear Excess Inventory"],
-  PORTFOLIO_HEALTH: ["Reduce Ad Waste", "Reallocate Budget", "Exit SKU"]
+  PORTFOLIO_HEALTH: ["Enrich Inputs", "Reduce Ad Waste", "Reallocate Budget", "Exit SKU"]
 };
 
 function goalFilterDisplayLabel(goal: OptimizationGoal) {
@@ -2591,6 +2591,9 @@ function optimizationGoalForDecision(row: PortfolioDecisionRow): { goal: Optimiz
   }
   if (backendUnifiedAction === "STOP_SKU") {
     return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
+  }
+  if (backendUnifiedAction === "ENRICH_PROFIT_INPUTS" || sourceAction === "ENRICH_PROFIT_INPUTS") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Enrich Inputs" };
   }
   if (sourceAction === "REDUCE_ADS" || row.action === "REDUCE") {
     const actionLabel = opportunityType === "AD_EFFICIENCY" || opportunityType === "PORTFOLIO" || recommendedText.includes("waste")

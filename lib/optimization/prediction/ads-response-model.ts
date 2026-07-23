@@ -8,7 +8,7 @@ export type AdsResponseModelInput = {
     impressions: number;
     clicks: number;
     conversions: number;
-    roas: number;
+    roas: number | null;
   }>;
   spend: number;
   additional_spend: number;
@@ -24,8 +24,14 @@ export type AdsResponseModelOutput = {
   confidence: number;
 };
 
+function hasUsableRoas(row: NonNullable<AdsResponseModelInput["campaign_history"]>[number]): row is NonNullable<AdsResponseModelInput["campaign_history"]>[number] & { roas: number } {
+  return typeof row.roas === "number" && Number.isFinite(row.roas) && row.roas > 0;
+}
+
 export function predictAdsResponse(input: AdsResponseModelInput): AdsResponseModelOutput {
-  const campaignRows = (input.campaign_history ?? []).filter((row) => !row.sku || row.sku === input.sku);
+  const campaignRows = (input.campaign_history ?? [])
+    .filter((row) => !row.sku || row.sku === input.sku)
+    .filter(hasUsableRoas);
   const weightedRoas = campaignRows.length
     ? campaignRows.reduce((sum, row) => sum + row.roas * Math.max(1, row.spend), 0) / campaignRows.reduce((sum, row) => sum + Math.max(1, row.spend), 0)
     : safeRatio(input.revenue, input.spend);

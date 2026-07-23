@@ -3,6 +3,7 @@ import {
   loadEcommerceSalesDashboardData,
   type LoadDashboardResult
 } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
+import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { upsertDecisionSnapshot } from "@/lib/dashboard/snapshot-store";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 
@@ -26,11 +27,19 @@ export async function generateEcommerceDecisionSnapshots(
   input: {
     workspaceId: string;
     dataSourceId?: string | null;
+    sourceJobId?: string | null;
+    modes?: DecisionMode[];
   }
 ): Promise<GenerateDecisionSnapshotsResult> {
   const generated: GenerateDecisionSnapshotsResult["generated"] = [];
+  const versions = await currentDecisionSnapshotVersions(prisma, {
+    workspaceId: input.workspaceId
+  });
+  const modes = input.modes?.length ? input.modes : (["full", "sku"] as const);
 
-  for (const mode of ["full", "sku"] as const) {
+  for (const mode of modes) {
+    const startedAt = Date.now();
+    const optimizationType = mode === "sku" ? "SKU_OPTIMIZATION" : "FULL_OPTIMIZATION";
     const loaded = await loadEcommerceSalesDashboardData({
       workspaceId: input.workspaceId,
       dataSourceId: input.dataSourceId ?? null,
@@ -41,34 +50,97 @@ export async function generateEcommerceDecisionSnapshots(
     const portfolioSummary = decisionReport?.portfolioSummary;
     const snapshot = await upsertDecisionSnapshot(prisma, {
       workspaceId: input.workspaceId,
-      optimizationType: mode === "sku" ? "SKU_OPTIMIZATION" : "FULL_OPTIMIZATION",
+      optimizationType,
       content,
       assumptions: {
         generatedFrom: "canonical_snapshot",
         dashboardState: loaded.state,
         dataSourceId: input.dataSourceId ?? null,
-        lineage: loaded.lineage ?? null
+        lineage: loaded.lineage ?? null,
+        sourceJobId: input.sourceJobId ?? null
       },
       expectedProfitImpact: typeof portfolioSummary?.totalProfitImpact === "number"
         ? portfolioSummary.totalProfitImpact
-        : null
+        : null,
+      ...versions
     });
     await saveSimulationSnapshot(prisma, {
       workspaceId: input.workspaceId,
-      sourceJobId: null,
+      sourceJobId: input.sourceJobId ?? null,
       decisionSnapshotId: typeof snapshot?.id === "string" ? snapshot.id : null,
       content
+    });
+    await writeDecisionGenerationLog(prisma, {
+      workspaceId: input.workspaceId,
+      sourceJobId: input.sourceJobId ?? null,
+      decisionSnapshotId: typeof snapshot?.id === "string" ? snapshot.id : null,
+      optimizationType,
+      versions,
+      content,
+      executionTimeMs: Date.now() - startedAt
     });
 
     generated.push({
       mode,
-      optimizationType: mode === "sku" ? "SKU_OPTIMIZATION" : "FULL_OPTIMIZATION",
+      optimizationType,
       snapshotId: typeof snapshot?.id === "string" ? snapshot.id : null,
       state: loaded.state
     });
   }
 
   return { generated };
+}
+
+async function writeDecisionGenerationLog(
+  prisma: PrismaClient,
+  input: {
+    workspaceId: string;
+    sourceJobId?: string | null;
+    decisionSnapshotId?: string | null;
+    optimizationType: string;
+    versions: Awaited<ReturnType<typeof currentDecisionSnapshotVersions>>;
+    content: Record<string, unknown>;
+    executionTimeMs: number;
+    errorMessage?: string | null;
+  }
+) {
+  const decisionGenerationLog = (prisma as unknown as {
+    decisionGenerationLog?: {
+      create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    };
+  }).decisionGenerationLog;
+  if (!decisionGenerationLog) return null;
+
+  const report = asRecord(input.content.decision_report);
+  const optimization = asRecord(report?.sku_portfolio_optimization);
+  const summary = asRecord(optimization?.optimization_summary);
+  const skuDecisions = Array.isArray(input.content.skuDecisions) ? input.content.skuDecisions : [];
+
+  return decisionGenerationLog.create({
+    data: {
+      workspaceId: input.workspaceId,
+      sourceJobId: input.sourceJobId ?? null,
+      decisionSnapshotId: input.decisionSnapshotId ?? null,
+      optimizationType: input.optimizationType,
+      algorithmVersion: input.versions.algorithmVersion,
+      optimizationVersion: input.versions.optimizationVersion,
+      canonicalSnapshotVersion: input.versions.canonicalSnapshotVersion,
+      metricSnapshotVersion: input.versions.metricSnapshotVersion,
+      simulationVersion: input.versions.simulationVersion,
+      inputHash: input.versions.inputHash,
+      simulationCount: toNumber(summary?.scenarios_tested) ?? 0,
+      executionTimeMs: input.executionTimeMs,
+      errorMessage: input.errorMessage ?? null,
+      resultSummary: {
+        state: input.content.state,
+        warning: input.content.warning,
+        skuDecisionCount: skuDecisions.length,
+        expectedProfitGain: toNumber(summary?.total_expected_profit_gain) ?? toNumber(summary?.expected_profit_gain) ?? 0,
+        currentPortfolioProfit: toNumber(summary?.current_portfolio_profit) ?? 0,
+        optimizedPortfolioProfit: toNumber(summary?.optimized_portfolio_profit) ?? 0
+      }
+    }
+  });
 }
 
 async function saveSimulationSnapshot(
@@ -125,10 +197,13 @@ function decisionSnapshotContent(loaded: LoadDashboardResult) {
   const hasSimulationOutput = scenariosTested > 0;
   const hasEstimatedOptimizationInputs = profitInputModel.profitDataCoverage < 95 && hasSimulationOutput;
   const isPartialOptimization = profitInputModel.profitDataCoverage < 95 && !hasSimulationOutput;
-  const hasDecisionRows = report.skuDecisions.length > 0 || report.sku_breakdown.top_revenue_skus.length > 0;
+  const optimizerSkuDecisions = portfolioOptimization.skuDecisions.length
+    ? portfolioOptimization.skuDecisions
+    : report.skuDecisions;
+  const hasDecisionRows = optimizerSkuDecisions.length > 0 || report.sku_breakdown.top_revenue_skus.length > 0;
   const exposedReport = hasDecisionRows ? report : null;
-  const skuDecisions = exposedReport?.skuDecisions.length
-    ? exposedReport.skuDecisions
+  const skuDecisions = optimizerSkuDecisions.length
+    ? optimizerSkuDecisions
     : partialSkuRecommendations(loaded, profitInputModel);
   const compactReport = exposedReport ? compactDecisionReport(exposedReport, skuDecisions) : null;
   const compactProfitInputModel = {

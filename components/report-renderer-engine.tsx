@@ -1028,14 +1028,19 @@ function CampaignTable({ rows }: { rows: DecisionIntelligenceReportV1["ads_break
           </tr>
         </thead>
         <tbody className="divide-y">
-          {rows.slice(0, 8).map((row) => (
-            <tr key={row.campaign_id} className={row.roas < 1 ? "bg-amber-50/60" : undefined}>
-              <td className="max-w-[180px] truncate px-3 py-3 font-semibold text-slate-900">{row.campaign_id}</td>
-              <td className="px-3 py-3">{currency.format(row.ad_spend)}</td>
-              <td className="px-3 py-3">{currency.format(row.revenue)}</td>
-              <td className={cn("px-3 py-3", row.roas < 1 ? "font-semibold text-amber-800" : "text-emerald-800")}>{ratioFormat.format(row.roas)}</td>
-            </tr>
-          ))}
+          {rows.slice(0, 8).map((row) => {
+            const roasValue = typeof row.roas === "number" && Number.isFinite(row.roas) ? row.roas : null;
+            return (
+              <tr key={row.campaign_id} className={roasValue !== null && roasValue < 1 ? "bg-amber-50/60" : undefined}>
+                <td className="max-w-[180px] truncate px-3 py-3 font-semibold text-slate-900">{row.campaign_id}</td>
+                <td className="px-3 py-3">{currency.format(row.ad_spend)}</td>
+                <td className="px-3 py-3">{currency.format(row.revenue)}</td>
+                <td className={cn("px-3 py-3", roasValue === null ? "text-slate-500" : roasValue < 1 ? "font-semibold text-amber-800" : "text-emerald-800")}>
+                  {roasValue !== null ? ratioFormat.format(roasValue) : "Missing attribution"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1317,13 +1322,24 @@ function SkuPortfolioOptimizationPanel({
   });
   const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
   const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
+  const decisionRowsExpectedProfitGain = decisionRows.reduce(
+    (sum, row) => sum + (row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta ?? 0),
+    0
+  );
+  const expectedProfitGain =
+    optimization.total_expected_profit_gain ||
+    summary.total_expected_profit_gain ||
+    summary.expected_profit_gain ||
+    optimization.portfolioSummary.totalProfitImpact ||
+    decisionRowsExpectedProfitGain;
+  const expectedProfitLiftRate = summary.current_portfolio_profit > 0 ? expectedProfitGain / summary.current_portfolio_profit : liftRate;
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : summary.current_portfolio_profit;
   const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : summary.ads_budget_used;
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
-  const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : optimization.total_expected_profit_gain;
-  const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : liftRate;
+  const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : expectedProfitGain;
+  const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
   const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
     ? 0
     : acceptedDecisionRows.reduce((sum, row) => sum + (row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta ?? 0), 0);
@@ -1975,6 +1991,8 @@ function persistedActionMatchesDecisionRow(action: PersistedActionTrackingRecord
 }
 
 function isOptimizationQueueRow(row: PortfolioDecisionRow) {
+  if (isNoActionDecisionRow(row)) return false;
+
   const impact = Math.abs(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? 0);
   return row.action !== "MONITOR" || impact > 1 || row.inventoryRisk === true || row.budgetOpportunity === true;
 }
@@ -2010,6 +2028,7 @@ function OptimizationDecisionRail({
   const [selectedGoal, setSelectedGoal] = useState<OptimizationGoal>("GROWTH");
   const [selectedGoalAction, setSelectedGoalAction] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(selectedRow ? decisionRowKey(selectedRow) : null);
+  const hasManuallySelectedGoalRef = useRef(false);
   const goalCounts = useMemo(() => rows.reduce<Record<OptimizationGoal, number>>((counts, row) => {
     const goal = optimizationGoalForDecision(row).goal;
     counts[goal] = (counts[goal] ?? 0) + 1;
@@ -2048,7 +2067,7 @@ function OptimizationDecisionRail({
   }, [selectedRow]);
 
   useEffect(() => {
-    if (!rows.length || goalCounts[selectedGoal] > 0) return;
+    if (hasManuallySelectedGoalRef.current || !rows.length || goalCounts[selectedGoal] > 0) return;
     const nextGoal = optimizationGoalFilters.find((filter) => goalCounts[filter.goal] > 0)?.goal;
     if (!nextGoal) return;
     setSelectedGoal(nextGoal);
@@ -2076,12 +2095,11 @@ function OptimizationDecisionRail({
             <button
               key={filter.goal}
               type="button"
-	              onClick={() => {
-	                setSelectedGoal((current) => {
-	                  if (current !== filter.goal) setSelectedGoalAction(null);
-	                  return filter.goal;
-	                });
-	              }}
+              onClick={() => {
+                hasManuallySelectedGoalRef.current = true;
+                if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
+                setSelectedGoal(filter.goal);
+              }}
               className={cn(
                 "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
                 isSelected
@@ -2227,7 +2245,9 @@ function OptimizationDecisionRail({
           );
         }) : (
           <div className="grid min-h-[92px] place-items-start rounded-lg bg-white p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
-            {isZh ? "暂无需要优化的 SKU。" : "No SKUs currently need optimization."}
+            {isZh
+              ? `${goalFilterDisplayLabel(selectedGoal)} 当前没有需要优化的 SKU。`
+              : `No ${goalFilterDisplayLabel(selectedGoal)} SKUs currently need optimization.`}
           </div>
         )}
       </div>

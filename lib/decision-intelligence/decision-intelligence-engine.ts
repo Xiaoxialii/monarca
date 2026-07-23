@@ -12,7 +12,7 @@ import {
   type DecisionSummary
 } from "@/lib/optimization/portfolio-optimizer";
 import { buildDynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
-import type { PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
+import type { AdsCampaignInput, PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
 import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
@@ -181,7 +181,19 @@ export type DecisionIntelligenceReportV1 = {
     roas: number;
     mer: number;
     cac: number;
-    campaign_performance: Array<{ campaign_id: string; ad_spend: number; revenue: number; roas: number; estimated: boolean }>;
+    campaign_performance: Array<{
+      campaign_id: string;
+      ad_spend: number;
+      revenue: number;
+      roas: number | null;
+      estimated: boolean;
+      attribution_status?: "attributed" | "missing";
+      attribution_source?: "campaign_attribution";
+      attribution_confidence?: number;
+    }>;
+    campaignRevenueCoverage?: number;
+    skuRevenueCoverage?: number;
+    fallbackUsed?: boolean;
     spend_distribution: Array<{ campaign_id: string; ad_spend: number; share: number }>;
   };
   customer_breakdown: {
@@ -352,7 +364,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
   const autonomousCommerceRuntime = buildAutonomousCommerceRuntime({
     decision_intelligence_v2: decisionIntelligenceV2,
     sku_rows: topProfitSkus,
-    campaign_rows: metrics.attribution.campaign_performance.slice(0, 10),
+    campaign_rows: metrics.attribution.campaign_performance.slice(0, 10).map((row) => ({
+      ...row,
+      roas: row.roas ?? 0
+    })),
     confidence_score: metadata.confidence_score
   });
   const skuOptimizationAlgorithm = buildSkuOptimizationAlgorithm({
@@ -391,14 +406,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
       })
     : withOptimizationReadinessMetadata(optimizeSkuPortfolio({
         skus: portfolioInputSkus,
-        ads: metrics.attribution.campaign_performance.slice(0, 20).map((row) => ({
-          campaign_id: row.campaign_id,
-          spend: row.ad_spend,
-          impressions: 0,
-          clicks: 0,
-          conversions: 0,
-          roas: row.roas
-        })),
+        ads: buildOptimizationAdsInput({
+          campaigns: metrics.attribution.campaign_performance,
+          skus: portfolioInputSkus
+        }),
         constraints: {
           total_ads_budget: Math.max(1, portfolioAdsBudget),
           inventory_capacity: Math.max(1, portfolioInputSkus.reduce((sum, row) => sum + row.inventory, 0)),
@@ -860,6 +871,51 @@ function dominantChannel(channelBreakdown: Record<string, number> | null | undef
   const entries = Object.entries(channelBreakdown ?? {});
   if (!entries.length) return "multi-channel";
   return entries.sort((left, right) => right[1] - left[1])[0]?.[0] ?? "multi-channel";
+}
+
+function buildOptimizationAdsInput(input: {
+  campaigns: MetricOutput["metrics"]["attribution"]["campaign_performance"];
+  skus: PortfolioSkuInput[];
+}): AdsCampaignInput[] {
+  const rows: AdsCampaignInput[] = [];
+
+  for (const campaign of input.campaigns) {
+    const hasValidRoas = typeof campaign.roas === "number" && Number.isFinite(campaign.roas) && campaign.roas > 0;
+    rows.push({
+      campaign_id: campaign.campaign_id,
+      spend: campaign.ad_spend,
+      impressions: 0,
+      clicks: 0,
+      conversions: 0,
+      roas: hasValidRoas ? campaign.roas : null,
+      attribution_status: hasValidRoas ? "attributed" : "missing",
+      attribution_source: "campaign_attribution",
+      attribution_confidence: campaign.attribution_confidence ?? (hasValidRoas ? 0.86 : 0)
+    });
+  }
+
+  for (const sku of input.skus) {
+    if (sku.ads_spend <= 0 || sku.revenue <= 0) continue;
+    const skuRoas = roundRatio(sku.revenue / Math.max(1, sku.ads_spend));
+    if (!Number.isFinite(skuRoas) || skuRoas <= 0) continue;
+
+    rows.push({
+      campaign_id: `sku-allocation-${sku.sku}`,
+      sku: sku.sku,
+      channel: sku.channel,
+      category: sku.category,
+      spend: sku.ads_spend,
+      impressions: 0,
+      clicks: 0,
+      conversions: Math.max(1, Math.round(sku.quantity)),
+      roas: skuRoas,
+      attribution_status: "estimated",
+      attribution_source: "sku_allocation",
+      attribution_confidence: Math.max(0.35, Math.min(0.75, sku.prediction_confidence ?? 0.62))
+    });
+  }
+
+  return rows;
 }
 
 function buildPortfolioOptimizationSkuInputs(input: {

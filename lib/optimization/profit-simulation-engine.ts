@@ -43,11 +43,16 @@ export type PortfolioSkuInput = {
 export type AdsCampaignInput = {
   campaign_id: string;
   sku?: string;
+  channel?: string;
+  category?: string;
   spend: number;
   impressions: number;
   clicks: number;
   conversions: number;
-  roas: number;
+  roas: number | null;
+  attribution_status?: "attributed" | "estimated" | "missing";
+  attribution_source?: "campaign_attribution" | "sku_allocation" | "channel_history" | "category_benchmark";
+  attribution_confidence?: number;
 };
 
 export type BusinessConstraintsInput = {
@@ -127,7 +132,14 @@ export type SimulationEstimate = {
     ad_budget_period: "daily" | "weekly" | "monthly" | "simulation_window";
     daily_budget_delta: number;
   };
-  prediction_source: "sku_historical_ads" | "similar_sku_benchmark" | "store_level_blended_roas_discounted" | "rule_based_conservative_fallback";
+  prediction_source:
+    | "sku_historical_ads"
+    | "sku_allocation"
+    | "channel_history"
+    | "category_benchmark"
+    | "similar_sku_benchmark"
+    | "store_level_blended_roas_discounted"
+    | "rule_based_conservative_fallback";
   revenue_simulation: {
     base_roas: number;
     marginal_roas: number;
@@ -611,29 +623,55 @@ function buildIncrementalProfitSimulationEstimate(input: {
   };
 }
 
+function usableRoas(row: AdsCampaignInput) {
+  return typeof row.roas === "number" && Number.isFinite(row.roas) && row.roas > 0;
+}
+
 function resolveRoasSource(sku: PortfolioSkuInput, ads: AdsCampaignInput[], allSkus: PortfolioSkuInput[]) {
-  const skuAds = ads.filter((row) => row.sku === sku.sku && row.spend > 0);
+  const skuAds = ads.filter((row) => row.sku === sku.sku && row.spend > 0 && usableRoas(row));
   if (skuAds.length) {
+    const confidence = skuAds.reduce((sum, row) => sum + (row.attribution_confidence ?? 0.86) * Math.max(1, row.spend), 0) /
+      skuAds.reduce((sum, row) => sum + Math.max(1, row.spend), 0);
     return {
-      predictionSource: "sku_historical_ads" as const,
+      predictionSource: skuAds.some((row) => row.attribution_source === "sku_allocation")
+        ? "sku_allocation" as const
+        : "sku_historical_ads" as const,
       baseRoas: weightedRoas(skuAds),
-      confidence: 0.86
+      confidence: Math.max(0.35, Math.min(0.86, confidence))
     };
   }
 
   const similarSkuIds = new Set(allSkus
     .filter((candidate) => candidate.sku !== sku.sku && isSimilarSku(sku, candidate))
     .map((candidate) => candidate.sku));
-  const similarAds = ads.filter((row) => row.sku && similarSkuIds.has(row.sku) && row.spend > 0);
+  const similarAds = ads.filter((row) => row.sku && similarSkuIds.has(row.sku) && row.spend > 0 && usableRoas(row));
   if (similarAds.length) {
     return {
       predictionSource: "similar_sku_benchmark" as const,
-      baseRoas: median(similarAds.map((row) => row.roas).filter((value) => Number.isFinite(value) && value > 0)),
+      baseRoas: median(similarAds.map((row) => row.roas).filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)),
       confidence: similarAds.length >= 3 ? 0.74 : 0.62
     };
   }
 
-  const storeAds = ads.filter((row) => row.spend > 0);
+  const channelAds = ads.filter((row) => row.channel && sku.channel && row.channel === sku.channel && row.spend > 0 && usableRoas(row));
+  if (channelAds.length) {
+    return {
+      predictionSource: "channel_history" as const,
+      baseRoas: weightedRoas(channelAds),
+      confidence: 0.6
+    };
+  }
+
+  const categoryAds = ads.filter((row) => row.category && sku.category && row.category === sku.category && row.spend > 0 && usableRoas(row));
+  if (categoryAds.length) {
+    return {
+      predictionSource: "category_benchmark" as const,
+      baseRoas: weightedRoas(categoryAds),
+      confidence: 0.54
+    };
+  }
+
+  const storeAds = ads.filter((row) => row.spend > 0 && usableRoas(row));
   if (storeAds.length) {
     return {
       predictionSource: "store_level_blended_roas_discounted" as const,
@@ -650,7 +688,8 @@ function resolveRoasSource(sku: PortfolioSkuInput, ads: AdsCampaignInput[], allS
 }
 
 function weightedRoas(rows: AdsCampaignInput[]) {
-  return safeRatio(rows.reduce((sum, row) => sum + row.roas * Math.max(1, row.spend), 0), rows.reduce((sum, row) => sum + Math.max(1, row.spend), 0));
+  const usableRows = rows.filter(usableRoas);
+  return safeRatio(usableRows.reduce((sum, row) => sum + (row.roas ?? 0) * Math.max(1, row.spend), 0), usableRows.reduce((sum, row) => sum + Math.max(1, row.spend), 0));
 }
 
 function isSimilarSku(left: PortfolioSkuInput, right: PortfolioSkuInput) {
@@ -668,6 +707,9 @@ function median(values: number[]) {
 
 function attributionFactor(source: SimulationEstimate["prediction_source"]) {
   if (source === "sku_historical_ads") return 0.85;
+  if (source === "sku_allocation") return 0.72;
+  if (source === "channel_history") return 0.58;
+  if (source === "category_benchmark") return 0.5;
   if (source === "similar_sku_benchmark") return 0.55;
   if (source === "store_level_blended_roas_discounted") return 0.65;
   return 0.35;

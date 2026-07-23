@@ -17006,12 +17006,14 @@ function ReportPage({
   const isZh = locale === "zh";
   type DecisionReportApiPayload = {
     ok?: boolean;
-    state?: "ready" | "empty" | "unavailable";
+    state?: "ready" | "empty" | "unavailable" | "stale";
+    status?: string;
     message?: string;
     decision_report?: DecisionIntelligenceReportV1 | null;
     generated_at?: string;
     source_platforms?: string[];
     code?: string;
+    jobId?: string;
   };
   const [decisionReportPayload, setDecisionReportPayload] = useState<DecisionReportApiPayload | null>(
     null
@@ -17024,9 +17026,14 @@ function ReportPage({
     && Boolean(decisionReportPayload.decision_report);
   const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
     && !decisionReportIsReady;
-  const decisionReportEmptyMessage = isZh
-    ? "已连接数据源，但运营报告还需要销售/订单历史、订单明细、退款、客户、库存、单位成本、履约成本和广告花费，才能生成可靠的 KPI 和运营建议。"
-    : "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
+  const decisionReportIsRefreshing = decisionReportPayload?.state === "stale" || decisionReportPayload?.status === "STALE";
+  const decisionReportEmptyMessage = decisionReportIsRefreshing
+    ? (isZh
+      ? "优化结果正在刷新。新数据或算法版本已变化，系统正在后台生成新的优化快照。"
+      : "Optimization is running. Data or algorithm versions changed, and a new decision snapshot is being generated in the background.")
+    : isZh
+      ? "已连接数据源，但运营报告还需要销售/订单历史、订单明细、退款、客户、库存、单位成本、履约成本和广告花费，才能生成可靠的 KPI 和运营建议。"
+      : "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
 
   const loadDecisionReport = useCallback(async () => {
     if (isLoadingConnectedSources || !hasConnectedDatabase) return;
@@ -17073,6 +17080,16 @@ function ReportPage({
       endDate
     });
   }, []);
+
+  useEffect(() => {
+    if (!decisionReportIsRefreshing || isLoadingDecisionReport) return;
+
+    const timeout = window.setTimeout(() => {
+      void loadDecisionReport();
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [decisionReportIsRefreshing, isLoadingDecisionReport, loadDecisionReport]);
 
   useEffect(() => {
     if (isLoadingConnectedSources) return;
@@ -17144,7 +17161,8 @@ function ReportPage({
         </Card>
       ) : shouldShowDecisionReportEmpty ? (
         <Card className="border bg-white shadow-sm">
-          <CardContent className="p-5 text-sm text-muted-foreground">
+          <CardContent className="flex items-center gap-3 p-5 text-sm text-muted-foreground">
+            {decisionReportIsRefreshing ? <RefreshCw className="size-4 animate-spin text-[#5747e8]" /> : null}
             {decisionReportEmptyMessage}
           </CardContent>
         </Card>

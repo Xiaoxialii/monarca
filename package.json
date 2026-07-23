@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "postinstall": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
+    "decision:regenerate": "node scripts/regenerate-decision-snapshots.mjs",
     "test:guardrails": "node scripts/report-guardrails-check.mjs",
     "test:report-entitlements": "node --test tests/report-entitlements.test.mjs",
     "test:report-summary": "node --test tests/zh-report-summary.test.mjs",

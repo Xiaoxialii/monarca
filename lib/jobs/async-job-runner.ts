@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { METRIC_SNAPSHOT_VERSION } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { processIngestionJob, retryableIngestionJobWhere } from "@/lib/ingestion/unified-ingestion-worker";
@@ -212,6 +213,44 @@ export async function createAsyncJob(
       payload: input.payload ?? undefined,
       maxRetries: input.maxRetries ?? 3
     }
+  });
+}
+
+export async function enqueueSkuOptimizationJob(
+  client: PrismaClient,
+  input: {
+    workspaceId: string;
+    reason?: string;
+    triggerDataSourceId?: string | null;
+    schemaSnapshotId?: string | null;
+    inputHash?: string | null;
+  }
+) {
+  const existing = await client.asyncJob.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      type: "SKU_OPTIMIZATION",
+      status: {
+        in: ["QUEUED", "PROCESSING", "PAUSED"]
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  if (existing) return existing;
+
+  return createAsyncJob(client, {
+    workspaceId: input.workspaceId,
+    type: "SKU_OPTIMIZATION",
+    currentStep: "Queued for decision optimization",
+    payload: {
+      reason: input.reason ?? "manual_or_freshness_refresh",
+      triggerDataSourceId: input.triggerDataSourceId ?? null,
+      schemaSnapshotId: input.schemaSnapshotId ?? null,
+      inputHash: input.inputHash ?? null
+    } as Prisma.InputJsonValue
   });
 }
 
@@ -581,7 +620,7 @@ async function processMetricCalculationAsyncJob(
 
   return {
     snapshotType: "METRIC_SNAPSHOT",
-    snapshotVersion: schemaSnapshotId ?? ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+    snapshotVersion: METRIC_SNAPSHOT_VERSION,
     dataReference: {
       triggerDataSourceId,
       schemaSnapshotId,
@@ -689,7 +728,8 @@ async function processSkuOptimizationAsyncJob(
 
   const decisionSnapshots = await generateEcommerceDecisionSnapshots(client, {
     workspaceId: input.workspaceId,
-    dataSourceId: null
+    dataSourceId: null,
+    sourceJobId: input.id
   });
 
   await input.setJobState({

@@ -41,8 +41,11 @@ export type AttributionMetric = {
     campaign_id: string;
     ad_spend: number;
     revenue: number;
-    roas: number;
+    roas: number | null;
     estimated: boolean;
+    attribution_status?: "attributed" | "missing";
+    attribution_source?: "campaign_attribution";
+    attribution_confidence?: number;
   }>;
   sku_attribution: Array<{
     sku: string;
@@ -52,6 +55,9 @@ export type AttributionMetric = {
     roas: number;
     estimated: boolean;
   }>;
+  campaignRevenueCoverage?: number;
+  skuRevenueCoverage?: number;
+  fallbackUsed?: boolean;
 };
 
 export type SkuUnitEconomicsMetric = {
@@ -992,6 +998,9 @@ function buildAttributionMetrics(input: {
   return {
     order_attribution_coverage: orderAttributionCoverage,
     sku_attribution_coverage: skuAttributionCoverage,
+    campaignRevenueCoverage: safeRatio(sum(Array.from(revenueByCampaign.values())), input.revenue),
+    skuRevenueCoverage: skuAttributionCoverage,
+    fallbackUsed: ads.length > 0 && revenueByCampaign.size === 0,
     attribution_model: model,
     roas_by_sku: skuAttribution.length > 0 && adSpend > 0 && orderAttributionCoverage > 0,
     campaign_performance: Array.from(campaignIds)
@@ -1003,8 +1012,11 @@ function buildAttributionMetrics(input: {
           campaign_id: campaignId,
           ad_spend: campaignSpend,
           revenue: campaignRev,
-          roas: safeRatio(campaignRev, campaignSpend),
-          estimated: !revenueByCampaign.has(campaignId)
+          roas: campaignRev > 0 && campaignSpend > 0 ? safeRatio(campaignRev, campaignSpend) : null,
+          estimated: !revenueByCampaign.has(campaignId),
+          attribution_status: campaignRev > 0 ? "attributed" : "missing",
+          attribution_source: "campaign_attribution",
+          attribution_confidence: campaignRev > 0 ? Math.max(0.35, Math.min(0.9, orderAttributionCoverage)) : 0
         };
       }),
     sku_attribution: skuAttribution

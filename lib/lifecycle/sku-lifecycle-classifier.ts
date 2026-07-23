@@ -16,9 +16,15 @@ export function classifySkuLifecycle(input: {
   sku: PortfolioSkuInput;
   ads?: AdsCampaignInput[];
 }): SkuLifecycleClassification {
-  const skuAds = (input.ads ?? []).filter((row) => row.sku === input.sku.sku && row.spend > 0);
+  const skuAds = (input.ads ?? []).filter((row) =>
+    row.sku === input.sku.sku &&
+    row.spend > 0 &&
+    typeof row.roas === "number" &&
+    Number.isFinite(row.roas) &&
+    row.roas > 0
+  );
   const roas = skuAds.length
-    ? roundRatio(skuAds.reduce((sum, row) => sum + row.roas * row.spend, 0) / Math.max(1, skuAds.reduce((sum, row) => sum + row.spend, 0)))
+    ? roundRatio(skuAds.reduce((sum, row) => sum + (row.roas ?? 0) * row.spend, 0) / Math.max(1, skuAds.reduce((sum, row) => sum + row.spend, 0)))
     : null;
   const score = calculateLifecycleScore({
     ...input.sku,

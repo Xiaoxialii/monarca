@@ -153,7 +153,14 @@ export async function findLatestDecisionSnapshot(
     select: {
       id: true,
       assumptions: true,
-      reasoning: true
+      reasoning: true,
+      algorithmVersion: true,
+      optimizationVersion: true,
+      canonicalSnapshotVersion: true,
+      metricSnapshotVersion: true,
+      simulationVersion: true,
+      inputHash: true,
+      generatedAt: true
     },
     orderBy: {
       createdAt: "desc"
@@ -179,6 +186,13 @@ export async function upsertDecisionSnapshot(
     content: Record<string, unknown>;
     assumptions?: unknown;
     expectedProfitImpact?: number | null;
+    algorithmVersion?: string | null;
+    optimizationVersion?: string | null;
+    canonicalSnapshotVersion?: string | null;
+    metricSnapshotVersion?: string | null;
+    simulationVersion?: string | null;
+    inputHash?: string | null;
+    generatedAt?: Date | null;
   }
 ) {
   const decisionSnapshot = (prisma as SnapshotPrismaClient).decisionSnapshot;
@@ -195,6 +209,13 @@ export async function upsertDecisionSnapshot(
       snapshotType: "optimization_report",
       acceptedAction: "snapshot",
       optimizationType: input.optimizationType,
+      algorithmVersion: input.algorithmVersion ?? null,
+      optimizationVersion: input.optimizationVersion ?? null,
+      canonicalSnapshotVersion: input.canonicalSnapshotVersion ?? null,
+      metricSnapshotVersion: input.metricSnapshotVersion ?? null,
+      simulationVersion: input.simulationVersion ?? null,
+      inputHash: input.inputHash ?? null,
+      generatedAt: input.generatedAt ?? new Date(),
       optimizationGoal: typeof report.optimizationGoal === "string" ? report.optimizationGoal : null,
       assumptions: (input.assumptions ?? null) as Prisma.InputJsonValue,
       recommendationsJson: input.content as Prisma.InputJsonValue,

@@ -195,8 +195,9 @@ function buildUserBenchmark(skus: PortfolioSkuInput[], ads: AdsCampaignInput[]) 
   const weightedMargin = safeRatio(sum(skus.map((sku) => sku.margin * Math.max(1, sku.revenue))), Math.max(1, revenue));
   const weightedConversion = safeRatio(sum(skus.map((sku) => sku.conversion_rate * Math.max(1, sku.revenue))), Math.max(1, revenue));
   const inventoryTurnover = safeRatio(sum(skus.map((sku) => sku.sales_velocity * 30)), Math.max(1, sum(skus.map((sku) => sku.inventory))));
-  const adsRoas = ads.length
-    ? safeRatio(sum(ads.map((campaign) => campaign.roas * Math.max(1, campaign.spend))), Math.max(1, sum(ads.map((campaign) => campaign.spend))))
+  const usableAds = ads.filter((campaign) => typeof campaign.roas === "number" && Number.isFinite(campaign.roas) && campaign.roas > 0);
+  const adsRoas = usableAds.length
+    ? safeRatio(sum(usableAds.map((campaign) => (campaign.roas ?? 0) * Math.max(1, campaign.spend))), Math.max(1, sum(usableAds.map((campaign) => campaign.spend))))
     : safeRatio(revenue, Math.max(1, adsSpend));
   const orders = sum(skus.map((sku) => sku.order_count ?? sku.quantity));
   const cac = safeRatio(adsSpend, Math.max(1, orders));

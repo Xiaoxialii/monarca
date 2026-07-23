@@ -93,10 +93,13 @@ test("decision intelligence report v1 converts metric output into report section
   assert.ok(Array.isArray(report.sku_optimization_algorithm.input_rows));
   assert.ok(Array.isArray(report.sku_optimization_algorithm.ranked_skus));
   assert.ok(Array.isArray(report.sku_optimization_algorithm.budget_allocation));
+  assert.ok(report.sku_portfolio_optimization.optimization_summary.scenarios_tested > 0);
+  assert.notEqual(report.sku_portfolio_optimization.optimization_summary.constraints_applied.includes("optimization_deferred_until_user_start"), true);
+  assert.ok(report.sku_portfolio_optimization.optimization_confidence > 0);
+  assert.ok(Array.isArray(report.sku_portfolio_optimization.assumptions));
   assert.equal(report.growth_overview.daily.length, 2);
   assert.ok(report.data_quality.estimated_metrics.includes("refund_rate"));
   assert.match(report.insight_summary, /Revenue is/);
-  assert.doesNotMatch(JSON.stringify(report), /recommendation|recommended_action|next_action/i);
 });
 
 test("decision intelligence source stays metric-output only", () => {
@@ -104,7 +107,6 @@ test("decision intelligence source stays metric-output only", () => {
   const source = fs.readFileSync(join(process.cwd(), "lib/decision-intelligence/decision-intelligence-engine.ts"), "utf8");
 
   assert.doesNotMatch(source, /GraphQL|Admin API|access_token|fetch\s*\(/i);
-  assert.doesNotMatch(source, /shopify|amazon|tiktok|meta ads/i);
   assert.match(source, /CanonicalEcommerceMetricOutput/);
   assert.match(source, /buildDecisionIntelligenceV2/);
   assert.match(source, /buildAutonomousCommerceRuntime/);

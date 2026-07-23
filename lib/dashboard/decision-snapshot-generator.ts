@@ -53,6 +53,12 @@ export async function generateEcommerceDecisionSnapshots(
         ? portfolioSummary.totalProfitImpact
         : null
     });
+    await saveSimulationSnapshot(prisma, {
+      workspaceId: input.workspaceId,
+      sourceJobId: null,
+      decisionSnapshotId: typeof snapshot?.id === "string" ? snapshot.id : null,
+      content
+    });
 
     generated.push({
       mode,
@@ -65,10 +71,60 @@ export async function generateEcommerceDecisionSnapshots(
   return { generated };
 }
 
+async function saveSimulationSnapshot(
+  prisma: PrismaClient,
+  input: {
+    workspaceId: string;
+    sourceJobId?: string | null;
+    decisionSnapshotId?: string | null;
+    content: Record<string, unknown>;
+  }
+) {
+  const snapshot = (prisma as unknown as {
+    snapshot?: {
+      create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    };
+  }).snapshot;
+  if (!snapshot) return null;
+
+  const report = asRecord(input.content.decision_report);
+  const optimization = asRecord(report?.sku_portfolio_optimization);
+  const summary = asRecord(optimization?.optimization_summary);
+  const scenariosTested = toNumber(summary?.scenarios_tested) ?? 0;
+  if (scenariosTested <= 0) return null;
+
+  return snapshot.create({
+    data: {
+      workspaceId: input.workspaceId,
+      sourceJobId: input.sourceJobId ?? null,
+      type: "SIMULATION_SNAPSHOT",
+      version: "sku_portfolio_simulation_v1",
+      status: "READY",
+      dataReference: {
+        decisionSnapshotId: input.decisionSnapshotId,
+        scenarios_tested: scenariosTested,
+        baseline_profit: toNumber(summary?.current_portfolio_profit) ?? 0,
+        optimized_profit: toNumber(summary?.optimized_portfolio_profit) ?? 0,
+        expected_profit_gain: toNumber(summary?.total_expected_profit_gain) ?? toNumber(summary?.expected_profit_gain) ?? 0
+      },
+      metadataJson: {
+        generatedFrom: "decision_snapshot_generator",
+        assumptions: optimization?.assumptions ?? [],
+        confidence_score: toNumber(optimization?.optimizationConfidenceScore) ?? toNumber(optimization?.optimization_confidence) ?? null,
+        constraints_applied: Array.isArray(summary?.constraints_applied) ? summary?.constraints_applied : []
+      }
+    }
+  });
+}
+
 function decisionSnapshotContent(loaded: LoadDashboardResult) {
   const report = loaded.data.decision_report;
   const profitInputModel = normalizeProfitInputs(loaded.data);
-  const isPartialOptimization = profitInputModel.profitDataCoverage < 95;
+  const portfolioOptimization = report.sku_portfolio_optimization;
+  const scenariosTested = portfolioOptimization.optimization_summary.scenarios_tested ?? 0;
+  const hasSimulationOutput = scenariosTested > 0;
+  const hasEstimatedOptimizationInputs = profitInputModel.profitDataCoverage < 95 && hasSimulationOutput;
+  const isPartialOptimization = profitInputModel.profitDataCoverage < 95 && !hasSimulationOutput;
   const hasDecisionRows = report.skuDecisions.length > 0 || report.sku_breakdown.top_revenue_skus.length > 0;
   const exposedReport = hasDecisionRows ? report : null;
   const skuDecisions = exposedReport?.skuDecisions.length
@@ -84,7 +140,9 @@ function decisionSnapshotContent(loaded: LoadDashboardResult) {
     ok: true,
     state: loaded.state,
     hasConnectedDataSource: loaded.state === "ready",
-    message: isPartialOptimization
+    message: hasEstimatedOptimizationInputs
+      ? estimatedOptimizationMessage(profitInputModel.profitDataCoverage)
+      : isPartialOptimization
       ? partialOptimizationMessage(profitInputModel.profitDataCoverage)
       : loaded.message ?? null,
     decision_report: compactReport,
@@ -100,11 +158,21 @@ function decisionSnapshotContent(loaded: LoadDashboardResult) {
     profitDataCoverage: profitInputModel.profitDataCoverage,
     optimizationLevel: profitInputModel.optimizationLevel,
     confidenceScore: profitInputModel.confidenceScore,
-    missingDataRequirements: isPartialOptimization ? profitInputModel.missingFields : [],
-    warning: isPartialOptimization
+    missingDataRequirements: profitInputModel.profitDataCoverage < 95 ? profitInputModel.missingFields : [],
+    warning: hasEstimatedOptimizationInputs
+      ? "ESTIMATED_OPTIMIZATION_INPUTS"
+      : isPartialOptimization
       ? "PARTIAL_OPTIMIZATION_INPUTS"
       : loaded.state === "ready" ? null : "DECISION_SNAPSHOT_PARTIAL"
   };
+}
+
+function estimatedOptimizationMessage(coverage: number) {
+  if (coverage >= 70) {
+    return "Optimization ran with estimated profit inputs. Review confidence and assumptions before executing actions.";
+  }
+
+  return "Optimization ran with estimated costs and partial profit inputs. Recommendations include reduced confidence and assumptions.";
 }
 
 function compactDecisionReport(

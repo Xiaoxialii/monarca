@@ -263,10 +263,6 @@ export type DecisionIntelligenceReportV1 = {
 export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): DecisionIntelligenceReportV1 {
   const metrics = metricOutput.metrics;
   const metadata = metricOutput.metadata;
-  const isSkuOnlyMode = metricOutput.decisionMode === "sku";
-  const normalizedDataCoverage = metadata.data_coverage > 1 ? metadata.data_coverage / 100 : metadata.data_coverage;
-  const normalizedProfitConfidence = metadata.profit_confidence > 1 ? metadata.profit_confidence / 100 : metadata.profit_confidence;
-  const shouldDeferPortfolioOptimization = isSkuOnlyMode || normalizedDataCoverage < 0.7 || normalizedProfitConfidence < 0.7;
   const totalSkuRevenue = metrics.core.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
   const topRevenueSkus = metrics.core.sku_revenue.map((row) => ({
     sku: row.sku,
@@ -325,6 +321,13 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     estimated_components: row.estimated_components,
     estimated: row.estimated
   }));
+  const optimizationReadiness = assessOptimizationReadiness({
+    metrics,
+    metadata,
+    topProfitSkus,
+    topRevenueSkus
+  });
+  const shouldDeferPortfolioOptimization = !optimizationReadiness.canOptimize;
   const top5Revenue = topRevenueSkus.slice(0, 5).reduce((sum, row) => sum + row.revenue, 0);
   const topSkuShare = topRevenueSkus[0]?.share ?? 0;
   const campaignSpend = metrics.attribution.campaign_performance.reduce((sum, row) => sum + row.ad_spend, 0);
@@ -372,7 +375,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     profitRows: topProfitSkus,
     revenueRows: topRevenueSkus,
     metrics,
-    confidence: metadata.confidence_score
+    confidence: optimizationReadiness.optimizationConfidenceScore
   });
   const portfolioAdsBudget = shouldDeferPortfolioOptimization ? metrics.ads.ad_spend : Math.max(
     metrics.ads.ad_spend,
@@ -383,9 +386,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
         inputSkuCount: metrics.total_sku_count ?? topRevenueSkus.length,
         currentProfit: metrics.business.net_profit,
         adsBudget: portfolioAdsBudget,
-        confidence: metadata.confidence_score
+        confidence: optimizationReadiness.optimizationConfidenceScore,
+        reasons: optimizationReadiness.blockingReasons
       })
-    : optimizeSkuPortfolio({
+    : withOptimizationReadinessMetadata(optimizeSkuPortfolio({
         skus: portfolioInputSkus,
         ads: metrics.attribution.campaign_performance.slice(0, 20).map((row) => ({
           campaign_id: row.campaign_id,
@@ -402,10 +406,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
           target_margin: Math.max(0.1, Math.min(0.35, metrics.business.margin || 0.18)),
           max_price_change: 0.2,
           minimum_profit: 0,
-          minimum_confidence: 0.45,
+          minimum_confidence: optimizationReadiness.optimizationConfidenceScore >= 0.7 ? 0.45 : 0.25,
           simulation_horizon_days: 30
         }
-      });
+      }), optimizationReadiness);
   const skuPortfolioReport = shouldDeferPortfolioOptimization
     ? buildDeferredPortfolioOptimizationReport()
     : generatePortfolioOptimizationReport(skuPortfolioOptimization);
@@ -543,6 +547,7 @@ function buildDeferredPortfolioOptimization(input: {
   currentProfit: number;
   adsBudget: number;
   confidence: number;
+  reasons?: string[];
 }): PortfolioOptimizationResult {
   const portfolioSummary: DecisionSummary = {
     totalProfitImpact: 0,
@@ -599,7 +604,7 @@ function buildDeferredPortfolioOptimization(input: {
       max_allowed_clear_inventory_ratio: 0.25,
       inventory_risk_level: "LOW",
       simulation_horizon_days: 30,
-      constraints_applied: ["optimization_deferred_until_user_start"]
+      constraints_applied: ["optimization_deferred_insufficient_signals", ...(input.reasons ?? [])]
     },
     prediction_summary: {
       simulation_source: "prediction_model",
@@ -647,6 +652,139 @@ function buildDeferredPortfolioOptimization(input: {
     },
     simulations: []
   };
+}
+
+type OptimizationReadiness = {
+  canOptimize: boolean;
+  optimizationConfidenceScore: number;
+  assumptions: Array<{
+    field: string;
+    estimated: true;
+    reason: string;
+  }>;
+  blockingReasons: string[];
+  signals: {
+    hasSkuRevenue: boolean;
+    hasProfitSignal: boolean;
+    hasAdsLever: boolean;
+    hasInventoryLever: boolean;
+    hasPricingLever: boolean;
+    hasConversionLever: boolean;
+  };
+};
+
+function assessOptimizationReadiness(input: {
+  metrics: MetricOutput["metrics"];
+  metadata: MetricOutput["metadata"];
+  topProfitSkus: DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"];
+  topRevenueSkus: DecisionIntelligenceReportV1["sku_breakdown"]["top_revenue_skus"];
+}): OptimizationReadiness {
+  const { metrics, metadata, topProfitSkus, topRevenueSkus } = input;
+  const normalizedDataCoverage = normalizeScore(metadata.data_coverage);
+  const normalizedProfitConfidence = normalizeScore(metadata.profit_confidence);
+  const normalizedMetricConfidence = normalizeScore(metadata.confidence_score);
+  const skuRows = topProfitSkus.length ? topProfitSkus : topRevenueSkus;
+  const hasSkuRevenue = skuRows.some((row) => row.revenue > 0 && row.quantity > 0);
+  const hasProfitSignal = topProfitSkus.some((row) =>
+    row.revenue > 0 &&
+    Number.isFinite(row.net_profit) &&
+    Number.isFinite(row.margin)
+  );
+  const hasAdsLever = metrics.ads.ad_spend > 0 || topProfitSkus.some((row) => (row.ad_cost_allocated ?? 0) > 0);
+  const hasInventoryLever = topProfitSkus.some((row) =>
+    (row.available_stock ?? row.stock_level ?? 0) > 0 ||
+    (row.sales_velocity ?? 0) > 0 ||
+    row.stockout_risk === "high" ||
+    row.overstock_risk === "high"
+  );
+  const hasPricingLever = skuRows.some((row) => row.revenue > 0 && row.quantity > 0 && row.revenue / Math.max(1, row.quantity) > 0);
+  const hasConversionLever = metrics.core.orders > 0 && skuRows.some((row) => row.quantity > 0);
+  const hasOptimizationLever = hasAdsLever || hasInventoryLever || hasPricingLever || hasConversionLever;
+  const rowConfidence = topProfitSkus.length
+    ? topProfitSkus.reduce((sum, row) => sum + normalizeScore(row.profit_confidence ?? normalizedProfitConfidence), 0) / topProfitSkus.length
+    : normalizedProfitConfidence;
+  const estimatedMetricPenalty = Math.min(0.22, metadata.estimated_metrics.length * 0.025);
+  const missingFieldPenalty = Math.min(0.18, metadata.missing_fields.length * 0.018);
+  const optimizationConfidenceScore = roundRatio(Math.max(
+    0,
+    Math.min(
+      0.95,
+      normalizedMetricConfidence * 0.22 +
+        normalizedProfitConfidence * 0.22 +
+        rowConfidence * 0.24 +
+        normalizedDataCoverage * 0.12 +
+        (hasSkuRevenue ? 0.08 : 0) +
+        (hasProfitSignal ? 0.08 : 0) +
+        (hasOptimizationLever ? 0.04 : 0) -
+        estimatedMetricPenalty -
+        missingFieldPenalty
+    )
+  ));
+  const blockingReasons = [
+    ...(!hasSkuRevenue ? ["missing_sku_level_revenue"] : []),
+    ...(!hasProfitSignal ? ["missing_sku_level_profit_signal"] : []),
+    ...(!hasOptimizationLever ? ["missing_optimization_lever"] : []),
+    ...(optimizationConfidenceScore < 0.12 ? ["optimization_confidence_below_minimum"] : [])
+  ];
+  const assumptions = Array.from(new Set([
+    ...metadata.estimated_metrics,
+    ...metadata.missing_fields
+  ]))
+    .filter((field) => /cost|cogs|refund|fulfillment|warehouse|shipping|fee|ads|spend|inventory/i.test(field))
+    .slice(0, 30)
+    .map((field) => ({
+      field,
+      estimated: true as const,
+      reason: "Optimizer used estimated or partially available profit inputs instead of disabling simulation."
+    }));
+
+  return {
+    canOptimize: blockingReasons.length === 0,
+    optimizationConfidenceScore,
+    assumptions,
+    blockingReasons,
+    signals: {
+      hasSkuRevenue,
+      hasProfitSignal,
+      hasAdsLever,
+      hasInventoryLever,
+      hasPricingLever,
+      hasConversionLever
+    }
+  };
+}
+
+function withOptimizationReadinessMetadata(
+  optimization: PortfolioOptimizationResult,
+  readiness: OptimizationReadiness
+): PortfolioOptimizationResult {
+  return {
+    ...optimization,
+    optimization_summary: {
+      ...optimization.optimization_summary,
+      constraints_applied: Array.from(new Set([
+        ...optimization.optimization_summary.constraints_applied,
+        ...(readiness.assumptions.length ? ["estimated_profit_inputs"] : []),
+        `optimization_confidence=${readiness.optimizationConfidenceScore}`
+      ]))
+    },
+    prediction_summary: {
+      ...optimization.prediction_summary,
+      prediction_confidence: Math.min(
+        optimization.prediction_summary.prediction_confidence,
+        readiness.optimizationConfidenceScore
+      )
+    },
+    optimization_confidence: readiness.optimizationConfidenceScore,
+    assumptions: readiness.assumptions,
+    optimizationConfidenceScore: readiness.optimizationConfidenceScore,
+    optimizationSignals: readiness.signals
+  } as PortfolioOptimizationResult;
+}
+
+function normalizeScore(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value > 1 ? value / 100 : value));
 }
 
 function buildDeferredPortfolioOptimizationReport(): PortfolioOptimizationBusinessReport {

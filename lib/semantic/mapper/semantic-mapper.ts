@@ -1,8 +1,9 @@
 import { analyzeRawFields } from "@/lib/semantic/engine/field-analyzer";
 import { SemanticIntelligenceEngine } from "@/lib/semantic/engine/semantic-intelligence-engine";
 import { buildCanonicalSchema } from "@/lib/semantic/mapper/canonical-schema-engine";
+import { firstValidCandidate, validateSemanticMapping } from "@/lib/semantic/mapper/mapping-validation";
 import type { SemanticMemoryStore } from "@/lib/semantic/memory";
-import type { RawFieldObservation, SemanticCandidate, SemanticMapperResult, SemanticMappingDecision } from "@/lib/semantic/types";
+import type { MappingValidationResult, RawFieldObservation, SemanticCandidate, SemanticMapperResult, SemanticMappingDecision } from "@/lib/semantic/types";
 
 export type SemanticMapperOptions = {
   platform?: string;
@@ -24,6 +25,7 @@ export class RuntimeSemanticMapper {
     const candidatesByField = groupCandidates(engineResult.candidates);
     const decisions: SemanticMappingDecision[] = [];
     const pendingWrites: Array<{ field: RawFieldObservation; decision: SemanticMappingDecision }> = [];
+    const validationResults: MappingValidationResult[] = [];
     let memoryHits = 0;
     let recordsUpdated = 0;
 
@@ -32,11 +34,28 @@ export class RuntimeSemanticMapper {
       const memoryCandidates = await this.memoryCandidates(field, options.platform);
       const memoryCandidate = memoryCandidates[0];
       const threshold = options.memoryConfidenceThreshold ?? 0.72;
-      const selected = memoryCandidate && memoryCandidate.confidence >= threshold
+      const preferred = memoryCandidate && memoryCandidate.confidence >= threshold
         ? memoryCandidate
         : engineCandidates.find((candidate) => candidate.maps_to !== "unknown");
+      const selectedValidation = preferred
+        ? validateSemanticMapping(field.field, preferred.maps_to)
+        : null;
+      const fallback = selectedValidation && !selectedValidation.accepted
+        ? firstValidCandidate(field.field, [...memoryCandidates, ...engineCandidates].filter((candidate) => candidate !== preferred))
+        : null;
+      const selected = selectedValidation?.accepted
+        ? preferred
+        : fallback?.candidate;
+      const validation = selectedValidation?.accepted
+        ? selectedValidation
+        : fallback?.validation ?? selectedValidation ?? {
+            sourceField: field.field,
+            predictedConcept: "unknown" as const,
+            accepted: true
+          };
 
       if (memoryCandidate && memoryCandidate.confidence >= threshold) memoryHits += 1;
+      validationResults.push(validation);
 
       const decision: SemanticMappingDecision = selected
         ? {
@@ -44,14 +63,16 @@ export class RuntimeSemanticMapper {
             canonical: selected.maps_to,
             confidence: selected.confidence,
             source: selected.source === "memory" ? "memory" : "engine",
-            candidates: [...memoryCandidates, ...engineCandidates]
+            candidates: [...memoryCandidates, ...engineCandidates],
+            validation
           }
         : {
             field: field.path || field.field,
             canonical: "unknown",
             confidence: 0,
             source: "unmapped",
-            candidates: engineCandidates
+            candidates: engineCandidates,
+            validation
           };
 
       decisions.push(decision);
@@ -95,7 +116,8 @@ export class RuntimeSemanticMapper {
       learning: {
         records_updated: recordsUpdated,
         unknown_fields: decisions.filter((decision) => decision.canonical === "unknown").map((decision) => decision.field),
-        anomaly_fields: analyzer.confidence < 0.2 ? analyzer.fields.map((field) => field.path) : []
+        anomaly_fields: analyzer.confidence < 0.2 ? analyzer.fields.map((field) => field.path) : [],
+        mapping_validation: validationResults
       }
     };
   }

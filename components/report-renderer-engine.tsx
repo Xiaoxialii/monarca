@@ -1996,6 +1996,16 @@ function OptimizationDecisionRail({
   const [selectedGoal, setSelectedGoal] = useState<OptimizationGoal>("GROWTH");
   const [selectedGoalAction, setSelectedGoalAction] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(selectedRow ? decisionRowKey(selectedRow) : null);
+  const goalCounts = useMemo(() => rows.reduce<Record<OptimizationGoal, number>>((counts, row) => {
+    const goal = optimizationGoalForDecision(row).goal;
+    counts[goal] = (counts[goal] ?? 0) + 1;
+    return counts;
+  }, {
+    GROWTH: 0,
+    PROFIT: 0,
+    INVENTORY: 0,
+    PORTFOLIO_HEALTH: 0
+  }), [rows]);
   const displayedRows = selectedGoal
     ? rows.filter((row) => {
       const goal = optimizationGoalForDecision(row);
@@ -2022,6 +2032,14 @@ function OptimizationDecisionRail({
   useEffect(() => {
     if (selectedRow) setSelectedRowKey(decisionRowKey(selectedRow));
   }, [selectedRow]);
+
+  useEffect(() => {
+    if (!rows.length || goalCounts[selectedGoal] > 0) return;
+    const nextGoal = optimizationGoalFilters.find((filter) => goalCounts[filter.goal] > 0)?.goal;
+    if (!nextGoal) return;
+    setSelectedGoal(nextGoal);
+    setSelectedGoalAction(null);
+  }, [goalCounts, rows.length, selectedGoal]);
 
   const selectRow = (row: PortfolioDecisionRow) => {
     setSelectedRowKey(decisionRowKey(row));

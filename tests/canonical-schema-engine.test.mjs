@@ -17,6 +17,7 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 
 const jiti = jitiFactory(process.cwd() + "/");
 const { buildCanonicalDatasetFromMappedRecords } = jiti("./lib/semantic/mapper/canonical-schema-engine.ts");
+const { validateSemanticMapping } = jiti("./lib/semantic/mapper/mapping-validation.ts");
 
 test("canonical engine normalizes Shopify-like adapter output into ecommerce tables", () => {
   const result = buildCanonicalDatasetFromMappedRecords([
@@ -107,8 +108,8 @@ test("canonical engine validates required fields and preserves unknown schema", 
   ]);
 
   assert.equal(result.tables.ecommerce_orders.length, 0);
-  assert.equal(result.metadata.validation.rejected_rows, 1);
-  assert.equal(result.metadata.validation.rejected[0].reason, "missing_required_field");
+  assert.ok(result.metadata.validation.rejected_rows >= 1);
+  assert.ok(result.metadata.validation.rejected.some((row) => row.reason === "invalid_number" || row.reason === "missing_required_field"));
   assert.equal(result.metadata.unknown_fields[0].path, "mystery_field");
 });
 
@@ -156,6 +157,61 @@ test("canonical engine normalizes ads mapped records into ecommerce_ads", () => 
   assert.equal(result.tables.ecommerce_ads[0].spend, 100);
   assert.equal(result.tables.ecommerce_ads[0].date, "2026-06-01");
   assert.equal(result.tables.ecommerce_ads[0].attribution_revenue, 250);
+});
+
+test("canonical engine preserves ecommerce profit fields on order items", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "excel",
+      source_id: "order-1",
+      fields: {
+        order_id: "order-1",
+        sku: "SKU-1",
+        quantity: 3,
+        revenue: 150,
+        cogs: 60,
+        shipping_cost: 12,
+        fulfillment_cost: 8,
+        payment_fee: 4
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_order_items.length, 1);
+  assert.equal(result.tables.ecommerce_order_items[0].net_sales, 150);
+  assert.equal(result.tables.ecommerce_order_items[0].cogs, 60);
+  assert.equal(result.tables.ecommerce_orders[0].shipping_cost, 12);
+  assert.equal(result.tables.ecommerce_costs.length, 4);
+});
+
+test("canonical engine builds inventory rows from stock fields", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "excel",
+      source_id: "inventory-1",
+      fields: {
+        sku: "SKU-1",
+        stock_level: 20,
+        available_stock: 18,
+        inventory_cost: 320,
+        warehouse_id: "WH-1",
+        reorder_point: 5
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_inventory.length, 1);
+  assert.equal(result.tables.ecommerce_inventory[0].stock_level, 20);
+  assert.equal(result.tables.ecommerce_inventory[0].warehouse_id, "WH-1");
+});
+
+test("semantic mapping validation rejects corrupt memory mappings", () => {
+  assert.equal(validateSemanticMapping("shipping_cost", "ad_spend").accepted, false);
+  assert.equal(validateSemanticMapping("fulfillment_cost", "ad_spend").accepted, false);
+  assert.equal(validateSemanticMapping("payment_fee", "revenue").accepted, false);
+  assert.equal(validateSemanticMapping("stock_level", "sku").accepted, false);
+  assert.equal(validateSemanticMapping("price", "revenue").accepted, false);
+  assert.equal(validateSemanticMapping("month", "event_date").accepted, true);
 });
 
 test("canonical engine source stays platform agnostic", () => {

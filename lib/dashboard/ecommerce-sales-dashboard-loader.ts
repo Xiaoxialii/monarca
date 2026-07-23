@@ -215,6 +215,7 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
         ${dataSourceFilter.replaceAll('"dataSourceId"', 'snapshot."dataSourceId"')}
         and snapshot."dataSourceId" is not null
         and source."isActive" = true
+        and source."status" = 'CONNECTED'
         and snapshot."canonicalStatus" = 'READY'
         and snapshot."canonicalVersion" = '${ECOMMERCE_CANONICAL_SCHEMA_VERSION}'
         and (

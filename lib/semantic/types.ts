@@ -1,5 +1,10 @@
 export type CanonicalConcept =
   | "revenue"
+  | "gross_sales"
+  | "net_sales"
+  | "discount_amount"
+  | "tax_amount"
+  | "shipping_revenue"
   | "order_id"
   | "order_date"
   | "sku"
@@ -23,6 +28,25 @@ export type CanonicalConcept =
   | "refund_reason"
   | "quantity"
   | "price"
+  | "unit_price"
+  | "cogs"
+  | "product_cost"
+  | "platform_fee"
+  | "payment_fee"
+  | "shipping_cost"
+  | "fulfillment_cost"
+  | "warehouse_cost"
+  | "gross_profit"
+  | "net_profit"
+  | "contribution_margin"
+  | "profit_margin"
+  | "stock_level"
+  | "available_stock"
+  | "inventory_quantity"
+  | "inventory_cost"
+  | "reorder_point"
+  | "warehouse_id"
+  | "cost_type"
   | "status"
   | "currency"
   | "unknown";
@@ -80,6 +104,14 @@ export type SemanticMappingDecision = {
   confidence: number;
   source: "memory" | "engine" | "unmapped";
   candidates: SemanticCandidate[];
+  validation?: MappingValidationResult;
+};
+
+export type MappingValidationResult = {
+  sourceField: string;
+  predictedConcept: CanonicalConcept;
+  accepted: boolean;
+  rejectionReason?: string;
 };
 
 export type CanonicalDataset = {
@@ -92,6 +124,7 @@ export type CanonicalDataset = {
     ecommerce_refunds: Array<Record<string, unknown>>;
     ecommerce_ads?: Array<Record<string, unknown>>;
     ecommerce_inventory?: Array<Record<string, unknown>>;
+    ecommerce_costs?: Array<Record<string, unknown>>;
     inventory?: Array<Record<string, unknown>>;
   };
   metadata: {
@@ -104,6 +137,14 @@ export type CanonicalDataset = {
       warnings: Array<{ table: string; field?: string; reason: string }>;
       rejected: Array<{ table: string; reason: string; row: Record<string, unknown> }>;
     };
+    generation_audit?: Array<{
+      source?: string;
+      table: string;
+      inputColumns: string[];
+      mappedColumns: string[];
+      rejectedColumns: Array<{ field: string; reason: string }>;
+      rowCount: number;
+    }>;
     dedupe: {
       canonical_key_strategy: "hash(platform + source_id + order_id)";
       duplicate_count: number;
@@ -122,5 +163,6 @@ export type SemanticMapperResult = {
     records_updated: number;
     unknown_fields: string[];
     anomaly_fields: string[];
+    mapping_validation?: MappingValidationResult[];
   };
 };

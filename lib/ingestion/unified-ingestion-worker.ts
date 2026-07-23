@@ -471,6 +471,8 @@ export async function processIngestionJob(
         dataMode: "upload_unified_canonical"
       }
     });
+    const canonicalRowCount = countCanonicalRows(ingestionResult.canonical_data as CanonicalDataset);
+    const canonicalStatus = canonicalRowCount > 0 ? "READY" : "FAILED";
     const completedSchemaPayload = {
       ...schemaPayload,
       unifiedIngestion
@@ -496,7 +498,7 @@ export async function processIngestionJob(
           fileSize: metadata.fileSize ?? 0,
           tableCount: qualityReport.tableCount,
           columnCount: qualityReport.columnCount,
-          canonicalStatus: "READY",
+          canonicalStatus,
           canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
           schemaSnapshotId
         } as Prisma.InputJsonValue
@@ -509,7 +511,8 @@ export async function processIngestionJob(
         schemaJson,
         qualityReport: {
           ...qualityReport,
-          canonicalArtifactBacked: true
+          canonicalArtifactBacked: canonicalRowCount > 0,
+          canonicalRowCount
         } as Prisma.InputJsonValue
       }
     });
@@ -517,9 +520,9 @@ export async function processIngestionJob(
     await client.schemaSnapshot.updateMany({
       where: { id: schemaSnapshotId },
       data: {
-        status: ConnectionStatus.CONNECTED,
+        status: canonicalRowCount > 0 ? ConnectionStatus.CONNECTED : ConnectionStatus.FAILED,
         schemaStatus: "READY",
-        canonicalStatus: "READY",
+        canonicalStatus,
         canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
       }
     });
@@ -528,16 +531,20 @@ export async function processIngestionJob(
       where: { id: dataSourceId },
       data: {
         isActive: true,
-        status: ConnectionStatus.CONNECTED,
-        lastErrorMessage: null,
+        status: canonicalRowCount > 0 ? ConnectionStatus.CONNECTED : ConnectionStatus.FAILED,
+        lastErrorMessage: canonicalRowCount > 0 ? null : "Canonical generation produced no rows",
         config: {
           ...compactDataSourceConfig({}, metadata),
           schemaSnapshotId,
           schemaVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-          canonicalStatus: "READY"
+          canonicalStatus
         } as Prisma.InputJsonValue
       }
     });
+
+    if (canonicalRowCount <= 0) {
+      throw new Error("Canonical generation produced no rows");
+    }
 
     currentStep = "Completing ingestion job";
     currentProgress = 95;
@@ -613,6 +620,10 @@ export async function processIngestionJob(
   } finally {
     stopJobHeartbeat();
   }
+}
+
+function countCanonicalRows(dataset: CanonicalDataset) {
+  return Object.values(dataset.tables).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
 }
 
 export async function recoverStaleIngestionJobs(

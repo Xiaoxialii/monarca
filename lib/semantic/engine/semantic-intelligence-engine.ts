@@ -7,10 +7,27 @@ type ConceptProfile = {
 };
 
 const CONCEPTS: ConceptProfile[] = [
-  { concept: "revenue", aliases: ["revenue", "sales", "gmv", "amount", "total", "subtotal", "price", "paid", "payment"], expectedTypes: ["number", "string"] },
-  { concept: "refund_amount", aliases: ["refund", "refunded", "return_amount", "chargeback"], expectedTypes: ["number", "string"] },
-  { concept: "ad_spend", aliases: ["ad_spend", "spend", "cost", "cpc", "cpm", "budget"], expectedTypes: ["number", "string"] },
+  { concept: "revenue", aliases: ["revenue", "sales", "gmv", "amount", "total", "subtotal", "paid"], expectedTypes: ["number", "string"] },
+  { concept: "gross_sales", aliases: ["gross_sales", "gross_revenue", "gross_amount"], expectedTypes: ["number", "string"] },
+  { concept: "net_sales", aliases: ["net_sales", "net_revenue", "net_amount"], expectedTypes: ["number", "string"] },
+  { concept: "discount_amount", aliases: ["discount_amount", "discount", "discounts", "promo_discount"], expectedTypes: ["number", "string"] },
+  { concept: "tax_amount", aliases: ["tax_amount", "tax", "sales_tax"], expectedTypes: ["number", "string"] },
+  { concept: "shipping_revenue", aliases: ["shipping_revenue", "shipping_income", "shipping_charged"], expectedTypes: ["number", "string"] },
+  { concept: "refund_amount", aliases: ["refund_amount", "refund", "refunded", "return_amount", "chargeback"], expectedTypes: ["number", "string"] },
+  { concept: "ad_spend", aliases: ["ad_spend", "ads_spend", "advertising_spend", "marketing_spend", "media_spend", "spend", "cpc", "cpm", "budget"], expectedTypes: ["number", "string"] },
   { concept: "price", aliases: ["price", "unit_price", "item_price", "product_price"], expectedTypes: ["number", "string"] },
+  { concept: "unit_price", aliases: ["unit_price", "item_price", "selling_price", "sale_price"], expectedTypes: ["number", "string"] },
+  { concept: "cogs", aliases: ["cogs", "cost_of_goods_sold", "unit_cogs"], expectedTypes: ["number", "string"] },
+  { concept: "product_cost", aliases: ["product_cost", "unit_cost", "item_cost", "landed_cost"], expectedTypes: ["number", "string"] },
+  { concept: "platform_fee", aliases: ["platform_fee", "marketplace_fee", "selling_fee", "commission_fee"], expectedTypes: ["number", "string"] },
+  { concept: "payment_fee", aliases: ["payment_fee", "processing_fee", "transaction_fee", "stripe_fee"], expectedTypes: ["number", "string"] },
+  { concept: "shipping_cost", aliases: ["shipping_cost", "shipping_fee", "carrier_cost", "postage_cost"], expectedTypes: ["number", "string"] },
+  { concept: "fulfillment_cost", aliases: ["fulfillment_cost", "pick_pack_cost", "fulfilment_cost"], expectedTypes: ["number", "string"] },
+  { concept: "warehouse_cost", aliases: ["warehouse_cost", "storage_cost", "warehousing_cost"], expectedTypes: ["number", "string"] },
+  { concept: "gross_profit", aliases: ["gross_profit", "gross_margin_amount"], expectedTypes: ["number", "string"] },
+  { concept: "net_profit", aliases: ["net_profit", "profit", "profit_amount"], expectedTypes: ["number", "string"] },
+  { concept: "contribution_margin", aliases: ["contribution_margin", "contribution_profit"], expectedTypes: ["number", "string"] },
+  { concept: "profit_margin", aliases: ["profit_margin", "margin_rate", "margin_pct", "profit_rate"], expectedTypes: ["number", "string"] },
   { concept: "order_id", aliases: ["order_id", "orderid", "order_number", "purchase_id", "transaction_id", "checkout_id"], expectedTypes: ["string", "number"] },
   { concept: "order_date", aliases: ["order_date", "created_at", "created", "purchase_time", "paid_at", "processed_at", "date", "time", "timestamp"], expectedTypes: ["datetime", "string"] },
   { concept: "product_id", aliases: ["product_id", "productid", "item_id", "asin", "listing_id"], expectedTypes: ["string", "number"] },
@@ -26,11 +43,18 @@ const CONCEPTS: ConceptProfile[] = [
   { concept: "clicks", aliases: ["clicks", "click", "link_clicks"], expectedTypes: ["number", "string"] },
   { concept: "conversions", aliases: ["conversions", "conversion_count", "purchases", "orders"], expectedTypes: ["number", "string"] },
   { concept: "attribution_revenue", aliases: ["attribution_revenue", "purchase_value", "conversion_value", "revenue_attributed"], expectedTypes: ["number", "string"] },
-  { concept: "event_date", aliases: ["event_date", "date_start", "report_date", "insight_date"], expectedTypes: ["datetime", "string"] },
+  { concept: "event_date", aliases: ["event_date", "date_start", "day", "month", "report_date", "campaign_date", "insight_date"], expectedTypes: ["datetime", "string"] },
   { concept: "conversion_event", aliases: ["conversion", "event", "event_name", "action", "purchase_event"], expectedTypes: ["string"] },
   { concept: "refund_id", aliases: ["refund_id", "return_id", "chargeback_id"], expectedTypes: ["string", "number"] },
   { concept: "refund_reason", aliases: ["refund_reason", "return_reason", "reason"], expectedTypes: ["string"] },
   { concept: "quantity", aliases: ["quantity", "qty", "units", "unit_count", "item_count"], expectedTypes: ["number", "string"] },
+  { concept: "stock_level", aliases: ["stock_level", "stock", "on_hand", "stock_on_hand"], expectedTypes: ["number", "string"] },
+  { concept: "available_stock", aliases: ["available_stock", "available", "available_quantity", "sellable_stock"], expectedTypes: ["number", "string"] },
+  { concept: "inventory_quantity", aliases: ["inventory_quantity", "inventory_qty", "inventory"], expectedTypes: ["number", "string"] },
+  { concept: "inventory_cost", aliases: ["inventory_cost", "stock_value", "inventory_value"], expectedTypes: ["number", "string"] },
+  { concept: "reorder_point", aliases: ["reorder_point", "reorder_level", "min_stock"], expectedTypes: ["number", "string"] },
+  { concept: "warehouse_id", aliases: ["warehouse_id", "warehouse", "location_id", "fulfillment_center"], expectedTypes: ["string", "number"] },
+  { concept: "cost_type", aliases: ["cost_type", "expense_type", "fee_type"], expectedTypes: ["string"] },
   { concept: "status", aliases: ["status", "order_status", "financial_status", "payment_status"], expectedTypes: ["string"] },
   { concept: "currency", aliases: ["currency", "currency_code", "iso_currency"], expectedTypes: ["string"] }
 ];
@@ -136,12 +160,37 @@ function valuePatternScore(concept: Exclude<CanonicalConcept, "unknown">, field:
   const stringSamples = samples.map((sample) => String(sample));
 
   if (concept === "order_date" && stringSamples.some(isDateLike)) return 0.16;
-  if ((concept === "revenue" || concept === "refund_amount" || concept === "ad_spend") && samples.some((sample) => Number(sample) > 0)) return 0.1;
+  if (MONEY_CONCEPTS.has(concept) && samples.some((sample) => Number(sample) > 0)) return 0.1;
   if (concept === "currency" && stringSamples.some((sample) => /^[A-Z]{3}$/.test(sample))) return 0.18;
   if (concept === "sku" && stringSamples.some((sample) => /^[A-Z0-9_-]{3,}$/i.test(sample))) return 0.08;
 
   return 0;
 }
+
+const MONEY_CONCEPTS = new Set<Exclude<CanonicalConcept, "unknown">>([
+  "revenue",
+  "gross_sales",
+  "net_sales",
+  "discount_amount",
+  "tax_amount",
+  "shipping_revenue",
+  "refund_amount",
+  "ad_spend",
+  "price",
+  "unit_price",
+  "cogs",
+  "product_cost",
+  "platform_fee",
+  "payment_fee",
+  "shipping_cost",
+  "fulfillment_cost",
+  "warehouse_cost",
+  "gross_profit",
+  "net_profit",
+  "contribution_margin",
+  "profit_margin",
+  "inventory_cost"
+]);
 
 function typeCompatible(profile: ConceptProfile, valueType: SemanticValueType) {
   return valueType === "null" || profile.expectedTypes.includes(valueType);

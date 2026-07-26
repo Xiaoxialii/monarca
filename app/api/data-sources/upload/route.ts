@@ -14,6 +14,7 @@ import { storeUploadLocally } from "@/lib/local-upload-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 
@@ -73,7 +74,8 @@ function uploadErrorMessage(error: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.upload.POST", session);
     await requireCanConnectDataSource(session.workspace.id);
     const formData = await request.formData();
     const file = formData.get("file");

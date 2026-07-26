@@ -10,6 +10,7 @@ import {
 } from "@/lib/database-connection-config";
 import { testDatabaseConnection } from "@/lib/database-introspection";
 import { apiErrorResponse } from "@/lib/api-errors";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,8 @@ function jsonError(message: string, status = 400, details: Record<string, unknow
 
 export async function POST(request: Request) {
   try {
-    await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.test-connection.POST", session);
 
     const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const type = normalizeDatabaseType(payload?.type);

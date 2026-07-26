@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export const workspaceInviteCookieName = "monarca_workspace_id";
 export const workspaceInviteTokenBytes = 32;
 export const workspaceInviteTtlDays = 7;
 

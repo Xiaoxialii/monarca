@@ -4,6 +4,7 @@ import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-au
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -298,9 +299,10 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const session = await requireWorkspace();
+    const session = await requireWorkspace(request);
+    logWorkspaceContext("[workspace-context] data-sources.GET", session);
     const includeDeleted = true;
 
     const dataSources = await prisma.dataSourceConnection.findMany({

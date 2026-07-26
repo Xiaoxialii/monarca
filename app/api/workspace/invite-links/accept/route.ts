@@ -1,10 +1,13 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { WorkspaceMemberStatus, WorkspaceRole } from "@prisma/client";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ensureReportEntitlement } from "@/lib/report-entitlements";
-import { hashWorkspaceInviteToken, workspaceInviteCookieName } from "@/lib/workspace-invite-links";
+import { hashWorkspaceInviteToken } from "@/lib/workspace-invite-links";
+import {
+  findActiveWorkspaceMembershipForUser,
+  singleWorkspaceViolationPayload
+} from "@/lib/single-workspace-membership";
 
 export const runtime = "nodejs";
 
@@ -76,6 +79,15 @@ export async function POST(request: Request) {
   }
 
   const user = await upsertCurrentUser(userId);
+  const activeMembership = await findActiveWorkspaceMembershipForUser(user.id);
+
+  if (activeMembership && activeMembership.workspaceId !== invite.workspaceId) {
+    return NextResponse.json(
+      { ok: false, ...singleWorkspaceViolationPayload(activeMembership.workspace.name) },
+      { status: 409 }
+    );
+  }
+
   const existing = await prisma.workspaceMember.findUnique({
     where: {
       workspaceId_userId: {
@@ -107,14 +119,6 @@ export async function POST(request: Request) {
       });
 
   await ensureReportEntitlement(invite.workspaceId);
-
-  const cookieStore = await cookies();
-  cookieStore.set(workspaceInviteCookieName, invite.workspaceId, {
-    path: "/",
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 30
-  });
 
   return NextResponse.json({
     ok: true,

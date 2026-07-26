@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generatePortfolioOptimizationReport } from "@/lib/optimization/optimization-report-generator";
 import { runOptimizationLayerV2 } from "@/lib/optimization/optimization-layer-v2";
 import { optimizeSkuPortfolio } from "@/lib/optimization/portfolio-optimizer";
@@ -10,8 +11,13 @@ import type { PortfolioOptimizationInput } from "@/lib/optimization/profit-simul
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const session = await syncCurrentClerkUser();
-  if (!session) return NextResponse.json({ ok: false, message: "Unauthenticated." }, { status: 401 });
+  const session = await getCurrentWorkspaceContext(request).catch((error) => {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  });
+  if (session instanceof NextResponse) return session;
+  logWorkspaceContext("[workspace-context] optimization.run.POST", session);
 
   const body = await request.json().catch(() => null) as (CommerceState & { portfolio_input?: PortfolioOptimizationInput }) | PortfolioOptimizationInput | null;
   const state = isCommerceState(body) ? body : null;

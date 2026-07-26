@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -107,7 +108,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.id.PATCH", session);
     const { id } = await params;
     const payload = asRecord(await request.json().catch(() => null));
 
@@ -163,7 +165,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.id.DELETE", session);
     const { id } = await params;
     const url = new URL(request.url);
     const permanent = url.searchParams.get("permanent") === "true";

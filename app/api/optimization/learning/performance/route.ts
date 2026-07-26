@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveActionSession } from "@/app/api/actions/session";
 import { prisma } from "@/lib/prisma";
 import { listActionTrackingRecords } from "@/lib/optimization/action-tracking-store";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +28,9 @@ type PrismaWithOptimizationLearning = typeof prisma & {
   };
 };
 
-export async function GET() {
-  const { workspaceId } = await resolveActionSession();
-
+export async function GET(request: Request) {
   try {
+    const { workspaceId } = await resolveActionSession(request);
     const [decisions, learningRecords] = await Promise.all([
       (prisma as PrismaWithOptimizationLearning).optimizationDecision.findMany({ where: { workspaceId } }),
       (prisma as PrismaWithOptimizationLearning).optimizationLearningRecord.findMany({ where: { workspaceId } })
@@ -54,7 +54,11 @@ export async function GET() {
         action_performance: byAction
       }
     });
-  } catch {
+  } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
+    const { workspaceId } = await resolveActionSession(request);
     const actions = await listActionTrackingRecords({ workspaceId });
     const accepted = actions.filter((row) => row.status !== "rejected").length;
     return NextResponse.json({

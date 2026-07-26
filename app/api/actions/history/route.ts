@@ -4,8 +4,8 @@ import { listActionTrackingRecords } from "@/lib/optimization/action-tracking-st
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const { workspaceId } = await resolveActionSession();
+export async function GET(request: Request) {
+  const { workspaceId } = await resolveActionSession(request);
   const actions = await listActionTrackingRecords({ workspaceId });
 
   return NextResponse.json({ ok: true, actions });

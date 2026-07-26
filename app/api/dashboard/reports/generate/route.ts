@@ -48,6 +48,7 @@ import {
   validationFromLineage
 } from "@/lib/metric-validation";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { calculateVerifiedMetrics } from "@/lib/metrics/metric-calculator";
 import { reportMetricTimeWindow } from "@/lib/metrics/time-window-builder";
 import { validateMetricConsistency } from "@/lib/metrics/metric-consistency-validator";
@@ -1216,7 +1217,8 @@ export async function POST(request: Request) {
   let generationWorkspaceId: string | null = null;
 
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] dashboard.reports.generate.POST", session);
     const payload = await request.json().catch(() => null);
     const payloadRecord = asRecord(payload);
     const userRequested = asRecord(payload).userRequested === true;

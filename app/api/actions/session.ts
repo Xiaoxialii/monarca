@@ -1,16 +1,11 @@
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
 
-export async function resolveActionSession() {
-  try {
-    const session = await syncCurrentClerkUser();
-    return {
-      workspaceId: session?.workspace.id ?? "local-workspace",
-      userId: session?.user.id ?? null
-    };
-  } catch {
-    return {
-      workspaceId: "local-workspace",
-      userId: null
-    };
-  }
+export async function resolveActionSession(request?: Request | null) {
+  const session = await getCurrentWorkspaceContext(request);
+  logWorkspaceContext("[workspace-context] action-session", session);
+
+  return {
+    workspaceId: session.workspace.id,
+    userId: session.user.id
+  };
 }

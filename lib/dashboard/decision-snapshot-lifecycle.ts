@@ -47,8 +47,7 @@ function canonicalSnapshotVersion(snapshot: {
   return [
     snapshot.id,
     snapshot.version,
-    snapshot.canonicalVersion ?? "canonical-unknown",
-    snapshot.createdAt.toISOString()
+    snapshot.canonicalVersion ?? "canonical-unknown"
   ].join(":");
 }
 
@@ -62,9 +61,7 @@ function metricSnapshotVersion(snapshot: {
 
   return [
     snapshot.id,
-    snapshot.schemaVersion ?? "schema-unknown",
-    snapshot.calculatedAt.toISOString(),
-    snapshot.createdAt.toISOString()
+    snapshot.schemaVersion ?? "schema-unknown"
   ].join(":");
 }
 

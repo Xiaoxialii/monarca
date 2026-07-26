@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { getCurrentWorkspaceContext } from "@/lib/current-workspace-context";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const session = await syncCurrentClerkUser();
+export async function GET(request: Request) {
+  const session = await getCurrentWorkspaceContext(request).catch((error) => {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  });
 
   if (!session) {
     return NextResponse.json({ currentUser: null, currentWorkspace: null, currentRole: null }, { status: 401 });
   }
+
+  if (session instanceof NextResponse) return session;
 
   return NextResponse.json({
     currentUser: {

@@ -5,7 +5,7 @@ import { resolveActionSession } from "@/app/api/actions/session";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const { workspaceId, userId } = await resolveActionSession();
+  const { workspaceId, userId } = await resolveActionSession(request);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
 
   const record = await rejectActionTrackingRecord({

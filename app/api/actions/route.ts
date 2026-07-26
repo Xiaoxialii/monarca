@@ -6,7 +6,7 @@ import { resolveActionSession } from "@/app/api/actions/session";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const { workspaceId } = await resolveActionSession();
+  const { workspaceId } = await resolveActionSession(request);
   const status = new URL(request.url).searchParams.get("status") as ActionTrackingStatus | null;
   const records = await listActionTrackingRecords({ workspaceId, status });
 

@@ -262,6 +262,7 @@ model WorkspaceMember {
   workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user              User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  @@unique([userId])
   @@unique([workspaceId, userId])
   @@unique([workspaceId, invitedEmail])
 }

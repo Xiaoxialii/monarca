@@ -1,9 +1,8 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { WorkspaceMemberStatus, WorkspaceRole } from "@prisma/client";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { ensureReportEntitlement } from "@/lib/report-entitlements";
-import { workspaceInviteCookieName } from "@/lib/workspace-invite-links";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function createWorkspaceSlug(clerkUserId: string) {
   return `workspace-${clerkUserId.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase()}`;
@@ -48,7 +47,17 @@ export async function syncCurrentClerkUser(options: { fallbackEmail?: string } =
   return syncClerkUserById(userId, options);
 }
 
-export async function syncClerkUserById(
+export async function syncCurrentClerkUserIdentity(options: { fallbackEmail?: string } = {}) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return null;
+  }
+
+  return syncClerkUserIdentityById(userId, options);
+}
+
+export async function syncClerkUserIdentityById(
   clerkUserId: string,
   options: { fallbackEmail?: string } = {}
 ) {
@@ -103,27 +112,23 @@ export async function syncClerkUserById(
       include: userWithMembershipsInclude
     });
 
-  const cookieStore = await cookies().catch(() => null);
-  const preferredWorkspaceId = cookieStore?.get(workspaceInviteCookieName)?.value ?? null;
-  const existingMembership = (
-    preferredWorkspaceId
-      ? user.memberships.find(
-        (membership) =>
-          membership.status === WorkspaceMemberStatus.ACTIVE &&
-          membership.workspaceId === preferredWorkspaceId
-      )
-      : null
-  ) ?? user.memberships.find(
+  const activeMemberships = user.memberships.filter(
     (membership) => membership.status === WorkspaceMemberStatus.ACTIVE
-  ) ?? user.memberships[0];
+  );
 
-  if (existingMembership) {
-    await ensureReportEntitlement(existingMembership.workspace.id);
-
+  if (activeMemberships.length === 1) {
     return {
       user,
-      workspace: existingMembership.workspace,
-      membership: existingMembership
+      workspace: activeMemberships[0].workspace,
+      membership: activeMemberships[0]
+    };
+  }
+
+  if (activeMemberships.length > 1) {
+    return {
+      user,
+      workspace: null,
+      membership: null
     };
   }
 
@@ -145,7 +150,7 @@ export async function syncClerkUserById(
     : null;
 
   if (pendingInvite) {
-    const membership = await prisma.workspaceMember.update({
+    await prisma.workspaceMember.update({
       where: { id: pendingInvite.id },
       data: {
         userId: user.id,
@@ -155,11 +160,24 @@ export async function syncClerkUserById(
       }
     });
     await ensureReportEntitlement(pendingInvite.workspace.id);
+    const refreshedUser = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      include: userWithMembershipsInclude
+    });
+    const acceptedMembership = refreshedUser.memberships.find((item) => item.id === pendingInvite.id) ?? null;
 
     return {
+      user: refreshedUser,
+      workspace: acceptedMembership?.workspace ?? pendingInvite.workspace,
+      membership: acceptedMembership
+    };
+  }
+
+  if (user.memberships.length > 0) {
+    return {
       user,
-      workspace: pendingInvite.workspace,
-      membership
+      workspace: null,
+      membership: null
     };
   }
 
@@ -181,10 +199,43 @@ export async function syncClerkUserById(
     }
   });
   await ensureReportEntitlement(workspace.id);
+  const refreshedUser = await prisma.user.findUniqueOrThrow({
+    where: { id: user.id },
+    include: userWithMembershipsInclude
+  });
+  const createdMembership = refreshedUser.memberships.find((item) => item.id === membership.id) ?? null;
 
   return {
-    user,
-    workspace,
+    user: refreshedUser,
+    workspace: createdMembership?.workspace ?? workspace,
+    membership: createdMembership
+  };
+}
+
+export async function syncClerkUserById(
+  clerkUserId: string,
+  options: { fallbackEmail?: string } = {}
+) {
+  const identity = await syncClerkUserIdentityById(clerkUserId, options);
+  const activeMemberships = identity.user.memberships.filter(
+    (membership) => membership.status === WorkspaceMemberStatus.ACTIVE
+  );
+  const membership = identity.membership ?? (activeMemberships.length === 1 ? activeMemberships[0] : null);
+
+  if (!membership) {
+    throw new WorkspaceAuthError(
+      activeMemberships.length > 1
+        ? "User has multiple active workspace memberships; data migration is required."
+        : "No active workspace membership",
+      activeMemberships.length > 1 ? 409 : 403
+    );
+  }
+
+  await ensureReportEntitlement(membership.workspace.id);
+
+  return {
+    user: identity.user,
+    workspace: membership.workspace,
     membership
   };
 }

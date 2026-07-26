@@ -7,8 +7,8 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const { workspaceId } = await resolveActionSession();
+export async function GET(request: Request) {
+  const { workspaceId } = await resolveActionSession(request);
   const hasConnectedData = await hasConnectedDataSource(workspaceId);
   if (!hasConnectedData) {
     return NextResponse.json({

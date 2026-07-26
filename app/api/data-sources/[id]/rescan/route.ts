@@ -17,6 +17,7 @@ import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-me
 import { storedSecret } from "@/lib/secret-crypto";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 
@@ -377,11 +378,12 @@ function publicConfig(config: ReturnType<typeof resolveDatabaseConfig>) {
 }
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.id.rescan.POST", session);
     const { id } = await params;
     const dataSource = await prisma.dataSourceConnection.findFirst({
       where: {

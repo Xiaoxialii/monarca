@@ -31,6 +31,7 @@ export const ASYNC_JOB_STATUSES = [
 const ACTIVE_ASYNC_JOB_STATUSES = ["PROCESSING"] as const;
 const RESUMABLE_ASYNC_JOB_STATUSES = ["PROCESSING", "PAUSED"] as const;
 const DEFAULT_STALE_ASYNC_JOB_MS = 10 * 60 * 1000;
+const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 30 * 60 * 1000;
 const DEFAULT_QUEUED_ASYNC_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const DEFAULT_MAX_RECOVERY_BATCH = 25;
@@ -73,6 +74,11 @@ export const QUEUED_ASYNC_JOB_MS = configuredDurationMs(
   DEFAULT_QUEUED_ASYNC_JOB_MS
 );
 
+export const SKU_OPTIMIZATION_STALE_JOB_MS = configuredDurationMs(
+  process.env.SKU_OPTIMIZATION_JOB_STALE_MS,
+  DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS
+);
+
 const HEARTBEAT_INTERVAL_MS = configuredDurationMs(
   process.env.ASYNC_JOB_HEARTBEAT_MS,
   DEFAULT_HEARTBEAT_INTERVAL_MS
@@ -92,6 +98,10 @@ function staleBeforeDate(now = new Date()) {
 
 function queuedBeforeDate(now = new Date()) {
   return new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
+}
+
+function skuOptimizationStaleBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - SKU_OPTIMIZATION_STALE_JOB_MS);
 }
 
 function staleQueuedJobWhere(now = new Date()) {
@@ -136,6 +146,28 @@ export function retryableAsyncJobWhere(now = new Date()) {
       }
     ]
   };
+}
+
+function activeJobHeartbeatDate(job: {
+  heartbeatAt: Date | null;
+  startedAt: Date | null;
+  lockedAt: Date | null;
+  updatedAt: Date;
+  createdAt: Date;
+}) {
+  return job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt ?? job.createdAt;
+}
+
+function isStaleSkuOptimizationJob(job: {
+  status: string;
+  heartbeatAt: Date | null;
+  startedAt: Date | null;
+  lockedAt: Date | null;
+  updatedAt: Date;
+  createdAt: Date;
+}, now = new Date()) {
+  if (job.status !== "PROCESSING" && job.status !== "PAUSED") return false;
+  return activeJobHeartbeatDate(job) < skuOptimizationStaleBeforeDate(now);
 }
 
 function startHeartbeat(
@@ -221,12 +253,13 @@ export async function enqueueSkuOptimizationJob(
   input: {
     workspaceId: string;
     reason?: string;
+    decisionMode?: "full" | "sku";
     triggerDataSourceId?: string | null;
     schemaSnapshotId?: string | null;
     inputHash?: string | null;
   }
 ) {
-  const existing = await client.asyncJob.findFirst({
+  const existingJobs = await client.asyncJob.findMany({
     where: {
       workspaceId: input.workspaceId,
       type: "SKU_OPTIMIZATION",
@@ -234,12 +267,55 @@ export async function enqueueSkuOptimizationJob(
         in: ["QUEUED", "PROCESSING", "PAUSED"]
       }
     },
+    select: {
+      id: true,
+      workspaceId: true,
+      type: true,
+      status: true,
+      progress: true,
+      currentStep: true,
+      payload: true,
+      resultReference: true,
+      errorMessage: true,
+      retryCount: true,
+      maxRetries: true,
+      heartbeatAt: true,
+      lockedAt: true,
+      lockedBy: true,
+      startedAt: true,
+      completedAt: true,
+      createdAt: true,
+      updatedAt: true
+    },
     orderBy: {
       createdAt: "desc"
     }
   });
 
-  if (existing) return existing;
+  const now = new Date();
+  for (const existing of existingJobs) {
+    if (existing.status === "QUEUED") return existing;
+    if (!isStaleSkuOptimizationJob(existing, now)) return existing;
+
+    await client.asyncJob.updateMany({
+      where: {
+        id: existing.id,
+        status: {
+          in: ["PROCESSING", "PAUSED"]
+        }
+      },
+      data: {
+        status: "FAILED",
+        progress: 100,
+        currentStep: "Failed - stale optimization job heartbeat",
+        errorMessage: `Superseded because SKU optimization heartbeat was stale for more than ${Math.round(SKU_OPTIMIZATION_STALE_JOB_MS / 60000)} minutes.`,
+        heartbeatAt: now,
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: now
+      }
+    });
+  }
 
   return createAsyncJob(client, {
     workspaceId: input.workspaceId,
@@ -247,6 +323,7 @@ export async function enqueueSkuOptimizationJob(
     currentStep: "Queued for decision optimization",
     payload: {
       reason: input.reason ?? "manual_or_freshness_refresh",
+      decisionMode: input.decisionMode ?? null,
       triggerDataSourceId: input.triggerDataSourceId ?? null,
       schemaSnapshotId: input.schemaSnapshotId ?? null,
       inputHash: input.inputHash ?? null
@@ -720,6 +797,9 @@ async function processSkuOptimizationAsyncJob(
       ? input.payload.dataSourceId
       : null;
   const schemaSnapshotId = typeof input.payload.schemaSnapshotId === "string" ? input.payload.schemaSnapshotId : null;
+  const decisionMode = input.payload.decisionMode === "full" || input.payload.decisionMode === "sku"
+    ? input.payload.decisionMode
+    : null;
 
   await input.setJobState({
     progress: 35,
@@ -729,7 +809,8 @@ async function processSkuOptimizationAsyncJob(
   const decisionSnapshots = await generateEcommerceDecisionSnapshots(client, {
     workspaceId: input.workspaceId,
     dataSourceId: null,
-    sourceJobId: input.id
+    sourceJobId: input.id,
+    modes: decisionMode ? [decisionMode] : undefined
   });
 
   await input.setJobState({

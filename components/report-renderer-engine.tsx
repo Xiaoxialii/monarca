@@ -1105,7 +1105,7 @@ export function DecisionAnalysisEnginePanel({
           showSkuTableEmptyState={showSkuTableEmptyState}
           isLoadingOptimization={isLoadingOptimization}
           isLoadingData={isLoadingData}
-          onStartProfitOptimization={showSkuTableEmptyState ? undefined : onStartProfitOptimization}
+          onStartProfitOptimization={onStartProfitOptimization}
         />
       );
     }
@@ -1192,20 +1192,20 @@ function InitialProfitOptimizationShell({
               <div className="w-full max-w-[430px] text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
-                    {isLoadingData
-                      ? (isZh ? "正在模拟 SKU 优化" : "Simulating SKU optimization")
+                    {isLoadingData || isLoadingOptimization
+                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
                       : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
                   <button
                     type="button"
                     onClick={() => {
                       if (isLoadingData) return;
-                      if (!showSkuTableEmptyState) void onStartProfitOptimization?.();
+                      void onStartProfitOptimization?.();
                     }}
                     disabled={isLoadingOptimization || isLoadingData}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
-                    aria-label={isLoadingData
-                      ? (isZh ? "正在模拟 SKU 优化" : "Simulating SKU optimization")
+                    aria-label={isLoadingData || isLoadingOptimization
+                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
                       : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
                     {isLoadingOptimization || isLoadingData ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
@@ -1302,7 +1302,7 @@ function SkuPortfolioOptimizationPanel({
   const [trackedOutcomeRows, setTrackedOutcomeRows] = useState<ActionOutcomeRow[]>(seedActionOutcomeRows);
   const [selectedOutcomeRow, setSelectedOutcomeRow] = useState<ActionOutcomeRow | null>(null);
   const [selectedDecisionRow, setSelectedDecisionRow] = useState<PortfolioDecisionRow | null>(null);
-  const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(true);
+  const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
   const focusedQueueSku = selectedDecisionRow?.skuId ?? null;
   const displayedSkuRows = useMemo(() => {
@@ -1360,11 +1360,27 @@ function SkuPortfolioOptimizationPanel({
     : null;
 
   useEffect(() => {
+    if (optimizationStarted) {
+      setIsSkuOperationsOpen(false);
+    }
+  }, [optimizationStarted]);
+
+  useEffect(() => {
     if (wasLoadingOptimizationRef.current && !isLoadingOptimization && optimizationStarted) {
-      setIsSkuOperationsOpen(true);
+      setIsSkuOperationsOpen(false);
     }
     wasLoadingOptimizationRef.current = isLoadingOptimization;
   }, [isLoadingOptimization, optimizationStarted]);
+
+  useEffect(() => {
+    if (!optimizationStarted || isLoadingOptimization || selectedDecisionRow || !pendingDecisionRows.length) {
+      return;
+    }
+    const firstDecision = pendingDecisionRows[0];
+    setSelectedDecisionRow(firstDecision);
+    setSkuChannel("all");
+    setExpandedSku(firstDecision.skuId);
+  }, [isLoadingOptimization, optimizationStarted, pendingDecisionRows, selectedDecisionRow]);
 
   useEffect(() => {
     if (!optimizationStarted || !decisionRows.length) {
@@ -1637,7 +1653,7 @@ function SkuPortfolioOptimizationPanel({
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
                   <p className="text-sm font-semibold text-slate-600">
-                    {isZh ? "正在生成利润优化方案..." : "Generating profit optimization plan..."}
+                    {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
                   </p>
                 </div>
               </div>
@@ -1781,18 +1797,21 @@ function SkuPortfolioOptimizationPanel({
               <div className="text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
-                    {isZh ? "开始利润优化" : "Start profit optimization"}
+                    {isLoadingOptimization
+                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
+                      : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
                   <button
                     type="button"
                     onClick={() => {
-                      if (showSkuTableEmptyState) return;
                       setIsSkuOperationsOpen(false);
                       void onStartProfitOptimization?.();
                     }}
                     disabled={isLoadingOptimization}
-                    className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a]"
-                    aria-label={isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks"}
+                    className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
+                    aria-label={isLoadingOptimization
+                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
+                      : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
                     {isLoadingOptimization ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
                   </button>
@@ -1803,7 +1822,7 @@ function SkuPortfolioOptimizationPanel({
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
                   <p className="text-sm font-semibold text-slate-600">
-                    {isZh ? "正在生成利润优化方案..." : "Generating profit optimization plan..."}
+                    {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
                   </p>
                 </div>
               </div>
@@ -1850,7 +1869,7 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
         </h2>
         {isLoadingData ? (
           <p className="mt-5 text-sm font-semibold text-[#5747e8]">
-            {isZh ? "正在更新数据" : "Updating data"}
+            {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
           </p>
         ) : null}
       </div>

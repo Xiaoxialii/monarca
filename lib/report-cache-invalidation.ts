@@ -8,6 +8,9 @@ type ReportCacheClient = {
   dailyBriefing: {
     deleteMany: (args: { where: { workspaceId: string } }) => Promise<unknown>;
   };
+  reportSnapshot?: {
+    deleteMany: (args: { where: { workspaceId: string } }) => Promise<unknown>;
+  };
 };
 
 export async function clearWorkspaceReportCaches(prisma: ReportCacheClient, workspaceId: string) {
@@ -18,6 +21,9 @@ export async function clearWorkspaceReportCaches(prisma: ReportCacheClient, work
     where: { workspaceId }
   });
   await prisma.dailyBriefing.deleteMany({
+    where: { workspaceId }
+  });
+  await prisma.reportSnapshot?.deleteMany({
     where: { workspaceId }
   });
 }

@@ -2,17 +2,19 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const startedAt = Date.now();
 
   try {
-    const session = await requireWorkspace();
+    const session = await requireWorkspace(request);
+    logWorkspaceContext("[workspace-context] data-sources.id.schema.GET", session);
     const { id } = await params;
     const dataSource = await prisma.dataSourceConnection.findFirst({
       where: {

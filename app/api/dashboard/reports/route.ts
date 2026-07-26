@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
 import { apiErrorResponse } from "@/lib/api-errors";
+import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { isBusinessFacingMetricDefinition, isBusinessFacingMetricText } from "@/lib/metric-visibility";
 import { getReportEntitlementState } from "@/lib/report-entitlements";
 import { dateRangeFromSearchParams, resolveReportDateRange, type DateRangePreset } from "@/lib/report-date-range";
@@ -743,11 +744,8 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
 
   try {
-    const session = await syncCurrentClerkUser();
-
-    if (!session) {
-      return NextResponse.json({ hasData: false, briefing: null, insights: [], recommendations: [] }, { status: 401 });
-    }
+    const session = await getCurrentWorkspaceContext(request);
+    logWorkspaceContext("[workspace-context] dashboard.reports.GET", session);
 
     const url = new URL(request.url);
     const resolvedDateRange = resolveReportDateRange(dateRangeFromSearchParams(url.searchParams));
@@ -1180,6 +1178,9 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(responsePayload);
   } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
     return apiErrorResponse(error, "Failed to load report data");
   }
 }

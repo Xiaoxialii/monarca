@@ -1,31 +1,18 @@
 import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { getCurrentWorkspaceContext } from "@/lib/current-workspace-context";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
-export class WorkspaceAuthError extends Error {
-  status: 401 | 403;
+export { WorkspaceAuthError };
 
-  constructor(message: string, status: 401 | 403) {
-    super(message);
-    this.name = "WorkspaceAuthError";
-    this.status = status;
-  }
+export type WorkspaceSession = Awaited<ReturnType<typeof getCurrentWorkspaceContext>>;
+
+export async function requireAuth(request?: Request | null): Promise<WorkspaceSession> {
+  return requireWorkspace(request);
 }
 
-export type WorkspaceSession = NonNullable<Awaited<ReturnType<typeof syncCurrentClerkUser>>>;
-
-export async function requireAuth(): Promise<WorkspaceSession> {
-  const session = await syncCurrentClerkUser();
-
-  if (!session) {
-    throw new WorkspaceAuthError("Unauthorized", 401);
-  }
-
-  return session;
-}
-
-export async function requireWorkspace(): Promise<WorkspaceSession> {
-  return requireAuth();
+export async function requireWorkspace(request?: Request | null): Promise<WorkspaceSession> {
+  return getCurrentWorkspaceContext(request);
 }
 
 export function getCurrentUserRole(session: WorkspaceSession): WorkspaceRole {
@@ -36,8 +23,8 @@ export function hasWorkspaceRole(role: WorkspaceRole, allowedRoles: WorkspaceRol
   return allowedRoles.includes(role);
 }
 
-export async function requireWorkspaceRole(allowedRoles: WorkspaceRole[]): Promise<WorkspaceSession> {
-  const session = await requireWorkspace();
+export async function requireWorkspaceRole(allowedRoles: WorkspaceRole[], request?: Request | null): Promise<WorkspaceSession> {
+  const session = await requireWorkspace(request);
 
   if (!hasWorkspaceRole(session.membership.role, allowedRoles)) {
     throw new WorkspaceAuthError("Forbidden", 403);
@@ -48,7 +35,14 @@ export async function requireWorkspaceRole(allowedRoles: WorkspaceRole[]): Promi
 
 export function workspaceAuthErrorResponse(error: unknown) {
   if (error instanceof WorkspaceAuthError) {
-    return NextResponse.json({ error: error.message, message: error.message }, { status: error.status });
+    return NextResponse.json(
+      {
+        error: error.message,
+        message: error.message,
+        code: error.status === 409 ? "USER_WORKSPACE_CONFLICT" : undefined
+      },
+      { status: error.status }
+    );
   }
 
   return null;

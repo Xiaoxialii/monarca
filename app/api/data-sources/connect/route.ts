@@ -22,6 +22,7 @@ import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-me
 import { encryptSecret } from "@/lib/secret-crypto";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 
@@ -31,7 +32,8 @@ function jsonError(message: string, status = 400, details: Record<string, unknow
 
 export async function POST(request: Request) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    logWorkspaceContext("[workspace-context] data-sources.connect.POST", session);
     await requireCanConnectDataSource(session.workspace.id);
     const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const type = normalizeDatabaseType(payload?.type);

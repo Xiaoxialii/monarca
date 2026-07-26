@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveActionSession } from "@/app/api/actions/session";
 import { acceptActionTrackingRecord } from "@/lib/optimization/action-tracking-store";
 import { prisma } from "@/lib/prisma";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +24,14 @@ type PrismaWithOptimizationDecision = typeof prisma & {
   };
 };
 
-export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const { workspaceId, userId } = await resolveActionSession();
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const actionSession = await resolveActionSession(request).catch((error) => {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  });
+  if (actionSession instanceof NextResponse) return actionSession;
+  const { workspaceId, userId } = actionSession;
   const { id } = await context.params;
 
   const decision = await (prisma as PrismaWithOptimizationDecision).optimizationDecision.findFirst({

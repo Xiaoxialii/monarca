@@ -5,7 +5,7 @@ import { completeActionTrackingRecord } from "@/lib/optimization/action-tracking
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, context: { params: Promise<{ actionId: string }> }) {
-  const { workspaceId } = await resolveActionSession();
+  const { workspaceId } = await resolveActionSession(request);
   const { actionId } = await context.params;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const actualMetrics = body?.actual_metrics && typeof body.actual_metrics === "object" && !Array.isArray(body.actual_metrics)

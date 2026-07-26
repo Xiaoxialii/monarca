@@ -4,8 +4,8 @@ import { listActionTrackingRecords } from "@/lib/optimization/action-tracking-st
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const { workspaceId } = await resolveActionSession();
+export async function GET(request: Request) {
+  const { workspaceId } = await resolveActionSession(request);
   const actions = await listActionTrackingRecords({ workspaceId });
   const completed = actions.filter((action) => action.status === "completed" || action.status === "learned");
   const accepted = actions.filter((action) => action.status !== "rejected").length;

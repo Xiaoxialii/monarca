@@ -95,7 +95,9 @@ export async function PATCH(_request: Request, context: { params: Promise<{ id: 
       id
     },
     data: {
-      status: WorkspaceMemberStatus.REMOVED
+      status: WorkspaceMemberStatus.REMOVED,
+      userId: null,
+      invitedEmail: target.user?.email ?? target.invitedEmail ?? null
     },
     include: {
       user: {

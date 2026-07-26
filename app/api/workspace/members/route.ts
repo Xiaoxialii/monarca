@@ -11,6 +11,11 @@ import {
   parseTeamRole
 } from "@/lib/workspace-members";
 import { WorkspaceMemberStatus } from "@prisma/client";
+import {
+  findActiveWorkspaceMembershipForUser,
+  findBlockingPendingInviteForEmail,
+  singleWorkspaceViolationPayload
+} from "@/lib/single-workspace-membership";
 
 async function sendClerkInvitationEmail(request: Request, email: string, workspaceId: string, role: string) {
   const client = await clerkClient();
@@ -124,6 +129,15 @@ export async function POST(request: Request) {
   });
 
   if (!user) {
+    const blockingInvite = await findBlockingPendingInviteForEmail(email, session.workspace.id);
+
+    if (blockingInvite) {
+      return NextResponse.json(
+        { ...singleWorkspaceViolationPayload(blockingInvite.workspace.name), code: "EMAIL_ALREADY_INVITED_TO_WORKSPACE" },
+        { status: 409 }
+      );
+    }
+
     const existing = await prisma.workspaceMember.findUnique({
       where: {
         workspaceId_invitedEmail: {
@@ -221,6 +235,15 @@ export async function POST(request: Request) {
       },
       inviteUrl
     });
+  }
+
+  const activeMembership = await findActiveWorkspaceMembershipForUser(user.id);
+
+  if (activeMembership && activeMembership.workspaceId !== session.workspace.id) {
+    return NextResponse.json(
+      singleWorkspaceViolationPayload(activeMembership.workspace.name),
+      { status: 409 }
+    );
   }
 
   const existing = await prisma.workspaceMember.findUnique({

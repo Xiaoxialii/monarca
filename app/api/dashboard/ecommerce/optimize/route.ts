@@ -4,19 +4,22 @@ import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapsh
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.VIEWER]);
+    const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.VIEWER], request);
+    logWorkspaceContext("[workspace-context] dashboard.ecommerce.optimize.POST", session);
     const versions = await currentDecisionSnapshotVersions(prisma, {
       workspaceId: session.workspace.id
     });
     const job = await enqueueSkuOptimizationJob(prisma, {
       workspaceId: session.workspace.id,
       reason: "manual_optimization_refresh",
+      decisionMode: "full",
       inputHash: versions.inputHash
     });
 

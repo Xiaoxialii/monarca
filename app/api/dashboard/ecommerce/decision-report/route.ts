@@ -1,5 +1,5 @@
 import { after, NextResponse } from "next/server";
-import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
 import { decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import {
   findLatestDecisionSnapshot,
@@ -7,6 +7,7 @@ import {
 } from "@/lib/dashboard/snapshot-store";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,20 +20,13 @@ export async function GET(request: Request) {
   const decisionMode = url.searchParams.get("mode") === "sku" ? "sku" : "full";
   const optimizationType = decisionMode === "sku" ? "SKU_OPTIMIZATION" : "FULL_OPTIMIZATION";
 
-  let session: Awaited<ReturnType<typeof syncCurrentClerkUser>>;
-
-  try {
-    session = await syncCurrentClerkUser();
-  } catch (error) {
+  const session = await getCurrentWorkspaceContext(request).catch((error) => {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     throw error;
-  }
-
-  if (!session) {
-    return NextResponse.json(
-      { ok: false, code: "UNAUTHENTICATED", message: "Missing authenticated user." },
-      { status: 401 }
-    );
-  }
+  });
+  if (session instanceof NextResponse) return session;
+  logWorkspaceContext("[workspace-context] dashboard.ecommerce.decision-report.GET", session);
 
   const snapshot = await findLatestDecisionSnapshot(prisma, {
     workspaceId: session.workspace.id,
@@ -56,6 +50,7 @@ export async function GET(request: Request) {
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
         reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
+        decisionMode,
         inputHash: freshness.current.inputHash
       });
 
@@ -66,20 +61,12 @@ export async function GET(request: Request) {
       });
 
       return NextResponse.json({
+        ...(snapshot.recommendationsJson as Record<string, unknown>),
         ok: true,
         state: "stale",
         status: "STALE",
         latestSnapshot: false,
         message: "Optimization snapshot is stale. A refresh job has been queued.",
-        decision_report: null,
-        portfolioSummary: null,
-        allocationRecommendation: null,
-        skuDecisions: [],
-        riskAlerts: [],
-        executionPlan: [],
-        generated_at: null,
-        source_platforms: [],
-        lineage: null,
         staleReason: freshness.reason,
         jobId: job.id,
         currentVersions: freshness.current,

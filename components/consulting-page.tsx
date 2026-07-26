@@ -8,6 +8,7 @@ import {
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,14 @@ const consultingCopy: Record<CopyLocale, {
   trustTitle: string;
   trustText: string;
   trustTags: string[];
+  demo: {
+    heroTitle: string;
+    heroNote: string;
+    formTitle: string;
+    formText: string;
+    submit: string;
+    success: string;
+  };
 }> = {
   en: {
     brand: "Monarca AI",
@@ -73,7 +82,7 @@ const consultingCopy: Record<CopyLocale, {
       "How Monarca AI can help detect anomalies, find causes, and generate recommended actions"
     ],
     formTitle: "Submit request",
-    formText: "Leave your contact information and we’ll follow up to discuss your business, data, and reporting needs.",
+    formText: "Leave your contact information and we’ll follow up to discuss your business, data, and business need.",
     name: "Name",
     email: "Email / WeChat",
     emailPlaceholder: "name@example.com or WeChat ID",
@@ -103,7 +112,15 @@ const consultingCopy: Record<CopyLocale, {
     trustTitle: "Not a generic AI summary, but business analysis grounded in your data",
     trustText:
       "Monarca AI combines your data sources, metric definitions, and business goals to help teams generate explainable, trackable, and actionable operating reports.",
-    trustTags: ["Data integration", "Metric system setup", "Automated business reports"]
+    trustTags: ["Data integration", "Metric system setup", "Automated business reports"],
+    demo: {
+      heroTitle: "Request the Monarca demo",
+      heroNote: "",
+      formTitle: "Send me the demo",
+      formText: "",
+      submit: "Send demo request",
+      success: "We’ve received your request and will send the demo to your WeChat or email soon."
+    }
   },
   zh: {
     brand: "Monarca AI",
@@ -154,7 +171,15 @@ const consultingCopy: Record<CopyLocale, {
     trustTitle: "不是普通 AI 总结，而是基于业务数据的经营分析",
     trustText:
       "Monarca AI 会结合你的数据源、指标口径和业务目标，帮助团队自动生成可解释、可追踪、可行动的经营报告。",
-    trustTags: ["数据接入", "指标体系配置", "自动化经营报告"]
+    trustTags: ["数据接入", "指标体系配置", "自动化经营报告"],
+    demo: {
+      heroTitle: "获取 Monarca Demo",
+      heroNote: "留下微信或邮箱，我们会把 Demo 发送给你，并根据你的业务情况继续沟通。",
+      formTitle: "发送 Demo",
+      formText: "留下你的联系方式，我们会与你沟通业务、数据和业务需求。",
+      submit: "提交 Demo 申请",
+      success: "我们已收到你的申请，会尽快通过微信或邮箱发送 Demo。"
+    }
   }
 };
 
@@ -169,12 +194,15 @@ function FieldLabel({ label, optional }: { label: string; optional?: string }) {
 
 export function ConsultingPage() {
   const [locale, setLocale] = useLocale("zh");
+  const searchParams = useSearchParams();
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const meetingTimeInputs = useRef<Array<HTMLInputElement | null>>([]);
   const copy = consultingCopy[getCopyLocale(locale)];
   const isZh = getCopyLocale(locale) === "zh";
+  const isDemoRequest = searchParams?.get("intent") === "demo";
+  const pageCopy = isDemoRequest ? { ...copy, ...copy.demo } : copy;
 
   function openMeetingTimePicker(index: number) {
     const input = meetingTimeInputs.current[index - 1];
@@ -213,7 +241,7 @@ export function ConsultingPage() {
           painPoints: problem ? [problem] : [],
           preferredMeetingTimes: meetingTimes,
           message: String(formData.get("message") || ""),
-          source: "consulting_page"
+          source: isDemoRequest ? "demo_request" : "consulting_page"
         })
       });
       const data = await response.json().catch(() => null);
@@ -264,14 +292,19 @@ export function ConsultingPage() {
         <div className="mx-auto min-w-0 max-w-3xl lg:mx-0 lg:pl-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
             <Sparkles className="size-3.5" />
-            {isZh ? "商业咨询" : "Business consultation"}
+            {isDemoRequest ? (isZh ? "Demo 申请" : "Demo request") : (isZh ? "商业咨询" : "Business consultation")}
           </div>
           <h1 className="mt-6 max-w-3xl text-4xl font-semibold leading-[1.08] tracking-normal text-slate-950 sm:text-5xl lg:text-[3.5rem]">
-            {copy.heroTitle}
+            {pageCopy.heroTitle}
           </h1>
-          {copy.heroSubtitle ? (
+          {pageCopy.heroSubtitle ? (
             <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">
-              {copy.heroSubtitle}
+              {pageCopy.heroSubtitle}
+            </p>
+          ) : null}
+          {pageCopy.heroNote ? (
+            <p className="mt-6 max-w-2xl text-base leading-8 text-slate-600">
+              {pageCopy.heroNote}
             </p>
           ) : null}
         </div>
@@ -282,16 +315,18 @@ export function ConsultingPage() {
               <div className="grid size-11 place-items-center rounded-full bg-white text-emerald-800">
                 <CheckCircle2 className="size-5" />
               </div>
-              <p className="mt-4 text-base font-semibold text-slate-950">{copy.formTitle}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{copy.success}</p>
+              <p className="mt-4 text-base font-semibold text-slate-950">{pageCopy.formTitle}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{pageCopy.success}</p>
               <Button className="mt-5 rounded-full bg-slate-950 text-white hover:bg-slate-800" onClick={() => setIsSubmitted(false)}>
                 {copy.submitAnother}
               </Button>
             </div>
           ) : (
             <>
-              <h2 className="text-xl font-semibold tracking-normal text-slate-950">{copy.formTitle}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{copy.formText}</p>
+              <h2 className="text-xl font-semibold tracking-normal text-slate-950">{pageCopy.formTitle}</h2>
+              {pageCopy.formText ? (
+                <p className="mt-2 text-sm leading-6 text-slate-500">{pageCopy.formText}</p>
+              ) : null}
               <form className="mt-5 grid gap-4" onSubmit={handleSubmit}>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   <label className="grid gap-2">
@@ -309,37 +344,39 @@ export function ConsultingPage() {
                   <Input name="companyName" placeholder={isZh ? "公司或团队名称" : "Company or team name"} />
                 </label>
 
-                <label className="grid gap-2">
-                  <FieldLabel label={copy.meetingTime} optional={copy.optional} />
-                  <div className="grid gap-2">
-                    {[1, 2, 3].map((index) => (
-                      <div
-                        key={index}
-                        className="group relative cursor-pointer overflow-hidden rounded-xl border border-emerald-100/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fffb_62%,#f1fdf7_100%)] shadow-[0_7px_18px_rgba(15,23,42,0.045)] transition focus-within:border-emerald-300 focus-within:shadow-[0_10px_24px_rgba(16,185,129,0.13)]"
-                        onClick={() => openMeetingTimePicker(index)}
-                      >
-                        <span className="pointer-events-none absolute left-2.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_7px_18px_rgba(16,185,129,0.24)] ring-3 ring-emerald-50 transition group-focus-within:bg-emerald-500">
-                          <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-white text-[9px] font-semibold text-emerald-700 shadow-sm">
-                            {index}
+                {!isDemoRequest ? (
+                  <label className="grid gap-2">
+                    <FieldLabel label={copy.meetingTime} optional={copy.optional} />
+                    <div className="grid gap-2">
+                      {[1, 2, 3].map((index) => (
+                        <div
+                          key={index}
+                          className="group relative cursor-pointer overflow-hidden rounded-xl border border-emerald-100/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fffb_62%,#f1fdf7_100%)] shadow-[0_7px_18px_rgba(15,23,42,0.045)] transition focus-within:border-emerald-300 focus-within:shadow-[0_10px_24px_rgba(16,185,129,0.13)]"
+                          onClick={() => openMeetingTimePicker(index)}
+                        >
+                          <span className="pointer-events-none absolute left-2.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_7px_18px_rgba(16,185,129,0.24)] ring-3 ring-emerald-50 transition group-focus-within:bg-emerald-500">
+                            <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-white text-[9px] font-semibold text-emerald-700 shadow-sm">
+                              {index}
+                            </span>
+                            <CalendarDays className="size-4" />
                           </span>
-                          <CalendarDays className="size-4" />
-                        </span>
-                        <Input
-                          ref={(node) => {
-                            meetingTimeInputs.current[index - 1] = node;
-                          }}
-                          name={`meetingTime${index}`}
-                          type="datetime-local"
-                          aria-label={`${copy.meetingTimePlaceholder} ${index}`}
-                          className="h-11 border-0 bg-transparent pl-16 pr-24 text-sm font-semibold text-slate-950 shadow-none outline-none ring-0 placeholder:text-slate-400 focus-visible:ring-0"
-                        />
-                        <span className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-full border border-white/80 bg-white/80 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm sm:inline">
-                          {copy.meetingTimeOption} {index}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </label>
+                          <Input
+                            ref={(node) => {
+                              meetingTimeInputs.current[index - 1] = node;
+                            }}
+                            name={`meetingTime${index}`}
+                            type="datetime-local"
+                            aria-label={`${copy.meetingTimePlaceholder} ${index}`}
+                            className="h-11 border-0 bg-transparent pl-16 pr-24 text-sm font-semibold text-slate-950 shadow-none outline-none ring-0 placeholder:text-slate-400 focus-visible:ring-0"
+                          />
+                          <span className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-full border border-white/80 bg-white/80 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm sm:inline">
+                            {copy.meetingTimeOption} {index}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </label>
+                ) : null}
 
                 <label className="grid gap-2">
                   <FieldLabel label={copy.businessProblems} optional={copy.optional} />
@@ -368,7 +405,7 @@ export function ConsultingPage() {
 
                 <Button className="mt-1 h-11 w-full rounded-full bg-slate-950 text-sm text-white hover:bg-slate-800" disabled={isSubmitting}>
                   <Send className="size-4" />
-                  {isSubmitting ? copy.submitting : copy.submit}
+                  {isSubmitting ? copy.submitting : pageCopy.submit}
                 </Button>
               </form>
             </>

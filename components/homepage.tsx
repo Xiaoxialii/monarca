@@ -137,8 +137,8 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "AI Profit Control System",
-      headline: "Real-Time Profit Optimization",
+      eyebrow: "AI Profit Optimization System",
+      headline: "AI Profit Optimization System",
       subheadline: "Connect data. Generate optimal profit decisions",
       teamLabel: "Three-layer profit control that turns data changes into operating actions",
       team: [
@@ -196,7 +196,7 @@ const homepageCopy = {
     },
     useCases: {
       title: "How different teams use Monarca AI",
-      subtitle: "Start from daily business questions and turn scattered data into executable operating judgment.",
+      subtitle: "",
       consultTitle: "Want to see what profit opportunities your data can reveal?",
       consultText: "",
       consultCta: "Book consultation",
@@ -249,7 +249,7 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "AI Profit Control System",
+      sectionTitle: "AI Profit Optimization Engine",
       sectionSubtitle:
         "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision.",
       eyebrow: "",
@@ -295,54 +295,84 @@ const homepageCopy = {
     },
     pricing: {
       eyebrow: "Pricing",
-      title: "SaaS plans for growth intelligence",
+      title: "AI profit optimization pricing",
       intro:
-        "Choose the subscription that matches how your team wants to automate reports, analyze decisions, and operate growth",
+        "Monarca is not a dashboard tool. It is an AI profit optimization system built to identify, simulate, and track measurable ecommerce profit decisions.",
       plans: [
         {
-          name: "Professional",
-          subtitle: "For teams that need ongoing automated operating analysis with dedicated analyst support",
-          price: "$600",
+          name: "Starter",
+          subtitle: "For ecommerce companies with fewer than 1,000 SKUs",
+          price: "$500",
           cadence: "/ month",
-          billingNote: "Annual service term, billed annually",
-          badge: "Recommended",
+          billingNote: "SKU-level profitability visibility for growing ecommerce teams",
+          badge: "Starter",
           description:
-            "Data onboarding + metric system configuration + dedicated analyst support + automated operating reports",
+            "For growing ecommerce teams that need SKU-level profitability visibility and AI-driven optimization.",
           features: [
-            "Connect databases, Excel, SQL, CSV, and other data sources",
-            "Configure a dedicated metric system and report structure",
-            "Dedicated analyst support for data onboarding and adoption",
-            "Auto-generate daily, weekly, and monthly operating reports",
-            "Support anomaly alerts, report refresh, and metric checks"
+            "Connect ecommerce data sources",
+            "SKU profitability analysis",
+            "Product portfolio insights",
+            "AI-generated business recommendations",
+            "Basic profit and inventory alerts"
           ],
-          cta: "Book consultation",
-          href: "/consulting"
+          cta: "Start Profit Analysis",
+          href: "/sign-up"
         },
         {
-          name: "Enterprise",
-          subtitle: "Private enterprise decision system",
-          price: "Custom",
-          cadence: "",
-          badge: "",
-          features: ["Private deployment and data isolation", "Enterprise knowledge base plus business logic modeling", "Custom decision engine integrated into business workflows"],
-          cta: "Contact us",
-          href: "/checkout/enterprise"
+          name: "Performance-Based",
+          subtitle: "For teams that want pricing aligned with measurable business impact",
+          price: "Base fee + 5%",
+          cadence: " of incremental profit",
+          billingNote: "Monarca shares the upside by charging based on measured profit improvement",
+          badge: "Aligned incentives",
+          description:
+            "Pay based on the profit decisions Monarca helps you make.",
+          features: [
+            "Profit optimization recommendations",
+            "Scenario simulation",
+            "Advertising budget optimization",
+            "SKU portfolio optimization",
+            "Performance tracking",
+            "Incremental profit measurement"
+          ],
+          cta: "Share Success",
+          href: "/consulting?plan=performance"
+        },
+        {
+          name: "Growth",
+          subtitle: "For ecommerce companies with 1,000-2,000 SKUs",
+          price: "$1,000",
+          cadence: "/ month",
+          billingNote: "For larger SKU portfolios and more complex operational decisions",
+          badge: "Portfolio scale",
+          description:
+            "For growing brands managing larger SKU portfolios and complex operational decisions.",
+          features: [
+            "Everything in Starter",
+            "Advanced SKU portfolio optimization",
+            "Ad spend allocation simulation",
+            "Inventory investment recommendations",
+            "Multi-channel analysis",
+            "Advanced AI decision reports"
+          ],
+          cta: "Optimize Your Portfolio",
+          href: "/consulting?plan=growth"
         }
       ],
       addOn: {
-        eyebrow: "Add-on service",
-        name: "Database Setup",
-        subtitle: "Build the data foundation before SaaS automation",
-        price: "$200+",
-        description: "For teams that need help designing databases, connecting sources, cleaning data, and preparing metric modeling",
+        eyebrow: "Value model",
+        name: "Profit decision alignment",
+        subtitle: "Pay based on the profit decisions Monarca helps you make",
+        price: "",
+        description: "Monarca measures recommendation impact so teams can connect optimization work to incremental profit.",
         features: [
-          "Business database and table structure",
-          "Core source connection and field standards",
-          "Cleaning, sync, and metric modeling readiness",
-          "Consulting price varies by business complexity"
+          "Decision-level expected profit impact",
+          "Scenario simulation before action",
+          "Performance tracking after action",
+          "Incremental profit measurement"
         ],
-        cta: "Add database setup",
-        href: "/checkout/database-setup"
+        cta: "Discuss pricing",
+        href: "/consulting"
       }
     },
     integrations: {
@@ -364,8 +394,8 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "AI Profit Control System",
-      headline: "实时利润优化",
+      eyebrow: "AI Profit Optimization System",
+      headline: "AI Profit Optimization System",
       subheadline: "连接数据，生成最优利润决策",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
@@ -408,67 +438,52 @@ const homepageCopy = {
           text: "连接 Excel、数据库和业务系统，进入统一的利润控制系统"
         },
         {
-          title: "定位增长机会",
-          text: "拆解收入、利润、广告、库存和 SKU 表现，定位正在影响利润的因素"
+          title: "发现增长机会",
+          text: "拆解收入、利润、广告、库存和 SKU 表现，定位真正影响利润的因素"
         },
         {
           title: "生成最优决策",
-          text: "给出预算、库存、渠道和 SKU 层面的调整动作与预期利润影响"
+          text: "围绕预算、库存、渠道和 SKU，输出带预期利润影响的经营动作"
         },
         {
           title: "追踪行动效果",
-          text: "持续观察行动后指标是否改善，形成数据驱动闭环"
+          text: "持续监控行动后的指标变化，形成数据驱动的经营闭环"
         }
       ]
     },
     useCases: {
       title: "不同团队如何使用 Monarca AI",
-      subtitle: "从每天要回答的业务问题出发，把分散数据转化为可执行的经营判断。",
-      consultTitle: "想知道你的数据能发现哪些利润机会？",
+      subtitle: "从日常经营问题出发，把分散数据转化为可执行的经营判断。",
+      consultTitle: "想知道你的数据里有哪些利润机会？",
       consultText: "",
       consultCta: "预约咨询",
       cards: [
         {
           title: "电商团队",
-          persona: "Monarca AI 帮我们看清哪些 SKU 真正赚钱，哪些广告在浪费预算，哪些库存正在带来风险。",
+          persona:
+            "Monarca AI 帮我们看清哪些 SKU 真正赚钱、哪些广告在浪费预算、哪些库存正在形成风险。",
           scene: "",
           insight: "Monarca AI 直接识别真实利润来源。",
-          action: "更快知道哪些商品值得继续放大。",
-          roles: ["🛒 Ecommerce Operator", "🚀 Growth Analyst"]
+          action: "更快知道哪些产品值得放大。",
+          roles: ["Ecommerce Operator", "Growth Analyst"]
+        },
+        {
+          title: "增长团队",
+          persona:
+            "Monarca AI 把流量、转化、复购和毛利放在一起判断，而不是只看 GMV 或 ROAS。",
+          scene: "",
+          insight: "Monarca AI 判断增长是否真正带来利润。",
+          action: "避免把预算投向低质量增长。",
+          roles: ["Growth Lead", "Performance Marketer"]
         },
         {
           title: "管理层",
-          persona: "Monarca AI 把分散的经营数据转成利润决策，让我们快速知道哪里在赚钱、哪里在亏钱、下一步该做什么。",
+          persona:
+            "Monarca AI 帮我们把复杂经营数据转化成每日可执行的决策摘要。",
           scene: "",
-          insight: "Monarca AI 自动把复杂变化整理成重点。",
-          action: "团队能更快完成复盘和决策。",
-          roles: ["👔 Executive", "📊 Business Analyst"]
-        },
-        {
-          title: "运营团队",
-          persona: "每天都有销售、广告、库存和成本变化，但我们很难判断先处理哪个。Monarca AI 会自动诊断利润异常、模拟不同方案，并输出最优执行动作。",
-          scene: "",
-          insight: "Monarca AI 先定位异常并判断优先级。",
-          action: "再把问题转成清晰可执行的任务。",
-          roles: ["👤 Ops Operator", "⚠ Risk Controller"]
-        }
-      ]
-    },
-    system: {
-      eyebrow: "为什么需要它",
-      title: "增长不缺数据，缺的是能控制利润的决策系统",
-      points: [
-        {
-          title: "指标一直在变化",
-          text: "Monarca AI 会持续监控增长模型，不依赖人工盯盘"
-        },
-        {
-          title: "定位原因太慢",
-          text: "系统会跨数据源对比，并缩短调查路径"
-        },
-        {
-          title: "驱动因素转成决策",
-          text: "每个利润驱动因素都会进入模拟、优化和执行队列"
+          insight: "Monarca AI 解释业务变化背后的利润影响。",
+          action: "更快决定该补货、控投放还是调整价格。",
+          roles: ["Executive", "Business Analyst"]
         }
       ]
     },
@@ -486,89 +501,117 @@ const homepageCopy = {
       timeline: [
         ["08:42", "系统检测到收入异常"],
         ["08:43", "对比了客群、投放、计费事件和产品激活数据"],
-        ["08:45", "生成根因判断和行动建议"]
+        ["08:45", "生成利润控制决策和预期影响"]
       ],
       steps: [
         {
-          title: "AI 分析了 15+ 项指标",
-          text: "系统检查了收入、激活率、流量质量、计费错误和扩张管道"
+          title: "AI 诊断利润驱动因素",
+          text: "系统检查收入、转化、流量质量、成本和库存变化"
         },
         {
           title: "识别关键根因",
-          text: "收入下滑主要来自 CAC 上升、结账摩擦和后期管道收缩"
+          text: "下滑主要来自 CAC 上升、结账摩擦和库存限制"
         },
         {
-          title: "推荐可执行行动",
-          text: "输出 3 个行动建议，并附带预期影响和置信度"
+          title: "优化经营决策",
+          text: "输出预算、渠道、库存和 SKU 层面的动作与预期利润影响"
         }
       ]
     },
     reports: {
       sectionEyebrow: "团队专属控制简报",
-      eyebrow: "控制简报",
-      title: "自动生成每天利润控制简报",
-      intro: "自动同步并清洗数据，生成决策摘要和影响追踪，不再手动更新数据或拼报表",
+      eyebrow: "自动化报告",
+      title: "自动生成每日利润控制简报",
+      intro: "决策摘要、负责人更新和效果追踪，来自同一套利润控制循环",
       signal: "每日信号",
       status: "自动生成",
       cards: [
-        ["数据自动化", "无需手动更新数据，系统自动同步、清洗并整理关键指标"],
-        ["增长简报", "自动汇总每天发生了什么、为什么发生、下一步该关注哪里"],
+        ["增长简报", "今天发生了什么、为什么发生、下一步关注哪里"],
+        ["行动账本", "统一记录动作、负责人、置信度和利润影响"],
         ["管理层摘要", "把可信数据转化为适合复盘和汇报的清晰解释"]
       ]
     },
     pricing: {
       eyebrow: "价格",
-      title: "增长智能系统订阅方案",
-      intro: "选择适合团队当前阶段的 SaaS 方案，用于报告自动化、数据分析和经营决策辅助",
+      title: "面向电商利润优化的三档方案",
+      intro: "Monarca 不是 dashboard 工具，而是一套 AI 利润优化系统，用来识别、模拟并追踪可衡量的电商利润决策。",
       plans: [
         {
-          name: "专业版",
-          subtitle: "适合需要持续自动化经营分析，并希望有专属分析师协助落地的团队",
-          price: "¥2,000",
+          name: "Starter",
+          subtitle: "适合 SKU 少于 1,000 个的电商公司",
+          price: "$500",
           cadence: "/ 月",
-          billingNote: "年度服务周期，按年支付",
-          badge: "推荐",
-          description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
+          billingNote: "为增长型电商团队提供 SKU 级利润可视化",
+          badge: "Starter",
+          description: "适合需要 SKU 级盈利能力视图和 AI 优化建议的增长型电商团队。",
           features: [
-            "连接数据库、Excel、SQL、CSV 等数据源",
-            "配置专属指标体系与经营报告结构",
-            "专属分析师协助数据接入与分析落地",
-            "自动生成日报、周报和月经营分析",
-            "支持异常提醒、报告刷新和指标口径校验"
+            "连接电商数据源",
+            "SKU 盈利能力分析",
+            "产品组合洞察",
+            "AI 生成经营建议",
+            "基础利润和库存提醒"
           ],
-          cta: "预约咨询",
-          href: "/consulting"
+          cta: "Start Profit Analysis",
+          href: "/sign-up"
         },
         {
-          name: "企业版",
-          subtitle: "企业级决策系统（私有化）",
-          price: "按需报价",
-          cadence: "",
-          badge: "",
-          features: ["私有化部署 / 数据安全隔离", "企业知识库 + 业务逻辑建模", "定制化决策引擎（接入业务流）"],
-          cta: "联系咨询",
-          href: "/checkout/enterprise"
+          name: "Performance-Based",
+          subtitle: "适合希望价格与可衡量业务结果对齐的电商公司",
+          price: "基础费用 + 5%",
+          cadence: " 增量利润",
+          billingNote: "Monarca 与客户共享优化收益，按可衡量利润改善收费",
+          badge: "收益对齐",
+          description: "Pay based on the profit decisions Monarca helps you make.",
+          features: [
+            "利润优化建议",
+            "方案模拟",
+            "广告预算优化",
+            "SKU 组合优化",
+            "效果追踪",
+            "增量利润衡量"
+          ],
+          cta: "Share Success",
+          href: "/consulting?plan=performance"
+        },
+        {
+          name: "Growth",
+          subtitle: "适合拥有 1,000-2,000 个 SKU 的电商公司",
+          price: "$1,000",
+          cadence: "/ 月",
+          billingNote: "适合更大 SKU 组合和更复杂的经营决策",
+          badge: "Portfolio scale",
+          description: "适合管理更大 SKU 组合和复杂运营决策的成长型品牌。",
+          features: [
+            "包含 Starter 的全部功能",
+            "高级 SKU 组合优化",
+            "广告支出分配模拟",
+            "库存投资建议",
+            "多渠道分析",
+            "高级 AI 决策报告"
+          ],
+          cta: "Optimize Your Portfolio",
+          href: "/consulting?plan=growth"
         }
       ],
       addOn: {
-        eyebrow: "附加服务",
-        name: "数据库搭建",
-        subtitle: "在 SaaS 自动化前建立数据基础设施",
-        price: "¥2,000+",
-        description: "适合需要先搭建数据库、连接数据源、清洗数据并准备指标建模的团队",
+        eyebrow: "价值主张",
+        name: "利润决策对齐",
+        subtitle: "Pay based on the profit decisions Monarca helps you make.",
+        price: "",
+        description: "Monarca 会衡量建议带来的利润影响，让团队把优化工作和增量利润连接起来。",
         features: [
-          "业务数据库与数据表结构",
-          "核心数据源连接与字段规范",
-          "数据清洗、同步和指标建模准备",
-          "咨询根据商业复杂程度定价"
+          "决策级预期利润影响",
+          "行动前方案模拟",
+          "行动后效果追踪",
+          "增量利润衡量"
         ],
-        cta: "添加数据库搭建",
-        href: "/checkout/database-setup"
+        cta: "咨询方案",
+        href: "/consulting"
       }
     },
     integrations: {
       eyebrow: "支持的数据集成",
-      title: "连接增长团队已经在使用的系统"
+      title: "连接收入团队已经在使用的系统"
     }
   }
 } as const;
@@ -902,7 +945,9 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
         <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
           {copy.title}
         </h2>
-        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.subtitle}</p>
+        {copy.subtitle ? (
+          <p className="mt-3 text-sm leading-6 text-slate-500">{copy.subtitle}</p>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-5">
@@ -1464,7 +1509,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
               </Link>
             </Button>
             <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 text-sm sm:w-auto lg:h-10">
-              <Link href="/sign-up">
+              <Link href="/consulting?intent=demo">
                 {copy.hero.secondaryCta}
                 <ArrowRight />
               </Link>

@@ -1,5 +1,5 @@
 export type StripeCheckoutCurrency = "cny" | "usd";
-export type StripeCheckoutPlan = "database-setup" | "professional";
+export type StripeCheckoutPlan = "database-setup" | "professional" | "enterprise";
 
 export const stripeCheckoutPlans: Record<
   StripeCheckoutPlan,
@@ -9,13 +9,23 @@ export const stripeCheckoutPlans: Record<
   }
 > = {
   "database-setup": {
-    priceEnv: "STRIPE_PRICE_DATABASE_SETUP",
-    mode: "payment"
+    priceEnv: {
+      cny: "STRIPE_PRICE_PERFORMANCE_BASE_CNY",
+      usd: "STRIPE_PRICE_PERFORMANCE_BASE_USD"
+    },
+    mode: "subscription"
   },
   professional: {
     priceEnv: {
       cny: "STRIPE_PRICE_PROFESSIONAL_CNY",
       usd: "STRIPE_PRICE_PROFESSIONAL_USD"
+    },
+    mode: "subscription"
+  },
+  enterprise: {
+    priceEnv: {
+      cny: "STRIPE_PRICE_GROWTH_CNY",
+      usd: "STRIPE_PRICE_GROWTH_USD"
     },
     mode: "subscription"
   }

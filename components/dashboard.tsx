@@ -5571,43 +5571,6 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         : entitlement.status === "expired"
           ? isZh ? "订阅已过期，请重新开通" : "Subscription expired. Please reactivate"
           : isZh ? "套餐权限可用" : "Plan access is active";
-  const planCards = isZh
-    ? [
-        {
-          name: "专业版",
-          price: "¥2,000 / 月",
-          description: "数据接入 + 指标体系配置 + 专属分析师协助 + 自动化经营报告",
-          href: "/checkout/professional",
-          action: entitlement?.planType === "MONTHLY" ? "当前套餐" : "开通专业版",
-          tone: entitlement?.planType === "MONTHLY" ? "current" : "primary"
-        },
-        {
-          name: "企业版",
-          price: "定制",
-          description: "适合多工作区、权限隔离和企业级数据治理",
-          href: "/checkout/enterprise",
-          action: "升级企业版",
-          tone: "primary"
-        }
-      ]
-    : [
-        {
-          name: "Professional",
-          price: "¥2,000 / month",
-          description: "Data integration, expert-assisted metric configuration, and automated reports",
-          href: "/checkout/professional",
-          action: entitlement?.planType === "MONTHLY" ? "Current plan" : "Start professional",
-          tone: entitlement?.planType === "MONTHLY" ? "current" : "primary"
-        },
-        {
-          name: "Enterprise",
-          price: "Custom",
-          description: "Workspace controls, governance, and enterprise data workflows",
-          href: "/checkout/enterprise",
-          action: "Upgrade to Enterprise",
-          tone: "primary"
-        }
-      ];
   const billingStats = isZh
     ? [
         ["当前套餐", currentPlan],
@@ -5718,92 +5681,6 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        {planCards.map((plan) => (
-          <Card key={plan.name} className="overflow-hidden bg-white shadow-sm">
-            <CardHeader className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">{plan.name}</CardTitle>
-                  <CardDescription className="mt-1 leading-5">{plan.description}</CardDescription>
-                </div>
-                {plan.tone === "current" ? (
-                  <Badge className="bg-emerald-700 text-white hover:bg-emerald-700">
-                    {isZh ? "当前" : "Current"}
-                  </Badge>
-                ) : null}
-              </div>
-            </CardHeader>
-            <CardContent className="flex h-full flex-col gap-4 p-4 pt-0">
-              <p className="text-2xl font-semibold tracking-normal">{plan.price}</p>
-              <Button
-                asChild
-                size="sm"
-                variant={plan.tone === "primary" ? "default" : "outline"}
-                disabled={plan.tone === "current"}
-                className="mt-auto w-full"
-              >
-                <a href={plan.href}>{plan.action}</a>
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.6fr)]">
-        <Card className="overflow-hidden bg-white shadow-sm">
-          <CardHeader className="border-b p-4">
-            <CardTitle className="text-base">{isZh ? "套餐权限说明" : "Plan permissions"}</CardTitle>
-            <CardDescription className="mt-1">
-              {isZh ? "所有权限由当前工作区套餐决定" : "Access is determined by the current workspace plan"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="divide-y p-0">
-            {(isZh
-              ? [
-                  ["免费版", "仅可查看 dashboard。升级后才能连接数据并生成报告。"],
-                  ["专业版", "年度服务周期，按年支付；包含数据接入协助、指标体系配置和自动化报告。"]
-                ]
-              : [
-                  ["Free", "View dashboard only. Upgrade to connect data and generate reports."],
-                  ["Professional", "Annual service term, billed annually, with expert-assisted data onboarding, metric configuration, and automated reports."]
-                ]).map(([plan, description]) => (
-              <div key={plan} className="px-4 py-3">
-                <p className="text-sm font-medium">{plan}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden bg-white shadow-sm">
-          <CardHeader className="border-b p-4">
-            <CardTitle className="text-base">{isZh ? "套餐操作" : "Plan actions"}</CardTitle>
-            <CardDescription className="mt-1">
-              {entitlement?.planType === "MONTHLY"
-                ? isZh ? "升级企业版以获得多工作区、权限隔离和企业级数据治理" : "Upgrade to Enterprise for workspace controls, governance, and enterprise data workflows"
-                : isZh ? "开通专业版以连接数据并生成报告" : "Start Professional to connect data and generate reports"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 p-4">
-            <div className="rounded-lg border bg-secondary/20 p-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-emerald-700" />
-                <p className="text-sm font-semibold">{currentPlan}</p>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {stateMessage}
-              </p>
-            </div>
-            <Button asChild className="w-full" size="sm">
-              <a href={entitlement?.planType === "MONTHLY" ? "/checkout/enterprise" : "/checkout/professional"}>
-                <CreditCard className="size-4" />
-                {entitlement?.planType === "MONTHLY" ? isZh ? "升级企业版" : "Upgrade to Enterprise" : isZh ? "开通专业版" : "Start Professional"}
-              </a>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }

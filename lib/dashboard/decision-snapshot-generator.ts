@@ -7,6 +7,7 @@ import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapsh
 import { upsertDecisionSnapshot, upsertReportSnapshot } from "@/lib/dashboard/snapshot-store";
 import { upsertOptimizationReportCache } from "@/lib/dashboard/optimization-report-cache";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
+import { applyDecisionLearningToDecisionReport } from "@/lib/decision-outcome/optimizer-learning-integration";
 
 type DecisionMode = "full" | "sku";
 
@@ -46,7 +47,10 @@ export async function generateEcommerceDecisionSnapshots(
       dataSourceId: input.dataSourceId ?? null,
       decisionMode: mode
     });
-    const content = decisionSnapshotContent(loaded, versions);
+    const content = await applyDecisionLearningToDecisionReport(prisma, {
+      workspaceId: input.workspaceId,
+      content: decisionSnapshotContent(loaded, versions)
+    }) as ReturnType<typeof decisionSnapshotContent>;
     const decisionReport = content.decision_report;
     const portfolioSummary = decisionReport?.portfolioSummary;
     const snapshot = await upsertDecisionSnapshot(prisma, {
@@ -284,15 +288,12 @@ function compactDecisionReport(
   skuDecisions: unknown[]
 ) {
   const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions);
+  const compactSkuBreakdown = compactSkuBreakdownRows(report.sku_breakdown, compactPortfolio.skuDecisions);
 
   return {
     executive_summary: report.executive_summary,
     performance_overview: report.performance_overview,
-    sku_breakdown: {
-      ...report.sku_breakdown,
-      top_revenue_skus: [],
-      top_profit_skus: []
-    },
+    sku_breakdown: compactSkuBreakdown,
     ads_breakdown: {
       ...report.ads_breakdown,
       campaign_performance: []
@@ -314,6 +315,45 @@ function compactDecisionReport(
     executionPlan: compactPortfolio.executionPlan,
     insight_summary: report.insight_summary
   };
+}
+
+function compactSkuBreakdownRows(
+  breakdown: NonNullable<LoadDashboardResult["data"]["decision_report"]>["sku_breakdown"],
+  decisionRows: unknown[]
+) {
+  const decisionSkuIds = new Set(
+    decisionRows
+      .map((row) => String(asRecord(row)?.skuId ?? asRecord(row)?.sku ?? "").trim())
+      .filter(Boolean)
+  );
+
+  return {
+    ...breakdown,
+    top_revenue_skus: compactSkuRows(breakdown.top_revenue_skus, decisionSkuIds),
+    top_profit_skus: compactSkuRows(breakdown.top_profit_skus, decisionSkuIds)
+  };
+}
+
+function compactSkuRows<T extends { sku: string }>(rows: T[], prioritySkuIds: Set<string>) {
+  const bySku = new Map(rows.map((row) => [row.sku, row]));
+  const selected: T[] = [];
+  const selectedSkuIds = new Set<string>();
+
+  for (const sku of prioritySkuIds) {
+    const row = bySku.get(sku);
+    if (!row || selectedSkuIds.has(row.sku)) continue;
+    selected.push(row);
+    selectedSkuIds.add(row.sku);
+  }
+
+  for (const row of rows) {
+    if (selected.length >= SNAPSHOT_ROW_LIMIT) break;
+    if (selectedSkuIds.has(row.sku)) continue;
+    selected.push(row);
+    selectedSkuIds.add(row.sku);
+  }
+
+  return selected;
 }
 
 function compactDecisionRows(rows: unknown[]) {

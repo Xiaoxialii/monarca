@@ -52,6 +52,40 @@ export async function GET(request: Request) {
 
   if (reportCache) {
     const cachedPayload = optimizationReportCachePayload(reportCache);
+    if (cachedOptimizationReportMissingOpsRows(cachedPayload)) {
+      const job = await enqueueSkuOptimizationJob(prisma, {
+        workspaceId: session.workspace.id,
+        reason: "invalid_decision_report_cache:missing_ops_rows",
+        decisionMode,
+        inputHash: reportCache.inputHash
+      });
+
+      after(() => {
+        void processJob(job.id).catch((error) => {
+          console.error("Failed to process invalid decision report cache refresh job", error);
+        });
+      });
+
+      return NextResponse.json({
+        ...cachedPayload,
+        ok: true,
+        state: "stale",
+        status: "STALE",
+        latestSnapshot: false,
+        message: "Optimization snapshot is missing SKU operating rows. A refresh job has been queued.",
+        staleReason: "missing_ops_rows",
+        jobId: job.id,
+        snapshot: {
+          id: reportCache.id,
+          type: "OptimizationReportCache",
+          createdAt: dateToIso(reportCache.createdAt),
+          updatedAt: dateToIso(reportCache.updatedAt),
+          stale: true
+        },
+        performance: snapshotPerformance(startedAt, "snapshot")
+      });
+    }
+
     const freshness = await decisionSnapshotFreshness(prisma, {
       workspaceId: session.workspace.id,
       snapshot: {
@@ -212,4 +246,17 @@ export async function GET(request: Request) {
     warning: "DECISION_SNAPSHOT_MISS",
     performance: snapshotPerformance(startedAt, "snapshot")
   });
+}
+
+function cachedOptimizationReportMissingOpsRows(payload: unknown) {
+  const record = asRecord(payload);
+  const report = asRecord(record.decision_report);
+  const breakdown = asRecord(report.sku_breakdown);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const topRevenueSkus = Array.isArray(breakdown.top_revenue_skus) ? breakdown.top_revenue_skus : [];
+  const topProfitSkus = Array.isArray(breakdown.top_profit_skus) ? breakdown.top_profit_skus : [];
+  const decisionRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return (decisionRows.length > 0 || portfolioRows.length > 0) && topRevenueSkus.length === 0 && topProfitSkus.length === 0;
 }

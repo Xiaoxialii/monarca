@@ -28,7 +28,7 @@ import {
   YAxis
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
+import { isRevenueChannel, normalizeRevenueChannel, revenueChannelOrNull } from "@/lib/channels/revenue-channel";
 import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 import {
   canonicalOptimizationAction,
@@ -138,32 +138,107 @@ type InventorySummary = {
 type SkuProfitBreakdownRow = DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"][number];
 type SkuRevenueBreakdownRow = DecisionIntelligenceReportV1["sku_breakdown"]["top_revenue_skus"][number];
 
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function numberOrNull(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function safeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function safeNumber(value: unknown, fallback = 0) {
+  return numberOrNull(value) ?? fallback;
+}
+
+function safeChannelDetails(value: unknown): SkuReportRow["channel_details"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = objectRecord(item);
+    return {
+      platform: String(record.platform ?? ""),
+      revenue: numberOrNull(record.revenue) ?? 0,
+      quantity: numberOrNull(record.quantity) ?? 0,
+      profit: numberOrNull(record.profit) ?? 0,
+      margin: numberOrNull(record.margin) ?? 0,
+      share: numberOrNull(record.share) ?? 0
+    };
+  }).filter((item) => isRevenueChannel(item.platform));
+}
+
+function safeChannelBreakdown(value: unknown): Record<string, number> {
+  const record = objectRecord(value);
+  return Object.fromEntries(Object.entries(record)
+    .map(([channel, revenue]) => [normalizeRevenueChannel(channel), numberOrNull(revenue) ?? 0])
+    .filter(([channel, revenue]) => Boolean(channel) && Number(revenue) > 0)) as Record<string, number>;
+}
+
+function safeCostBreakdown(value: unknown): SkuReportRow["cost_breakdown"] {
+  const record = objectRecord(value);
+  if (!Object.keys(record).length) return null;
+  return {
+    cogs: numberOrNull(record.cogs) ?? 0,
+    shipping: numberOrNull(record.shipping) ?? 0,
+    ads: numberOrNull(record.ads) ?? 0,
+    platform_fee: numberOrNull(record.platform_fee) ?? 0,
+    payment_fee: numberOrNull(record.payment_fee) ?? 0,
+    fulfillment: numberOrNull(record.fulfillment) ?? 0,
+    refund: numberOrNull(record.refund) ?? 0
+  };
+}
+
+function validSkuBreakdownRows<T extends { sku: string }>(rows: unknown): T[] {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row) => {
+      const record = objectRecord(row);
+      return typeof record.sku === "string" && record.sku.trim().length > 0;
+    })
+    .map((row) => row as T);
+}
+
 function skuBreakdownRows(report: DecisionIntelligenceReportV1): {
   topProfitSkus: SkuProfitBreakdownRow[];
   topRevenueSkus: SkuRevenueBreakdownRow[];
 } {
   const breakdown = (report as { sku_breakdown?: Partial<DecisionIntelligenceReportV1["sku_breakdown"]> }).sku_breakdown;
   return {
-    topProfitSkus: Array.isArray(breakdown?.top_profit_skus) ? breakdown.top_profit_skus : [],
-    topRevenueSkus: Array.isArray(breakdown?.top_revenue_skus) ? breakdown.top_revenue_skus : []
+    topProfitSkus: validSkuBreakdownRows<SkuProfitBreakdownRow>(breakdown?.top_profit_skus),
+    topRevenueSkus: validSkuBreakdownRows<SkuRevenueBreakdownRow>(breakdown?.top_revenue_skus)
   };
 }
 
 function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[] {
   const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
   const profitBySku = new Map(topProfitSkus.map((row) => [row.sku, row]));
+  const revenueBySku = new Map(topRevenueSkus.map((row) => [row.sku, row]));
+  const orderedSkuIds = [
+    ...topRevenueSkus.map((row) => row.sku),
+    ...topProfitSkus.map((row) => row.sku)
+  ].filter((sku, index, skus) => sku && skus.indexOf(sku) === index);
 
-  return topRevenueSkus.map((row) => {
-    const profit = profitBySku.get(row.sku);
+  return orderedSkuIds.map((sku) => {
+    const row = revenueBySku.get(sku);
+    const profit = profitBySku.get(sku);
+    const revenue = row?.revenue ?? profit?.revenue ?? 0;
+    const quantity = row?.quantity ?? profit?.quantity ?? 0;
     return {
-      sku: row.sku,
-      product_name: displayProductName(row.product_name ?? profit?.product_name, row.sku),
-      category: row.category ?? profit?.category,
-      variant_name: row.variant_name ?? profit?.variant_name,
-      size: row.size ?? profit?.size,
-      color: row.color ?? profit?.color,
-      revenue: row.revenue,
-      quantity: row.quantity,
+      sku,
+      product_name: displayProductName(row?.product_name ?? profit?.product_name, sku),
+      category: row?.category ?? profit?.category,
+      variant_name: row?.variant_name ?? profit?.variant_name,
+      size: row?.size ?? profit?.size,
+      color: row?.color ?? profit?.color,
+      revenue,
+      quantity,
       profit: profit?.net_profit ?? null,
       margin: profit?.margin ?? null,
       total_cost: profit?.total_cost ?? null,
@@ -174,14 +249,14 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
       roas_status: profit?.roas_status,
       attribution_method: profit?.attribution_method,
       attribution_confidence: profit?.attribution_confidence,
-      channel_breakdown: profit?.channel_breakdown ?? {},
-      channel_details: profit?.channel_details ?? [],
+      channel_breakdown: safeChannelBreakdown(profit?.channel_breakdown),
+      channel_details: safeChannelDetails(profit?.channel_details),
       ad_allocation_method: profit?.ad_allocation_method ?? null,
       ad_allocation_confidence: profit?.ad_allocation_confidence ?? null,
       campaign_ids: profit?.campaign_ids ?? [],
       attribution_window_start: profit?.attribution_window_start ?? null,
       attribution_window_end: profit?.attribution_window_end ?? null,
-      cost_breakdown: profit?.cost_breakdown ?? null,
+      cost_breakdown: safeCostBreakdown(profit?.cost_breakdown),
       sku_roas: profit?.sku_roas ?? null,
       stock_level: profit?.stock_level ?? null,
       available_stock: profit?.available_stock ?? null,
@@ -200,7 +275,7 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
       estimated: profit?.estimated === true,
       lifecycle_stage: normalizeLifecycleStage(
         (profit as { lifecycle_stage?: string } | undefined)?.lifecycle_stage ??
-          (row as { lifecycle_stage?: string }).lifecycle_stage
+          (row as { lifecycle_stage?: string } | undefined)?.lifecycle_stage
       )
     };
   });
@@ -238,6 +313,15 @@ function fallbackSkuReportRowFromDecision(row: PortfolioDecisionRow, recommendat
   const currentStock = beforeState?.inventory ?? null;
   const salesVelocity = beforeState?.sales_velocity ?? 0;
   const daysOfInventory = currentStock != null && salesVelocity > 0 ? currentStock / salesVelocity : null;
+  const channelBreakdown = inferDecisionChannelBreakdown(row, recommendation, currentRevenue);
+  const channelDetails = Object.entries(channelBreakdown).map(([platform, revenue]) => ({
+    platform,
+    revenue,
+    quantity: 0,
+    profit: 0,
+    margin: 0,
+    share: currentRevenue > 0 ? revenue / currentRevenue : 0
+  }));
 
   return {
     sku: row.skuId,
@@ -254,8 +338,8 @@ function fallbackSkuReportRowFromDecision(row: PortfolioDecisionRow, recommendat
     ad_cost_allocated: simulation?.current_ads_spend ?? null,
     profit_confidence: row.confidence ?? recommendation?.confidence ?? null,
     roas_value: null,
-    channel_breakdown: {},
-    channel_details: [],
+    channel_breakdown: channelBreakdown,
+    channel_details: channelDetails,
     ad_allocation_method: null,
     ad_allocation_confidence: null,
     campaign_ids: [],
@@ -282,6 +366,39 @@ function fallbackSkuReportRowFromDecision(row: PortfolioDecisionRow, recommendat
   };
 }
 
+function inferDecisionChannelBreakdown(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined, revenue: number) {
+  const payload = row as PortfolioDecisionRow & Record<string, unknown>;
+  const recommendationPayload = (recommendation ?? {}) as PortfolioRow & Record<string, unknown>;
+  const channels = new Set<string>();
+  const candidates = [
+    payload.channel,
+    payload.source_channel,
+    payload.target_channel,
+    payload.from_channel,
+    payload.to_channel,
+    payload.current_channel,
+    payload.recommended_channel,
+    recommendationPayload.channel,
+    recommendationPayload.source_channel,
+    recommendationPayload.target_channel,
+    recommendationPayload.from_channel,
+    recommendationPayload.to_channel,
+    recommendationPayload.current_channel,
+    recommendationPayload.recommended_channel
+  ];
+
+  for (const candidate of candidates) {
+    const channel = revenueChannelOrNull(candidate);
+    if (channel) channels.add(channel);
+  }
+
+  const normalizedChannels = Array.from(channels);
+  if (!normalizedChannels.length) return {};
+
+  const revenueValue = revenue > 0 ? revenue / normalizedChannels.length : 1;
+  return Object.fromEntries(normalizedChannels.map((channel) => [channel, revenueValue]));
+}
+
 export function ReportRendererEngine({ report, message, showEmptyShell = false, locale = "en" }: ReportRendererEngineProps) {
   const [skuChannel, setSkuChannel] = useState("all");
   const [inventorySearch, setInventorySearch] = useState("");
@@ -289,61 +406,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   const skuRows = useMemo(() => {
     if (!report) return [];
-
-    const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
-    const profitBySku = new Map(topProfitSkus.map((row) => [row.sku, row]));
-
-    return topRevenueSkus.map((row) => {
-      const profit = profitBySku.get(row.sku);
-      return {
-        sku: row.sku,
-        product_name: displayProductName(row.product_name ?? profit?.product_name, row.sku),
-        category: row.category ?? profit?.category,
-        variant_name: row.variant_name ?? profit?.variant_name,
-        size: row.size ?? profit?.size,
-        color: row.color ?? profit?.color,
-        revenue: row.revenue,
-        quantity: row.quantity,
-        profit: profit?.net_profit ?? null,
-        margin: profit?.margin ?? null,
-        total_cost: profit?.total_cost ?? null,
-        ad_cost_allocated: profit?.ad_cost_allocated ?? null,
-        profit_confidence: profit?.profit_confidence ?? null,
-        roas_value: profit?.roas_value ?? null,
-        roas_display: profit?.roas_display,
-        roas_status: profit?.roas_status,
-        attribution_method: profit?.attribution_method,
-        attribution_confidence: profit?.attribution_confidence,
-        channel_breakdown: profit?.channel_breakdown ?? {},
-        channel_details: profit?.channel_details ?? [],
-        ad_allocation_method: profit?.ad_allocation_method ?? null,
-        ad_allocation_confidence: profit?.ad_allocation_confidence ?? null,
-        campaign_ids: profit?.campaign_ids ?? [],
-        attribution_window_start: profit?.attribution_window_start ?? null,
-        attribution_window_end: profit?.attribution_window_end ?? null,
-        cost_breakdown: profit?.cost_breakdown ?? null,
-        sku_roas: profit?.sku_roas ?? null,
-        stock_level: profit?.stock_level ?? null,
-        available_stock: profit?.available_stock ?? null,
-        sales_velocity: profit?.sales_velocity ?? 0,
-        days_of_inventory: profit?.days_of_inventory ?? null,
-        stockout_risk: profit?.stockout_risk ?? "unknown",
-        overstock_risk: profit?.overstock_risk ?? "unknown",
-        refund_rate: profit?.refund_rate ?? 0,
-        refund_risk: profit?.refund_risk ?? "unknown",
-        margin_risk: profit?.margin_risk === true,
-        channel_concentration_risk: profit?.channel_concentration_risk === true,
-        attribution_risk: profit?.attribution_risk === true,
-        overall_risk_score: profit?.overall_risk_score ?? 0,
-        inventory_confidence: profit?.inventory_confidence ?? null,
-        estimated_components: profit?.estimated_components ?? [],
-        estimated: profit?.estimated === true,
-        lifecycle_stage: normalizeLifecycleStage(
-          (profit as { lifecycle_stage?: string } | undefined)?.lifecycle_stage ??
-            (row as { lifecycle_stage?: string }).lifecycle_stage
-        )
-      };
-    });
+    return buildSkuReportRows(report);
   }, [report]);
 
   const visibleSkuRows = useMemo(() => {
@@ -361,13 +424,14 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   const skuChannelTags = useMemo(() => {
     const channels = new Set<string>();
     for (const row of skuRows) {
-      for (const channel of row.channel_details) {
+      for (const channel of safeChannelDetails(row.channel_details)) {
         const platform = normalizeRevenueChannel(channel.platform);
         if (isRevenueChannel(platform)) channels.add(platform);
       }
-      for (const channel of Object.keys(row.channel_breakdown)) {
+      const channelBreakdown = safeChannelBreakdown(row.channel_breakdown);
+      for (const channel of Object.keys(channelBreakdown)) {
         const platform = normalizeRevenueChannel(channel);
-        if (isRevenueChannel(platform) && row.channel_breakdown[channel] > 0) channels.add(platform);
+        if (isRevenueChannel(platform) && channelBreakdown[channel] > 0) channels.add(platform);
       }
     }
     return ["all", ...Array.from(channels).filter(Boolean).sort()];
@@ -759,12 +823,44 @@ function summarizeInventoryRows(rows: InventoryBreakdownRow[]): InventorySummary
 }
 
 function primaryInventoryChannel(row: SkuReportRow) {
-  const details = row.channel_details.filter((channel) => isRevenueChannel(channel.platform));
+  const details = safeChannelDetails(row.channel_details);
   if (details.length > 1) return "multi-channel";
   if (details.length === 1) return details[0].platform || "unknown";
-  const channels = Object.entries(row.channel_breakdown).filter(([channel, revenue]) => isRevenueChannel(channel) && revenue > 0);
+  const channels = Object.entries(safeChannelBreakdown(row.channel_breakdown)).filter(([channel, revenue]) => isRevenueChannel(channel) && revenue > 0);
   if (channels.length > 1) return "multi-channel";
   return channels[0]?.[0] || "unknown";
+}
+
+function skuRowForSelectedChannel(row: SkuReportRow, selectedChannel: string): SkuReportRow {
+  const channel = normalizeRevenueChannel(selectedChannel);
+  if (!isRevenueChannel(channel)) return row;
+
+  const channelDetails = safeChannelDetails(row.channel_details);
+  const matchedDetail = channelDetails.find((item) => normalizeRevenueChannel(item.platform) === channel);
+  const breakdown = safeChannelBreakdown(row.channel_breakdown);
+  const channelRevenue = matchedDetail?.revenue ?? breakdown[channel] ?? 0;
+  const channelQuantity = matchedDetail?.quantity ?? 0;
+  const channelProfit = matchedDetail?.profit ?? null;
+  const channelMargin = matchedDetail?.margin ?? (channelProfit !== null && channelRevenue > 0 ? channelProfit / channelRevenue : null);
+  const channelCost = channelProfit !== null ? Math.max(0, channelRevenue - channelProfit) : null;
+  const scopedDetail = matchedDetail
+    ? [{ ...matchedDetail, platform: channel, share: 1 }]
+    : channelRevenue > 0
+      ? [{ platform: channel, revenue: channelRevenue, quantity: 0, profit: 0, margin: 0, share: 1 }]
+      : [];
+
+  return {
+    ...row,
+    revenue: channelRevenue,
+    quantity: channelQuantity,
+    profit: channelProfit,
+    margin: channelMargin,
+    total_cost: channelCost,
+    channel_breakdown: channelRevenue > 0 ? { [channel]: channelRevenue } : {},
+    channel_details: scopedDetail,
+    cost_breakdown: null,
+    ad_cost_allocated: null
+  };
 }
 
 function formatOneDecimal(value: number) {
@@ -974,9 +1070,11 @@ function SkuBreakdownTable({
           </thead>
           <tbody className="divide-y">
             {visibleRows.map((row, index) => {
-              const lowMargin = row.margin !== null && row.margin < 0.1;
+              const displayRow = selectedChannel === "all" ? row : skuRowForSelectedChannel(row, selectedChannel);
+              const lowMargin = displayRow.margin !== null && displayRow.margin < 0.1;
               const isExpanded = expandedSku === row.sku;
-              const fees = row.cost_breakdown ? row.cost_breakdown.platform_fee + row.cost_breakdown.payment_fee : null;
+              const costBreakdown = safeCostBreakdown(displayRow.cost_breakdown);
+              const fees = costBreakdown ? costBreakdown.platform_fee + costBreakdown.payment_fee : null;
               return (
                 <Fragment key={row.sku}>
                   <tr key={row.sku} data-sku-row={row.sku} className={cn("hover:bg-slate-50", index < 5 && "bg-emerald-50/40", lowMargin && "bg-rose-50/60")}>
@@ -988,39 +1086,39 @@ function SkuBreakdownTable({
                       <button type="button" onClick={() => onToggleExpanded(row.sku)} className="flex items-center gap-2 text-left">
                         {isExpanded ? <ChevronDown className="size-4 text-slate-500" /> : <ChevronRight className="size-4 text-slate-500" />}
                         <span className="min-w-0">
-                          <span className="block truncate">{row.product_name || row.sku}</span>
-                          {row.product_name ? <span className="mt-0.5 block truncate text-xs font-medium text-slate-500">{row.sku}</span> : null}
+	                          <span className="block truncate">{displayRow.product_name || row.sku}</span>
+	                          {displayRow.product_name ? <span className="mt-0.5 block truncate text-xs font-medium text-slate-500">{row.sku}</span> : null}
                         </span>
                       </button>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {row.category ? <Badge tone="neutral">{row.category}</Badge> : null}
-                        {row.variant_name ? <Badge tone="neutral">{row.variant_name}</Badge> : null}
-                        {row.size ? <Badge tone="neutral">Size {row.size}</Badge> : null}
-                        {row.color ? <Badge tone="neutral">{row.color}</Badge> : null}
-                        <LifecycleBadge stage={row.lifecycle_stage ?? inferSkuLifecycleStage(row)} locale={locale} />
+	                        {displayRow.category ? <Badge tone="neutral">{displayRow.category}</Badge> : null}
+	                        {displayRow.variant_name ? <Badge tone="neutral">{displayRow.variant_name}</Badge> : null}
+	                        {displayRow.size ? <Badge tone="neutral">Size {displayRow.size}</Badge> : null}
+	                        {displayRow.color ? <Badge tone="neutral">{displayRow.color}</Badge> : null}
+	                        <LifecycleBadge stage={displayRow.lifecycle_stage ?? inferSkuLifecycleStage(displayRow)} locale={locale} />
                       </div>
                     </td>
-                    <td className="px-3 py-3">{currency.format(row.revenue)}</td>
-                    <td className="px-3 py-3"><ChannelMix row={row} /></td>
-                    <td className="px-3 py-3">{numberFormat.format(row.quantity)}</td>
-                    <td className="px-3 py-3">{row.stock_level === null ? "No Data" : numberFormat.format(row.stock_level)}</td>
-                    <td className="px-3 py-3">{row.cost_breakdown ? currency.format(row.cost_breakdown.cogs) : "No Data"}</td>
-                    <td className="px-3 py-3">{row.ad_cost_allocated === null ? "No Data" : currency.format(row.ad_cost_allocated)}</td>
-                    <td className="px-3 py-3">{row.cost_breakdown ? currency.format(row.cost_breakdown.shipping + row.cost_breakdown.fulfillment) : "No Data"}</td>
+	                    <td className="px-3 py-3">{currency.format(displayRow.revenue)}</td>
+	                    <td className="px-3 py-3"><ChannelMix row={displayRow} /></td>
+	                    <td className="px-3 py-3">{numberFormat.format(displayRow.quantity)}</td>
+	                    <td className="px-3 py-3">{displayRow.stock_level === null ? "No Data" : numberFormat.format(displayRow.stock_level)}</td>
+                    <td className="px-3 py-3">{costBreakdown ? currency.format(costBreakdown.cogs) : "No Data"}</td>
+                    <td className="px-3 py-3">{displayRow.ad_cost_allocated === null ? "No Data" : currency.format(displayRow.ad_cost_allocated)}</td>
+                    <td className="px-3 py-3">{costBreakdown ? currency.format(costBreakdown.shipping + costBreakdown.fulfillment) : "No Data"}</td>
                     <td className="px-3 py-3">{fees === null ? "No Data" : currency.format(fees)}</td>
-                    <td className="px-3 py-3">{row.total_cost === null ? "No Data" : currency.format(row.total_cost)}</td>
-                    <td className={cn("px-3 py-3", row.profit !== null && row.profit < 0 && "font-semibold text-rose-700")}>
-                      {row.profit === null ? "No Data" : currency.format(row.profit)}
+                    <td className="px-3 py-3">{displayRow.total_cost === null ? "No Data" : currency.format(displayRow.total_cost)}</td>
+                    <td className={cn("px-3 py-3", displayRow.profit !== null && displayRow.profit < 0 && "font-semibold text-rose-700")}>
+                      {displayRow.profit === null ? "No Data" : currency.format(displayRow.profit)}
                     </td>
                     <td className={cn("px-3 py-3", lowMargin && "font-semibold text-rose-700")}>
-                      {row.margin === null ? "No Data" : percent.format(row.margin)}
+                      {displayRow.margin === null ? "No Data" : percent.format(displayRow.margin)}
                     </td>
-                    <td className="px-3 py-3">{formatSkuRoas(row)}</td>
+                    <td className="px-3 py-3">{formatSkuRoas(displayRow)}</td>
                   </tr>
                   {isExpanded ? (
                     <tr key={`${row.sku}-details`} className="bg-white">
                       <td colSpan={13} className="px-5 py-4">
-                        <SkuDetailPanel row={row} />
+                        <SkuDetailPanel row={displayRow} />
                       </td>
                     </tr>
                   ) : null}
@@ -1092,6 +1190,89 @@ function InventoryChart({ rows }: { rows: InventoryBreakdownRow[] }) {
   );
 }
 
+function createEmptyOptimizationPanelReport(): DecisionIntelligenceReportV1 {
+  return {
+    sku_breakdown: {
+      top_revenue_skus: [],
+      top_profit_skus: [],
+      sku_concentration: {
+        top_sku_revenue_share: 0,
+        top_5_revenue_share: 0,
+        concentration_level: "unknown"
+      }
+    },
+    sku_portfolio_optimization: {
+      version: "sku_portfolio_optimization_v2",
+      algorithm: "prediction_driven_global_portfolio_solver",
+      optimization_summary: {
+        input_sku_count: 0,
+        total_opportunities: 0,
+        scenarios_tested: 0,
+        action_distribution: {},
+        expected_profit_gain: 0,
+        current_portfolio_profit: 0,
+        optimized_portfolio_profit: 0,
+        total_expected_profit_gain: 0,
+        selected_sku_count: 0,
+        ads_budget_used: 0,
+        inventory_required: 0,
+        inventory_utilization: 0,
+        cash_required: 0,
+        inventory_health: {
+          total_inventory_units: 0,
+          total_inventory_value: 0,
+          average_inventory_days: 0,
+          inventory_risk_level: "low",
+          overstock_sku_count: 0,
+          stockout_sku_count: 0,
+          cash_locked_in_inventory: 0
+        },
+        clear_inventory_ratio: 0,
+        clear_inventory_impact_ratio: 0,
+        clear_inventory_cash_recovery_ratio: 0,
+        max_allowed_clear_inventory_ratio: 0,
+        inventory_risk_level: "low",
+        simulation_horizon_days: 30,
+        constraints_applied: []
+      },
+      prediction_summary: {
+        simulation_source: "prediction_model",
+        models_used: [],
+        prediction_type: "rule_based",
+        prediction_confidence: 0
+      },
+      threshold_profile: {},
+      recommended_portfolio: [],
+      portfolioSummary: {
+        totalProfitImpact: 0
+      },
+      lifecycleSummary: {
+        totalSkus: 0,
+        launch: 0,
+        growth: 0,
+        mature: 0,
+        declining: 0
+      },
+      lifecycleClassifications: [],
+      allocationRecommendation: {},
+      skuDecisions: [],
+      riskAlerts: [],
+      executionPlan: [],
+      budget_plan: [],
+      pricing_plan: [],
+      inventory_plan: [],
+      total_expected_profit_gain: 0,
+      optimization_confidence: 0,
+      greedy_single_sku_baseline: {
+        sku: null,
+        profit_delta: 0
+      },
+      simulations: []
+    },
+    skuDecisions: []
+  } as unknown as DecisionIntelligenceReportV1;
+}
+
 export function DecisionAnalysisEnginePanel({
   report,
   message,
@@ -1101,7 +1282,6 @@ export function DecisionAnalysisEnginePanel({
   onStartProfitOptimization,
   isLoadingOptimization = false,
   showSkuTableEmptyState = false,
-  showInitialShell = false,
   isLoadingData = false
 }: {
   report: DecisionIntelligenceReportV1 | null;
@@ -1118,16 +1298,20 @@ export function DecisionAnalysisEnginePanel({
   const isZh = locale === "zh";
 
   if (!report) {
-    if (showSkuTableEmptyState || showInitialShell) {
+    if (showSkuTableEmptyState || isLoadingData || isLoadingOptimization || optimizationStarted) {
+      const emptyReport = createEmptyOptimizationPanelReport();
       return (
-        <InitialProfitOptimizationShell
-          locale={locale}
-          headerAction={headerAction}
-          showSkuTableEmptyState={showSkuTableEmptyState}
-          isLoadingOptimization={isLoadingOptimization}
-          isLoadingData={isLoadingData}
-          onStartProfitOptimization={onStartProfitOptimization}
-        />
+        <section className="min-w-0 scroll-mt-24">
+          <SkuPortfolioOptimizationPanel
+            report={emptyReport}
+            locale={locale}
+            headerAction={headerAction}
+            optimizationStarted={optimizationStarted}
+            onStartProfitOptimization={onStartProfitOptimization}
+            isLoadingOptimization={isLoadingOptimization || isLoadingData}
+            showSkuTableEmptyState
+          />
+        </section>
       );
     }
 
@@ -1159,104 +1343,6 @@ export function DecisionAnalysisEnginePanel({
   );
 }
 
-function InitialProfitOptimizationShell({
-  locale,
-  headerAction,
-  showSkuTableEmptyState,
-  isLoadingOptimization,
-  isLoadingData,
-  onStartProfitOptimization
-}: {
-  locale: RendererLocale;
-  headerAction?: ReactNode;
-  showSkuTableEmptyState: boolean;
-  isLoadingOptimization: boolean;
-  isLoadingData: boolean;
-  onStartProfitOptimization?: () => void | Promise<void>;
-}) {
-  const isZh = locale === "zh";
-
-  return (
-    <section className="min-w-0 scroll-mt-24">
-      <div className="space-y-5 bg-transparent">
-        <div className="sticky top-0 z-30 py-4">
-          <div className="mb-3 flex items-center justify-between gap-3 px-1">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-              <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
-              {isZh ? "实时组合监控" : "Live Portfolio Monitor"}
-            </div>
-            {headerAction ?? <span className="text-xs font-medium text-slate-500">{isZh ? "加载中" : "Loading"}</span>}
-          </div>
-          {!showSkuTableEmptyState && !isLoadingData ? (
-            <div className="grid gap-0 xl:grid-cols-2">
-              <div className="min-w-0 px-5 py-3 xl:order-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "当前组合" : "Current Portfolio"}</p>
-                <p className="mt-3 break-words text-[42px] font-bold leading-none text-slate-950">0 SKUs</p>
-                <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
-                  <span>{isZh ? "当前预计利润" : "Estimated Profit"}: $0.00</span>
-                  <span>{isZh ? "广告预算" : "Ad Spend"}: $0.00</span>
-                </div>
-              </div>
-              <div className="min-w-0 px-5 py-3 xl:order-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "优化机会" : "Optimization Opportunities"}</p>
-                <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">0 SKUs</p>
-                <div className="mt-4 text-sm font-semibold text-emerald-900">
-                  <span>{isZh ? "模拟利润增益" : "Simulated Profit Gain"}: +$0.00 / +0.00%</span>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-			      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-3 p-4 xl:order-1 xl:p-5">
-            <div className="flex min-h-[calc(100vh-18rem)] items-center justify-center rounded-lg bg-transparent p-0">
-              <div className="w-full max-w-[430px] text-center">
-                <div className="space-y-5">
-                  <p className="text-lg font-bold text-slate-950">
-                    {isLoadingData || isLoadingOptimization
-                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
-                      : (isZh ? "开始利润优化" : "Start profit optimization")}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isLoadingData) return;
-                      void onStartProfitOptimization?.();
-                    }}
-                    disabled={isLoadingOptimization || isLoadingData}
-                    className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
-                    aria-label={isLoadingData || isLoadingOptimization
-                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
-                      : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
-                  >
-                    {isLoadingOptimization || isLoadingData ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
-          <div className="min-w-0 space-y-4 xl:order-3">
-            {!isLoadingData ? (
-              <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
-                <span className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm ring-1 ring-emerald-200">
-                  {isZh ? "SKU 经营数据" : "SKU operating data"}
-                </span>
-                <span className="rounded-full px-4 py-2 text-sm font-semibold text-slate-500">
-                  {isZh ? "SKU 优化决策" : "SKU optimization decision"}
-                </span>
-              </div>
-            ) : null}
-            <div className="min-w-0 overflow-hidden">
-              <EmptySkuProfitPortfolioTable locale={locale} isLoadingData={isLoadingData} />
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function SkuPortfolioOptimizationPanel({
   report,
   locale,
@@ -1275,14 +1361,16 @@ function SkuPortfolioOptimizationPanel({
   showSkuTableEmptyState?: boolean;
 }) {
   const isZh = locale === "zh";
-  const optimization = report.sku_portfolio_optimization;
-  const summary = optimization.optimization_summary;
+  const optimization = report.sku_portfolio_optimization ?? createEmptyOptimizationPanelReport().sku_portfolio_optimization;
+  const summary = optimization.optimization_summary ?? createEmptyOptimizationPanelReport().sku_portfolio_optimization.optimization_summary;
   const selectedRows = useMemo(
-    () => Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [],
+    () => Array.isArray(optimization.recommended_portfolio)
+      ? optimization.recommended_portfolio.filter((row) => objectRecord(row).sku)
+      : [],
     [optimization.recommended_portfolio]
   );
   const optimizationSimulations = useMemo(
-    () => Array.isArray(optimization.simulations) ? optimization.simulations : [],
+    () => Array.isArray(optimization.simulations) ? optimization.simulations.filter((row) => objectRecord(row).sku) : [],
     [optimization.simulations]
   );
   const [skuChannel, setSkuChannel] = useState("all");
@@ -1299,51 +1387,61 @@ function SkuPortfolioOptimizationPanel({
         return bRankValue - aRankValue || b.revenue - a.revenue || a.sku.localeCompare(b.sku);
       });
   }, [skuRows, skuChannel]);
-  const skuChannelTags = useMemo(() => {
-    const channels = new Set<string>();
-    for (const row of skuRows) {
-      for (const channel of row.channel_details) {
-        const platform = normalizeRevenueChannel(channel.platform);
-        if (isRevenueChannel(platform)) channels.add(platform);
-      }
-      for (const channel of Object.keys(row.channel_breakdown)) {
-        const platform = normalizeRevenueChannel(channel);
-        if (isRevenueChannel(platform) && row.channel_breakdown[channel] > 0) channels.add(platform);
-      }
-    }
-    return ["all", ...Array.from(channels).filter(Boolean).sort()];
-  }, [skuRows]);
   const decisionRows = useMemo(
     () => {
-      if (Array.isArray(optimization.skuDecisions)) return optimization.skuDecisions;
-      if (Array.isArray(report.skuDecisions)) return report.skuDecisions;
+      if (Array.isArray(optimization.skuDecisions)) return optimization.skuDecisions.filter((row) => objectRecord(row).skuId);
+      if (Array.isArray(report.skuDecisions)) return report.skuDecisions.filter((row) => objectRecord(row).skuId);
       return [];
     },
     [optimization.skuDecisions, report.skuDecisions]
   );
   const portfolioRowsBySku = useMemo(() => new Map(selectedRows.map((row) => [row.sku, row])), [selectedRows]);
+  const skuChannelTags = useMemo(() => {
+    const channels = new Set<string>();
+    for (const row of skuRows) {
+      for (const channel of safeChannelDetails(row.channel_details)) {
+        const platform = normalizeRevenueChannel(channel.platform);
+        if (isRevenueChannel(platform)) channels.add(platform);
+      }
+      const channelBreakdown = safeChannelBreakdown(row.channel_breakdown);
+      for (const channel of Object.keys(channelBreakdown)) {
+        const platform = normalizeRevenueChannel(channel);
+        if (isRevenueChannel(platform) && channelBreakdown[channel] > 0) channels.add(platform);
+      }
+    }
+    for (const row of decisionRows) {
+      const recommendation = portfolioRowsBySku.get(row.skuId);
+      for (const channel of Object.keys(inferDecisionChannelBreakdown(row, recommendation, 1))) {
+        channels.add(channel);
+      }
+    }
+    return ["all", ...Array.from(channels).filter(Boolean).sort()];
+  }, [decisionRows, portfolioRowsBySku, skuRows]);
   const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
   const sourceRows = topProfitSkus.length ? topProfitSkus : topRevenueSkus;
   const sourceSkuIds = sourceRows.length
     ? sourceRows.map((row) => row.sku)
-    : Array.from(new Set(optimizationSimulations.map((row) => row.sku)));
-  const currentSkuCount = summary.input_sku_count || sourceRows.length || sourceSkuIds.length;
-  const liftRate = summary.current_portfolio_profit > 0 ? optimization.total_expected_profit_gain / summary.current_portfolio_profit : 0;
-  const simulationHorizonDays = summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days ?? 30;
+    : Array.from(new Set(optimizationSimulations.map((row) => String(objectRecord(row).sku ?? ""))).values()).filter(Boolean);
+  const currentPortfolioProfit = safeNumber(summary.current_portfolio_profit);
+  const currentSkuCount = safeNumber(summary.input_sku_count) || sourceRows.length || sourceSkuIds.length;
+  const totalExpectedProfitGain = safeNumber(optimization.total_expected_profit_gain);
+  const liftRate = currentPortfolioProfit > 0 ? totalExpectedProfitGain / currentPortfolioProfit : 0;
+  const simulationHorizonDays = safeNumber(summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days, 30);
   const [actionStatuses, setActionStatuses] = useState<Record<string, "pending" | "accepted" | "rejected">>({});
   const [acceptedAtByDecision, setAcceptedAtByDecision] = useState<Record<string, string>>({});
   const [trackedOutcomeRows, setTrackedOutcomeRows] = useState<ActionOutcomeRow[]>(seedActionOutcomeRows);
   const [selectedOutcomeRow, setSelectedOutcomeRow] = useState<ActionOutcomeRow | null>(null);
   const [selectedDecisionRow, setSelectedDecisionRow] = useState<PortfolioDecisionRow | null>(null);
-  const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted);
+  const [focusedOpsSku, setFocusedOpsSku] = useState<string | null>(null);
+  const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted || isLoadingOptimization);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
-  const focusedQueueSku = selectedDecisionRow?.skuId ?? null;
   const displayedSkuRows = useMemo(() => {
-    if (!focusedQueueSku) return visibleSkuRows;
-    const matchedRows = skuRows.filter((row) => row.sku === focusedQueueSku);
+    if (!focusedOpsSku) return visibleSkuRows;
+    const matchedRows = visibleSkuRows.filter((row) => row.sku === focusedOpsSku);
     if (matchedRows.length > 0) return matchedRows;
-    return selectedDecisionRow ? [fallbackSkuReportRowFromDecision(selectedDecisionRow, portfolioRowsBySku.get(selectedDecisionRow.skuId))] : [];
-  }, [portfolioRowsBySku, selectedDecisionRow, skuRows, visibleSkuRows, focusedQueueSku]);
+    const selectedOpsDecision = decisionRows.find((row) => row.skuId === focusedOpsSku);
+    return selectedOpsDecision ? [fallbackSkuReportRowFromDecision(selectedOpsDecision, portfolioRowsBySku.get(selectedOpsDecision.skuId))] : [];
+  }, [decisionRows, focusedOpsSku, portfolioRowsBySku, visibleSkuRows]);
   const decisionActionFilter: PortfolioDecisionFilter = "ALL";
   const optimizationQueueRows = decisionRows.filter((row) => isOptimizationQueueRow(row));
   const filteredDecisionRows = (optimizationQueueRows.length ? optimizationQueueRows : decisionRows)
@@ -1356,26 +1454,26 @@ function SkuPortfolioOptimizationPanel({
   const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
   const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
   const decisionRowsExpectedProfitGain = decisionRows.reduce(
-    (sum, row) => sum + (row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta ?? 0),
+    (sum, row) => sum + safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta),
     0
   );
   const expectedProfitGain =
-    optimization.total_expected_profit_gain ||
-    summary.total_expected_profit_gain ||
-    summary.expected_profit_gain ||
-    optimization.portfolioSummary.totalProfitImpact ||
+    totalExpectedProfitGain ||
+    safeNumber(summary.total_expected_profit_gain) ||
+    safeNumber(summary.expected_profit_gain) ||
+    safeNumber(optimization.portfolioSummary?.totalProfitImpact) ||
     decisionRowsExpectedProfitGain;
-  const expectedProfitLiftRate = summary.current_portfolio_profit > 0 ? expectedProfitGain / summary.current_portfolio_profit : liftRate;
+  const expectedProfitLiftRate = currentPortfolioProfit > 0 ? expectedProfitGain / currentPortfolioProfit : liftRate;
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
-  const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : summary.current_portfolio_profit;
-  const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : summary.ads_budget_used;
+  const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
+  const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : safeNumber(summary.ads_budget_used);
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
   const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : expectedProfitGain;
   const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
   const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
     ? 0
-    : acceptedDecisionRows.reduce((sum, row) => sum + (row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta ?? 0), 0);
+    : acceptedDecisionRows.reduce((sum, row) => sum + safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta), 0);
   const displayedAcceptedLiftRate = displayedCurrentProfit > 0 ? displayedAcceptedProfitGain / displayedCurrentProfit : 0;
   const displayedAcceptedProjectedPortfolioProfit = displayedCurrentProfit + displayedAcceptedProfitGain;
   const displayedAcceptedAdditionalAds = shouldBlankOptimizationSummary
@@ -1391,12 +1489,17 @@ function SkuPortfolioOptimizationPanel({
   const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
+  const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization);
 
   useEffect(() => {
-    if (optimizationStarted) {
+    if (isLoadingOptimization) {
+      setIsSkuOperationsOpen(true);
+      return;
+    }
+    if (optimizationStarted && !showSkuTableEmptyState) {
       setIsSkuOperationsOpen(false);
     }
-  }, [optimizationStarted]);
+  }, [isLoadingOptimization, optimizationStarted, showSkuTableEmptyState]);
 
   useEffect(() => {
     if (wasLoadingOptimizationRef.current && !isLoadingOptimization && optimizationStarted) {
@@ -1463,6 +1566,8 @@ function SkuPortfolioOptimizationPanel({
 
   const selectOptimizationQueueRow = (row: PortfolioDecisionRow) => {
     setSelectedDecisionRow(row);
+    setFocusedOpsSku(row.skuId);
+    setIsSkuOperationsOpen(true);
     setSkuChannel("all");
     setExpandedSku(row.skuId);
   };
@@ -1556,6 +1661,7 @@ function SkuPortfolioOptimizationPanel({
   };
 
   const openDecisionIntelligence = () => {
+    setFocusedOpsSku(null);
     if (!optimizationStarted) {
       setIsSkuOperationsOpen(false);
       void onStartProfitOptimization?.();
@@ -1571,14 +1677,14 @@ function SkuPortfolioOptimizationPanel({
     setIsSkuOperationsOpen(false);
   };
   const selectSkuChannel = (value: string) => {
-    setSelectedDecisionRow(null);
     setExpandedSku(null);
     setSkuChannel(value);
   };
 
-  return (
-	    <div className="space-y-2 bg-transparent">
-	      <div className="sticky top-0 z-30 pb-2 pt-4">
+	  return (
+		    <div className="space-y-2 bg-transparent">
+		      {!shouldShowOptimizationStarter ? (
+		      <div className="sticky top-0 z-30 pb-2 pt-4">
 	        <div className="mb-3 flex items-center justify-between gap-3 px-1">
 	          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
 	            <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
@@ -1634,15 +1740,20 @@ function SkuPortfolioOptimizationPanel({
             </div>
           </div>
         </div>
-      </div>
-      <div className="space-y-2">
-        <div className="min-w-0 space-y-2">
-			      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
-		        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:p-5">
-          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
+	      </div>
+		      ) : null}
+	      <div className="space-y-2">
+	        <div className="min-w-0 space-y-2">
+				      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:p-5">
+	          {!shouldShowOptimizationStarter ? (
+	          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
             <button
               type="button"
-              onClick={() => setIsSkuOperationsOpen(true)}
+              onClick={() => {
+                setFocusedOpsSku(null);
+                setIsSkuOperationsOpen(true);
+              }}
               className={cn(
                 "inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5747e8]/30",
                 isSkuOperationsOpen ? "bg-[#5747e8] text-white shadow-sm ring-1 ring-[#5747e8]" : "bg-transparent text-slate-500 hover:text-slate-800"
@@ -1662,7 +1773,8 @@ function SkuPortfolioOptimizationPanel({
             >
               {isZh ? "SKU 优化决策" : "SKU optimization decision"}
             </button>
-          </div>
+	          </div>
+	          ) : null}
         {isSkuOperationsOpen ? (
           <div className={cn("min-w-0 overflow-hidden", showSkuTableEmptyState ? "" : "rounded-lg border bg-white")}>
             {showSkuTableEmptyState ? (
@@ -1753,9 +1865,12 @@ function SkuPortfolioOptimizationPanel({
                     {filteredDecisionRows.length ? filteredDecisionRows.map((row) => {
                       const isSelected = selectedDecision ? decisionRowKey(row) === decisionRowKey(selectedDecision) : false;
                       const recommendation = portfolioRowsBySku.get(row.skuId);
-                      const currentProfit = recommendation?.current_profit ?? null;
-                      const expectedProfitImpact = row.expectedProfitImpact ?? row.estimatedProfitImpact;
-                      const expectedLiftRate = currentProfit && currentProfit > 0 ? expectedProfitImpact / currentProfit : null;
+	                      const currentProfit = numberOrNull(recommendation?.current_profit);
+	                      const expectedProfitImpact = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact);
+	                      const expectedLiftRate = currentProfit && currentProfit > 0 ? expectedProfitImpact / currentProfit : null;
+	                      const recommendedActionText = safeStringArray(row.recommendedActions)[0] ??
+                          safeStringArray(row.recommendedExecution)[0] ??
+                          portfolioScenarioActionLabel(row.sourceAction, locale);
                       return (
                         <tr
                           key={`${row.skuId}-${row.action}-${row.sourceAction}`}
@@ -1777,7 +1892,7 @@ function SkuPortfolioOptimizationPanel({
                           <td className="px-3 py-3 font-semibold text-slate-950">
                             <DecisionBadge action={row.action ?? "MONITOR"} locale={locale} />
                             <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
-                              {(row.recommendedActions ?? row.recommendedExecution ?? [portfolioScenarioActionLabel(row.sourceAction, locale)])[0]}
+	                              {recommendedActionText}
                             </p>
                           </td>
                           <td className="px-3 py-3">
@@ -1824,22 +1939,22 @@ function SkuPortfolioOptimizationPanel({
 	        <div className="min-w-0 space-y-2 xl:order-1 xl:self-start">
 		        <div className={cn(
 	            "min-w-0 rounded-lg",
-	            isSkuOperationsOpen ? "grid min-h-[calc(100vh-18rem)] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
+	            isSkuOperationsOpen ? "grid min-h-[520px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
           )}>
-            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
-              <div className="text-center">
+	            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
+	              <div className="translate-y-8 text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
                     {isLoadingOptimization
                       ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
                       : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSkuOperationsOpen(false);
-                      void onStartProfitOptimization?.();
-                    }}
+	                  <button
+	                    type="button"
+	                    onClick={() => {
+	                      setIsSkuOperationsOpen(true);
+	                      void onStartProfitOptimization?.();
+	                    }}
                     disabled={isLoadingOptimization}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
                     aria-label={isLoadingOptimization
@@ -2045,7 +2160,7 @@ function persistedActionMatchesDecisionRow(action: PersistedActionTrackingRecord
 function isOptimizationQueueRow(row: PortfolioDecisionRow) {
   if (isNoActionDecisionRow(row)) return false;
 
-  const impact = Math.abs(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? 0);
+  const impact = Math.abs(safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact));
   return row.action !== "MONITOR" || impact > 1 || row.inventoryRisk === true || row.budgetOpportunity === true;
 }
 
@@ -2319,7 +2434,7 @@ function decisionTimingTableLabel(row: PortfolioDecisionRow, fallbackDays: numbe
 
 function simulationEstimateSourceLabel(row: PortfolioDecisionRow, locale: RendererLocale) {
   const source = row.simulation_estimate?.prediction_source;
-  const days = row.simulation_estimate?.simulation_window.days ?? row.simulation_horizon?.days ?? row.timing?.simulation_window_days ?? 30;
+  const days = row.simulation_estimate?.simulation_window?.days ?? row.simulation_horizon?.days ?? row.timing?.simulation_window_days ?? 30;
   const label = source === "sku_historical_ads"
     ? "SKU historical ads"
     : source === "similar_sku_benchmark"
@@ -2392,7 +2507,7 @@ function formatOfflineDate(row: PortfolioDecisionRow) {
 }
 
 function isAdDecision(row: PortfolioDecisionRow) {
-  return /AD|ADS|BUDGET|SCALE/i.test(`${row.sourceAction ?? ""} ${row.recommendedActions?.join(" ") ?? ""} ${row.recommendedExecution?.join(" ") ?? ""}`);
+  return /AD|ADS|BUDGET|SCALE/i.test(`${row.sourceAction ?? ""} ${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")}`);
 }
 
 function todayDateOnly() {
@@ -2427,19 +2542,20 @@ function decisionFilterMatchesRow(row: PortfolioDecisionRow, filter: PortfolioDe
 function decisionRowSearchText(row: PortfolioDecisionRow) {
   return [
     row.sourceAction,
-    row.recommendedActions?.join(" "),
-    row.recommendedExecution?.join(" "),
-    row.risks?.join(" "),
-    row.decisionDrivers?.map((driver) => `${driver.category} ${driver.metric} ${driver.value}`).join(" "),
-    row.causalExplanation ? `${row.causalExplanation.evidence.join(" ")} ${row.causalExplanation.businessMeaning} ${row.causalExplanation.decision}` : ""
+    safeStringArray(row.recommendedActions).join(" "),
+    safeStringArray(row.recommendedExecution).join(" "),
+    safeStringArray(row.risks).join(" "),
+    Array.isArray(row.decisionDrivers) ? row.decisionDrivers.map((driver) => `${objectRecord(driver).category ?? ""} ${objectRecord(driver).metric ?? ""} ${objectRecord(driver).value ?? ""}`).join(" ") : "",
+    row.causalExplanation ? `${safeStringArray(row.causalExplanation.evidence).join(" ")} ${row.causalExplanation.businessMeaning ?? ""} ${row.causalExplanation.decision ?? ""}` : ""
   ].join(" ").toLowerCase();
 }
 
 function portfolioActionLabel(row: PortfolioRow, locale: RendererLocale) {
-  if (row.action.includes("SCALE")) return locale === "zh" ? "增加广告" : "Increase Ads";
-  if (row.action.includes("REDUCE")) return locale === "zh" ? "降低广告" : "Reduce Ads";
-  if (row.action.includes("PRICE")) return locale === "zh" ? "调整价格" : "Price Adjust";
-  if (row.action.includes("RESTOCK")) return locale === "zh" ? "补库存" : "Restock Inventory";
+  const action = String(row.action ?? "");
+  if (action.includes("SCALE")) return locale === "zh" ? "增加广告" : "Increase Ads";
+  if (action.includes("REDUCE")) return locale === "zh" ? "降低广告" : "Reduce Ads";
+  if (action.includes("PRICE")) return locale === "zh" ? "调整价格" : "Price Adjust";
+  if (action.includes("RESTOCK")) return locale === "zh" ? "补库存" : "Restock Inventory";
   return locale === "zh" ? "保持" : "Hold";
 }
 
@@ -2448,14 +2564,14 @@ function portfolioRowToOutcomeRow(row: PortfolioRow, locale: RendererLocale): Ac
     action: portfolioActionLabel(row, locale),
     sku: row.sku,
     acceptedAt: "Jul 8",
-    window: row.action.includes("PRICE") ? "14d" : "7d",
-    baselineProfit: row.current_profit,
-    predictedProfitLift: Math.max(0, row.profit_delta),
+    window: String(row.action ?? "").includes("PRICE") ? "14d" : "7d",
+    baselineProfit: safeNumber(row.current_profit),
+    predictedProfitLift: Math.max(0, safeNumber(row.profit_delta)),
     actualTotalProfitChange: null,
     actualProfitLift: null,
     organicProfitChange: null,
     status: "Running",
-    confidence: row.confidence,
+    confidence: safeNumber(row.confidence),
     evidence: portfolioEvidenceSummary(row, locale)
   };
 }
@@ -2673,13 +2789,13 @@ function canonicalActionForDecision(row: PortfolioDecisionRow): CanonicalOptimiz
     inventoryRisk: "inventoryRisk" in row ? Boolean(row.inventoryRisk) : null,
     requiredInventory: payload.simulation?.required_inventory ?? null,
     currentInventory: payload.before_state?.inventory ?? null,
-    recommendedText: `${(row.recommendedActions ?? []).join(" ")} ${(row.recommendedExecution ?? []).join(" ")}`
+    recommendedText: `${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")}`
   });
 }
 
 function optimizationGoalForDecision(row: PortfolioDecisionRow): { goal: OptimizationGoal; goalLabel: string; actionLabel: string } {
-  const sourceAction = row.sourceAction ?? "";
-  const recommendedText = `${(row.recommendedActions ?? row.recommendedExecution ?? []).join(" ")} ${sourceAction}`.toLowerCase();
+  const sourceAction = String(row.sourceAction ?? "");
+  const recommendedText = `${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")} ${sourceAction}`.toLowerCase();
   const backendGoal = (row as { optimization_goal?: string }).optimization_goal;
   const backendUnifiedAction = (row as { unified_action?: string }).unified_action;
   const opportunityType = (row as { opportunity_type?: string }).opportunity_type;
@@ -2793,17 +2909,17 @@ function inventoryActionUnits(
 }
 
 function adsBudgetDeltaForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
-  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
+  const expectedProfit = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta);
   const rowWithSimulation = row as PortfolioDecisionRow & {
     simulation?: { recommended_ads_spend?: number; current_ads_spend?: number };
   };
   const rowSimulationDelta = rowWithSimulation.simulation
-    ? (rowWithSimulation.simulation.recommended_ads_spend ?? 0) - (rowWithSimulation.simulation.current_ads_spend ?? 0)
+    ? safeNumber(rowWithSimulation.simulation.recommended_ads_spend) - safeNumber(rowWithSimulation.simulation.current_ads_spend)
     : 0;
   const simulationDelta = recommendation
-    ? recommendation.simulation.recommended_ads_spend - recommendation.simulation.current_ads_spend
+    ? safeNumber(recommendation.simulation?.recommended_ads_spend) - safeNumber(recommendation.simulation?.current_ads_spend)
     : rowSimulationDelta;
-  const estimateDelta = row.simulation_estimate?.investment.additional_ad_spend ?? 0;
+  const estimateDelta = row.simulation_estimate?.investment?.additional_ad_spend ?? 0;
   const fallbackDelta = Math.max(50, Math.round(Math.abs(expectedProfit) * 0.24));
   const value = Math.max(simulationDelta, estimateDelta, 0);
 
@@ -2934,10 +3050,12 @@ function actionDisplayForDecision(
   }
 
   const sourceAction = row.sourceAction ?? "";
-  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
+  const expectedProfit = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta);
   const horizon = `${simulationHorizonDays} days`;
-  const priceChange = recommendation && recommendation.before_state.price > 0
-    ? (recommendation.simulation.simulated_price - recommendation.before_state.price) / recommendation.before_state.price
+  const beforePrice = safeNumber(recommendation?.before_state?.price);
+  const simulatedPrice = safeNumber(recommendation?.simulation?.simulated_price);
+  const priceChange = recommendation && beforePrice > 0
+    ? (simulatedPrice - beforePrice) / beforePrice
     : sourceAction === "PRICE_DOWN_10"
       ? -0.1
       : sourceAction === "PRICE_UP_10"
@@ -3101,9 +3219,9 @@ function actionReasoningForDecision(
     (row.sku_decision_object as { reasoning?: DecisionActionReasoning } | undefined)?.reasoning;
 
   const goal = optimizationGoalForDecision(row);
-  const expectedProfit = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d;
-  const roas = row.simulation_estimate?.revenue_simulation.base_roas ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
-  const marginalRoas = row.simulation_estimate?.revenue_simulation.marginal_roas ?? Math.max(1.2, roas * 0.83);
+  const expectedProfit = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d);
+  const roas = row.simulation_estimate?.revenue_simulation?.base_roas ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
+  const marginalRoas = row.simulation_estimate?.revenue_simulation?.marginal_roas ?? Math.max(1.2, roas * 0.83);
   const salesVelocity = Math.max(0.1, detail.current_sales_velocity);
   const demand30d = Math.round(detail.predicted_daily_demand * simulationHorizonDays);
   const stockCoverage = Math.round(detail.inventory_runway_days);
@@ -3651,8 +3769,8 @@ function buildDecisionSummaryComparisonRows(
   }
 
   if (goal.goal === "PROFIT") {
-    const currentPrice = recommendation?.before_state.price ?? null;
-    const simulatedPrice = recommendation?.simulation.simulated_price ?? null;
+    const currentPrice = numberOrNull(recommendation?.before_state?.price);
+    const simulatedPrice = numberOrNull(recommendation?.simulation?.simulated_price);
     const priceChange = priceChangeFromActionDisplay(actionDisplay);
 
     if (currentPrice && currentPrice > 0) {
@@ -3919,7 +4037,7 @@ function fallbackAIEvidence(detail: SelectedSkuDetail, row: PortfolioDecisionRow
 
 function fallbackScenarios(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined, detail: SelectedSkuDetail) {
   const selectedAction = row.sourceAction ?? row.action;
-  const expectedLift = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d;
+  const expectedLift = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d);
 
   return [
     {
@@ -3928,8 +4046,8 @@ function fallbackScenarios(row: PortfolioDecisionRow, recommendation: PortfolioR
       label: portfolioScenarioActionLabel(selectedAction, "en"),
       expected_profit: detail.current_profit + expectedLift,
       expected_profit_lift: expectedLift,
-      expected_revenue_lift: recommendation?.simulation.revenue_delta ?? expectedLift * 1.7,
-      confidence: row.confidence ?? detail.confidence,
+      expected_revenue_lift: safeNumber(recommendation?.simulation?.revenue_delta, expectedLift * 1.7),
+      confidence: safeNumber(row.confidence ?? detail.confidence),
       selected: true,
       constraints: ["budget", "inventory", "margin", "confidence"]
     },
@@ -3940,7 +4058,7 @@ function fallbackScenarios(row: PortfolioDecisionRow, recommendation: PortfolioR
       expected_profit: detail.current_profit + expectedLift * 0.42,
       expected_profit_lift: expectedLift * 0.42,
       expected_revenue_lift: expectedLift * 0.66,
-      confidence: Math.max(0.45, (row.confidence ?? detail.confidence) - 0.08),
+      confidence: Math.max(0.45, safeNumber(row.confidence ?? detail.confidence) - 0.08),
       selected: false,
       constraints: ["margin", "confidence"]
     },
@@ -4041,49 +4159,58 @@ function PanelDisclosure({ title, children, defaultOpen = false }: { title: stri
 function SimulationEstimateBreakdown({ row }: { row: PortfolioDecisionRow }) {
   const estimate = row.simulation_estimate;
   if (!estimate) return null;
+  const investment = estimate.investment ?? {};
+  const simulationWindow = estimate.simulation_window ?? {};
+  const revenueSimulation = estimate.revenue_simulation ?? {};
+  const costSimulation = estimate.cost_simulation ?? {};
+  const profitSimulation = estimate.profit_simulation ?? {};
+  const confidenceBreakdown = estimate.confidence_breakdown ?? {};
+  const estimatedComponents = safeStringArray(estimate.estimated_components);
+  const warnings = safeStringArray(estimate.warnings);
+  const days = safeNumber(simulationWindow.days, 30);
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        <SmallTrackerMetric label="Investment" value={`${signedCurrency(estimate.investment.additional_ad_spend)} / ${estimate.simulation_window.days} days`} />
-        <SmallTrackerMetric label="Daily budget delta" value={currencyDecimal.format(estimate.investment.daily_budget_delta)} />
-        <SmallTrackerMetric label="Base ROAS" value={ratioFormat.format(estimate.revenue_simulation.base_roas)} />
-        <SmallTrackerMetric label="Marginal ROAS" value={ratioFormat.format(estimate.revenue_simulation.marginal_roas)} />
-        <SmallTrackerMetric label="Diminishing return" value={percent.format(estimate.revenue_simulation.diminishing_return_factor)} />
-        <SmallTrackerMetric label="Attribution factor" value={percent.format(estimate.revenue_simulation.attribution_confidence_factor)} />
-        <SmallTrackerMetric label="Inventory factor" value={percent.format(estimate.revenue_simulation.inventory_capacity_factor)} />
-        <SmallTrackerMetric label="Revenue lift" value={signedCurrency(estimate.revenue_simulation.incremental_revenue)} />
+        <SmallTrackerMetric label="Investment" value={`${signedCurrency(safeNumber(investment.additional_ad_spend))} / ${days} days`} />
+        <SmallTrackerMetric label="Daily budget delta" value={currencyDecimal.format(safeNumber(investment.daily_budget_delta))} />
+        <SmallTrackerMetric label="Base ROAS" value={ratioFormat.format(safeNumber(revenueSimulation.base_roas))} />
+        <SmallTrackerMetric label="Marginal ROAS" value={ratioFormat.format(safeNumber(revenueSimulation.marginal_roas))} />
+        <SmallTrackerMetric label="Diminishing return" value={percent.format(safeNumber(revenueSimulation.diminishing_return_factor))} />
+        <SmallTrackerMetric label="Attribution factor" value={percent.format(safeNumber(revenueSimulation.attribution_confidence_factor))} />
+        <SmallTrackerMetric label="Inventory factor" value={percent.format(safeNumber(revenueSimulation.inventory_capacity_factor))} />
+        <SmallTrackerMetric label="Revenue lift" value={signedCurrency(safeNumber(revenueSimulation.incremental_revenue))} />
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Cost Simulation</p>
         <div className="mt-2 grid gap-1.5 text-xs">
-          <DetailRow label="Ad spend" value={`-${currencyDecimal.format(estimate.cost_simulation.additional_ad_spend)}`} />
-          <DetailRow label="Shipping" value={`-${currencyDecimal.format(estimate.cost_simulation.incremental_shipping_cost)}`} />
-          <DetailRow label="Platform fees" value={`-${currencyDecimal.format(estimate.cost_simulation.incremental_platform_fee)}`} />
-          <DetailRow label="Payment fees" value={`-${currencyDecimal.format(estimate.cost_simulation.incremental_payment_fee)}`} />
-          <DetailRow label="Refund estimate" value={`-${currencyDecimal.format(estimate.cost_simulation.expected_refund_cost)}`} />
-          <DetailRow label="Fulfillment" value={`-${currencyDecimal.format(estimate.cost_simulation.incremental_fulfillment_cost)}`} />
+          <DetailRow label="Ad spend" value={`-${currencyDecimal.format(safeNumber(costSimulation.additional_ad_spend))}`} />
+          <DetailRow label="Shipping" value={`-${currencyDecimal.format(safeNumber(costSimulation.incremental_shipping_cost))}`} />
+          <DetailRow label="Platform fees" value={`-${currencyDecimal.format(safeNumber(costSimulation.incremental_platform_fee))}`} />
+          <DetailRow label="Payment fees" value={`-${currencyDecimal.format(safeNumber(costSimulation.incremental_payment_fee))}`} />
+          <DetailRow label="Refund estimate" value={`-${currencyDecimal.format(safeNumber(costSimulation.expected_refund_cost))}`} />
+          <DetailRow label="Fulfillment" value={`-${currencyDecimal.format(safeNumber(costSimulation.incremental_fulfillment_cost))}`} />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <SmallTrackerMetric label="Contribution margin" value={percent.format(estimate.profit_simulation.contribution_margin)} />
-        <SmallTrackerMetric label="Gross incremental profit" value={signedCurrency(estimate.profit_simulation.gross_incremental_profit)} />
-        <SmallTrackerMetric label="Expected profit lift" value={`${signedCurrency(estimate.profit_simulation.expected_profit_impact)} / ${estimate.simulation_window.days} days`} />
-        <SmallTrackerMetric label="Confidence" value={percent.format(estimate.confidence_breakdown.overall_confidence)} />
+        <SmallTrackerMetric label="Contribution margin" value={percent.format(safeNumber(profitSimulation.contribution_margin))} />
+        <SmallTrackerMetric label="Gross incremental profit" value={signedCurrency(safeNumber(profitSimulation.gross_incremental_profit))} />
+        <SmallTrackerMetric label="Expected profit lift" value={`${signedCurrency(safeNumber(profitSimulation.expected_profit_impact))} / ${days} days`} />
+        <SmallTrackerMetric label="Confidence" value={percent.format(safeNumber(confidenceBreakdown.overall_confidence))} />
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
         <div className="flex justify-between gap-3">
           <span className="font-semibold text-slate-500">Source</span>
-          <span className="text-right font-bold text-slate-950">{estimate.prediction_source}</span>
+          <span className="text-right font-bold text-slate-950">{String(estimate.prediction_source ?? "unknown")}</span>
         </div>
-        {estimate.estimated_components.length ? (
-          <p className="mt-2 text-slate-500">Estimated components: {estimate.estimated_components.join(", ")}</p>
+        {estimatedComponents.length ? (
+          <p className="mt-2 text-slate-500">Estimated components: {estimatedComponents.join(", ")}</p>
         ) : null}
-        {estimate.warnings.length ? (
-          <p className="mt-1 text-amber-700">Warnings: {estimate.warnings.join(", ")}</p>
+        {warnings.length ? (
+          <p className="mt-1 text-amber-700">Warnings: {warnings.join(", ")}</p>
         ) : null}
       </div>
     </div>
@@ -4125,18 +4252,20 @@ function selectedSkuDetail(
   simulationHorizonDays: number,
   actionStatus: "pending" | "accepted" | "rejected"
 ): SelectedSkuDetail {
-  const expectedLift = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? 0;
+  const expectedLift = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta);
   const actualLift = actionStatus === "accepted" ? actualProfitLiftForSku(trackedRows, row.skuId) : null;
   const organicLift = actionStatus === "accepted" ? organicProfitChangeForSku(trackedRows, row.skuId) : null;
-  const currentProfit = recommendation?.current_profit ?? Math.max(0, expectedLift * 0.45);
-  const predictedProfit = recommendation?.predicted_profit ?? currentProfit + expectedLift;
-  const currentRevenue = recommendation?.before_state?.revenue ?? Math.max(predictedProfit * 2.4, currentProfit * 2.8, 1);
-  const predictedRevenue = recommendation?.simulation.predicted_revenue ?? recommendation?.after_state?.revenue ?? currentRevenue + Math.max(0, recommendation?.simulation.revenue_delta ?? expectedLift * 1.7);
-  const currentMargin = recommendation?.before_state?.margin ?? Math.max(0.18, Math.min(0.62, currentProfit / Math.max(1, currentRevenue)));
-  const predictedMargin = recommendation?.simulation.predicted_margin ?? recommendation?.after_state?.margin ?? Math.min(0.72, currentMargin + Math.max(0.02, recommendation?.simulation.margin_change ?? 0.056));
-  const currentAdsSpend = recommendation?.simulation.current_ads_spend ?? recommendation?.before_state?.ad_spend ?? Math.max(0, expectedLift * 0.16);
-  const currentStock = recommendation?.before_state?.inventory ?? recommendation?.simulation.required_inventory ?? 818;
-  const salesVelocity = Math.max(0.2, recommendation?.simulation.required_inventory ? recommendation.simulation.required_inventory / Math.max(1, simulationHorizonDays) : 3.2);
+  const currentProfit = safeNumber(recommendation?.current_profit, Math.max(0, expectedLift * 0.45));
+  const predictedProfit = safeNumber(recommendation?.predicted_profit, currentProfit + expectedLift);
+  const currentRevenue = safeNumber(recommendation?.before_state?.revenue, Math.max(predictedProfit * 2.4, currentProfit * 2.8, 1));
+  const revenueDelta = safeNumber(recommendation?.simulation?.revenue_delta, expectedLift * 1.7);
+  const predictedRevenue = safeNumber(recommendation?.simulation?.predicted_revenue ?? recommendation?.after_state?.revenue, currentRevenue + Math.max(0, revenueDelta));
+  const currentMargin = safeNumber(recommendation?.before_state?.margin, Math.max(0.18, Math.min(0.62, currentProfit / Math.max(1, currentRevenue))));
+  const predictedMargin = safeNumber(recommendation?.simulation?.predicted_margin ?? recommendation?.after_state?.margin, Math.min(0.72, currentMargin + Math.max(0.02, safeNumber(recommendation?.simulation?.margin_change, 0.056))));
+  const currentAdsSpend = safeNumber(recommendation?.simulation?.current_ads_spend ?? recommendation?.before_state?.ad_spend, Math.max(0, expectedLift * 0.16));
+  const currentStock = safeNumber(recommendation?.before_state?.inventory ?? recommendation?.simulation?.required_inventory, 818);
+  const requiredInventory = numberOrNull(recommendation?.simulation?.required_inventory);
+  const salesVelocity = Math.max(0.2, requiredInventory ? requiredInventory / Math.max(1, simulationHorizonDays) : 3.2);
   const predictedDailyDemand = salesVelocity * (row.action === "SCALE" ? 1.5 : row.action === "REDUCE" ? 0.75 : 1.12);
   const predictedCumulativeLift = expectedLift;
   const predictionError = actualLift === null || !predictedCumulativeLift ? null : (actualLift - predictedCumulativeLift) / Math.abs(predictedCumulativeLift);
@@ -4144,8 +4273,8 @@ function selectedSkuDetail(
   return {
     sku: row.skuId,
     action: decisionActionLabel(row.action ?? "MONITOR", "en"),
-    recommendation: (row.recommendedActions ?? row.recommendedExecution ?? [portfolioScenarioActionLabel(row.sourceAction, "en")])[0],
-    confidence: row.confidence ?? recommendation?.confidence ?? 0,
+    recommendation: safeStringArray(row.recommendedActions)[0] ?? safeStringArray(row.recommendedExecution)[0] ?? portfolioScenarioActionLabel(row.sourceAction, "en"),
+    confidence: safeNumber(row.confidence ?? recommendation?.confidence),
     expected_profit_lift_30d: expectedLift,
     current_profit: currentProfit,
     current_margin: currentMargin,
@@ -4232,9 +4361,9 @@ function buildSkuDecisionObject(
   const lifecycleLabel = lifecycleStage.charAt(0) + lifecycleStage.slice(1).toLowerCase();
   const demandTrend = (detail.predicted_revenue - detail.current_revenue) / Math.max(1, detail.current_revenue);
   const portfolioAverageMargin = 0.275;
-  const roas = row.simulation_estimate?.revenue_simulation.base_roas
+  const roas = row.simulation_estimate?.revenue_simulation?.base_roas
     ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
-  const marginalRoas = row.simulation_estimate?.revenue_simulation.marginal_roas ?? Math.max(1.2, roas * 0.83);
+  const marginalRoas = row.simulation_estimate?.revenue_simulation?.marginal_roas ?? Math.max(1.2, roas * 0.83);
   const stockCoverage = detail.inventory_runway_days;
   const predicted30dDemand = Math.round(detail.predicted_daily_demand * simulationHorizonDays);
   const inventorySignal = goal.actionLabel === "Clear Excess Inventory"
@@ -5094,9 +5223,18 @@ function buildFallbackDecisionDrivers(row?: PortfolioRow): DecisionDriverView[] 
     ];
   }
   const decision = row.decision_action ?? "MONITOR";
-  const revenueChangeRate = row.before_state.revenue > 0 ? row.simulation.revenue_delta / row.before_state.revenue : 0;
-  const runwayDays = row.simulation.required_inventory > 0
-    ? row.before_state.inventory / Math.max(1, row.simulation.required_inventory / 30)
+  const beforeRevenue = safeNumber(row.before_state?.revenue);
+  const revenueDelta = safeNumber(row.simulation?.revenue_delta);
+  const requiredInventory = safeNumber(row.simulation?.required_inventory);
+  const beforeInventory = safeNumber(row.before_state?.inventory);
+  const profitDelta = safeNumber(row.profit_delta);
+  const recommendedAdsSpend = safeNumber(row.simulation?.recommended_ads_spend);
+  const currentAdsSpend = safeNumber(row.simulation?.current_ads_spend);
+  const predictedMargin = safeNumber(row.simulation?.predicted_margin);
+  const marginChange = safeNumber(row.simulation?.margin_change);
+  const revenueChangeRate = beforeRevenue > 0 ? revenueDelta / beforeRevenue : 0;
+  const runwayDays = requiredInventory > 0
+    ? beforeInventory / Math.max(1, requiredInventory / 30)
     : null;
 
   if (decision === "SCALE") {
@@ -5110,14 +5248,14 @@ function buildFallbackDecisionDrivers(row?: PortfolioRow): DecisionDriverView[] 
       {
         category: "Profit Impact",
         metric: "Estimated Incremental Profit",
-        value: signedCurrency(row.profit_delta),
-        impact: row.profit_delta >= 0 ? "positive" : "negative"
+        value: signedCurrency(profitDelta),
+        impact: profitDelta >= 0 ? "positive" : "negative"
       },
       {
         category: "Inventory Status",
         metric: "Stock Runway",
         value: runwayDays === null ? "Needs validation" : `${ratioFormat.format(runwayDays)} days coverage`,
-        impact: row.simulation.required_inventory <= row.before_state.inventory ? "positive" : "risk"
+        impact: requiredInventory <= beforeInventory ? "positive" : "risk"
       }
     ];
   }
@@ -5127,20 +5265,20 @@ function buildFallbackDecisionDrivers(row?: PortfolioRow): DecisionDriverView[] 
       {
         category: "Ad Efficiency",
         metric: "Budget Reduction",
-        value: signedCurrency(row.simulation.recommended_ads_spend - row.simulation.current_ads_spend),
+        value: signedCurrency(recommendedAdsSpend - currentAdsSpend),
         impact: "negative"
       },
       {
         category: "Profit Impact",
         metric: "Marginal Profit",
-        value: signedCurrency(row.profit_delta),
-        impact: row.profit_delta < 0 ? "negative" : "risk"
+        value: signedCurrency(profitDelta),
+        impact: profitDelta < 0 ? "negative" : "risk"
       },
       {
         category: "Margin Signal",
         metric: "Predicted Margin",
-        value: percent.format(row.simulation.predicted_margin),
-        impact: row.simulation.predicted_margin < 0.15 ? "negative" : "risk"
+        value: percent.format(predictedMargin),
+        impact: predictedMargin < 0.15 ? "negative" : "risk"
       }
     ];
   }
@@ -5150,20 +5288,20 @@ function buildFallbackDecisionDrivers(row?: PortfolioRow): DecisionDriverView[] 
       {
         category: "Root Cause",
         metric: "Constraint",
-        value: row.action.includes("RESTOCK") ? "Inventory coverage constrains scale" : "Price or margin needs adjustment",
+        value: String(row.action ?? "").includes("RESTOCK") ? "Inventory coverage constrains scale" : "Price or margin needs adjustment",
         impact: "risk"
       },
       {
         category: "Profit Impact",
         metric: "Estimated Fix Value",
-        value: signedCurrency(row.profit_delta),
-        impact: row.profit_delta >= 0 ? "positive" : "risk"
+        value: signedCurrency(profitDelta),
+        impact: profitDelta >= 0 ? "positive" : "risk"
       },
       {
         category: "Margin Response",
         metric: "Margin Change",
-        value: formatSignedPercentText(row.simulation.margin_change),
-        impact: row.simulation.margin_change >= 0 ? "positive" : "risk"
+        value: formatSignedPercentText(marginChange),
+        impact: marginChange >= 0 ? "positive" : "risk"
       }
     ];
   }
@@ -5172,14 +5310,14 @@ function buildFallbackDecisionDrivers(row?: PortfolioRow): DecisionDriverView[] 
     {
       category: "Data Sufficiency",
       metric: "Prediction Confidence",
-      value: percent.format(row.confidence),
-      impact: row.confidence >= 0.65 ? "positive" : "risk"
+      value: percent.format(safeNumber(row.confidence)),
+      impact: safeNumber(row.confidence) >= 0.65 ? "positive" : "risk"
     },
     {
       category: "Profit Impact",
       metric: "Estimated Impact",
-      value: signedCurrency(row.profit_delta),
-      impact: row.profit_delta > 0 ? "positive" : "risk"
+      value: signedCurrency(profitDelta),
+      impact: profitDelta > 0 ? "positive" : "risk"
     }
   ];
 }
@@ -5194,10 +5332,11 @@ function buildFallbackCausalExplanation(row?: PortfolioRow): DecisionCausalExpla
   }
   const decision = row.decision_action ?? "MONITOR";
   if (decision === "SCALE") {
+    const adsDelta = safeNumber(row.simulation?.recommended_ads_spend) - safeNumber(row.simulation?.current_ads_spend);
     return {
       evidence: [],
       businessMeaning: "Demand, margin, and inventory signals indicate positive marginal profit potential.",
-      decision: `Increase advertising budget by ${currencyDecimal.format(Math.max(0, row.simulation.recommended_ads_spend - row.simulation.current_ads_spend))} and track profit lift.`
+      decision: `Increase advertising budget by ${currencyDecimal.format(Math.max(0, adsDelta))} and track profit lift.`
     };
   }
   if (decision === "REDUCE") {
@@ -5211,7 +5350,7 @@ function buildFallbackCausalExplanation(row?: PortfolioRow): DecisionCausalExpla
     return {
       evidence: [],
       businessMeaning: "The SKU has profit potential, but a constraint must be fixed before scaling.",
-      decision: row.action.includes("RESTOCK") ? "Resolve inventory coverage before increasing demand." : "Run the selected fix before scaling."
+      decision: String(row.action ?? "").includes("RESTOCK") ? "Resolve inventory coverage before increasing demand." : "Run the selected fix before scaling."
     };
   }
   return {
@@ -5288,28 +5427,29 @@ function formatSignedPercentText(value: number) {
 }
 
 function portfolioScenarioActionLabel(action: string, locale: RendererLocale) {
+  const actionValue = String(action ?? "");
   if (locale !== "zh") {
-    if (action.includes("SCALE") || action === "TEST_AD_SPEND") return "🚀 Scale Ads";
-    if (action === "SHIFT_CHANNEL") return "🌎 Expand Channel";
-    if (action === "REDUCE_ADS") return "🛑 Reduce Ad Waste";
-    if (action.includes("PRICE_UP")) return "💰 Increase Price";
-    if (action.includes("PRICE_DOWN")) return "💰 Decrease Price";
-    if (action === "PROMOTION_TEST") return "🏷 Run Promotion";
-    if (action.includes("RESTOCK")) return "📦 Restock Inventory";
-    if (action === "REDUCE_INVENTORY") return "🏷 Clear Excess Inventory";
-    if (action === "STOP") return "❌ Exit SKU";
+    if (actionValue.includes("SCALE") || actionValue === "TEST_AD_SPEND") return "🚀 Scale Ads";
+    if (actionValue === "SHIFT_CHANNEL") return "🌎 Expand Channel";
+    if (actionValue === "REDUCE_ADS") return "🛑 Reduce Ad Waste";
+    if (actionValue.includes("PRICE_UP")) return "💰 Increase Price";
+    if (actionValue.includes("PRICE_DOWN")) return "💰 Decrease Price";
+    if (actionValue === "PROMOTION_TEST") return "🏷 Run Promotion";
+    if (actionValue.includes("RESTOCK")) return "📦 Restock Inventory";
+    if (actionValue === "REDUCE_INVENTORY") return "🏷 Clear Excess Inventory";
+    if (actionValue === "STOP") return "❌ Exit SKU";
     return "Hold";
   }
 
-  if (action.includes("SCALE")) return "增加广告";
-  if (action === "SHIFT_CHANNEL") return "扩展渠道";
-  if (action === "REDUCE_ADS") return "减少广告浪费";
-  if (action.includes("PRICE_UP")) return "提价";
-  if (action.includes("PRICE_DOWN")) return "降价";
-  if (action === "PROMOTION_TEST") return "促销测试";
-  if (action.includes("RESTOCK")) return "补库存";
-  if (action === "REDUCE_INVENTORY") return "清理冗余库存";
-  if (action === "STOP") return "退出 SKU";
+  if (actionValue.includes("SCALE")) return "增加广告";
+  if (actionValue === "SHIFT_CHANNEL") return "扩展渠道";
+  if (actionValue === "REDUCE_ADS") return "减少广告浪费";
+  if (actionValue.includes("PRICE_UP")) return "提价";
+  if (actionValue.includes("PRICE_DOWN")) return "降价";
+  if (actionValue === "PROMOTION_TEST") return "促销测试";
+  if (actionValue.includes("RESTOCK")) return "补库存";
+  if (actionValue === "REDUCE_INVENTORY") return "清理冗余库存";
+  if (actionValue === "STOP") return "退出 SKU";
   return "保持";
 }
 
@@ -5327,7 +5467,7 @@ function portfolioEvidenceSummary(row: PortfolioRow, locale: RendererLocale) {
     signals.push(locale === "zh" ? "增量利润为正" : "Positive incremental profit");
   }
 
-  if (row.simulation.required_inventory > 0) {
+  if (safeNumber(row.simulation?.required_inventory) > 0) {
     signals.push(locale === "zh" ? "库存约束通过" : "Inventory constraint passed");
   }
 
@@ -5529,12 +5669,14 @@ function SmallMetric({ label, value }: { label: string; value: string }) {
 }
 
 function SkuDetailPanel({ row }: { row: SkuReportRow }) {
-  const fees = row.cost_breakdown ? row.cost_breakdown.platform_fee + row.cost_breakdown.payment_fee : null;
+  const channelDetails = safeChannelDetails(row.channel_details);
+  const costBreakdown = safeCostBreakdown(row.cost_breakdown);
+  const fees = costBreakdown ? costBreakdown.platform_fee + costBreakdown.payment_fee : null;
   return (
     <div className="grid gap-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3 lg:grid-cols-3">
       <DetailSection title="Channel Breakdown">
-        {row.channel_details.length ? (
-          row.channel_details.map((channel) => (
+        {channelDetails.length ? (
+          channelDetails.map((channel) => (
             <DetailRow
               key={channel.platform}
               label={`${channel.platform} ${percent.format(channel.share)}`}
@@ -5547,9 +5689,9 @@ function SkuDetailPanel({ row }: { row: SkuReportRow }) {
       </DetailSection>
 
       <DetailSection title="Cost Breakdown">
-        <DetailRow label="COGS" value={row.cost_breakdown ? currency.format(row.cost_breakdown.cogs) : "No Data"} />
+        <DetailRow label="COGS" value={costBreakdown ? currency.format(costBreakdown.cogs) : "No Data"} />
         <DetailRow label="Ads allocated" value={row.ad_cost_allocated === null ? "No Data" : currency.format(row.ad_cost_allocated)} />
-        <DetailRow label="Shipping + fulfillment" value={row.cost_breakdown ? currency.format(row.cost_breakdown.shipping + row.cost_breakdown.fulfillment) : "No Data"} />
+        <DetailRow label="Shipping + fulfillment" value={costBreakdown ? currency.format(costBreakdown.shipping + costBreakdown.fulfillment) : "No Data"} />
         <DetailRow label="Fees" value={fees === null ? "No Data" : currency.format(fees)} />
         <DetailRow label="Total cost" value={row.total_cost === null ? "No Data" : currency.format(row.total_cost)} />
       </DetailSection>
@@ -5610,8 +5752,8 @@ function DetailMuted({ children }: { children: ReactNode }) {
 }
 
 function ChannelMix({ row }: { row: SkuReportRow }) {
-  const revenueDetails = row.channel_details.filter((channel) => isRevenueChannel(channel.platform) && channel.revenue > 0);
-  const details = revenueDetails.length ? revenueDetails : Object.entries(row.channel_breakdown)
+  const revenueDetails = safeChannelDetails(row.channel_details).filter((channel) => isRevenueChannel(channel.platform) && channel.revenue > 0);
+  const details = revenueDetails.length ? revenueDetails : Object.entries(safeChannelBreakdown(row.channel_breakdown))
     .filter(([channel, revenue]) => isRevenueChannel(channel) && revenue > 0)
     .map(([platform, revenue]) => ({
       platform: normalizeRevenueChannel(platform),
@@ -5717,9 +5859,10 @@ function reportRendererLocale() {
 function getSkuChannelRevenue(row: SkuReportRow, channel: string) {
   if (!isRevenueChannel(channel)) return 0;
   const normalizedChannel = normalizeRevenueChannel(channel);
-  const detail = row.channel_details.find((item) => normalizeRevenueChannel(item.platform) === normalizedChannel && isRevenueChannel(item.platform));
+  const detail = safeChannelDetails(row.channel_details).find((item) => normalizeRevenueChannel(item.platform) === normalizedChannel && isRevenueChannel(item.platform));
   if (detail) return detail.revenue;
-  return row.channel_breakdown[normalizedChannel] ?? row.channel_breakdown[channel] ?? 0;
+  const channelBreakdown = safeChannelBreakdown(row.channel_breakdown);
+  return channelBreakdown[normalizedChannel] ?? channelBreakdown[channel] ?? 0;
 }
 
 function skuRowHasRevenueChannel(row: SkuReportRow, channel: string) {

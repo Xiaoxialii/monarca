@@ -143,6 +143,25 @@ enum DecisionActionStatus {
   REJECTED
 }
 
+enum OptimizationRecommendationType {
+  AD_OPTIMIZATION
+  SKU_OPTIMIZATION
+  INVENTORY_OPTIMIZATION
+}
+
+enum DecisionExecutionMetricType {
+  AD
+  SKU
+  INVENTORY
+}
+
+enum DecisionOutcomeStatus {
+  PENDING
+  CALCULATED
+  CONFIRMED
+  INSUFFICIENT_DATA
+}
+
 enum PaymentOrderType {
   ONE_TIME
   MONTHLY
@@ -214,6 +233,9 @@ model Workspace {
   decisionActions             DecisionAction[]
   optimizationDecisions       OptimizationDecision[]
   optimizationLearningRecords OptimizationLearningRecord[]
+  decisionBaselineSnapshots   DecisionBaselineSnapshot[]
+  decisionExecutionMetrics    DecisionExecutionMetric[]
+  decisionLearnings           DecisionLearning[]
   decisionTrackingSnapshots   DecisionTrackingSnapshot[]
   decisionSnapshots           DecisionSnapshot[]
   decisionGenerationLogs      DecisionGenerationLog[]
@@ -534,6 +556,7 @@ model ActionRecommendation {
 model DecisionAction {
   id                   String                     @id @default(cuid())
   workspaceId          String
+  recommendationId     String?
   skuId                String
   recommendedAction    String?
   optimizationGoal     String?
@@ -556,6 +579,7 @@ model DecisionAction {
   evaluatedAt          DateTime?
   updatedAt            DateTime                   @updatedAt
   workspace            Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recommendation       OptimizationDecision?       @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
   outcome              DecisionOutcome?
   trackingSnapshots    DecisionTrackingSnapshot[]
   baselineSnapshot     DecisionSnapshot?          @relation("DecisionBaselineSnapshot", fields: [baselineSnapshotId], references: [id])
@@ -563,9 +587,43 @@ model DecisionAction {
 
   @@index([workspaceId, status])
   @@index([workspaceId, skuId])
+  @@index([recommendationId])
   @@index([baselineSnapshotId])
   @@index([predictionSnapshotId])
   @@index([createdAt])
+}
+
+model DecisionBaselineSnapshot {
+  id               String                     @id @default(cuid())
+  recommendationId String
+  workspaceId      String
+  periodStart      DateTime
+  periodEnd        DateTime
+  metricsJson      Json
+  createdAt        DateTime                   @default(now())
+  recommendation   OptimizationDecision       @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  workspace        Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outcomes         DecisionOutcome[]
+
+  @@index([workspaceId, periodEnd])
+  @@index([workspaceId, recommendationId])
+  @@unique([recommendationId, periodStart, periodEnd])
+}
+
+model DecisionExecutionMetric {
+  id               String                      @id @default(cuid())
+  recommendationId String
+  workspaceId      String
+  date             DateTime
+  metricType       DecisionExecutionMetricType
+  metricsJson      Json
+  createdAt        DateTime                    @default(now())
+  recommendation   OptimizationDecision        @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  workspace        Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([recommendationId, date, metricType])
+  @@index([workspaceId, date])
+  @@index([workspaceId, recommendationId])
 }
 
 model DecisionSnapshot {
@@ -633,6 +691,14 @@ model DecisionGenerationLog {
 model DecisionOutcome {
   id                     String         @id @default(cuid())
   decisionId             String         @unique
+  recommendationId       String?
+  baselineSnapshotId     String?
+  evaluationPeriodStart  DateTime?
+  evaluationPeriodEnd    DateTime?
+  expectedMetricsJson    Json?
+  actualMetricsJson      Json?
+  impactJson             Json?
+  status                 DecisionOutcomeStatus @default(PENDING)
   baselineProfit         Float          @default(0)
   expectedProfitChange   Float          @default(0)
   actualProfitChange     Float          @default(0)
@@ -649,6 +715,37 @@ model DecisionOutcome {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
   decision               DecisionAction @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  recommendation         OptimizationDecision? @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  baselineSnapshot       DecisionBaselineSnapshot? @relation(fields: [baselineSnapshotId], references: [id], onDelete: SetNull)
+
+  @@index([recommendationId])
+  @@index([baselineSnapshotId])
+  @@index([evaluationPeriodEnd])
+}
+
+model DecisionLearning {
+  id               String                     @id @default(cuid())
+  recommendationId String
+  workspaceId      String
+  expectedProfit   Float                      @default(0)
+  actualProfit     Float                      @default(0)
+  predictionError  Float                      @default(0)
+  accuracyScore    Float                      @default(0)
+  actionType       String                     @default("UNKNOWN")
+  featureSnapshot  Json                       @default("{}")
+  success          Boolean                    @default(false)
+  incrementalProfit Float                     @default(0)
+  learningPattern  String?
+  learningJson     Json
+  createdAt        DateTime                   @default(now())
+  recommendation   OptimizationDecision       @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  workspace        Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, recommendationId])
+  @@index([workspaceId, actionType])
+  @@index([workspaceId, actionType, createdAt])
+  @@index([workspaceId, accuracyScore])
+  @@index([createdAt])
 }
 
 model DecisionTrackingSnapshot {
@@ -694,6 +791,14 @@ model OptimizationDecision {
   executionStatus        String    @default("NOT_STARTED")
   executionStartDate     DateTime?
   executionEndDate       DateTime?
+  recommendationType     OptimizationRecommendationType @default(SKU_OPTIMIZATION)
+  targetEntityType       String    @default("sku")
+  targetEntityId         String?
+  recommendationJson     Json      @default("{}")
+  expectedMetricsJson    Json      @default("{}")
+  evidenceJson           Json      @default("{}")
+  sourceDecisionSnapshotId String?
+  sourceReportSnapshotId   String?
   actualRevenueChange    Float?
   actualProfitChange     Float?
   actualCostChange       Float?
@@ -708,8 +813,15 @@ model OptimizationDecision {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actions                DecisionAction[]
+  baselineSnapshots      DecisionBaselineSnapshot[]
+  executionMetrics       DecisionExecutionMetric[]
+  outcomes               DecisionOutcome[]
+  decisionLearnings      DecisionLearning[]
 
   @@index([workspaceId, decisionStatus])
+  @@index([workspaceId, recommendationType])
+  @@index([workspaceId, targetEntityType, targetEntityId])
   @@index([workspaceId, skuId])
   @@index([workspaceId, recommendedAction])
   @@index([trackingActionId])

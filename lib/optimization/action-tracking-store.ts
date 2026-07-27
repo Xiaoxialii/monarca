@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { prisma } from "@/lib/prisma";
-import { recordOptimizationFeedback } from "@/lib/optimization/feedback-learning-engine";
+import {
+  collectDecisionExecutionMetric,
+  ensureOptimizationDecisionForAction,
+  evaluateDecisionOutcome,
+  startDecisionExecution
+} from "@/lib/decision-outcome/closed-loop-service";
 import type {
   ActionEvaluationResult,
   DecisionAttributionSnapshot,
@@ -55,6 +60,7 @@ type PersistedDecisionAction = {
   lifecycleStage: string | null;
   baselineSnapshotId: string | null;
   predictionSnapshotId: string | null;
+  recommendationId?: string | null;
   actionPayload: unknown;
   createdAt: Date;
   acceptedAt: Date | null;
@@ -136,6 +142,13 @@ export async function acceptActionTrackingRecord(input: AcceptActionInput) {
         },
         include: { outcome: true }
       }) as PersistedDecisionAction;
+      const recommendation = await ensureClosedLoopRecommendation(updated, input).catch(() => null);
+      if (recommendation?.id && updated.recommendationId !== recommendation.id) {
+        await (prisma as any).decisionAction.updateMany({
+          where: { id: updated.id, workspaceId: updated.workspaceId },
+          data: { recommendationId: recommendation.id }
+        }).catch(() => null);
+      }
       await upsertOptimizationDecisionFromAction(input, updated, "ACCEPTED").catch(() => null);
       return recordFromDecisionAction(updated);
     }
@@ -160,6 +173,13 @@ export async function acceptActionTrackingRecord(input: AcceptActionInput) {
       },
       include: { outcome: true }
     }) as PersistedDecisionAction;
+    const recommendation = await ensureClosedLoopRecommendation(created, input).catch(() => null);
+    if (recommendation?.id) {
+      await (prisma as any).decisionAction.updateMany({
+        where: { id: created.id, workspaceId: created.workspaceId },
+        data: { recommendationId: recommendation.id }
+      }).catch(() => null);
+    }
     await upsertOptimizationDecisionFromAction(input, created, "ACCEPTED").catch(() => null);
 
     return recordFromDecisionAction(created);
@@ -241,16 +261,38 @@ export async function startActionTrackingRecord(input: { workspaceId?: string; a
     }) as PersistedDecisionAction | null;
 
     if (!row) return null;
+    const record = recordFromDecisionAction(row);
+    const recommendation = row.recommendationId
+      ? { id: row.recommendationId }
+      : await ensureClosedLoopRecommendation(row, {
+        workspace_id: row.workspaceId,
+        sku: row.skuId,
+        action_type: record.action_type,
+        action_payload: safeRecord(row.actionPayload),
+        baseline_metrics: record.baseline_metrics,
+        predicted_metrics: record.predicted_metrics,
+        confidence_score: row.confidence
+      }).catch(() => null);
 
     const updated = await (prisma as any).decisionAction.update({
       where: { id: row.id },
       data: {
+        recommendationId: recommendation?.id ?? row.recommendationId ?? null,
         status: "EXECUTING",
         executionStartedAt: row.executionStartedAt ?? now,
         executedAt: row.executedAt ?? now
       },
       include: { outcome: true }
     }) as PersistedDecisionAction;
+    if (recommendation?.id) {
+      await startDecisionExecution(prisma as any, {
+        workspaceId: row.workspaceId,
+        actionId: row.id,
+        recommendationId: recommendation.id,
+        evaluationWindowDays: record.observation_window_days,
+        now
+      }).catch(() => null);
+    }
 
     await (prisma as any).optimizationDecision.updateMany({
       where: { trackingActionId: row.id },
@@ -290,40 +332,57 @@ export async function updateActionTrackingRecords(workspaceId?: string) {
 
     for (const row of rows) {
       const record = recordFromDecisionAction(row);
-      const predictedLift = predictedProfitLift(record);
-      const baselineProfit = record.baseline_metrics.profit ?? 0;
-      const elapsedRatio = progressRatio(record, now);
-      const realizedLift = predictedLift * (0.28 + elapsedRatio * 0.52);
-      const actualMetrics = {
-        ...record.actual_metrics,
-        profit: roundMoney(baselineProfit + realizedLift),
-        revenue: maybeAdd(record.baseline_metrics.revenue, predictedLift * 1.45 * elapsedRatio),
-        ad_spend: record.predicted_metrics.ad_spend ?? record.baseline_metrics.ad_spend,
-        roas: record.predicted_metrics.roas ?? record.baseline_metrics.roas,
-        sold_units: record.predicted_metrics.sold_units ?? record.baseline_metrics.sold_units,
-        stock: record.predicted_metrics.stock ?? record.baseline_metrics.stock
-      };
-      const nextRecord = { ...record, actual_metrics: actualMetrics };
-      const attribution = calculateDecisionAttribution(nextRecord);
-      const nextStatus = elapsedRatio >= 1 ? "COMPLETED" : "EXECUTING";
+      const recommendation = row.recommendationId
+        ? { id: row.recommendationId }
+        : await ensureClosedLoopRecommendation(row, {
+          workspace_id: row.workspaceId,
+          sku: row.skuId,
+          action_type: record.action_type,
+          action_payload: safeRecord(row.actionPayload),
+          baseline_metrics: record.baseline_metrics,
+          predicted_metrics: record.predicted_metrics,
+          confidence_score: row.confidence
+        }).catch(() => null);
+      if (!recommendation?.id) continue;
 
-      await (prisma as any).decisionAction.update({
-        where: { id: row.id },
-        data: {
-          status: nextStatus,
-          actualImpact: attribution.attributed_profit_change,
-          completedAt: nextStatus === "COMPLETED" ? now : row.completedAt,
-          executionStartedAt: row.executionStartedAt ?? now,
-          executionCompletedAt: nextStatus === "COMPLETED" ? now : row.executionCompletedAt,
-          executedAt: row.executedAt ?? now,
-          actionPayload: mergeTrackingPayload(row.actionPayload, {
-            actual_metrics: actualMetrics,
-            attribution
-          })
-        }
-      });
-      await writeDecisionTrackingSnapshot(row, nextRecord, attribution, now).catch(() => null);
-      await syncOptimizationDecisionExecution(row.id, nextStatus, actualProfitLift(nextRecord), attribution).catch(() => null);
+      await startDecisionExecution(prisma as any, {
+        workspaceId: row.workspaceId,
+        actionId: row.id,
+        recommendationId: recommendation.id,
+        evaluationWindowDays: record.observation_window_days,
+        now
+      }).catch(() => null);
+      await collectDecisionExecutionMetric(prisma as any, {
+        workspaceId: row.workspaceId,
+        recommendationId: recommendation.id,
+        date: now
+      }).catch(() => null);
+
+      const elapsedRatio = progressRatio(record, now);
+      if (elapsedRatio >= 1) {
+        await evaluateDecisionOutcome(prisma as any, {
+          workspaceId: row.workspaceId,
+          recommendationId: recommendation.id
+        }).catch(() => null);
+      } else {
+        await (prisma as any).decisionAction.updateMany({
+          where: { id: row.id, workspaceId: row.workspaceId },
+          data: {
+            recommendationId: recommendation.id,
+            status: "EXECUTING",
+            executionStartedAt: row.executionStartedAt ?? now,
+            executedAt: row.executedAt ?? now
+          }
+        });
+        await (prisma as any).optimizationDecision.updateMany({
+          where: { trackingActionId: row.id },
+          data: {
+            executionStatus: "EXECUTING",
+            executionStartDate: row.executionStartedAt ?? now,
+            learningStatus: "TRACKING"
+          }
+        }).catch(() => null);
+      }
     }
 
     return listActionTrackingRecords({ workspaceId });
@@ -350,7 +409,39 @@ export async function completeActionTrackingRecord(input: { workspaceId?: string
       ...input.actual_metrics
     };
     if (actualMetrics.profit == null) {
-      actualMetrics.profit = roundMoney((record.baseline_metrics.profit ?? 0) + predictedProfitLift(record));
+      const now = new Date();
+      const recommendation = row.recommendationId
+        ? { id: row.recommendationId }
+        : await ensureClosedLoopRecommendation(row, {
+          workspace_id: row.workspaceId,
+          sku: row.skuId,
+          action_type: record.action_type,
+          action_payload: safeRecord(row.actionPayload),
+          baseline_metrics: record.baseline_metrics,
+          predicted_metrics: record.predicted_metrics,
+          confidence_score: row.confidence
+        }).catch(() => null);
+      if (recommendation?.id) {
+        await evaluateDecisionOutcome(prisma as any, {
+          workspaceId: row.workspaceId,
+          recommendationId: recommendation.id,
+          evaluationPeriodEnd: now
+        }).catch(() => null);
+      }
+      const updated = await (prisma as any).decisionAction.update({
+        where: { id: row.id },
+        data: {
+          recommendationId: recommendation?.id ?? row.recommendationId ?? null,
+          status: "COMPLETED",
+          completedAt: now,
+          executionCompletedAt: now,
+          actionPayload: mergeTrackingPayload(row.actionPayload, {
+            learning_feedback: "Completed; waiting for real canonical actual metrics before outcome attribution."
+          })
+        },
+        include: { outcome: true }
+      }) as PersistedDecisionAction;
+      return recordFromDecisionAction(updated);
     }
     const nextRecord = { ...record, actual_metrics: actualMetrics };
     const actualImpact = actualProfitLift(nextRecord);
@@ -427,83 +518,28 @@ export async function evaluateActionTrackingRecord(input: { workspaceId?: string
 
     for (const row of rows) {
       const record = recordFromDecisionAction(row);
-      const predictedLift = predictedProfitLift(record);
-      const actualLift = actualProfitLift(record);
-      const attribution = calculateDecisionAttribution(record);
-      const attributedLift = attribution.attributed_profit_change;
-      const gap = roundMoney(attributedLift - predictedLift);
-      const errorRate = roundRatio(Math.abs(gap) / Math.max(1, Math.abs(predictedLift)));
-      const outcomeStatus = outcomeStatusForAttribution(attribution);
-      const resultLabel: ActionEvaluationResult["result_label"] = errorRate <= 0.2 ? "win" : errorRate <= 0.55 ? "neutral" : "miss";
-      const feedback = recordOptimizationFeedback({
-        action: record.action_type,
-        sku: record.sku,
-        predicted_profit: predictedLift,
-        predicted_revenue: record.predicted_metrics.revenue,
-        confidence: record.confidence_score,
-        actual_profit: attributedLift,
-        actual_revenue: record.actual_metrics.revenue
-      });
-      const learningSignals = extractDecisionDrivers(record.action_payload);
-      const evaluationResult: ActionEvaluationResult = {
-        predicted_vs_actual_gap: gap,
-        error_rate: errorRate,
-        result_label: resultLabel,
-        outcome_status: outcomeStatus,
-        attribution,
-        learning_feedback: learningFeedbackForOutcome(outcomeStatus, errorRate, feedback.confidence_adjustment),
-        evaluated_at: now.toISOString()
-      };
-
-      const updated = await (prisma as any).decisionAction.update({
+      const recommendation = row.recommendationId
+        ? { id: row.recommendationId }
+        : await ensureClosedLoopRecommendation(row, {
+          workspace_id: row.workspaceId,
+          sku: row.skuId,
+          action_type: record.action_type,
+          action_payload: safeRecord(row.actionPayload),
+          baseline_metrics: record.baseline_metrics,
+          predicted_metrics: record.predicted_metrics,
+          confidence_score: row.confidence
+        }).catch(() => null);
+      if (!recommendation?.id) continue;
+      await evaluateDecisionOutcome(prisma as any, {
+        workspaceId: row.workspaceId,
+        recommendationId: recommendation.id,
+        evaluationPeriodEnd: now
+      }).catch(() => null);
+      const updated = await (prisma as any).decisionAction.findUnique({
         where: { id: row.id },
-        data: {
-          status: "LEARNED",
-          evaluatedAt: now,
-          actionPayload: mergeTrackingPayload(row.actionPayload, {
-            evaluation_result: evaluationResult,
-            learning_feedback: evaluationResult.learning_feedback
-          }),
-          outcome: {
-            upsert: {
-              create: {
-                baselineProfit: record.baseline_metrics.profit ?? 0,
-                expectedProfitChange: predictedLift,
-                actualProfitChange: actualLift,
-                attributedProfitChange: attributedLift,
-                organicProfitChange: attribution.organic_profit_change,
-                profitVariance: gap,
-                outcomeStatus,
-                predictedProfit: predictedLift,
-                realizedProfit: attributedLift,
-                profitDelta: gap,
-                accuracy: roundRatio(1 - errorRate),
-                attributionJson: attribution,
-                learningSignals
-              },
-              update: {
-                baselineProfit: record.baseline_metrics.profit ?? 0,
-                expectedProfitChange: predictedLift,
-                actualProfitChange: actualLift,
-                attributedProfitChange: attributedLift,
-                organicProfitChange: attribution.organic_profit_change,
-                profitVariance: gap,
-                outcomeStatus,
-                predictedProfit: predictedLift,
-                realizedProfit: attributedLift,
-                profitDelta: gap,
-                accuracy: roundRatio(1 - errorRate),
-                attributionJson: attribution,
-                learningSignals
-              }
-            }
-          }
-        },
         include: { outcome: true }
-      }) as PersistedDecisionAction;
-      await createOptimizationLearningRecord(row, record, predictedLift, attributedLift, gap, outcomeStatus === "POSITIVE").catch(() => null);
-      await syncOptimizationDecisionLearning(row.id, actualLift, gap, attribution, outcomeStatus).catch(() => null);
-
+      }) as PersistedDecisionAction | null;
+      if (!updated) continue;
       updatedRecords.push(recordFromDecisionAction(updated));
     }
 
@@ -612,6 +648,19 @@ async function createDecisionSnapshots(input: AcceptActionInput) {
     baselineSnapshotId: baseline.id as string,
     predictionSnapshotId: prediction.id as string
   };
+}
+
+async function ensureClosedLoopRecommendation(row: PersistedDecisionAction, input: AcceptActionInput) {
+  return ensureOptimizationDecisionForAction(prisma as any, {
+    workspaceId: input.workspace_id,
+    actionId: row.id,
+    sku: input.sku,
+    actionType: input.action_type,
+    actionPayload: input.action_payload ?? safeRecord(row.actionPayload),
+    baselineMetrics: input.baseline_metrics ?? metricsFromUnknown(safeRecord(safeRecord(row.actionPayload).tracking).baseline_metrics),
+    predictedMetrics: input.predicted_metrics ?? metricsFromUnknown(safeRecord(safeRecord(row.actionPayload).tracking).predicted_metrics),
+    sourceDecisionSnapshotId: row.predictionSnapshotId ?? row.baselineSnapshotId ?? null
+  });
 }
 
 function buildRejectedActionPayload(input: RejectActionInput) {
@@ -739,27 +788,6 @@ async function upsertOptimizationDecisionFromRejectedAction(input: RejectActionI
   });
 }
 
-async function syncOptimizationDecisionExecution(
-  actionId: string,
-  status: string,
-  actualProfitChange: number,
-  attribution: DecisionAttributionSnapshot
-) {
-  await (prisma as any).optimizationDecision.updateMany({
-    where: { trackingActionId: actionId },
-    data: {
-      executionStatus: status === "COMPLETED" ? "COMPLETED" : "EXECUTING",
-      executionEndDate: status === "COMPLETED" ? new Date() : undefined,
-      actualProfitChange,
-      attributedProfitChange: attribution.attributed_profit_change,
-      organicProfitChange: attribution.organic_profit_change,
-      outcomeStatus: outcomeStatusForAttribution(attribution),
-      attributionJson: attribution,
-      learningStatus: status === "COMPLETED" ? "READY_TO_LEARN" : "TRACKING"
-    }
-  });
-}
-
 async function syncOptimizationDecisionOutcome(
   actionId: string,
   actualProfitChange: number,
@@ -782,57 +810,6 @@ async function syncOptimizationDecisionOutcome(
       }
     });
   }
-}
-
-async function syncOptimizationDecisionLearning(
-  actionId: string,
-  actualProfitChange: number,
-  predictionError: number,
-  attribution: DecisionAttributionSnapshot,
-  outcomeStatus: "POSITIVE" | "NEGATIVE" | "NEUTRAL"
-) {
-  await (prisma as any).optimizationDecision.updateMany({
-    where: { trackingActionId: actionId },
-    data: {
-      actualProfitChange,
-      attributedProfitChange: attribution.attributed_profit_change,
-      organicProfitChange: attribution.organic_profit_change,
-      outcomeStatus,
-      attributionJson: attribution,
-      predictionError,
-      learningStatus: "LEARNED"
-    }
-  });
-}
-
-async function createOptimizationLearningRecord(
-  row: PersistedDecisionAction,
-  record: ActionTrackingRecord,
-  predictedLift: number,
-  actualLift: number,
-  error: number,
-  success: boolean
-) {
-  await (prisma as any).optimizationLearningRecord.create({
-    data: {
-      workspaceId: row.workspaceId,
-      skuCategory: asString(safeRecord(record.action_payload).sku_category),
-      industry: asString(safeRecord(record.action_payload).industry),
-      lifecycle: record.lifecycle_stage ?? null,
-      action: record.action_type,
-      prediction: predictedLift,
-      actual: actualLift,
-      error,
-      success,
-      confidence: record.confidence_score,
-      metadataJson: {
-        sku: record.sku,
-        result: success ? "win" : "miss",
-        tracking_action_id: row.id,
-        attribution: record.attribution ?? null
-      }
-    }
-  });
 }
 
 async function optimizationDecisionIdForAction(actionId: string) {
@@ -1093,23 +1070,9 @@ async function updateJsonActionTrackingRecords(workspaceId?: string) {
   for (const record of records) {
     if (workspaceId && record.workspace_id !== workspaceId) continue;
     if (record.status !== "accepted" && record.status !== "running") continue;
-
-    const predictedLift = predictedProfitLift(record);
-    const baselineProfit = record.baseline_metrics.profit ?? 0;
     const elapsedRatio = progressRatio(record, now);
-    const realizedLift = predictedLift * (0.28 + elapsedRatio * 0.52);
 
     record.status = elapsedRatio >= 1 ? "completed" : "running";
-	    record.actual_metrics = {
-	      ...record.actual_metrics,
-	      profit: roundMoney(baselineProfit + realizedLift),
-      revenue: maybeAdd(record.baseline_metrics.revenue, predictedLift * 1.45 * elapsedRatio),
-      ad_spend: record.predicted_metrics.ad_spend ?? record.baseline_metrics.ad_spend,
-      roas: record.predicted_metrics.roas ?? record.baseline_metrics.roas,
-      sold_units: record.predicted_metrics.sold_units ?? record.baseline_metrics.sold_units,
-	      stock: record.predicted_metrics.stock ?? record.baseline_metrics.stock
-	    };
-	    record.attribution = calculateDecisionAttribution(record);
 	    record.updated_at = now.toISOString();
   }
 
@@ -1132,11 +1095,9 @@ async function completeJsonActionTrackingRecord(input: { workspaceId?: string; a
     ...record.actual_metrics,
     ...input.actual_metrics
   };
-	  if (record.actual_metrics.profit == null) {
-	    const predictedLift = predictedProfitLift(record);
-	    record.actual_metrics.profit = roundMoney((record.baseline_metrics.profit ?? 0) + predictedLift);
-	  }
-	  record.attribution = calculateDecisionAttribution(record);
+  if (record.actual_metrics.profit != null) {
+    record.attribution = calculateDecisionAttribution(record);
+  }
 	  record.updated_at = now;
   await writeJsonRecords(records);
   return record;
@@ -1152,6 +1113,11 @@ async function evaluateJsonActionTrackingRecord(input: { workspaceId?: string; a
   );
 
   for (const record of targets) {
+    if (record.actual_metrics.profit == null) {
+      record.learning_feedback = "Outcome evaluation is pending until real actual metrics are available.";
+      record.updated_at = now;
+      continue;
+    }
 	    const predictedLift = predictedProfitLift(record);
 	    const attribution = calculateDecisionAttribution(record);
 	    const attributedLift = attribution.attributed_profit_change;
@@ -1159,15 +1125,6 @@ async function evaluateJsonActionTrackingRecord(input: { workspaceId?: string; a
 	    const errorRate = roundRatio(Math.abs(gap) / Math.max(1, Math.abs(predictedLift)));
 	    const outcomeStatus = outcomeStatusForAttribution(attribution);
 	    const resultLabel: ActionEvaluationResult["result_label"] = errorRate <= 0.2 ? "win" : errorRate <= 0.55 ? "neutral" : "miss";
-	    const feedback = recordOptimizationFeedback({
-      action: record.action_type,
-      sku: record.sku,
-      predicted_profit: predictedLift,
-      predicted_revenue: record.predicted_metrics.revenue,
-      confidence: record.confidence_score,
-	      actual_profit: attributedLift,
-	      actual_revenue: record.actual_metrics.revenue
-	    });
 
 	    record.attribution = attribution;
 	    record.evaluation_result = {
@@ -1176,7 +1133,7 @@ async function evaluateJsonActionTrackingRecord(input: { workspaceId?: string; a
 	      result_label: resultLabel,
 	      outcome_status: outcomeStatus,
 	      attribution,
-	      learning_feedback: learningFeedbackForOutcome(outcomeStatus, errorRate, feedback.confidence_adjustment),
+	      learning_feedback: learningFeedbackForOutcome(outcomeStatus, errorRate, 0),
 	      evaluated_at: now
 	    };
     record.learning_feedback = record.evaluation_result.learning_feedback;
@@ -1217,10 +1174,6 @@ function progressRatio(record: ActionTrackingRecord, now: Date) {
   if (!Number.isFinite(acceptedAt)) return 0;
   const windowMs = Math.max(1, record.observation_window_days) * 24 * 60 * 60 * 1000;
   return Math.min(1, Math.max(0.08, (now.getTime() - acceptedAt) / windowMs));
-}
-
-function maybeAdd(value: number | undefined, delta: number) {
-  return value == null ? undefined : roundMoney(value + delta);
 }
 
 function metricsFromUnknown(value: unknown): ActionMetricsSnapshot {

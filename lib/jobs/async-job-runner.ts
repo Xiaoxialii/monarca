@@ -7,6 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import {
+  collectDecisionExecutionMetric,
+  evaluateDecisionOutcome
+} from "@/lib/decision-outcome/closed-loop-service";
 
 export const ASYNC_JOB_TYPES = [
   "INGESTION",
@@ -16,7 +20,10 @@ export const ASYNC_JOB_TYPES = [
   "GENERATE_REPORT",
   "GENERATE_INSIGHT",
   "SKU_OPTIMIZATION",
-  "SIMULATION"
+  "SIMULATION",
+  "DECISION_OUTCOME_COLLECTOR",
+  "DECISION_EVALUATOR",
+  "DECISION_LEARNING_UPDATER"
 ] as const;
 
 export const ASYNC_JOB_STATUSES = [
@@ -44,6 +51,8 @@ type AsyncJobPayload = {
   ingestionJobId?: string;
   dataSourceId?: string;
   schemaSnapshotId?: string;
+  recommendationId?: string;
+  actionId?: string;
   [key: string]: unknown;
 };
 
@@ -519,12 +528,32 @@ async function executeJobHandler(
       return processProfitAnalysisAsyncJob(client, input);
     case "SKU_OPTIMIZATION":
       return processSkuOptimizationAsyncJob(client, input);
+    case "DECISION_OUTCOME_COLLECTOR":
+      return processDecisionOutcomeCollectorJob(client, input);
+    case "DECISION_EVALUATOR":
+      return processDecisionEvaluatorJob(client, input);
+    case "DECISION_LEARNING_UPDATER":
+      return processDecisionLearningUpdaterJob(client, input);
     case "SYNC_CONNECTOR":
     case "GENERATE_REPORT":
     case "GENERATE_INSIGHT":
     case "SIMULATION":
       throw new Error(`${input.type} handler is registered but has not been migrated to AsyncJob yet.`);
   }
+}
+
+function dateOnly(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function numberFromUnknown(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function processIngestionAsyncJob(
@@ -833,6 +862,190 @@ async function processSkuOptimizationAsyncJob(
   };
 }
 
+async function processDecisionOutcomeCollectorJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const targetRecommendationId = typeof input.payload.recommendationId === "string" ? input.payload.recommendationId : null;
+
+  await input.setJobState({
+    progress: 20,
+    currentStep: "Finding executing decision actions"
+  });
+
+  const actions = await client.decisionAction.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      status: "EXECUTING",
+      recommendationId: targetRecommendationId ?? { not: null }
+    },
+    select: { id: true, recommendationId: true },
+    take: targetRecommendationId ? 1 : 200,
+    orderBy: { updatedAt: "asc" }
+  });
+
+  let collected = 0;
+  for (const action of actions) {
+    if (!action.recommendationId) continue;
+    await collectDecisionExecutionMetric(client, {
+      workspaceId: input.workspaceId,
+      recommendationId: action.recommendationId,
+      date: new Date()
+    });
+    collected += 1;
+    await input.setJobState({
+      progress: Math.min(85, 20 + Math.round((collected / Math.max(1, actions.length)) * 60)),
+      currentStep: `Collected metrics for ${collected}/${actions.length} active decisions`
+    });
+  }
+
+  return {
+    dataReference: {
+      collectedDecisionCount: collected,
+      recommendationId: targetRecommendationId
+    },
+    metadataJson: {
+      collectorVersion: "decision_outcome_collector_v1",
+      collectedAt: new Date().toISOString()
+    },
+    nextJobs: [
+      {
+        type: "DECISION_EVALUATOR",
+        currentStep: "Queued for decision outcome evaluation",
+        payload: targetRecommendationId ? { recommendationId: targetRecommendationId } as Prisma.InputJsonValue : undefined
+      }
+    ]
+  };
+}
+
+async function processDecisionEvaluatorJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const targetRecommendationId = typeof input.payload.recommendationId === "string" ? input.payload.recommendationId : null;
+
+  await input.setJobState({
+    progress: 20,
+    currentStep: "Finding executing decisions ready for evaluation"
+  });
+
+  const actions = await client.decisionAction.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      status: "EXECUTING",
+      recommendationId: targetRecommendationId ?? { not: null }
+    },
+    select: { id: true, recommendationId: true, acceptedAt: true, executionStartedAt: true, actionPayload: true },
+    take: targetRecommendationId ? 1 : 200,
+    orderBy: { updatedAt: "asc" }
+  });
+
+  const now = dateOnly(new Date());
+  let evaluated = 0;
+  let skipped = 0;
+  for (const action of actions) {
+    if (!action.recommendationId) continue;
+    const tracking = asRecord(asRecord(action.actionPayload).tracking);
+    const windowDays = Math.max(1, numberFromUnknown(tracking.observation_window_days) ?? 30);
+    const startedAt = action.executionStartedAt ?? action.acceptedAt ?? null;
+    if (!targetRecommendationId && startedAt && dateOnly(addDays(startedAt, windowDays)) > now) {
+      skipped += 1;
+      continue;
+    }
+
+    await evaluateDecisionOutcome(client, {
+      workspaceId: input.workspaceId,
+      recommendationId: action.recommendationId,
+      evaluationPeriodEnd: now
+    });
+    evaluated += 1;
+    await input.setJobState({
+      progress: Math.min(90, 20 + Math.round(((evaluated + skipped) / Math.max(1, actions.length)) * 65)),
+      currentStep: `Evaluated ${evaluated}; skipped ${skipped}`
+    });
+  }
+
+  return {
+    dataReference: {
+      evaluatedRecommendationCount: evaluated,
+      skippedRecommendationCount: skipped,
+      recommendationId: targetRecommendationId
+    },
+    metadataJson: {
+      evaluatorVersion: "decision_evaluator_v1",
+      evaluatedAt: new Date().toISOString()
+    },
+    nextJobs: evaluated > 0
+      ? [
+        {
+          type: "DECISION_LEARNING_UPDATER",
+          currentStep: "Queued for learning update",
+          payload: targetRecommendationId ? { recommendationId: targetRecommendationId } as Prisma.InputJsonValue : undefined
+        }
+      ]
+      : []
+  };
+}
+
+async function processDecisionLearningUpdaterJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const targetRecommendationId = typeof input.payload.recommendationId === "string" ? input.payload.recommendationId : null;
+
+  await input.setJobState({
+    progress: 35,
+    currentStep: "Marking evaluated recommendations as learned"
+  });
+
+  const updated = await client.optimizationDecision.updateMany({
+    where: {
+      workspaceId: input.workspaceId,
+      ...(targetRecommendationId ? { id: targetRecommendationId } : {}),
+      learningStatus: "READY_TO_LEARN",
+      decisionLearnings: { some: {} }
+    },
+    data: { learningStatus: "LEARNED" }
+  });
+
+  await client.decisionAction.updateMany({
+    where: {
+      workspaceId: input.workspaceId,
+      recommendation: {
+        ...(targetRecommendationId ? { id: targetRecommendationId } : {}),
+        learningStatus: "LEARNED"
+      }
+    },
+    data: { status: "LEARNED" }
+  });
+
+  return {
+    dataReference: {
+      learnedRecommendationCount: updated.count,
+      recommendationId: targetRecommendationId
+    },
+    metadataJson: {
+      learningUpdaterVersion: "decision_learning_updater_v1",
+      updatedAt: new Date().toISOString()
+    }
+  };
+}
+
 export async function recoverAsyncJobs(
   options: {
     client?: PrismaClient;
@@ -845,6 +1058,9 @@ export async function recoverAsyncJobs(
   const bridgedIngestionJobs = await enqueueMissingIngestionAsyncJobs(client, {
     workspaceId: options.workspaceId,
     limit
+  });
+  const decisionIntelligenceJobs = await enqueueDecisionIntelligenceRuntimeJobs(client, {
+    workspaceId: options.workspaceId
   });
   const jobs = await client.asyncJob.findMany({
     where: {
@@ -881,6 +1097,7 @@ export async function recoverAsyncJobs(
 
   for (const job of [
     ...bridgedIngestionJobs,
+    ...decisionIntelligenceJobs,
     ...jobs.filter((item) => item.status !== "FAILED" || item.retryCount < item.maxRetries)
   ]) {
     const result = await processJob(job.id, { client });
@@ -894,8 +1111,93 @@ export async function recoverAsyncJobs(
     recovered: results.filter((item) => item.result.ok).length,
     attempted: results.length,
     bridgedIngestionJobs: bridgedIngestionJobs.length,
+    decisionIntelligenceJobs: decisionIntelligenceJobs.length,
     results
   };
+}
+
+async function enqueueDecisionIntelligenceRuntimeJobs(
+  client: PrismaClient,
+  options: {
+    workspaceId?: string;
+  }
+) {
+  const workspaces = options.workspaceId
+    ? [{ workspaceId: options.workspaceId }]
+    : await client.decisionAction.findMany({
+      where: { status: "EXECUTING" },
+      distinct: ["workspaceId"],
+      select: { workspaceId: true },
+      take: 100
+    });
+  const createdJobs = [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const workspace of workspaces) {
+    const activeDecisionCount = await client.decisionAction.count({
+      where: {
+        workspaceId: workspace.workspaceId,
+        status: "EXECUTING"
+      }
+    });
+    if (!activeDecisionCount) continue;
+
+    for (const type of ["DECISION_OUTCOME_COLLECTOR", "DECISION_EVALUATOR"] as const) {
+      const existing = await client.asyncJob.findFirst({
+        where: {
+          workspaceId: workspace.workspaceId,
+          type,
+          status: { in: ["QUEUED", "PROCESSING", "COMPLETED"] },
+          payload: {
+            path: ["runtimeDate"],
+            equals: today
+          }
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+          type: true,
+          status: true,
+          progress: true,
+          currentStep: true,
+          errorMessage: true,
+          retryCount: true,
+          maxRetries: true,
+          heartbeatAt: true,
+          updatedAt: true
+        },
+        orderBy: { createdAt: "desc" }
+      });
+      if (existing) continue;
+
+      const job = await createAsyncJob(client, {
+        workspaceId: workspace.workspaceId,
+        type,
+        currentStep: type === "DECISION_OUTCOME_COLLECTOR"
+          ? "Queued for daily outcome metric collection"
+          : "Queued for daily decision outcome evaluation",
+        payload: {
+          runtimeDate: today,
+          source: "decision_intelligence_scheduler"
+        } as Prisma.InputJsonValue
+      });
+      createdJobs.push({
+        id: job.id,
+        workspaceId: job.workspaceId,
+        type: job.type,
+        status: job.status,
+        progress: job.progress,
+        currentStep: job.currentStep,
+        errorMessage: job.errorMessage,
+        retryCount: job.retryCount,
+        maxRetries: job.maxRetries,
+        heartbeatAt: job.heartbeatAt,
+        updatedAt: job.updatedAt
+      });
+    }
+  }
+
+  return createdJobs;
 }
 
 async function enqueueMissingIngestionAsyncJobs(

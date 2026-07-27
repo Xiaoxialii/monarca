@@ -17131,6 +17131,37 @@ type DecisionImpactPayload = {
   };
 };
 
+type DecisionOutcomeDetail = {
+  recommendation?: {
+    recommendationJson?: Record<string, unknown>;
+    expectedMetricsJson?: Record<string, unknown>;
+    evidenceJson?: Record<string, unknown>;
+    status?: string;
+  } | null;
+  baseline?: {
+    periodStart?: string;
+    periodEnd?: string;
+    metricsJson?: Record<string, unknown>;
+  } | null;
+  outcome?: {
+    status?: string;
+    actualMetricsJson?: Record<string, unknown>;
+    impactJson?: Record<string, unknown>;
+    accuracy?: number | null;
+    learningSignals?: unknown;
+  } | null;
+  executionMetrics?: Array<{
+    date?: string;
+    metricType?: string;
+    metricsJson?: Record<string, unknown>;
+  }>;
+  learnings?: Array<{
+    accuracyScore?: number;
+    learningJson?: unknown;
+    createdAt?: string;
+  }>;
+};
+
 function ActionTrackerPage({
   locale,
   hasConnectedData,
@@ -17145,6 +17176,9 @@ function ActionTrackerPage({
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDecisionBucket, setSelectedDecisionBucket] = useState<"active" | "completed">("active");
   const [selectedRunningTaskIndex, setSelectedRunningTaskIndex] = useState(0);
+  const [selectedDetailTask, setSelectedDetailTask] = useState<DecisionImpactRow | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<DecisionOutcomeDetail | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!hasConnectedData) {
@@ -17159,6 +17193,19 @@ function ActionTrackerPage({
     setIsLoading(false);
   }, [hasConnectedData]);
 
+  const openDecisionDetail = useCallback(async (task: DecisionImpactRow) => {
+    setSelectedDetailTask(task);
+    setSelectedDetail(null);
+    setIsLoadingDetail(true);
+    try {
+      const response = await fetch(`/api/decisions/${encodeURIComponent(task.id)}/outcome`, { cache: "no-store" });
+      const detail = await response.json().catch(() => null) as (DecisionOutcomeDetail & { ok?: boolean }) | null;
+      if (response.ok && detail?.ok) setSelectedDetail(detail);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -17167,8 +17214,10 @@ function ActionTrackerPage({
   const completedDecisionCount = payload?.completedActions.length ?? 0;
   const shouldShowEmptyDecisionLoop = !isLoadingConnectedData && !isLoading && activeDecisionCount + completedDecisionCount === 0;
   const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
-  const realizedProfitImpact = payload?.summary.realizedProfitImpact ?? 0;
-  const predictionAccuracy = payload?.summary.predictionAccuracy;
+  const activeRealizedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + (row.actualImpact ?? 0), 0);
+  const activeRealizationRate = activeExpectedProfitImpact > 0
+    ? Math.round((activeRealizedProfitImpact / activeExpectedProfitImpact) * 100)
+    : null;
   const runningTasks = [...(payload?.activeDecisions ?? [])]
     .filter((row) => row.lifecycle.accepted && row.status !== "pending")
     .sort((a, b) => decisionTaskProgress(a).percent - decisionTaskProgress(b).percent);
@@ -17221,10 +17270,26 @@ function ActionTrackerPage({
       </div>
 
       <div className="flex flex-wrap items-start gap-x-16 gap-y-6">
-        <DecisionTextMetric label={isZh ? "进行中决策" : "Active Decisions"} value={formatInteger(activeDecisionCount)} />
-        <DecisionTextMetric label={isZh ? "预计利润影响" : "Expected Profit Impact"} value={formatSignedMoney(activeExpectedProfitImpact)} />
-        <DecisionTextMetric label={isZh ? "已实现利润影响" : "Realized Profit Impact"} value={completedDecisionCount ? formatSignedMoney(realizedProfitImpact) : (isZh ? "跟踪中" : "Tracking...")} />
-        <DecisionTextMetric label={isZh ? "预测准确率" : "Prediction Accuracy"} value={predictionAccuracy == null ? (isZh ? "评估后可用" : "Available after evaluation") : `${predictionAccuracy}%`} />
+        <DecisionTextMetric
+          label={isZh ? "进行中决策" : "Active Decisions"}
+          value={formatInteger(activeDecisionCount)}
+          description={isZh ? "当前正在执行并等待效果验证的 AI 决策数量" : "AI decisions currently executing and waiting for outcome validation"}
+        />
+        <DecisionTextMetric
+          label={isZh ? "预计利润影响" : "Expected Profit Impact"}
+          value={formatSignedMoney(activeExpectedProfitImpact)}
+          description={isZh ? "接受决策后预计应该产生的利润提升" : "Profit lift expected after accepted AI decisions"}
+        />
+        <DecisionTextMetric
+          label={isZh ? "已实现利润影响" : "Realized Profit Impact"}
+          value={activeRealizedProfitImpact ? `${formatSignedMoney(activeRealizedProfitImpact)} (${activeRealizationRate ?? 0}% Realized / Expected)` : (isZh ? "采集中" : "Collecting")}
+          description={isZh ? "当前 active decisions 已经产生的利润提升" : "Profit lift already realized by current active decisions"}
+        />
+        <DecisionTextMetric
+          label={isZh ? "实现率" : "Realization Rate"}
+          value={activeRealizationRate == null ? "-" : `${activeRealizationRate}%`}
+          description={isZh ? "Realized Profit Impact ÷ Expected Profit Impact × 100" : "Realized Profit Impact ÷ Expected Profit Impact × 100"}
+        />
       </div>
 
       {isLoadingConnectedData ? (
@@ -17363,7 +17428,7 @@ function ActionTrackerPage({
 	                      <p>{isZh ? "接受时间" : "Accepted"}: {formatActionDate(task.lifecycle.accepted)}</p>
 	                      <p>{isZh ? "预计完成" : "Est. complete"}: {formatActionDate(task.estimatedCompletion)}</p>
                     </div>
-                    <Button type="button" variant="outline" size="sm">
+                    <Button type="button" variant="outline" size="sm" onClick={() => void openDecisionDetail(task)}>
                       {isZh ? "查看详情" : "View Details"}
                     </Button>
                   </div>
@@ -17402,7 +17467,14 @@ function ActionTrackerPage({
                       <td className="px-5 py-4 font-semibold text-slate-700">{task.recommendedAction}</td>
                       <td className="px-5 py-4 font-bold text-emerald-700">{formatSignedMoney(task.expectedImpact)}</td>
                       <td className="px-5 py-4 font-bold text-slate-950">{formatSignedMoney(task.actualImpact ?? 0)}</td>
-                      <td className="py-4 pl-5 font-bold text-slate-950">{decisionAccuracy(task)}</td>
+                      <td className="py-4 pl-5 font-bold text-slate-950">
+                        <div className="flex items-center justify-between gap-3">
+                          <span>{decisionAccuracy(task)}</span>
+                          <Button type="button" variant="outline" size="sm" onClick={() => void openDecisionDetail(task)}>
+                            {isZh ? "详情" : "Details"}
+                          </Button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -17414,15 +17486,142 @@ function ActionTrackerPage({
         </div>
       ) : null}
 
+      {selectedDetailTask ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/20" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label={isZh ? "关闭详情" : "Close details"}
+            onClick={() => {
+              setSelectedDetailTask(null);
+              setSelectedDetail(null);
+            }}
+          />
+          <div className="relative h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
+                  {isZh ? "结果闭环" : "Outcome Loop"}
+                </p>
+                <h2 className="mt-2 text-2xl font-bold text-slate-950">{selectedDetailTask.recommendedAction}</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500">{selectedDetailTask.sku}</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSelectedDetailTask(null);
+                  setSelectedDetail(null);
+                }}
+              >
+                {isZh ? "关闭" : "Close"}
+              </Button>
+            </div>
+
+            {isLoadingDetail ? (
+              <div className="mt-8 flex items-center gap-3 text-sm font-semibold text-slate-500">
+                <RefreshCw className="size-4 animate-spin" />
+                {isZh ? "正在读取真实结果" : "Loading real outcome"}
+              </div>
+            ) : (
+              <div className="mt-8 space-y-5">
+                <DecisionDetailMetricGrid
+                  isZh={isZh}
+                  expectedImpact={selectedDetailTask.expectedImpact}
+                  actualImpact={numberFromDetail(selectedDetail?.outcome?.impactJson, "incrementalProfit") ?? selectedDetailTask.actualImpact}
+                  accuracy={selectedDetail?.outcome?.accuracy ?? selectedDetail?.learnings?.[0]?.accuracyScore ?? null}
+                />
+                <DecisionDetailSection
+                  title={isZh ? "为什么 AI 推荐" : "Why AI Recommended This"}
+                  items={detailEntries(selectedDetail?.recommendation?.evidenceJson ?? selectedDetail?.recommendation?.recommendationJson)}
+                />
+                <DecisionDetailSection
+                  title={isZh ? "Baseline Snapshot" : "Baseline Snapshot"}
+                  items={detailEntries(selectedDetail?.baseline?.metricsJson)}
+                />
+                <DecisionDetailSection
+                  title={isZh ? "Actual Outcome" : "Actual Outcome"}
+                  items={detailEntries(selectedDetail?.outcome?.actualMetricsJson)}
+                />
+                <DecisionDetailSection
+                  title={isZh ? "Learning" : "Learning"}
+                  items={detailEntries(selectedDetail?.learnings?.[0]?.learningJson ?? selectedDetail?.outcome?.learningSignals)}
+                  emptyText={isZh ? "等待评估窗口和真实业务数据。" : "Waiting for the evaluation window and real business data."}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
     </section>
   );
 }
 
-function DecisionTextMetric({ label, value }: { label: string; value: string }) {
+function DecisionDetailMetricGrid({
+  isZh,
+  expectedImpact,
+  actualImpact,
+  accuracy
+}: {
+  isZh: boolean;
+  expectedImpact: number;
+  actualImpact: number | null;
+  accuracy: number | null;
+}) {
   return (
-    <div>
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="rounded-xl border border-slate-200 p-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Expected" : "Expected"}</p>
+        <p className="mt-2 text-xl font-bold text-emerald-700">{formatSignedMoney(expectedImpact)}</p>
+      </div>
+      <div className="rounded-xl border border-slate-200 p-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Actual" : "Actual"}</p>
+        <p className="mt-2 text-xl font-bold text-slate-950">{actualImpact == null ? "-" : formatSignedMoney(actualImpact)}</p>
+      </div>
+      <div className="rounded-xl border border-slate-200 p-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Accuracy" : "Accuracy"}</p>
+        <p className="mt-2 text-xl font-bold text-slate-950">{accuracy == null ? "-" : `${Math.round(accuracy * 100)}%`}</p>
+      </div>
+    </div>
+  );
+}
+
+function DecisionDetailSection({
+  title,
+  items,
+  emptyText = "No data yet."
+}: {
+  title: string;
+  items: Array<{ label: string; value: string }>;
+  emptyText?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <h3 className="text-sm font-bold text-slate-950">{title}</h3>
+      {items.length ? (
+        <dl className="mt-3 grid gap-2 text-sm">
+          {items.slice(0, 8).map((item) => (
+            <div key={item.label} className="flex items-start justify-between gap-4">
+              <dt className="font-semibold text-slate-500">{humanizeDetailKey(item.label)}</dt>
+              <dd className="max-w-[60%] text-right font-bold text-slate-950">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-3 text-sm font-semibold text-slate-500">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function DecisionTextMetric({ label, value, description }: { label: string; value: string; description?: string }) {
+  return (
+    <div className="max-w-[260px]">
       <p className="text-sm font-bold text-slate-500">{label}</p>
       <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
+      {description ? <p className="mt-2 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
     </div>
   );
 }
@@ -17470,6 +17669,45 @@ function formatActionDate(value: string | null) {
 function decisionAccuracy(task: DecisionImpactRow) {
   if (!task.expectedImpact || task.actualImpact == null) return "No Data";
   return `${Math.round((Math.min(task.actualImpact, task.expectedImpact) / Math.max(1, task.expectedImpact)) * 100)}%`;
+}
+
+function detailEntries(value: unknown): Array<{ label: string; value: string }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== null && typeof entry !== "undefined")
+    .map(([label, entry]) => ({
+      label,
+      value: detailValue(entry)
+    }))
+    .filter((entry) => entry.value.length > 0);
+}
+
+function detailValue(value: unknown): string {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return Math.abs(value) >= 1000 ? formatInteger(value) : String(Math.round(value * 100) / 100);
+  }
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.slice(0, 3).map(detailValue).filter(Boolean).join(", ");
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, 3);
+    return entries.map(([key, entry]) => `${humanizeDetailKey(key)}: ${detailValue(entry)}`).filter(Boolean).join(" | ");
+  }
+  return "";
+}
+
+function numberFromDetail(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = (value as Record<string, unknown>)[key];
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function humanizeDetailKey(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function decisionTaskProgress(task: DecisionImpactRow) {

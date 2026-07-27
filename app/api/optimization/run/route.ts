@@ -5,6 +5,8 @@ import { generatePortfolioOptimizationReport } from "@/lib/optimization/optimiza
 import { runOptimizationLayerV2 } from "@/lib/optimization/optimization-layer-v2";
 import { optimizeSkuPortfolio } from "@/lib/optimization/portfolio-optimizer";
 import { runOptimization } from "@/lib/optimization/solver";
+import { prisma } from "@/lib/prisma";
+import { applyDecisionLearningToDecisionReport } from "@/lib/decision-outcome/optimizer-learning-integration";
 import type { CommerceState } from "@/lib/optimization/objective";
 import type { PortfolioOptimizationInput } from "@/lib/optimization/profit-simulation-engine";
 
@@ -28,13 +30,27 @@ export async function POST(request: Request) {
   }
 
   const portfolioOptimization = portfolioInput ? optimizeSkuPortfolio(portfolioInput) : null;
+  const portfolioReport = portfolioOptimization ? generatePortfolioOptimizationReport(portfolioOptimization) : null;
+  const learnedPortfolioReport = portfolioReport
+    ? await applyDecisionLearningToDecisionReport(prisma, {
+      workspaceId: session.workspace.id,
+      content: {
+        decision_report: {
+          sku_portfolio_optimization: portfolioOptimization
+        }
+      }
+    })
+    : null;
+  const learnedOptimization = learnedPortfolioReport
+    ? ((learnedPortfolioReport.decision_report as Record<string, unknown>).sku_portfolio_optimization ?? portfolioOptimization)
+    : portfolioOptimization;
 
   return NextResponse.json({
     ok: true,
     optimization: state ? runOptimization(state) : null,
     optimization_report: state ? runOptimizationLayerV2(state) : null,
-    sku_portfolio_optimization: portfolioOptimization,
-    sku_portfolio_report: portfolioOptimization ? generatePortfolioOptimizationReport(portfolioOptimization) : null
+    sku_portfolio_optimization: learnedOptimization,
+    sku_portfolio_report: portfolioReport
   });
 }
 

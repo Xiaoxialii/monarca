@@ -16602,7 +16602,7 @@ function ReportsPage({
     decision_report?: DecisionIntelligenceReportV1 | null;
   } | null>(null);
   const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(false);
-  const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(true);
+  const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(false);
   const analysisDecisionReportRequestRef = useRef(0);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const decisionApiHasConnectedDatabase = analysisDecisionReportPayload?.hasConnectedDataSource === true || Boolean(analysisDecisionReportPayload?.decision_report);
@@ -16615,7 +16615,7 @@ function ReportsPage({
     setAnalysisDecisionReportPayload(null);
 	    setIsLoading(false);
     setIsLoadingAnalysisDecisionReport(false);
-    setHasStartedProfitOptimization(true);
+    setHasStartedProfitOptimization(false);
 	    setIsGenerating(false);
 	    setStatusMessage(null);
 	  }, [effectiveHasConnectedDatabase, reportData]);
@@ -16682,10 +16682,6 @@ function ReportsPage({
       }
     }
   }, [isZh]);
-
-  useEffect(() => {
-    void loadAnalysisDecisionReport("full");
-  }, [loadAnalysisDecisionReport]);
 
   const startProfitOptimization = useCallback(async () => {
     setStatusMessage(null);
@@ -16925,13 +16921,6 @@ function ReportPage({
   const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
     && !decisionReportIsReady;
   const decisionReportIsRefreshing = decisionReportPayload?.state === "stale" || decisionReportPayload?.status === "STALE";
-  const decisionReportEmptyMessage = decisionReportIsRefreshing
-    ? (isZh
-      ? "优化结果正在刷新。新数据或算法版本已变化，系统正在后台生成新的优化快照。"
-      : "Optimization is running. Data or algorithm versions changed, and a new decision snapshot is being generated in the background.")
-    : isZh
-      ? "已连接数据源，但运营报告还需要销售/订单历史、订单明细、退款、客户、库存、单位成本、履约成本和广告花费，才能生成可靠的 KPI 和运营建议。"
-      : "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
 
   const loadDecisionReport = useCallback(async () => {
     if (isLoadingConnectedSources || !hasConnectedDatabase) return;
@@ -16942,7 +16931,7 @@ function ReportPage({
 
     try {
       const { response, payload } = await fetchReportJson<DecisionReportApiPayload>(
-        `/api/dashboard/ecommerce/decision-report?${cacheKey}&_=${Date.now()}`,
+        `/api/dashboard/ecommerce/report?${cacheKey}&_=${Date.now()}`,
         { cache: "no-store" },
         isZh
           ? "无法连接到 Monarca 报表服务，请刷新页面后重试。"
@@ -17030,21 +17019,11 @@ function ReportPage({
       </div>
 
       {isLoadingConnectedSources ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-semibold text-[#5747e8]">
-            <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在更新数据" : "Updating data"}
-          </CardContent>
-        </Card>
+        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : !hasConnectedDatabase ? (
         <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : isLoadingDecisionReport && !decisionReportPayload ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-semibold text-[#5747e8]">
-            <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在更新数据" : "Updating data"}
-          </CardContent>
-        </Card>
+        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : decisionReportIsReady ? (
         <ReportRendererEngine
           report={decisionReportPayload?.decision_report ?? null}
@@ -17058,19 +17037,9 @@ function ReportPage({
           </CardContent>
         </Card>
       ) : shouldShowDecisionReportEmpty ? (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm text-muted-foreground">
-            {decisionReportIsRefreshing ? <RefreshCw className="size-4 animate-spin text-[#5747e8]" /> : null}
-            {decisionReportEmptyMessage}
-          </CardContent>
-        </Card>
+        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : (
-        <Card className="border bg-white shadow-sm">
-          <CardContent className="flex items-center gap-3 p-5 text-sm font-semibold text-[#5747e8]">
-            <RefreshCw className="size-4 animate-spin" />
-            {isZh ? "正在更新数据" : "Updating data"}
-          </CardContent>
-        </Card>
+        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       )}
     </section>
   );
@@ -17294,14 +17263,14 @@ function ActionTrackerPage({
 
       {isLoadingConnectedData ? (
         <div className="grid min-h-[360px] place-items-center">
-          <p className="text-xl font-bold text-slate-500">{isZh ? "正在加载数据源状态" : "Loading data source status"}</p>
+          <p className="text-3xl font-bold text-slate-950">
+            {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
+          </p>
         </div>
       ) : shouldShowEmptyDecisionLoop ? (
         <div className="grid min-h-[360px] place-items-center">
           <p className="text-3xl font-bold text-slate-950">
-            {hasConnectedData
-              ? (isZh ? "开始构建你的 AI 决策反馈闭环" : "Start building your AI decision feedback loop")
-              : (isZh ? "连接数据源后开始跟踪优化决策" : "Connect a data source to start tracking optimization decisions")}
+            {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
           </p>
         </div>
       ) : null}

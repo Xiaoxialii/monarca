@@ -216,6 +216,23 @@ function skuBreakdownRows(report: DecisionIntelligenceReportV1): {
   };
 }
 
+function isRenderableOperatingReport(report: DecisionIntelligenceReportV1 | null): report is DecisionIntelligenceReportV1 {
+  if (!report) return false;
+  const record = objectRecord(report);
+  const performanceOverview = objectRecord(record.performance_overview);
+  const growthOverview = objectRecord(record.growth_overview);
+  const skuBreakdown = objectRecord(record.sku_breakdown);
+
+  return Boolean(
+    Object.keys(performanceOverview).length > 0 &&
+    Array.isArray(growthOverview.daily) &&
+    (
+      Array.isArray(skuBreakdown.top_revenue_skus) ||
+      Array.isArray(skuBreakdown.top_profit_skus)
+    )
+  );
+}
+
 function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[] {
   const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
   const profitBySku = new Map(topProfitSkus.map((row) => [row.sku, row]));
@@ -460,6 +477,26 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
           <div>
             <p className="font-semibold text-amber-950">No decision report is available.</p>
             <p className="mt-1 text-sm text-amber-800">{message ?? "Generate or sync ecommerce canonical data, then refresh this report."}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!isRenderableOperatingReport(report)) {
+    if (showEmptyShell) {
+      return <OperatingReportEmptyShell locale={locale} />;
+    }
+
+    return (
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardContent className="flex items-start gap-3 p-5">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-slate-500" />
+          <div>
+            <p className="font-semibold text-slate-950">No operating report is available.</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {message ?? "Refresh the report after the connected data has finished syncing."}
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -1744,7 +1781,7 @@ function SkuPortfolioOptimizationPanel({
 		      ) : null}
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
-				      <div className="grid items-start gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+				      <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
 			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
 	          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
@@ -1936,9 +1973,9 @@ function SkuPortfolioOptimizationPanel({
 	        </div>
 	        <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
 
-	        <div className="min-w-0 space-y-2 xl:order-1 xl:self-start">
+	        <div className="min-w-0 space-y-2 xl:order-1 xl:self-stretch">
 		        <div className={cn(
-	            "min-w-0 rounded-lg",
+	            "min-w-0 rounded-lg xl:h-full",
 	            isSkuOperationsOpen ? "grid min-h-[520px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
           )}>
 	            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
@@ -2247,7 +2284,7 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="sticky top-0 max-h-[calc(100vh-6rem)] overflow-hidden rounded-lg bg-emerald-50/70 p-0">
+    <aside className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:max-h-none">
       <div className="rounded-lg bg-emerald-950 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
@@ -2318,7 +2355,7 @@ function OptimizationDecisionRail({
           })
           : null}
       </div>
-      <div className="mt-2 min-h-[420px] max-h-[calc(100vh-14rem)] space-y-2 overflow-y-auto px-1 pb-1 pr-4 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-emerald-100/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-950/45">
+      <div className="mt-2 min-h-[420px] flex-1 space-y-2 overflow-y-auto px-1 pb-1 pr-4 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-emerald-100/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-950/45">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;

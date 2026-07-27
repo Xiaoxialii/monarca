@@ -16651,7 +16651,6 @@ function ReportsPage({
     const requestId = analysisDecisionReportRequestRef.current + 1;
     analysisDecisionReportRequestRef.current = requestId;
     setIsLoadingAnalysisDecisionReport(true);
-    if (mode === "sku") setAnalysisDecisionReportPayload(null);
     try {
       const modeQuery = mode === "sku" ? "mode=sku&" : "";
       const { response, payload } = await fetchReportJson<typeof analysisDecisionReportPayload>(
@@ -16691,7 +16690,6 @@ function ReportsPage({
   const startProfitOptimization = useCallback(async () => {
     setStatusMessage(null);
     setHasStartedProfitOptimization(true);
-    setAnalysisDecisionReportPayload(null);
     await loadAnalysisDecisionReport("full");
   }, [loadAnalysisDecisionReport]);
 

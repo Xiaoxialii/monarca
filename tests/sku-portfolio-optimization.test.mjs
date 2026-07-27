@@ -18,6 +18,7 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 
 const jiti = jitiFactory(process.cwd() + "/");
 const { optimizeSkuPortfolio } = jiti("./lib/optimization/portfolio-optimizer.ts");
+const { canonicalOptimizationAction, canonicalOptimizationGroup } = jiti("./lib/optimization/action-taxonomy.ts");
 const { simulateGeneratedActions, simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
 const { generateOptimizationActions } = jiti("./lib/optimization/action-generator.ts");
 const { buildDynamicThresholdProfile } = jiti("./lib/optimization/dynamic-threshold-engine.ts");
@@ -138,6 +139,24 @@ function input() {
     }
   };
 }
+
+test("RESTOCK_AND_SCALE without inventory risk is classified as growth scale ads", () => {
+  const action = canonicalOptimizationAction({
+    sourceAction: "RESTOCK_AND_SCALE",
+    action: "SCALE",
+    unifiedAction: "RESTOCK",
+    inventoryRisk: false,
+    requiredInventory: 120,
+    currentInventory: 180,
+    recommendedText: "Inventory can support the simulated demand window."
+  });
+
+  assert.equal(action, "SCALE_ADS");
+  assert.deepEqual(canonicalOptimizationGroup(action), {
+    goal: "GROWTH",
+    actionLabel: "Scale Ads"
+  });
+});
 
 test("portfolio optimization result beats single SKU ranking baseline", () => {
   const result = optimizeSkuPortfolio(input());

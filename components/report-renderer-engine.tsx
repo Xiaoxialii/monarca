@@ -30,6 +30,11 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
 import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
+import {
+  canonicalOptimizationAction,
+  canonicalOptimizationGroup,
+  type CanonicalOptimizationAction
+} from "@/lib/optimization/action-taxonomy";
 import { cn } from "@/lib/utils";
 
 type ReportRendererEngineProps = {
@@ -2624,13 +2629,45 @@ function isNoActionDecisionRow(row: PortfolioDecisionRow) {
   return sourceAction === "HOLD" || (!sourceAction && !hasConcreteAction && row.action === "MONITOR");
 }
 
+function canonicalActionForDecision(row: PortfolioDecisionRow): CanonicalOptimizationAction | null {
+  const payload = row as PortfolioDecisionRow & {
+    canonical_action?: string | null;
+    unified_action?: string | null;
+    simulation?: { required_inventory?: number | null };
+    before_state?: { inventory?: number | null };
+  };
+
+  return canonicalOptimizationAction({
+    canonicalAction: payload.canonical_action,
+    sourceAction: row.sourceAction,
+    action: row.action,
+    unifiedAction: payload.unified_action,
+    inventoryRisk: "inventoryRisk" in row ? Boolean(row.inventoryRisk) : null,
+    requiredInventory: payload.simulation?.required_inventory ?? null,
+    currentInventory: payload.before_state?.inventory ?? null,
+    recommendedText: `${(row.recommendedActions ?? []).join(" ")} ${(row.recommendedExecution ?? []).join(" ")}`
+  });
+}
+
 function optimizationGoalForDecision(row: PortfolioDecisionRow): { goal: OptimizationGoal; goalLabel: string; actionLabel: string } {
   const sourceAction = row.sourceAction ?? "";
   const recommendedText = `${(row.recommendedActions ?? row.recommendedExecution ?? []).join(" ")} ${sourceAction}`.toLowerCase();
   const backendGoal = (row as { optimization_goal?: string }).optimization_goal;
   const backendUnifiedAction = (row as { unified_action?: string }).unified_action;
   const opportunityType = (row as { opportunity_type?: string }).opportunity_type;
+  const canonicalAction = canonicalActionForDecision(row);
 
+  if (canonicalAction === "SCALE_ADS" || canonicalAction === "RESTOCK_INVENTORY" || canonicalAction === "CLEAR_EXCESS_INVENTORY") {
+    const canonicalGroup = canonicalOptimizationGroup(canonicalAction);
+    return { goal: canonicalGroup.goal, goalLabel: goalFilterDisplayLabel(canonicalGroup.goal), actionLabel: canonicalGroup.actionLabel };
+  }
+  if (canonicalAction === "REDUCE_ADS") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: opportunityType === "AD_EFFICIENCY" || opportunityType === "PORTFOLIO" || recommendedText.includes("waste") ? "Reduce Ad Waste" : "Reallocate Budget" };
+  }
+  if (canonicalAction === "HOLD") {
+    const canonicalGroup = canonicalOptimizationGroup(canonicalAction);
+    return { goal: canonicalGroup.goal, goalLabel: goalFilterDisplayLabel(canonicalGroup.goal), actionLabel: canonicalGroup.actionLabel };
+  }
   if (sourceAction === "STOP") {
     return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
   }

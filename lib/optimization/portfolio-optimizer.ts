@@ -10,6 +10,7 @@ import { assessPortfolioInventoryHealth, assessSelectedInventoryMix, type Invent
 import { classifySkuLifecycles, type SkuLifecycleClassification } from "@/lib/lifecycle/sku-lifecycle-classifier";
 import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 import { buildAIEvidence, type AIEvidenceCard } from "@/lib/decision-intelligence/evidence-engine";
+import { canonicalOptimizationAction, type CanonicalOptimizationAction } from "@/lib/optimization/action-taxonomy";
 import { buildScenarioComparison, type AIDecisionSelection, type AIScenario } from "@/lib/optimization/scenario-engine";
 import {
   simulateGeneratedActions,
@@ -51,6 +52,7 @@ export type PortfolioRecommendation = {
   time_to_impact: string;
   optimization_goal: string;
   unified_action: string;
+  canonical_action: CanonicalOptimizationAction | null;
   display: ActionDisplayMetadata;
   reasoning: ActionReasoningMetadata;
   opportunity_type?: string;
@@ -173,6 +175,7 @@ export type SKUDecision = {
   time_to_impact: string;
   optimization_goal: string;
   unified_action: string;
+  canonical_action: CanonicalOptimizationAction | null;
   display: ActionDisplayMetadata;
   reasoning: ActionReasoningMetadata;
   priority: number;
@@ -504,6 +507,15 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     selected: row,
     candidates: simulations.filter((scenario) => scenario.sku === row.sku)
   });
+  const inventoryRisk = isInventoryRiskRow(row);
+  const canonicalAction = canonicalOptimizationAction({
+    sourceAction: row.action,
+    action: decision,
+    unifiedAction: row.unified_action,
+    inventoryRisk,
+    requiredInventory: row.required_inventory,
+    currentInventory: row.current_inventory
+  });
   const aiEvidence = buildAIEvidence({
     simulation: row,
     portfolioMarginBenchmark: portfolioMarginBenchmark(simulations),
@@ -531,6 +543,7 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     time_to_impact: row.time_to_impact,
     optimization_goal: row.optimization_goal,
     unified_action: row.unified_action,
+    canonical_action: canonicalAction,
     display,
     reasoning,
     opportunity_type: row.opportunity_type,
@@ -657,6 +670,10 @@ function isInventoryRiskRow(row: ProfitSimulationResult) {
   return row.required_inventory > row.current_inventory || row.risk >= 0.25;
 }
 
+function isRestockInventoryAction(row: ProfitSimulationResult) {
+  return row.required_inventory > row.current_inventory || (row.unified_action === "RESTOCK" && row.inventory_impact > 0);
+}
+
 function hasBudgetOpportunity(row: ProfitSimulationResult) {
   return Math.max(0, row.recommended_ads_spend - row.current_ads_spend) > 0
     || Math.max(0, row.current_ads_spend - row.recommended_ads_spend) > 0
@@ -671,6 +688,15 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
   return ranked.map((row, index) => {
     const decision = classifyDecisionAction(row);
     const skuRole = classifySkuRole(row, decision);
+    const inventoryRisk = isInventoryRiskRow(row);
+    const canonicalAction = canonicalOptimizationAction({
+      sourceAction: row.action,
+      action: decision,
+      unifiedAction: row.unified_action,
+      inventoryRisk,
+      requiredInventory: row.required_inventory,
+      currentInventory: row.current_inventory
+    });
     const skuScenarios = buildScenarioComparison({
       selected: row,
       candidates: simulations.filter((scenario) => scenario.sku === row.sku)
@@ -694,7 +720,7 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
       action: decision,
       skuRole,
       sourceAction: row.action,
-      inventoryRisk: isInventoryRiskRow(row),
+      inventoryRisk,
       budgetOpportunity: hasBudgetOpportunity(row),
       lifecycle_stage: row.lifecycle_stage,
       lifecycle: row.lifecycle,
@@ -708,6 +734,7 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
       time_to_impact: row.time_to_impact,
       optimization_goal: row.optimization_goal,
       unified_action: row.unified_action,
+      canonical_action: canonicalAction,
       display,
       reasoning,
       priority: index + 1,
@@ -816,6 +843,7 @@ function buildActionDisplayMetadata(row: ProfitSimulationResult): ActionDisplayM
   const budgetDelta = roundCurrency(row.recommended_ads_spend - row.current_ads_spend);
   const inventoryDelta = row.required_inventory - row.current_inventory;
   const isAdWasteReduction = row.action === "REDUCE_ADS" && (row.opportunity_type === "AD_EFFICIENCY" || row.opportunity_type === "PORTFOLIO");
+  const restockRequired = isRestockInventoryAction(row);
 
   if (row.action === "PRICE_UP_5" || row.action === "PRICE_UP_10" || (row.unified_action === "OPTIMIZE_PRICE" && priceChange > 0)) {
     return {
@@ -853,7 +881,7 @@ function buildActionDisplayMetadata(row: ProfitSimulationResult): ActionDisplayM
     };
   }
 
-  if (row.unified_action === "SCALE_ADS") {
+  if (row.unified_action === "SCALE_ADS" || (row.action === "RESTOCK_AND_SCALE" && !restockRequired)) {
     return {
       title: "Scale Ads",
       icon: "🚀",
@@ -901,7 +929,7 @@ function buildActionDisplayMetadata(row: ProfitSimulationResult): ActionDisplayM
     };
   }
 
-  if (row.unified_action === "RESTOCK" || row.action === "RESTOCK_AND_SCALE") {
+  if ((row.unified_action === "RESTOCK" || row.action === "RESTOCK_AND_SCALE") && restockRequired) {
     return {
       title: `Restock ${Math.max(0, inventoryDelta).toLocaleString("en-US")} units`,
       icon: "📦",
@@ -962,8 +990,9 @@ function buildActionReasoningMetadata(row: ProfitSimulationResult): ActionReason
   const inventoryValue = roundCurrency(Math.max(0, row.current_inventory) * Math.max(0, row.current_price * Math.max(0.15, row.before_state.margin)));
   const cashReleased = roundCurrency(Math.max(0, -row.inventory_impact) * Math.max(0, row.current_price * Math.max(0.15, row.before_state.margin)));
   const isAdWasteReduction = row.action === "REDUCE_ADS" && (row.opportunity_type === "AD_EFFICIENCY" || row.opportunity_type === "PORTFOLIO");
+  const restockRequired = isRestockInventoryAction(row);
 
-  if (row.unified_action === "SCALE_ADS") {
+  if (row.unified_action === "SCALE_ADS" || (row.action === "RESTOCK_AND_SCALE" && !restockRequired)) {
     return {
       title: "Why AI selected Increase Ads Budget",
       reasons: [
@@ -1029,7 +1058,7 @@ function buildActionReasoningMetadata(row: ProfitSimulationResult): ActionReason
     };
   }
 
-  if (row.unified_action === "RESTOCK") {
+  if (row.unified_action === "RESTOCK" && restockRequired) {
     return {
       title: "Why AI selected Restock Inventory",
       reasons: [
@@ -1368,7 +1397,7 @@ function buildDecisionDrivers(row: ProfitSimulationResult, decision: DecisionAct
   }
 
   if (decision === "OPTIMIZE") {
-    const rootCause = row.action.includes("RESTOCK")
+    const rootCause = row.action.includes("RESTOCK") && isRestockInventoryAction(row)
       ? "Inventory coverage constrains scale"
       : row.action.includes("PRICE")
         ? "Price and margin need adjustment"
@@ -1457,7 +1486,7 @@ function buildCausalExplanation(row: ProfitSimulationResult, decision: DecisionA
     return {
       evidence,
       businessMeaning: "The SKU has profit potential, but a constraint must be fixed before scaling.",
-      decision: row.action.includes("RESTOCK")
+      decision: row.action.includes("RESTOCK") && isRestockInventoryAction(row)
         ? "Resolve inventory coverage before increasing demand."
         : row.action.includes("PRICE")
           ? "Run a controlled price adjustment before scaling."
@@ -1484,7 +1513,7 @@ function buildDecisionReasons(row: ProfitSimulationResult, decision: DecisionAct
     if (row.predicted_margin < 0.15) reasons.push("Predicted margin is below the portfolio threshold.");
   } else if (decision === "OPTIMIZE") {
     if (row.action.includes("PRICE")) reasons.push("Price simulation indicates margin can be improved before scaling.");
-    if (row.action.includes("RESTOCK")) reasons.push("Inventory coverage constrains the growth scenario.");
+    if (row.action.includes("RESTOCK") && isRestockInventoryAction(row)) reasons.push("Inventory coverage constrains the growth scenario.");
     if (row.margin_change > 0) reasons.push("The fix improves contribution margin.");
   } else {
     reasons.push("Current evidence is not strong enough for immediate scale or stop action.");
@@ -1532,7 +1561,7 @@ function buildRecommendedExecution(row: ProfitSimulationResult, decision: Decisi
   }
   if (decision === "OPTIMIZE") {
     if (row.action === "TEST_AD_SPEND") return ["Run a small budget ad response test.", "Collect SKU-level paid response data before scaling."];
-    if (row.action.includes("RESTOCK")) return ["Validate stock availability before scaling demand.", "Execute inventory allocation before increasing exposure."];
+    if (row.action.includes("RESTOCK") && isRestockInventoryAction(row)) return ["Validate stock availability before scaling demand.", "Execute inventory allocation before increasing exposure."];
     if (row.action.includes("PRICE")) return ["Run the selected price adjustment as a controlled test.", "Track demand elasticity and margin response."];
     return ["Fix the limiting metric before scaling.", "Re-run simulation after the fix is applied."];
   }
@@ -1563,7 +1592,7 @@ function buildRecommendedActions(row: ProfitSimulationResult, decision: Decision
       const budgetDelta = Math.max(0, row.recommended_ads_spend - row.current_ads_spend);
       return [`Run small budget ad response test${budgetDelta > 0 ? ` with ${formatCurrencyValue(budgetDelta)} / ${row.simulation_horizon.label}` : ""}`, "Collect SKU-level marginal ROAS before scaling"];
     }
-    if (row.action.includes("RESTOCK")) {
+    if (row.action.includes("RESTOCK") && isRestockInventoryAction(row)) {
       return ["Increase inventory allocation before demand scaling", "Re-run scale simulation after stock is available"];
     }
     if (row.action.includes("PRICE")) {

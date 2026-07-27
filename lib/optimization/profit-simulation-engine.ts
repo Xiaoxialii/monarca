@@ -468,7 +468,7 @@ export function simulateSkuAction(
       "pricing-elasticity-model",
       "demand-forecast-model"
     ],
-    why: explainSimulation(action, profitDelta),
+    why: explainSimulation(action, profitDelta, requiredInventory, sku.inventory),
     evidence: [
       `margin=${roundRatio(sku.margin)}`,
       `conversion_rate=${roundRatio(sku.conversion_rate)}`,
@@ -488,11 +488,11 @@ export function simulateSkuAction(
     risk_penalty: riskPenalty,
     price_risk_penalty: priceRiskPenalty,
     cash_impact: roundCurrency(requiredCash - Math.max(0, sku.net_profit < 0 ? 0 : 0)),
-    time_to_impact: timeToImpact(action),
+    time_to_impact: timeToImpact(action, requiredInventory, sku.inventory),
     risk_level: riskLevel(risk),
     market_reference_price: marketReasonablePrice(sku) ?? undefined,
-    optimization_goal: optimizationGoalForAction(action),
-    unified_action: unifiedActionForAction(action),
+    optimization_goal: optimizationGoalForAction(action, requiredInventory, sku.inventory),
+    unified_action: unifiedActionForAction(action, requiredInventory, sku.inventory),
     strategic_fit: roundRatio(strategicFit * lifecycleFit),
     feasibility,
     evidence_tags: generatedAction?.signals ?? evidenceTagsForSku(sku, profitDelta, requiredInventory),
@@ -934,11 +934,15 @@ function defaultThresholdProfile(): DynamicThresholdProfile {
   };
 }
 
-function timeToImpact(action: PortfolioAction): ProfitSimulationResult["time_to_impact"] {
+function hasRestockNeed(requiredInventory: number, currentInventory: number) {
+  return requiredInventory > currentInventory;
+}
+
+function timeToImpact(action: PortfolioAction, requiredInventory = 0, currentInventory = 0): ProfitSimulationResult["time_to_impact"] {
   if (action === "REDUCE_ADS" || action === "STOP" || action === "PRICE_UP_5") return "immediate";
   if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "PRICE_UP_10") return "short";
   if (action === "SHIFT_CHANNEL" || action === "PROMOTION_TEST" || action === "CREATE_BUNDLE") return "medium";
-  if (action === "RESTOCK_AND_SCALE") return "long";
+  if (action === "RESTOCK_AND_SCALE") return hasRestockNeed(requiredInventory, currentInventory) ? "long" : "short";
   return "short";
 }
 
@@ -948,19 +952,20 @@ function riskLevel(risk: number): ProfitSimulationResult["risk_level"] {
   return "Low";
 }
 
-function optimizationGoalForAction(action: PortfolioAction): ProfitSimulationResult["optimization_goal"] {
+function optimizationGoalForAction(action: PortfolioAction, requiredInventory = 0, currentInventory = 0): ProfitSimulationResult["optimization_goal"] {
   if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE" || action === "TEST_AD_SPEND") return "GROWTH";
   if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST") return "PROFIT";
-  if (action === "RESTOCK_AND_SCALE" || action === "REDUCE_INVENTORY") return "INVENTORY";
+  if (action === "RESTOCK_AND_SCALE") return hasRestockNeed(requiredInventory, currentInventory) ? "INVENTORY" : "GROWTH";
+  if (action === "REDUCE_INVENTORY") return "INVENTORY";
   return "PORTFOLIO_HEALTH";
 }
 
-function unifiedActionForAction(action: PortfolioAction): ProfitSimulationResult["unified_action"] {
+function unifiedActionForAction(action: PortfolioAction, requiredInventory = 0, currentInventory = 0): ProfitSimulationResult["unified_action"] {
   if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "TEST_AD_SPEND") return "SCALE_ADS";
   if (action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE") return "EXPAND_CHANNEL";
   if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST") return "OPTIMIZE_PRICE";
   if (action === "REDUCE_ADS") return "REALLOCATE_BUDGET";
-  if (action === "RESTOCK_AND_SCALE") return "RESTOCK";
+  if (action === "RESTOCK_AND_SCALE") return hasRestockNeed(requiredInventory, currentInventory) ? "RESTOCK" : "SCALE_ADS";
   if (action === "REDUCE_INVENTORY") return "REDUCE_INVENTORY";
   if (action === "STOP") return "STOP_SKU";
   if (action === "HOLD") return "HOLD";
@@ -1046,13 +1051,17 @@ function evidenceTagsForSku(sku: PortfolioSkuInput, profitDelta: number, require
   return tags.length ? tags : ["baseline_simulation"];
 }
 
-function explainSimulation(action: PortfolioAction, profitDelta: number) {
+function explainSimulation(action: PortfolioAction, profitDelta: number, requiredInventory = 0, currentInventory = 0) {
   if (action === "TEST_AD_SPEND") return "Small budget test is simulated to collect SKU-level paid response data before scaling ads.";
   if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5") return "Ads scaling is simulated because marginal paid demand can lift long-term expected profit.";
   if (action === "REDUCE_ADS") return "Ad spend is reduced because current paid efficiency does not justify the budget level.";
   if (action === "PRICE_UP_5" || action === "PRICE_UP_10") return "Price lift is simulated because margin expansion can offset demand elasticity.";
   if (action === "PRICE_DOWN_10") return "Price reduction is simulated to test whether demand expansion offsets lower unit margin.";
-  if (action === "RESTOCK_AND_SCALE") return "Inventory expansion is simulated before scaling demand to avoid stock-constrained growth.";
+  if (action === "RESTOCK_AND_SCALE") {
+    return hasRestockNeed(requiredInventory, currentInventory)
+      ? "Inventory expansion is simulated before scaling demand to avoid stock-constrained growth."
+      : "Demand scaling is simulated because current inventory can support the expected growth window.";
+  }
   if (action === "SHIFT_CHANNEL") return "Channel shift is simulated to test whether budget performs better in the stronger commerce channel.";
   if (action === "CREATE_BUNDLE") return "Bundle optimization is simulated to test whether AOV expansion increases contribution profit.";
   if (action === "PROMOTION_TEST") return "Promotion test is simulated with a bounded discount to test conversion lift against margin loss.";

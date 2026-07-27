@@ -16602,7 +16602,7 @@ function ReportsPage({
     decision_report?: DecisionIntelligenceReportV1 | null;
   } | null>(null);
   const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(false);
-  const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(false);
+  const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(true);
   const analysisDecisionReportRequestRef = useRef(0);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const decisionApiHasConnectedDatabase = analysisDecisionReportPayload?.hasConnectedDataSource === true || Boolean(analysisDecisionReportPayload?.decision_report);
@@ -16684,7 +16684,7 @@ function ReportsPage({
   }, [isZh]);
 
   useEffect(() => {
-    void loadAnalysisDecisionReport("sku");
+    void loadAnalysisDecisionReport("full");
   }, [loadAnalysisDecisionReport]);
 
   const startProfitOptimization = useCallback(async () => {
@@ -16738,7 +16738,7 @@ function ReportsPage({
 	      }
 
 	      await loadAnalysisReport(dateRange);
-      await loadAnalysisDecisionReport(hasStartedProfitOptimization ? "full" : "sku");
+      await loadAnalysisDecisionReport("full");
 	      setStatusMessage(isZh ? "经营分析报告已更新。" : "Operational analysis updated.");
 	      window.dispatchEvent(new Event("monarca-report-updated"));
 	    } catch (error) {
@@ -16746,7 +16746,7 @@ function ReportsPage({
 	    } finally {
 	      setIsGenerating(false);
 	    }
-	  }, [effectiveHasConnectedDatabase, hasStartedProfitOptimization, isZh, loadAnalysisDecisionReport, loadAnalysisReport, locale, selectedAnalysisDateRange]);
+	  }, [isZh, loadAnalysisDecisionReport, loadAnalysisReport, locale, selectedAnalysisDateRange]);
 
 	  const aiReport = reportData?.briefing?.payloadJson?.aiReport ?? null;
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];

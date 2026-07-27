@@ -798,7 +798,7 @@ function HeroPreviewCardMobile({ isZh }: { isZh: boolean }) {
 function HeroVisualization({ isZh }: { isZh: boolean }) {
   return (
     <div className="relative mx-auto w-full max-w-[520px] lg:mx-0">
-      <div className="absolute inset-[-24px] rounded-[44px] bg-gradient-to-br from-[#9dd8b8]/50 via-[#eef8f2]/75 to-[#aacfc1]/40 blur-3xl" />
+      <div className="absolute inset-[-18px] rounded-[44px] bg-white/70 shadow-[0_28px_90px_rgba(15,23,42,0.08)]" />
       <div className="butterfly-float absolute -right-4 -top-7 z-20 grid size-12 place-items-center rounded-[20px] bg-white/90 text-emerald-800 shadow-[0_20px_60px_rgba(6,78,59,0.16)] ring-1 ring-white/80 backdrop-blur">
         <BrainCircuit className="size-5" />
       </div>

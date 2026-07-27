@@ -3,13 +3,16 @@ import type { Metadata } from "next";
 import { getRequestHtmlLang } from "@/lib/server-locale";
 import "./globals.css";
 
+const siteDescription =
+  "Monarca AI is an AI decision system that helps ecommerce teams maximize profit by optimizing SKU portfolios, advertising spend, and inventory decisions.";
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.monarcadata.com"),
   title: {
     default: "Monarca AI",
     template: "%s | Monarca AI"
   },
-  description: "Monarca AI helps teams turn connected business data into AI analytics reports, metric monitoring, and actionable operating insights.",
+  description: siteDescription,
   alternates: {
     canonical: "/"
   },
@@ -18,7 +21,7 @@ export const metadata: Metadata = {
     url: "https://www.monarcadata.com",
     siteName: "Monarca AI",
     title: "Monarca AI",
-    description: "AI analytics reports, metric monitoring, and actionable operating insights for connected business data.",
+    description: siteDescription,
     images: [
       {
         url: "/brand-mark.png",
@@ -31,7 +34,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary",
     title: "Monarca AI",
-    description: "AI analytics reports, metric monitoring, and actionable operating insights for connected business data.",
+    description: siteDescription,
     images: ["/brand-mark.png"]
   },
   verification: process.env.GOOGLE_SITE_VERIFICATION

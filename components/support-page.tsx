@@ -187,7 +187,7 @@ export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }
 
   return (
     <main
-      className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_34%),linear-gradient(180deg,#ffffff,#f8fafc)] px-4 py-5 text-slate-950 sm:px-6 lg:px-8"
+      className="min-h-screen bg-[#fbfcfa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8"
       lang={getHtmlLang(locale)}
     >
       <div className="mx-auto max-w-6xl">

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 99%;
+  --background: 90 25% 98%;
   --foreground: 222 22% 9%;
   --card: 0 0% 100%;
   --card-foreground: 222 22% 9%;
@@ -28,9 +28,7 @@
 body {
   min-height: 100vh;
   color: hsl(var(--foreground));
-  background:
-    radial-gradient(circle at 20% 0%, rgba(20, 184, 166, 0.08), transparent 26rem),
-    linear-gradient(180deg, #fbfbfb 0%, #f6f7f8 100%);
+  background: #fbfcfa;
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 

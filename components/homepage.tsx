@@ -1429,7 +1429,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
   return (
     <main
       lang={getHtmlLang(locale)}
-      className="min-h-screen overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f1faf5_46%,#ffffff_100%)] text-slate-950"
+      className="min-h-screen overflow-hidden bg-[#fbfcfa] text-slate-950"
     >
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
         <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:h-16 sm:px-6 lg:h-14 lg:px-8">

@@ -261,6 +261,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     ...asRecord(cache.portfolioOptimizationJson),
     skuDecisions: asArray(cache.queueRowsJson),
     recommended_portfolio: asArray(cache.portfolioRowsJson),
+    simulations: asArray(asRecord(cache.portfolioOptimizationJson).simulations),
     portfolioSummary,
     allocationRecommendation,
     riskAlerts,

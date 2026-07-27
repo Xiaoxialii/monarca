@@ -135,10 +135,25 @@ type InventorySummary = {
   averageRunwayDays: number | null;
 };
 
-function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[] {
-  const profitBySku = new Map(report.sku_breakdown.top_profit_skus.map((row) => [row.sku, row]));
+type SkuProfitBreakdownRow = DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"][number];
+type SkuRevenueBreakdownRow = DecisionIntelligenceReportV1["sku_breakdown"]["top_revenue_skus"][number];
 
-  return report.sku_breakdown.top_revenue_skus.map((row) => {
+function skuBreakdownRows(report: DecisionIntelligenceReportV1): {
+  topProfitSkus: SkuProfitBreakdownRow[];
+  topRevenueSkus: SkuRevenueBreakdownRow[];
+} {
+  const breakdown = (report as { sku_breakdown?: Partial<DecisionIntelligenceReportV1["sku_breakdown"]> }).sku_breakdown;
+  return {
+    topProfitSkus: Array.isArray(breakdown?.top_profit_skus) ? breakdown.top_profit_skus : [],
+    topRevenueSkus: Array.isArray(breakdown?.top_revenue_skus) ? breakdown.top_revenue_skus : []
+  };
+}
+
+function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[] {
+  const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
+  const profitBySku = new Map(topProfitSkus.map((row) => [row.sku, row]));
+
+  return topRevenueSkus.map((row) => {
     const profit = profitBySku.get(row.sku);
     return {
       sku: row.sku,
@@ -275,9 +290,10 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   const skuRows = useMemo(() => {
     if (!report) return [];
 
-    const profitBySku = new Map(report.sku_breakdown.top_profit_skus.map((row) => [row.sku, row]));
+    const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
+    const profitBySku = new Map(topProfitSkus.map((row) => [row.sku, row]));
 
-    return report.sku_breakdown.top_revenue_skus.map((row) => {
+    return topRevenueSkus.map((row) => {
       const profit = profitBySku.get(row.sku);
       return {
         sku: row.sku,
@@ -1261,7 +1277,14 @@ function SkuPortfolioOptimizationPanel({
   const isZh = locale === "zh";
   const optimization = report.sku_portfolio_optimization;
   const summary = optimization.optimization_summary;
-  const selectedRows = optimization.recommended_portfolio;
+  const selectedRows = useMemo(
+    () => Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [],
+    [optimization.recommended_portfolio]
+  );
+  const optimizationSimulations = useMemo(
+    () => Array.isArray(optimization.simulations) ? optimization.simulations : [],
+    [optimization.simulations]
+  );
   const [skuChannel, setSkuChannel] = useState("all");
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const skuRows = useMemo(() => buildSkuReportRows(report), [report]);
@@ -1291,17 +1314,22 @@ function SkuPortfolioOptimizationPanel({
     return ["all", ...Array.from(channels).filter(Boolean).sort()];
   }, [skuRows]);
   const decisionRows = useMemo(
-    () => optimization.skuDecisions ?? report.skuDecisions ?? [],
+    () => {
+      if (Array.isArray(optimization.skuDecisions)) return optimization.skuDecisions;
+      if (Array.isArray(report.skuDecisions)) return report.skuDecisions;
+      return [];
+    },
     [optimization.skuDecisions, report.skuDecisions]
   );
   const portfolioRowsBySku = useMemo(() => new Map(selectedRows.map((row) => [row.sku, row])), [selectedRows]);
-  const sourceRows = report.sku_breakdown.top_profit_skus.length ? report.sku_breakdown.top_profit_skus : report.sku_breakdown.top_revenue_skus;
+  const { topProfitSkus, topRevenueSkus } = skuBreakdownRows(report);
+  const sourceRows = topProfitSkus.length ? topProfitSkus : topRevenueSkus;
   const sourceSkuIds = sourceRows.length
     ? sourceRows.map((row) => row.sku)
-    : Array.from(new Set(optimization.simulations.map((row) => row.sku)));
+    : Array.from(new Set(optimizationSimulations.map((row) => row.sku)));
   const currentSkuCount = summary.input_sku_count || sourceRows.length || sourceSkuIds.length;
   const liftRate = summary.current_portfolio_profit > 0 ? optimization.total_expected_profit_gain / summary.current_portfolio_profit : 0;
-  const simulationHorizonDays = summary.simulation_horizon_days ?? optimization.recommended_portfolio[0]?.simulation_horizon?.days ?? 30;
+  const simulationHorizonDays = summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days ?? 30;
   const [actionStatuses, setActionStatuses] = useState<Record<string, "pending" | "accepted" | "rejected">>({});
   const [acceptedAtByDecision, setAcceptedAtByDecision] = useState<Record<string, string>>({});
   const [trackedOutcomeRows, setTrackedOutcomeRows] = useState<ActionOutcomeRow[]>(seedActionOutcomeRows);

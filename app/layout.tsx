@@ -13,6 +13,16 @@ export const metadata: Metadata = {
     template: "%s | Monarca AI"
   },
   description: siteDescription,
+  keywords: [
+    "monarca",
+    "Monarca",
+    "Monarca AI",
+    "ecommerce profit optimization",
+    "SKU portfolio optimization",
+    "advertising spend optimization",
+    "inventory decision system",
+    "AI decision system"
+  ],
   alternates: {
     canonical: "/"
   },

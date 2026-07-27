@@ -202,6 +202,7 @@ model Workspace {
   reportMetricCaches          ReportMetricCache[]
   metricSnapshots             MetricSnapshot[]
   reportSnapshots             ReportSnapshot[]
+  optimizationReportCaches    OptimizationReportCache[]
   reportHistory               ReportHistory[]
   reportRuns                  ReportRun[]
   inviteLinks                 WorkspaceInviteLink[]
@@ -939,6 +940,46 @@ model ReportSnapshot {
   @@index([workspaceId, reportType, createdAt])
   @@index([workspaceId, periodStart, periodEnd])
   @@index([sourceSnapshotId])
+}
+
+model OptimizationReportCache {
+  id                           String    @id @default(cuid())
+  workspaceId                  String
+  mode                         String
+  state                        String
+  hasConnectedDataSource       Boolean   @default(false)
+  message                      String?
+  warning                      String?
+  generatedAt                  DateTime?
+  sourcePlatforms              Json      @default("[]")
+  lineageJson                  Json?
+  profitDataCoverage           Int?
+  optimizationLevel            String?
+  confidenceScore              Float?
+  missingDataRequirements      Json      @default("[]")
+  reportShellJson              Json      @default("{}")
+  portfolioOptimizationJson    Json      @default("{}")
+  queueRowsJson                Json      @default("[]")
+  portfolioRowsJson            Json      @default("[]")
+  portfolioSummaryJson         Json?
+  allocationRecommendationJson Json?
+  riskAlertsJson               Json      @default("[]")
+  executionPlanJson            Json      @default("[]")
+  algorithmVersion             String?
+  optimizationVersion          String?
+  canonicalSnapshotVersion     String?
+  metricSnapshotVersion        String?
+  simulationVersion            String?
+  inputHash                    String?
+  sourceReportSnapshotId       String?
+  sourceDecisionSnapshotId     String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, mode])
+  @@index([workspaceId, mode, updatedAt])
+  @@index([workspaceId, inputHash])
 }
 
 model AsyncJob {

@@ -2,10 +2,13 @@ import { after, NextResponse } from "next/server";
 import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
 import { decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import {
-  findLatestReportSnapshot,
   findLatestDecisionSnapshot,
   snapshotPerformance
 } from "@/lib/dashboard/snapshot-store";
+import {
+  findOptimizationReportCache,
+  optimizationReportCachePayload
+} from "@/lib/dashboard/optimization-report-cache";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -42,24 +45,22 @@ export async function GET(request: Request) {
   if (session instanceof NextResponse) return session;
   logWorkspaceContext("[workspace-context] dashboard.ecommerce.decision-report.GET", session);
 
-  const reportSnapshot = await findLatestReportSnapshot(prisma, {
+  const reportCache = await findOptimizationReportCache(prisma, {
     workspaceId: session.workspace.id,
-    reportType: `optimization_decision_report:${decisionMode}`,
-    cacheKey: "latest"
+    mode: decisionMode
   });
 
-  if (reportSnapshot) {
-    const cachedPayload = asRecord(reportSnapshot.contentJson);
-    const cachedVersions = asRecord(cachedPayload.decisionSnapshotVersions);
+  if (reportCache) {
+    const cachedPayload = optimizationReportCachePayload(reportCache);
     const freshness = await decisionSnapshotFreshness(prisma, {
       workspaceId: session.workspace.id,
       snapshot: {
-        algorithmVersion: typeof cachedVersions.algorithmVersion === "string" ? cachedVersions.algorithmVersion : null,
-        optimizationVersion: typeof cachedVersions.optimizationVersion === "string" ? cachedVersions.optimizationVersion : null,
-        canonicalSnapshotVersion: typeof cachedVersions.canonicalSnapshotVersion === "string" ? cachedVersions.canonicalSnapshotVersion : null,
-        metricSnapshotVersion: typeof cachedVersions.metricSnapshotVersion === "string" ? cachedVersions.metricSnapshotVersion : null,
-        simulationVersion: typeof cachedVersions.simulationVersion === "string" ? cachedVersions.simulationVersion : null,
-        inputHash: typeof cachedVersions.inputHash === "string" ? cachedVersions.inputHash : null
+        algorithmVersion: reportCache.algorithmVersion,
+        optimizationVersion: reportCache.optimizationVersion,
+        canonicalSnapshotVersion: reportCache.canonicalSnapshotVersion,
+        metricSnapshotVersion: reportCache.metricSnapshotVersion,
+        simulationVersion: reportCache.simulationVersion,
+        inputHash: reportCache.inputHash
       }
     });
 
@@ -88,9 +89,10 @@ export async function GET(request: Request) {
         jobId: job.id,
         currentVersions: freshness.current,
         snapshot: {
-          id: reportSnapshot.id,
-          type: "ReportSnapshot",
-          createdAt: dateToIso(reportSnapshot.createdAt),
+          id: reportCache.id,
+          type: "OptimizationReportCache",
+          createdAt: dateToIso(reportCache.createdAt),
+          updatedAt: dateToIso(reportCache.updatedAt),
           stale: true
         },
         performance: snapshotPerformance(startedAt, "snapshot")
@@ -100,9 +102,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ...cachedPayload,
       snapshot: {
-        id: reportSnapshot.id,
-        type: "ReportSnapshot",
-        createdAt: dateToIso(reportSnapshot.createdAt),
+        id: reportCache.id,
+        type: "OptimizationReportCache",
+        createdAt: dateToIso(reportCache.createdAt),
+        updatedAt: dateToIso(reportCache.updatedAt),
         latestSnapshot: true
       },
       performance: snapshotPerformance(startedAt, "snapshot")

@@ -5,6 +5,7 @@ import {
 } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { upsertDecisionSnapshot, upsertReportSnapshot } from "@/lib/dashboard/snapshot-store";
+import { upsertOptimizationReportCache } from "@/lib/dashboard/optimization-report-cache";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 
 type DecisionMode = "full" | "sku";
@@ -64,11 +65,18 @@ export async function generateEcommerceDecisionSnapshots(
         : null,
       ...versions
     });
-    await upsertReportSnapshot(prisma, {
+    const reportSnapshot = await upsertReportSnapshot(prisma, {
       workspaceId: input.workspaceId,
       reportType: `optimization_decision_report:${mode}`,
       cacheKey: "latest",
       content
+    });
+    await upsertOptimizationReportCache(prisma, {
+      workspaceId: input.workspaceId,
+      mode,
+      content,
+      sourceReportSnapshotId: typeof reportSnapshot?.id === "string" ? reportSnapshot.id : null,
+      sourceDecisionSnapshotId: typeof snapshot?.id === "string" ? snapshot.id : null
     });
     await saveSimulationSnapshot(prisma, {
       workspaceId: input.workspaceId,
@@ -310,23 +318,54 @@ function compactDecisionReport(
 
 function compactDecisionRows(rows: unknown[]) {
   return rows.map((row) => {
-    const compact = { ...asRecord(row) };
-    delete compact.reasoning;
-    delete compact.decisionDrivers;
-    delete compact.causalExplanation;
-    delete compact.comparisonInsights;
-    delete compact.selected_scenario;
-    delete compact.decision_explanation;
-    delete compact.simulation_estimate;
-    delete compact.confidence_breakdown;
-    delete compact.scenarios;
-    delete compact.scenario_results;
-    delete compact.alternative_actions;
-    delete compact.ai_evidence;
-    delete compact.sku_decision_object;
-    delete compact.feedback;
-    delete compact.lifecycle;
-    return compact;
+    const record = asRecord(row) ?? {};
+    const timing = asRecord(record.timing) ?? {};
+    const simulationHorizon = asRecord(record.simulation_horizon) ?? {};
+    const simulation = asRecord(record.simulation) ?? {};
+    const beforeState = asRecord(record.before_state) ?? {};
+
+    return {
+      skuId: record.skuId,
+      sku: record.sku ?? record.skuId,
+      action: record.action,
+      sourceAction: record.sourceAction,
+      canonical_action: record.canonical_action,
+      unified_action: record.unified_action,
+      optimization_goal: record.optimization_goal,
+      opportunity_type: record.opportunity_type,
+      expectedProfitImpact: record.expectedProfitImpact,
+      estimatedProfitImpact: record.estimatedProfitImpact,
+      confidence: record.confidence,
+      inventoryRisk: record.inventoryRisk,
+      budgetOpportunity: record.budgetOpportunity,
+      lifecycle_stage: record.lifecycle_stage,
+      skuRole: record.skuRole,
+      risk_level: record.risk_level,
+      risk: record.risk,
+      priority: record.priority,
+      action_score: record.action_score,
+      time_to_impact: record.time_to_impact,
+      recommendedActions: record.recommendedActions,
+      recommendedExecution: record.recommendedExecution,
+      timing: {
+        simulation_window_days: timing.simulation_window_days,
+        simulation_window_start: timing.simulation_window_start,
+        simulation_window_end: timing.simulation_window_end,
+        timing_source: timing.timing_source
+      },
+      simulation_horizon: {
+        days: simulationHorizon.days
+      },
+      simulation: {
+        required_inventory: simulation.required_inventory,
+        current_inventory: simulation.current_inventory,
+        current_ads_spend: simulation.current_ads_spend,
+        recommended_ads_spend: simulation.recommended_ads_spend
+      },
+      before_state: {
+        inventory: beforeState.inventory
+      }
+    };
   });
 }
 
@@ -361,7 +400,8 @@ function compactPortfolioOptimization(
   const portfolioSkuDecisions = optimization.skuDecisions.length
     ? optimization.skuDecisions
     : fallbackSkuDecisions;
-  const compactSkuDecisions = compactDecisionRows(portfolioSkuDecisions).slice(0, SNAPSHOT_ROW_LIMIT);
+  const queueDecisionRows = portfolioSkuDecisions.filter(isOptimizationCandidateRow);
+  const compactSkuDecisions = compactDecisionRows(queueDecisionRows.length ? queueDecisionRows : portfolioSkuDecisions).slice(0, SNAPSHOT_ROW_LIMIT);
   const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
   const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
     const record = asRecord(row);
@@ -415,6 +455,14 @@ function compactPortfolioOptimization(
     inventory_plan: [],
     simulations: []
   };
+}
+
+function isOptimizationCandidateRow(row: unknown) {
+  const record = asRecord(row) ?? {};
+  const action = typeof record.action === "string" ? record.action : "";
+  const impact = Math.abs(toNumber(record.expectedProfitImpact) ?? toNumber(record.estimatedProfitImpact) ?? 0);
+
+  return action !== "MONITOR" || impact > 1 || record.inventoryRisk === true || record.budgetOpportunity === true;
 }
 
 function partialOptimizationMessage(coverage: number) {

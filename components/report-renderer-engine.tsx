@@ -41,6 +41,7 @@ type ReportRendererEngineProps = {
   report: DecisionIntelligenceReportV1 | null;
   message?: string;
   showEmptyShell?: boolean;
+  showEmptyShellLoading?: boolean;
   locale?: RendererLocale;
 };
 
@@ -416,7 +417,7 @@ function inferDecisionChannelBreakdown(row: PortfolioDecisionRow, recommendation
   return Object.fromEntries(normalizedChannels.map((channel) => [channel, revenueValue]));
 }
 
-export function ReportRendererEngine({ report, message, showEmptyShell = false, locale = "en" }: ReportRendererEngineProps) {
+export function ReportRendererEngine({ report, message, showEmptyShell = false, showEmptyShellLoading = false, locale = "en" }: ReportRendererEngineProps) {
   const [skuChannel, setSkuChannel] = useState("all");
   const [inventorySearch, setInventorySearch] = useState("");
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
@@ -467,7 +468,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   if (!report) {
     if (showEmptyShell) {
-      return <OperatingReportEmptyShell locale={locale} />;
+      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} />;
     }
 
     return (
@@ -485,7 +486,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   if (!isRenderableOperatingReport(report)) {
     if (showEmptyShell) {
-      return <OperatingReportEmptyShell locale={locale} />;
+      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} />;
     }
 
     return (
@@ -701,14 +702,21 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   );
 }
 
-function OperatingReportEmptyShell({ locale }: { locale: RendererLocale }) {
+function OperatingReportEmptyShell({ locale, showLoadingData = false }: { locale: RendererLocale; showLoadingData?: boolean }) {
   const isZh = locale === "zh";
 
   return (
     <div id="report-sku" className="grid min-h-[520px] w-full place-items-center bg-transparent px-6 text-center scroll-mt-24">
-      <p className="max-w-5xl text-4xl font-bold leading-tight tracking-tight text-slate-950 sm:text-6xl">
-        {isZh ? "连接你的数据，追踪实时利润" : "Connect your data to track real-time profit"}
-      </p>
+      <div className="grid gap-4">
+        <p className="max-w-5xl text-4xl font-bold leading-tight tracking-tight text-slate-950 sm:text-6xl">
+          {isZh ? "连接你的数据，追踪实时利润" : "Connect your data to track real-time profit"}
+        </p>
+        {showLoadingData ? (
+          <p className="text-sm font-semibold text-slate-500">
+            {isZh ? "正在加载数据" : "Loading data"}
+          </p>
+        ) : null}
+      </div>
       <span id="report-ads" className="sr-only" />
       <span id="report-warehouse" className="sr-only" />
       <span id="report-customers" className="sr-only" />
@@ -1026,7 +1034,7 @@ function SkuBreakdownTable({
   }, [expandedSku, visibleRows]);
 
   return (
-    <div className="min-w-0 overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
         <div className="flex flex-wrap gap-2">
           {channelTags.map((channel) => (
@@ -1064,7 +1072,7 @@ function SkuBreakdownTable({
         onMouseUp={stopTableDrag}
         onMouseLeave={stopTableDrag}
         className={cn(
-          "relative max-h-[560px] w-full max-w-full min-w-0 overflow-x-scroll overflow-y-auto bg-white",
+          "relative max-h-[560px] w-full max-w-full min-w-0 overflow-x-scroll overflow-y-auto bg-white xl:max-h-none xl:flex-1",
           "cursor-grab overscroll-x-contain overscroll-y-auto [scrollbar-gutter:stable]",
           "[&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3",
           "[&::-webkit-scrollbar-track]:bg-slate-100",
@@ -1472,6 +1480,10 @@ function SkuPortfolioOptimizationPanel({
   const [focusedOpsSku, setFocusedOpsSku] = useState<string | null>(null);
   const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted || isLoadingOptimization);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
+  const actionStatusHydrationKey = useMemo(() => decisionRows.map(decisionRowKey).join("|"), [decisionRows]);
+  const [loadedActionStatusHydrationKey, setLoadedActionStatusHydrationKey] = useState<string | null>(null);
+  const hasLoadedPersistedActionStatuses = !optimizationStarted || !decisionRows.length || loadedActionStatusHydrationKey === actionStatusHydrationKey;
+  const isResolvingOptimizationState = isLoadingOptimization || !hasLoadedPersistedActionStatuses;
   const displayedSkuRows = useMemo(() => {
     if (!focusedOpsSku) return visibleSkuRows;
     const matchedRows = visibleSkuRows.filter((row) => row.sku === focusedOpsSku);
@@ -1526,47 +1538,54 @@ function SkuPortfolioOptimizationPanel({
   const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
-  const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization);
+  const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isResolvingOptimizationState);
 
   useEffect(() => {
-    if (isLoadingOptimization) {
+    if (isResolvingOptimizationState) {
       setIsSkuOperationsOpen(true);
       return;
     }
     if (optimizationStarted && !showSkuTableEmptyState) {
       setIsSkuOperationsOpen(false);
     }
-  }, [isLoadingOptimization, optimizationStarted, showSkuTableEmptyState]);
+  }, [isResolvingOptimizationState, optimizationStarted, showSkuTableEmptyState]);
 
   useEffect(() => {
-    if (wasLoadingOptimizationRef.current && !isLoadingOptimization && optimizationStarted) {
+    if (wasLoadingOptimizationRef.current && !isResolvingOptimizationState && optimizationStarted) {
       setIsSkuOperationsOpen(false);
     }
-    wasLoadingOptimizationRef.current = isLoadingOptimization;
-  }, [isLoadingOptimization, optimizationStarted]);
+    wasLoadingOptimizationRef.current = isResolvingOptimizationState;
+  }, [isResolvingOptimizationState, optimizationStarted]);
 
   useEffect(() => {
-    if (!optimizationStarted || isLoadingOptimization || selectedDecisionRow || !pendingDecisionRows.length) {
+    if (!optimizationStarted || isResolvingOptimizationState || selectedDecisionRow || !pendingDecisionRows.length) {
       return;
     }
     const firstDecision = pendingDecisionRows[0];
     setSelectedDecisionRow(firstDecision);
     setSkuChannel("all");
     setExpandedSku(firstDecision.skuId);
-  }, [isLoadingOptimization, optimizationStarted, pendingDecisionRows, selectedDecisionRow]);
+  }, [isResolvingOptimizationState, optimizationStarted, pendingDecisionRows, selectedDecisionRow]);
 
   useEffect(() => {
     if (!optimizationStarted || !decisionRows.length) {
+      setLoadedActionStatusHydrationKey(actionStatusHydrationKey);
       return;
     }
     let cancelled = false;
 
     async function loadPersistedDecisionStatuses() {
       const response = await fetch("/api/actions", { cache: "no-store" }).catch(() => null);
-      if (!response?.ok) return;
+      if (!response?.ok) {
+        if (!cancelled) setLoadedActionStatusHydrationKey(actionStatusHydrationKey);
+        return;
+      }
       const payload = await response.json().catch(() => null) as { actions?: PersistedActionTrackingRecord[] } | null;
       const actions = Array.isArray(payload?.actions) ? payload.actions : [];
-      if (!actions.length || cancelled) return;
+      if (!actions.length || cancelled) {
+        if (!cancelled) setLoadedActionStatusHydrationKey(actionStatusHydrationKey);
+        return;
+      }
 
       const nextStatuses: Record<string, "accepted" | "rejected"> = {};
       const nextAcceptedAt: Record<string, string> = {};
@@ -1589,9 +1608,13 @@ function SkuPortfolioOptimizationPanel({
         }
       }
 
-      if (!Object.keys(nextStatuses).length || cancelled) return;
-      setActionStatuses((current) => ({ ...current, ...nextStatuses }));
-      setAcceptedAtByDecision((current) => ({ ...current, ...nextAcceptedAt }));
+      if (!cancelled) {
+        if (Object.keys(nextStatuses).length) {
+          setActionStatuses((current) => ({ ...current, ...nextStatuses }));
+          setAcceptedAtByDecision((current) => ({ ...current, ...nextAcceptedAt }));
+        }
+        setLoadedActionStatusHydrationKey(actionStatusHydrationKey);
+      }
     }
 
     void loadPersistedDecisionStatuses();
@@ -1599,7 +1622,7 @@ function SkuPortfolioOptimizationPanel({
     return () => {
       cancelled = true;
     };
-  }, [optimizationStarted, decisionRows]);
+  }, [actionStatusHydrationKey, optimizationStarted, decisionRows]);
 
   const selectOptimizationQueueRow = (row: PortfolioDecisionRow) => {
     setSelectedDecisionRow(row);
@@ -1781,8 +1804,8 @@ function SkuPortfolioOptimizationPanel({
 		      ) : null}
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
-				      <div className="grid items-stretch gap-0 xl:grid-cols-[390px_6px_minmax(0,1fr)]">
-			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:p-5">
+				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-hidden xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
 	          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
             <button
@@ -1812,7 +1835,11 @@ function SkuPortfolioOptimizationPanel({
             </button>
 	          </div>
 	          ) : null}
-        {isSkuOperationsOpen ? (
+        {isResolvingOptimizationState ? (
+          <div className="min-w-0 overflow-hidden">
+            <EmptySkuProfitPortfolioTable locale={locale} isLoadingData />
+          </div>
+        ) : isSkuOperationsOpen ? (
           <div className={cn("min-w-0 overflow-hidden", showSkuTableEmptyState ? "" : "rounded-lg border bg-white")}>
             {showSkuTableEmptyState ? (
               <EmptySkuProfitPortfolioTable locale={locale} />
@@ -1829,8 +1856,8 @@ function SkuPortfolioOptimizationPanel({
             )}
           </div>
         ) : (
-          <div className="min-w-0 rounded-lg border bg-white p-3 shadow-sm shadow-slate-950/5">
-            {isLoadingOptimization ? (
+	          <div className="min-w-0 rounded-lg border bg-white p-3 shadow-sm shadow-slate-950/5 xl:h-full xl:overflow-hidden">
+            {isResolvingOptimizationState ? (
               <div className="grid min-h-[520px] place-items-center rounded-md bg-white text-center">
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
@@ -1973,16 +2000,16 @@ function SkuPortfolioOptimizationPanel({
 	        </div>
 	        <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
 
-	        <div className="min-w-0 space-y-2 xl:order-1 xl:self-stretch">
+	        <div className="min-h-0 min-w-0 space-y-2 xl:order-1 xl:h-full xl:self-stretch">
 		        <div className={cn(
-	            "min-w-0 rounded-lg xl:h-full",
+	            "min-h-0 min-w-0 rounded-lg xl:h-full",
 	            isSkuOperationsOpen ? "grid min-h-[520px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
           )}>
-	            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isLoadingOptimization) ? (
+	            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isResolvingOptimizationState) ? (
 	              <div className="translate-y-8 text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
-                    {isLoadingOptimization
+                    {isResolvingOptimizationState
                       ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
                       : (isZh ? "开始利润优化" : "Start profit optimization")}
                   </p>
@@ -1992,17 +2019,17 @@ function SkuPortfolioOptimizationPanel({
 	                      setIsSkuOperationsOpen(true);
 	                      void onStartProfitOptimization?.();
 	                    }}
-                    disabled={isLoadingOptimization}
+                    disabled={isResolvingOptimizationState}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
-                    aria-label={isLoadingOptimization
+                    aria-label={isResolvingOptimizationState
                       ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
                       : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
-                    {isLoadingOptimization ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
+                    {isResolvingOptimizationState ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
                   </button>
                 </div>
               </div>
-            ) : isLoadingOptimization ? (
+            ) : isResolvingOptimizationState ? (
               <div className="grid min-h-[520px] place-items-center rounded-lg bg-white text-center">
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
@@ -2284,7 +2311,7 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:max-h-none">
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:h-full xl:max-h-full">
       <div className="rounded-lg bg-emerald-950 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
@@ -2355,7 +2382,7 @@ function OptimizationDecisionRail({
           })
           : null}
       </div>
-      <div className="mt-2 min-h-[420px] flex-1 space-y-2 overflow-y-auto px-1 pb-1 pr-4 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-emerald-100/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-950/45">
+      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-scroll overscroll-contain px-1 pb-1 pr-4 [scrollbar-color:rgba(100,116,139,0.75)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500/75">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;
@@ -2412,7 +2439,7 @@ function OptimizationDecisionRail({
 	                  {actionDisplay.description}
                 </p>
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-500">{recommendation ? percent.format(recommendation.confidence) : percent.format(row.confidence)}</span>
+                  <span />
                   {status === "awaiting_decision" ? (
                     <ActionDecisionButtons
                       locale={locale}

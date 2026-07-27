@@ -17019,11 +17019,11 @@ function ReportPage({
       </div>
 
       {isLoadingConnectedSources ? (
-        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
       ) : !hasConnectedDatabase ? (
         <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : isLoadingDecisionReport && !decisionReportPayload ? (
-        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
       ) : decisionReportIsReady ? (
         <ReportRendererEngine
           report={decisionReportPayload?.decision_report ?? null}
@@ -17182,6 +17182,8 @@ function ActionTrackerPage({
   const activeDecisionCount = payload?.activeDecisions.length ?? 0;
   const completedDecisionCount = payload?.completedActions.length ?? 0;
   const shouldShowEmptyDecisionLoop = !isLoadingConnectedData && !isLoading && activeDecisionCount + completedDecisionCount === 0;
+  const shouldShowDecisionTrackerLoadingState = isLoadingConnectedData || isLoading || shouldShowEmptyDecisionLoop;
+  const shouldShowDecisionTrackerLoadingLabel = isLoadingConnectedData || (hasConnectedData && isLoading);
   const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
   const activeRealizedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + (row.actualImpact ?? 0), 0);
   const activeRealizationRate = activeExpectedProfitImpact > 0
@@ -17261,17 +17263,18 @@ function ActionTrackerPage({
         />
       </div>
 
-      {isLoadingConnectedData ? (
-        <div className="grid min-h-[360px] place-items-center">
-          <p className="text-3xl font-bold text-slate-950">
-            {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
-          </p>
-        </div>
-      ) : shouldShowEmptyDecisionLoop ? (
-        <div className="grid min-h-[360px] place-items-center">
-          <p className="text-3xl font-bold text-slate-950">
-            {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
-          </p>
+      {shouldShowDecisionTrackerLoadingState ? (
+        <div className="grid min-h-[360px] place-items-center text-center">
+          <div className="grid gap-4">
+            <p className="text-3xl font-bold text-slate-950">
+              {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
+            </p>
+            {shouldShowDecisionTrackerLoadingLabel ? (
+              <p className="text-sm font-semibold text-slate-500">
+                {isZh ? "正在加载数据" : "Loading data"}
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

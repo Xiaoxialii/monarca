@@ -18,10 +18,20 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 
 const jiti = jitiFactory(process.cwd() + "/");
 const { optimizeSkuPortfolio } = jiti("./lib/optimization/portfolio-optimizer.ts");
-const { canonicalOptimizationAction, canonicalOptimizationGroup } = jiti("./lib/optimization/action-taxonomy.ts");
+const {
+  canonicalOptimizationAction,
+  canonicalOptimizationGroup,
+  inventoryRestockUnits,
+  isInventoryRestockRequired,
+  normalizeDecision
+} = jiti("./lib/optimization/action-taxonomy.ts");
 const { simulateGeneratedActions, simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
 const { generateOptimizationActions } = jiti("./lib/optimization/action-generator.ts");
 const { buildDynamicThresholdProfile } = jiti("./lib/optimization/dynamic-threshold-engine.ts");
+const { solveGlobalPortfolio } = jiti("./lib/optimization/portfolio-solver.ts");
+const { getOptimizationPolicy } = jiti("./lib/optimization/policy/policy-loader.ts");
+const { evaluateActionEligibility } = jiti("./lib/optimization/policy/optimization-policy.ts");
+const { validateDecisionContract } = jiti("./lib/optimization/decision-contract-validator.ts");
 const { assessSelectedInventoryMix, clearInventoryQualityScore } = jiti("./lib/optimization/inventory-health-score.ts");
 const { generatePortfolioOptimizationReport } = jiti("./lib/optimization/optimization-report-generator.ts");
 const { predictRevenue } = jiti("./lib/optimization/prediction/revenue-prediction-model.ts");
@@ -158,6 +168,285 @@ test("RESTOCK_AND_SCALE without inventory risk is classified as growth scale ads
   });
 });
 
+test("decision contract validator accepts valid restock evidence", () => {
+  const result = validateDecisionContract({
+    action: "RESTOCK_AND_SCALE",
+    current_inventory: 43,
+    required_inventory: 124,
+    inventory_gap: 81,
+    current_profit: 100,
+    predicted_profit: 140,
+    predicted_profit_delta: 40,
+    predicted_revenue: 400,
+    predicted_margin: 0.35,
+    required_cash: 81
+  }, {
+    constraints: input().constraints
+  });
+
+  assert.equal(result.valid, true);
+  assert.ok(result.checked_rules.includes("inventory_evidence_present"));
+});
+
+test("decision contract validator rejects restock missing current inventory", () => {
+  const result = validateDecisionContract({
+    action: "RESTOCK_AND_SCALE",
+    required_inventory: 124,
+    inventory_gap: 81,
+    current_profit: 100,
+    predicted_profit: 140,
+    predicted_profit_delta: 40
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "current_inventory"));
+});
+
+test("decision contract validator rejects zero inventory gap restock", () => {
+  const result = validateDecisionContract({
+    action: "RESTOCK_AND_SCALE",
+    current_inventory: 124,
+    required_inventory: 124,
+    inventory_gap: 0,
+    current_profit: 100,
+    predicted_profit: 100,
+    predicted_profit_delta: 0
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "inventory_gap"));
+});
+
+test("decision contract validator rejects restock with inconsistent inventory evidence", () => {
+  const result = validateDecisionContract({
+    action: "RESTOCK_AND_SCALE",
+    current_inventory: 43,
+    required_inventory: 124,
+    inventory_gap: 124,
+    current_profit: 100,
+    predicted_profit: 140,
+    predicted_profit_delta: 40
+  });
+
+  assert.equal(result.valid, false);
+  assert.match(result.errors.map((error) => error.message).join(" "), /required_inventory - current_inventory/);
+});
+
+test("decision contract validator accepts valid scale ads evidence", () => {
+  const result = validateDecisionContract({
+    action: "SCALE_ADS",
+    ads_spend: 500,
+    estimated_roas: 3.8,
+    margin: 0.42,
+    prediction_confidence: 0.78,
+    inventory_coverage_days: 45,
+    current_profit: 1000,
+    predicted_profit: 1280,
+    predicted_profit_delta: 280,
+    predicted_revenue: 3200,
+    predicted_margin: 0.4,
+    required_cash: 150
+  }, {
+    constraints: input().constraints
+  });
+
+  assert.equal(result.valid, true);
+  assert.ok(result.checked_rules.includes("advertising_evidence_present"));
+});
+
+test("decision contract validator rejects scale ads without ROAS", () => {
+  const result = validateDecisionContract({
+    action: "SCALE_ADS",
+    ads_spend: 500,
+    margin: 0.42,
+    prediction_confidence: 0.78,
+    inventory_coverage_days: 45
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "estimated_roas"));
+});
+
+test("decision contract validator rejects scale ads below margin threshold", () => {
+  const result = validateDecisionContract({
+    action: "SCALE_ADS",
+    ads_spend: 500,
+    estimated_roas: 3.8,
+    margin: 0.2,
+    prediction_confidence: 0.78,
+    inventory_coverage_days: 45
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "margin"));
+});
+
+test("decision contract validator accepts valid price adjustment evidence", () => {
+  const result = validateDecisionContract({
+    action: "PRICE_UP_5",
+    current_price: 100,
+    new_price: 105,
+    price_change_percentage: 0.05,
+    price_elasticity_confidence: 0.76,
+    conversion_stability: 0.74,
+    market_reference_price: 112,
+    current_profit: 1000,
+    predicted_profit: 1100,
+    predicted_profit_delta: 100,
+    predicted_revenue: 2500,
+    predicted_margin: 0.44,
+    required_cash: 0
+  });
+
+  assert.equal(result.valid, true);
+});
+
+test("decision contract validator rejects price adjustment missing elasticity", () => {
+  const result = validateDecisionContract({
+    action: "PRICE_UP_5",
+    current_price: 100,
+    new_price: 105,
+    price_change_percentage: 0.05,
+    conversion_stability: 0.74
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "price_elasticity_confidence"));
+});
+
+test("decision contract validator rejects inconsistent profit delta", () => {
+  const result = validateDecisionContract({
+    action: "HOLD",
+    current_profit: 100,
+    predicted_profit: 150,
+    predicted_profit_delta: 20
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.field === "predicted_profit_delta"));
+});
+
+test("normalizes stale restock canonical action with no inventory evidence to scale ads when budget grows", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "RESTOCK_INVENTORY",
+    inventoryGap: 0,
+    inventoryDelta: 0,
+    displayTitle: "Scale Ads",
+    adBudgetChange: 255.14,
+    expectedProfitImpact: 1014.71,
+    roas: 3.2
+  });
+
+  assert.deepEqual({
+    action: decision.action,
+    category: decision.category,
+    title: decision.title,
+    rejected: decision.trace.rejectedActions[0]?.action
+  }, {
+    action: "SCALE_ADS",
+    category: "GROWTH",
+    title: "Scale Ads",
+    rejected: "RESTOCK_INVENTORY"
+  });
+});
+
+test("generic inventory risk does not create restock evidence when stock covers required inventory", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "RESTOCK_INVENTORY",
+    currentInventory: 135,
+    requiredInventory: 135,
+    inventoryRisk: true
+  });
+
+  assert.notEqual(decision.action, "RESTOCK_INVENTORY");
+  assert.equal(isInventoryRestockRequired({
+    currentInventory: 135,
+    requiredInventory: 135,
+    inventoryRisk: true
+  }), false);
+});
+
+test("stockout copy does not create restock evidence when inventory units do not change", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "RESTOCK_INVENTORY",
+    currentInventory: 124,
+    requiredInventory: 124,
+    inventoryDelta: 0,
+    recommendedInventoryChange: 0,
+    stockoutRisk: "high",
+    recommendedText: "Add inventory to prevent stockout risk",
+    adBudgetChange: 260.66,
+    expectedProfitImpact: 485.59,
+    roas: 3.4
+  });
+
+  assert.deepEqual({
+    action: decision.action,
+    category: decision.category,
+    units: inventoryRestockUnits({ currentInventory: 124, requiredInventory: 124 }),
+    inventoryEvidence: decision.hasInventoryEvidence
+  }, {
+    action: "SCALE_ADS",
+    category: "GROWTH",
+    units: 0,
+    inventoryEvidence: false
+  });
+});
+
+test("keeps restock canonical action when inventory gap is positive", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "RESTOCK_INVENTORY",
+    currentInventory: 100,
+    requiredInventory: 235
+  });
+
+  assert.deepEqual({
+    action: decision.action,
+    category: decision.category,
+    units: inventoryRestockUnits({ currentInventory: 100, requiredInventory: 235 })
+  }, {
+    action: "RESTOCK_INVENTORY",
+    category: "INVENTORY",
+    units: 135
+  });
+});
+
+test("missing current inventory does not assume restock from generic risk", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "RESTOCK_INVENTORY",
+    requiredInventory: 135,
+    inventoryRisk: true
+  });
+
+  assert.deepEqual({
+    action: decision.action,
+    category: decision.category,
+    units: inventoryRestockUnits({ requiredInventory: 135, currentInventory: null })
+  }, {
+    action: "HOLD",
+    category: "PORTFOLIO_HEALTH",
+    units: 0
+  });
+  assert.equal(decision.trace.validationReason, "No inventory gap or stronger alternative evidence detected.");
+});
+
+test("ignores conflicting backend display title when canonical action is scale ads", () => {
+  const decision = normalizeDecision({
+    canonicalAction: "SCALE_ADS",
+    displayTitle: "Restock Inventory"
+  });
+
+  assert.deepEqual({
+    action: decision.action,
+    category: decision.category,
+    title: decision.title
+  }, {
+    action: "SCALE_ADS",
+    category: "GROWTH",
+    title: "Scale Ads"
+  });
+});
+
 test("portfolio optimization result beats single SKU ranking baseline", () => {
   const result = optimizeSkuPortfolio(input());
 
@@ -202,14 +491,19 @@ test("portfolio optimization result beats single SKU ranking baseline", () => {
   assert.ok(result.recommended_portfolio[0].ai_evidence.length >= 4);
   assert.ok(result.recommended_portfolio[0].ai_evidence.some((row) => row.type === "profit_signal"));
   assert.ok(result.recommended_portfolio[0].ai_evidence.some((row) => row.type === "inventory_signal"));
-  assert.ok(result.recommended_portfolio[0].scenarios.length >= 3);
+  assert.ok(result.recommended_portfolio[0].scenarios.length >= 2);
+  assert.ok(result.recommended_portfolio.every((row) => row.validation?.status === "PASSED"));
+  assert.ok(result.recommended_portfolio.every((row) => row.decision_contract.validation?.status === "PASSED"));
+  assert.equal(result.recommended_portfolio[0].policy_trace.policyVersion, result.optimization_policy.version);
   assert.ok(result.recommended_portfolio[0].selected_scenario.selected);
   assert.equal(result.recommended_portfolio[0].decision_explanation.selected_action, result.recommended_portfolio[0].selected_scenario.action);
-  assert.ok(result.recommended_portfolio[0].decision_explanation.alternatives_considered.length >= 2);
+  assert.ok(result.recommended_portfolio[0].decision_explanation.alternatives_considered.length >= 1);
   assert.equal(result.recommended_portfolio[0].sku_decision_object.sku, result.recommended_portfolio[0].sku);
   assert.equal(result.recommended_portfolio[0].sku_decision_object.tracking_status, "RECOMMENDED");
   assert.ok(result.skuDecisions[0].ai_evidence.length >= 4);
-  assert.ok(result.skuDecisions[0].scenarios.length >= 3);
+  assert.ok(result.skuDecisions[0].scenarios.length >= 2);
+  assert.ok(result.skuDecisions.every((row) => row.validation?.status === "PASSED"));
+  assert.equal(result.skuDecisions[0].policy_trace.policyVersion, result.optimization_policy.version);
   assert.equal(result.skuDecisions[0].tracking_status, "RECOMMENDED");
   assert.equal(result.skuDecisions[0].feedback.learned, false);
 });
@@ -229,8 +523,9 @@ test("v2 multi-path optimization exposes scenario mix and alternatives", () => {
   for (const decision of result.skuDecisions) {
     assert.equal(decision.expectedProfitImpact, decision.estimatedProfitImpact);
     assert.equal(typeof decision.action_score, "number");
-    assert.ok(decision.scenarios.length >= 3);
-    assert.ok(decision.alternative_actions.length >= 2);
+    assert.ok(decision.scenarios.length >= 2);
+    assert.equal(decision.policy_trace.policyVersion, result.optimization_policy.version);
+    assert.ok(decision.alternative_actions.length >= 1);
     assert.equal(decision.sku_decision_object.expected_profit_impact, decision.expectedProfitImpact);
     assert.equal(decision.sku_decision_object.simulation.profit_delta, decision.expectedProfitImpact);
   }
@@ -269,6 +564,111 @@ test("adaptive threshold profile uses user history and business objective", () =
     cashResult.threshold_profile.scale_ads_threshold.marginal_roas
   );
   assert.ok(growthResult.simulations.every((row) => typeof row.action_score === "number"));
+});
+
+test("default expert baseline policy is conservative when merchant history is unavailable", () => {
+  const policy = getOptimizationPolicy();
+
+  assert.equal(policy.objective, "BALANCED");
+  assert.equal(policy.source, "system_default");
+  assert.equal(policy.thresholds.advertising.scaleAds.minimumMarginalRoas, 3);
+  assert.equal(policy.thresholds.advertising.scaleAds.minimumMargin, 0.35);
+  assert.equal(policy.thresholds.advertising.scaleAds.minimumConfidence, 0.7);
+  assert.equal(policy.thresholds.advertising.scaleAds.maximumBudgetIncreasePct, 0.3);
+  assert.equal(policy.thresholds.advertising.reduceAds.roasThreshold, 1.5);
+  assert.equal(policy.thresholds.pricing.maximumIncreasePct, 0.05);
+  assert.equal(policy.thresholds.pricing.maximumDecreasePct, 0.1);
+  assert.equal(policy.thresholds.pricing.minimumElasticityConfidence, 0.7);
+  assert.equal(policy.thresholds.inventory.stockoutRiskDays, 14);
+  assert.equal(policy.thresholds.inventory.excessInventoryDays, 90);
+  assert.equal(policy.lifecycle.newProductDays, 30);
+  assert.equal(policy.lifecycle.growthRevenueThreshold, 0.15);
+  assert.equal(policy.lifecycle.declineRevenueThreshold, -0.1);
+  assert.equal(policy.portfolioConstraints.SCALE_ADS.maxSkuShare, 0.25);
+  assert.equal(policy.portfolioConstraints.PRICE_CHANGE.maxSkuShare, 0.15);
+  assert.equal(policy.portfolioConstraints.CLEARANCE.maxSkuShare, 0.1);
+});
+
+test("workspace policy override wins over default expert baseline", () => {
+  const policy = getOptimizationPolicy({
+    workspacePolicy: {
+      thresholds: {
+        advertising: {
+          scaleAds: {
+            minimumMarginalRoas: 4.5
+          }
+        }
+      },
+      portfolioConstraints: {
+        SCALE_ADS: {
+          maxSkuShare: 0.1
+        }
+      }
+    }
+  });
+
+  assert.equal(policy.source, "workspace_policy");
+  assert.equal(policy.thresholds.advertising.scaleAds.minimumMarginalRoas, 4.5);
+  assert.equal(policy.portfolioConstraints.SCALE_ADS.maxSkuShare, 0.1);
+});
+
+test("policy eligibility rejects scale ads below expert thresholds", () => {
+  const policy = getOptimizationPolicy();
+  const sku = adsSimulationSku({
+    sku: "SKU_POLICY_REJECT_SCALE",
+    revenue: 3000,
+    ads_spend: 1000,
+    margin: 0.25,
+    inventory: 300,
+    sales_velocity: 8,
+    prediction_confidence: 0.62
+  });
+  const eligibility = evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy,
+    marginalRoas: 2.2,
+    confidence: 0.62
+  });
+
+  assert.equal(eligibility.allowed, false);
+  assert.ok(eligibility.rejectedReasons.includes("ROAS below scale ads threshold."));
+  assert.ok(eligibility.rejectedReasons.includes("Margin below scale ads threshold."));
+  assert.ok(eligibility.rejectedReasons.includes("Confidence below scale ads threshold."));
+});
+
+test("portfolio solver enforces hard SCALE_ADS cap from policy", () => {
+  const policy = getOptimizationPolicy({
+    workspacePolicy: {
+      portfolioConstraints: {
+        SCALE_ADS: {
+          maxSkuShare: 0.25
+        }
+      }
+    }
+  });
+  const skus = Array.from({ length: 8 }, (_, index) => `SKU_CAP_${index + 1}`);
+  const bySku = new Map(skus.map((sku, index) => [
+    sku,
+    [
+      fakeSimulationRow(sku, "SCALE_ADS", 500 - index),
+      fakeSimulationRow(sku, "HOLD", 0)
+    ]
+  ]));
+  const selected = solveGlobalPortfolio(bySku, {
+    skus: skus.map((sku) => ({ sku })),
+    constraints: {
+      total_ads_budget: 10000,
+      inventory_capacity: 10000,
+      target_margin: 0,
+      max_price_change: 0.1,
+      minimum_profit: -1000,
+      minimum_confidence: 0
+    }
+  }, policy);
+  const scaleCount = selected.rows.filter((row) => row.action === "SCALE_ADS").length;
+
+  assert.equal(scaleCount, 2);
 });
 
 function daysBetween(startDateOnly, endDateOnly) {

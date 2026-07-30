@@ -5,19 +5,34 @@ import { generateOptimizationActions } from "@/lib/optimization/action-generator
 import { detectOptimizationOpportunities } from "@/lib/optimization/opportunity-engine";
 import { simulatePricingOptimization, type PricingPlan } from "@/lib/optimization/pricing-simulator";
 import { solveGlobalPortfolio } from "@/lib/optimization/portfolio-solver";
-import { buildDynamicThresholdProfile, type DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
+import { type DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
 import { assessPortfolioInventoryHealth, assessSelectedInventoryMix, type InventoryHealthAssessment } from "@/lib/optimization/inventory-health-score";
 import { classifySkuLifecycles, type SkuLifecycleClassification } from "@/lib/lifecycle/sku-lifecycle-classifier";
 import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 import { buildAIEvidence, type AIEvidenceCard } from "@/lib/decision-intelligence/evidence-engine";
-import { canonicalOptimizationAction, type CanonicalOptimizationAction } from "@/lib/optimization/action-taxonomy";
+import {
+  buildDecisionContract,
+  canonicalOptimizationAction,
+  isInventoryRestockRequired,
+  logDecisionValidationChange,
+  validateDecision,
+  type CanonicalOptimizationAction,
+  type DecisionContract
+} from "@/lib/optimization/action-taxonomy";
 import { buildScenarioComparison, type AIDecisionSelection, type AIScenario } from "@/lib/optimization/scenario-engine";
 import {
   simulateGeneratedActions,
   type PortfolioOptimizationInput,
   type ProfitSimulationResult
 } from "@/lib/optimization/profit-simulation-engine";
+import {
+  validatePortfolioSimulationContracts,
+  type DecisionContractValidationMetadata
+} from "@/lib/optimization/decision-contract-validator";
 import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
+import { dynamicThresholdProfileFromPolicy } from "@/lib/optimization/policy/optimization-policy";
+import { getOptimizationPolicyForInput } from "@/lib/optimization/policy/policy-loader";
+import type { OptimizationPolicy, PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
 
 export type OptimizationActionTiming = {
   action_start_at: string;
@@ -53,6 +68,8 @@ export type PortfolioRecommendation = {
   optimization_goal: string;
   unified_action: string;
   canonical_action: CanonicalOptimizationAction | null;
+  decision_contract: DecisionContract;
+  validation?: DecisionContractValidationMetadata;
   display: ActionDisplayMetadata;
   reasoning: ActionReasoningMetadata;
   opportunity_type?: string;
@@ -85,6 +102,7 @@ export type PortfolioRecommendation = {
   confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
   required_cash: number;
   strategic_fit: number;
+  policy_trace?: PolicyTrace;
   before_state: ProfitSimulationResult["before_state"];
   after_state: ProfitSimulationResult["after_state"];
   scenario_results: Array<{
@@ -176,6 +194,9 @@ export type SKUDecision = {
   optimization_goal: string;
   unified_action: string;
   canonical_action: CanonicalOptimizationAction | null;
+  decision_contract: DecisionContract;
+  validation?: DecisionContractValidationMetadata;
+  policy_trace?: PolicyTrace;
   display: ActionDisplayMetadata;
   reasoning: ActionReasoningMetadata;
   priority: number;
@@ -225,6 +246,7 @@ export type SKUDecisionObject = {
   action: string;
   display: ActionDisplayMetadata;
   reasoning: ActionReasoningMetadata;
+  policy_trace?: PolicyTrace;
   expected_profit_impact: number;
   why_selected: string;
   alternative_actions: SKUDecision["alternative_actions"];
@@ -326,6 +348,7 @@ export type PortfolioOptimizationResult = {
     prediction_type: "rule_based" | "statistical" | "ml_model";
     prediction_confidence: number;
   };
+  optimization_policy: OptimizationPolicy;
   threshold_profile: DynamicThresholdProfile;
   recommended_portfolio: PortfolioRecommendation[];
   portfolioSummary: DecisionSummary;
@@ -359,10 +382,12 @@ const MAX_OPTIMIZATION_SKU_CANDIDATES = 320;
 
 export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): PortfolioOptimizationResult {
   const optimizationInput = limitOptimizationInput(input);
-  const thresholdProfile = buildDynamicThresholdProfile(optimizationInput);
+  const optimizationPolicy = getOptimizationPolicyForInput(optimizationInput);
+  const thresholdProfile = dynamicThresholdProfileFromPolicy(optimizationPolicy);
   const lifecycleClassifications = classifySkuLifecycles({
     skus: optimizationInput.skus,
-    ads: optimizationInput.ads ?? []
+    ads: optimizationInput.ads ?? [],
+    policy: optimizationPolicy
   });
   const lifecycleBySku = new Map(lifecycleClassifications.map((row) => [row.sku, row]));
   const opportunities = detectOptimizationOpportunities(optimizationInput.skus, thresholdProfile);
@@ -370,9 +395,10 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
     skus: optimizationInput.skus,
     opportunities,
     lifecycleBySku,
-    thresholdProfile
+    thresholdProfile,
+    policy: optimizationPolicy
   });
-  const simulations = simulateGeneratedActions({
+  const simulatedActions = simulateGeneratedActions({
     skus: optimizationInput.skus,
     ads: optimizationInput.ads ?? [],
     actions: generatedActions,
@@ -380,8 +406,14 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
     lifecycleBySku,
     thresholdProfile
   });
-  const validBySku = groupValidPortfolioSimulations(optimizationInput, simulations);
-  const selected = solveGlobalPortfolio(validBySku, optimizationInput);
+  const contractValidation = validatePortfolioSimulationContracts(simulatedActions, {
+    policy: optimizationPolicy,
+    constraints: optimizationInput.constraints,
+    logger: logDecisionContractRejection
+  });
+  const simulations = contractValidation.valid;
+  const validBySku = groupValidPortfolioSimulations(optimizationInput, simulations, optimizationPolicy);
+  const selected = solveGlobalPortfolio(validBySku, optimizationInput, optimizationPolicy);
   const selectedDecisionRows = selected.rows;
   const selectedRows = selectedDecisionRows.filter((row) => row.action !== "STOP");
   const currentPortfolioProfit = roundCurrency(input.skus.reduce((sum, sku) => sum + sku.net_profit, 0));
@@ -443,6 +475,7 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
       prediction_type: simulations[0]?.prediction_type ?? "rule_based",
       prediction_confidence: roundRatio(confidence)
     },
+    optimization_policy: optimizationPolicy,
     threshold_profile: thresholdProfile,
     recommended_portfolio: portfolioRecommendations,
     portfolioSummary,
@@ -508,14 +541,11 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     candidates: simulations.filter((scenario) => scenario.sku === row.sku)
   });
   const inventoryRisk = isInventoryRiskRow(row);
-  const canonicalAction = canonicalOptimizationAction({
-    sourceAction: row.action,
-    action: decision,
-    unifiedAction: row.unified_action,
-    inventoryRisk,
-    requiredInventory: row.required_inventory,
-    currentInventory: row.current_inventory
-  });
+  const validatorInput = decisionValidatorInput(row, decision, inventoryRisk);
+  const normalizedDecision = validateDecision(validatorInput);
+  logDecisionValidationChange({ sku: row.sku, originalAction: validatorInput.originalAction, normalized: normalizedDecision });
+  const canonicalAction = canonicalOptimizationAction(validatorInput);
+  const decisionContract = withDecisionContractValidation(buildDecisionContract(validatorInput), row.validation);
   const aiEvidence = buildAIEvidence({
     simulation: row,
     portfolioMarginBenchmark: portfolioMarginBenchmark(simulations),
@@ -544,6 +574,8 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     optimization_goal: row.optimization_goal,
     unified_action: row.unified_action,
     canonical_action: canonicalAction,
+    decision_contract: decisionContract,
+    validation: row.validation,
     display,
     reasoning,
     opportunity_type: row.opportunity_type,
@@ -573,6 +605,7 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     confidence_breakdown: row.confidence_breakdown,
     required_cash: row.required_cash,
     strategic_fit: row.strategic_fit,
+    policy_trace: row.policy_trace,
     before_state: row.before_state,
     after_state: row.after_state,
     scenario_results: simulations
@@ -667,11 +700,104 @@ function buildLifecycleSummary(classifications: SkuLifecycleClassification[], fa
 }
 
 function isInventoryRiskRow(row: ProfitSimulationResult) {
-  return row.required_inventory > row.current_inventory || row.risk >= 0.25;
+  return row.required_inventory > row.current_inventory;
+}
+
+function withDecisionContractValidation(
+  contract: DecisionContract,
+  validation?: DecisionContractValidationMetadata
+): DecisionContract {
+  return {
+    ...contract,
+    validation: validation ?? {
+      status: "PASSED",
+      checked_rules: ["decision_contract_validator_not_available"]
+    }
+  };
+}
+
+function logDecisionContractRejection(input: {
+  sku: string;
+  action: string;
+  validation: DecisionContractValidationMetadata;
+  timestamp: string;
+}) {
+  if (!shouldLogDecisionContractRejection()) return;
+  const reason = input.validation.errors?.join("; ") ?? "Unknown validation failure.";
+  console.warn(JSON.stringify({
+    event: "decision_contract_rejected",
+    sku: input.sku,
+    action: input.action,
+    validation_reason: reason,
+    timestamp: input.timestamp
+  }));
+}
+
+const DECISION_CONTRACT_REJECTION_LOG_LIMIT = 20;
+let decisionContractRejectionLogCount = 0;
+
+function shouldLogDecisionContractRejection() {
+  decisionContractRejectionLogCount += 1;
+  if (decisionContractRejectionLogCount <= DECISION_CONTRACT_REJECTION_LOG_LIMIT) return true;
+  if (decisionContractRejectionLogCount === DECISION_CONTRACT_REJECTION_LOG_LIMIT + 1) {
+    console.warn(JSON.stringify({
+      event: "decision_contract_rejected_suppressed",
+      suppressed_after: DECISION_CONTRACT_REJECTION_LOG_LIMIT,
+      timestamp: new Date().toISOString()
+    }));
+  }
+  return false;
 }
 
 function isRestockInventoryAction(row: ProfitSimulationResult) {
-  return row.required_inventory > row.current_inventory || (row.unified_action === "RESTOCK" && row.inventory_impact > 0);
+  return isInventoryRestockRequired({
+    requiredInventory: row.required_inventory,
+    currentInventory: row.current_inventory,
+    inventoryDelta: row.inventory_impact
+  });
+}
+
+function decisionValidatorInput(row: ProfitSimulationResult, decision: DecisionAction, inventoryShortageRisk: boolean) {
+  return {
+    sku: row.sku,
+    originalAction: candidateCanonicalActionForSimulation(row),
+    sourceAction: row.action,
+    action: decision,
+    unifiedAction: row.unified_action,
+    inventoryRisk: inventoryShortageRisk,
+    requiredInventory: row.required_inventory,
+    currentInventory: row.current_inventory,
+    inventoryGap: row.required_inventory - row.current_inventory,
+    inventoryDelta: row.inventory_impact,
+    adBudgetChange: row.recommended_ads_spend - row.current_ads_spend,
+    roas: row.current_ads_spend > 0 ? roundRatio(row.before_state.revenue / Math.max(1, row.current_ads_spend)) : null,
+    margin: row.before_state.margin,
+    conversionRate: null,
+    expectedProfitImpact: row.profit_delta,
+    revenueChange: row.revenue_delta,
+    costChange: row.cost_delta,
+    priceChange: row.current_price > 0 ? roundRatio((row.simulated_price - row.current_price) / row.current_price) : 0,
+    confidence: row.confidence,
+    reasoning: row.why,
+    recommendedText: row.evidence.join(" "),
+    riskTypes: {
+      inventory_shortage_risk: inventoryShortageRisk,
+      execution_risk: row.risk,
+      model_confidence: row.confidence,
+      business_risk: row.risk_level
+    }
+  };
+}
+
+function candidateCanonicalActionForSimulation(row: ProfitSimulationResult) {
+  if (row.action === "RESTOCK_AND_SCALE" || row.unified_action === "RESTOCK") return "RESTOCK_INVENTORY";
+  if (row.action === "SCALE_ADS" || row.action === "SCALE_ADS_PRICE_UP_5" || row.action === "TEST_AD_SPEND") return "SCALE_ADS";
+  if (row.action === "SHIFT_CHANNEL" || row.action === "CREATE_BUNDLE") return "SCALE_ADS";
+  if (row.action === "PRICE_UP_5" || row.action === "PRICE_UP_10" || row.action === "PRICE_DOWN_10" || row.action === "PROMOTION_TEST" || row.unified_action === "OPTIMIZE_PRICE") return "ADJUST_PRICE";
+  if (row.action === "REDUCE_INVENTORY" || row.unified_action === "REDUCE_INVENTORY") return "REDUCE_INVENTORY";
+  if (row.action === "REDUCE_ADS" || row.unified_action === "REALLOCATE_BUDGET" || row.unified_action === "REDUCE_WASTE") return "REDUCE_ADS";
+  if (row.action === "STOP" || row.unified_action === "STOP_SKU") return "STOP_SKU";
+  return "HOLD";
 }
 
 function hasBudgetOpportunity(row: ProfitSimulationResult) {
@@ -689,14 +815,11 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
     const decision = classifyDecisionAction(row);
     const skuRole = classifySkuRole(row, decision);
     const inventoryRisk = isInventoryRiskRow(row);
-    const canonicalAction = canonicalOptimizationAction({
-      sourceAction: row.action,
-      action: decision,
-      unifiedAction: row.unified_action,
-      inventoryRisk,
-      requiredInventory: row.required_inventory,
-      currentInventory: row.current_inventory
-    });
+    const validatorInput = decisionValidatorInput(row, decision, inventoryRisk);
+    const normalizedDecision = validateDecision(validatorInput);
+    logDecisionValidationChange({ sku: row.sku, originalAction: validatorInput.originalAction, normalized: normalizedDecision });
+    const canonicalAction = canonicalOptimizationAction(validatorInput);
+    const decisionContract = withDecisionContractValidation(buildDecisionContract(validatorInput), row.validation);
     const skuScenarios = buildScenarioComparison({
       selected: row,
       candidates: simulations.filter((scenario) => scenario.sku === row.sku)
@@ -735,6 +858,9 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
       optimization_goal: row.optimization_goal,
       unified_action: row.unified_action,
       canonical_action: canonicalAction,
+      decision_contract: decisionContract,
+      validation: row.validation,
+      policy_trace: row.policy_trace,
       display,
       reasoning,
       priority: index + 1,
@@ -791,6 +917,7 @@ function buildSkuDecisionObject(
     action: row.unified_action,
     display,
     reasoning,
+    policy_trace: row.policy_trace,
     expected_profit_impact: row.profit_delta,
     why_selected: scenarioComparison.decision_explanation.selection_reason,
     alternative_actions: scenarioComparison.scenarios

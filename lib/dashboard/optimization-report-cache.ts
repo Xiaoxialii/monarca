@@ -88,6 +88,7 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
 
   const reportShell = {
     ...reportShellBase,
+    optimizationRun: content.optimizationRun ?? reportShellBase.optimizationRun ?? null,
     skuDecisions: [],
     portfolioSummary,
     allocationRecommendation,
@@ -257,6 +258,8 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
   const allocationRecommendation = cache.allocationRecommendationJson ?? null;
   const riskAlerts = asArray(cache.riskAlertsJson);
   const executionPlan = asArray(cache.executionPlanJson);
+  const reportShell = asRecord(cache.reportShellJson);
+  const optimizationRun = asRecord(reportShell.optimizationRun);
   const portfolioOptimization = {
     ...asRecord(cache.portfolioOptimizationJson),
     skuDecisions: asArray(cache.queueRowsJson),
@@ -268,7 +271,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     executionPlan
   };
   const decisionReport = {
-    ...asRecord(cache.reportShellJson),
+    ...reportShell,
     sku_portfolio_optimization: portfolioOptimization,
     skuDecisions: [],
     portfolioSummary,
@@ -291,6 +294,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     generated_at: cache.generatedAt instanceof Date ? cache.generatedAt.toISOString() : null,
     source_platforms: asArray(cache.sourcePlatforms),
     lineage: cache.lineageJson ?? null,
+    optimizationRun: Object.keys(optimizationRun).length ? optimizationRun : null,
     decisionSnapshotVersions: {
       algorithmVersion: cache.algorithmVersion,
       optimizationVersion: cache.optimizationVersion,

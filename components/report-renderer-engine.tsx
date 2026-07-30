@@ -31,9 +31,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { isRevenueChannel, normalizeRevenueChannel, revenueChannelOrNull } from "@/lib/channels/revenue-channel";
 import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 import {
-  canonicalOptimizationAction,
-  canonicalOptimizationGroup,
-  type CanonicalOptimizationAction
+  inventoryRestockUnits,
+  normalizeDecision,
+  type DecisionContract,
+  type NormalizedDecision
 } from "@/lib/optimization/action-taxonomy";
 import { cn } from "@/lib/utils";
 
@@ -1326,6 +1327,8 @@ export function DecisionAnalysisEnginePanel({
   optimizationStarted = true,
   onStartProfitOptimization,
   isLoadingOptimization = false,
+  optimizationRunStatus,
+  optimizationRunStep,
   showSkuTableEmptyState = false,
   isLoadingData = false
 }: {
@@ -1336,6 +1339,8 @@ export function DecisionAnalysisEnginePanel({
   optimizationStarted?: boolean;
   onStartProfitOptimization?: () => void | Promise<void>;
   isLoadingOptimization?: boolean;
+  optimizationRunStatus?: string;
+  optimizationRunStep?: string | null;
   showSkuTableEmptyState?: boolean;
   showInitialShell?: boolean;
   isLoadingData?: boolean;
@@ -1354,6 +1359,8 @@ export function DecisionAnalysisEnginePanel({
             optimizationStarted={optimizationStarted}
             onStartProfitOptimization={onStartProfitOptimization}
             isLoadingOptimization={isLoadingOptimization || isLoadingData}
+            optimizationRunStatus={optimizationRunStatus}
+            optimizationRunStep={optimizationRunStep}
             showSkuTableEmptyState
           />
         </section>
@@ -1382,6 +1389,8 @@ export function DecisionAnalysisEnginePanel({
         optimizationStarted={optimizationStarted}
         onStartProfitOptimization={onStartProfitOptimization}
         isLoadingOptimization={isLoadingOptimization}
+        optimizationRunStatus={optimizationRunStatus}
+        optimizationRunStep={optimizationRunStep}
         showSkuTableEmptyState={showSkuTableEmptyState}
       />
     </section>
@@ -1395,6 +1404,8 @@ function SkuPortfolioOptimizationPanel({
   optimizationStarted = true,
   onStartProfitOptimization,
   isLoadingOptimization = false,
+  optimizationRunStatus,
+  optimizationRunStep,
   showSkuTableEmptyState = false
 }: {
   report: DecisionIntelligenceReportV1;
@@ -1403,6 +1414,8 @@ function SkuPortfolioOptimizationPanel({
   optimizationStarted?: boolean;
   onStartProfitOptimization?: () => void | Promise<void>;
   isLoadingOptimization?: boolean;
+  optimizationRunStatus?: string;
+  optimizationRunStep?: string | null;
   showSkuTableEmptyState?: boolean;
 }) {
   const isZh = locale === "zh";
@@ -1475,15 +1488,23 @@ function SkuPortfolioOptimizationPanel({
   const [actionStatuses, setActionStatuses] = useState<Record<string, "pending" | "accepted" | "rejected">>({});
   const [acceptedAtByDecision, setAcceptedAtByDecision] = useState<Record<string, string>>({});
   const [trackedOutcomeRows, setTrackedOutcomeRows] = useState<ActionOutcomeRow[]>(seedActionOutcomeRows);
+  const [acceptedImpactSummary, setAcceptedImpactSummary] = useState<AcceptedImpactSummary | null>(null);
+  const [actionPersistenceError, setActionPersistenceError] = useState<string | null>(null);
   const [selectedOutcomeRow, setSelectedOutcomeRow] = useState<ActionOutcomeRow | null>(null);
   const [selectedDecisionRow, setSelectedDecisionRow] = useState<PortfolioDecisionRow | null>(null);
   const [focusedOpsSku, setFocusedOpsSku] = useState<string | null>(null);
   const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted || isLoadingOptimization);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
+  const optimizationReportInstanceKey = useMemo(() => optimizationReportKey(report), [report]);
   const actionStatusHydrationKey = useMemo(() => decisionRows.map(decisionRowKey).join("|"), [decisionRows]);
   const [loadedActionStatusHydrationKey, setLoadedActionStatusHydrationKey] = useState<string | null>(null);
   const hasLoadedPersistedActionStatuses = !optimizationStarted || !decisionRows.length || loadedActionStatusHydrationKey === actionStatusHydrationKey;
   const isResolvingOptimizationState = isLoadingOptimization || !hasLoadedPersistedActionStatuses;
+  const optimizationStartLabel = isZh ? "运行利润优化" : "Run Profit Optimization";
+  const optimizationLoadingLabel = optimizationRunStep
+    ?? (optimizationRunStatus === "QUEUED"
+      ? (isZh ? "正在准备优化..." : "Preparing optimization...")
+      : (isZh ? "正在运行利润优化..." : "Running profit optimization..."));
   const displayedSkuRows = useMemo(() => {
     if (!focusedOpsSku) return visibleSkuRows;
     const matchedRows = visibleSkuRows.filter((row) => row.sku === focusedOpsSku);
@@ -1522,17 +1543,18 @@ function SkuPortfolioOptimizationPanel({
   const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
   const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
     ? 0
-    : acceptedDecisionRows.reduce((sum, row) => sum + safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta), 0);
+    : acceptedImpactSummary?.expectedProfitImpact
+      ?? acceptedDecisionRows.reduce((sum, row) => sum + safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? portfolioRowsBySku.get(row.skuId)?.profit_delta), 0);
   const displayedAcceptedLiftRate = displayedCurrentProfit > 0 ? displayedAcceptedProfitGain / displayedCurrentProfit : 0;
   const displayedAcceptedProjectedPortfolioProfit = displayedCurrentProfit + displayedAcceptedProfitGain;
   const displayedAcceptedAdditionalAds = shouldBlankOptimizationSummary
     ? 0
     : acceptedDecisionRows.reduce((sum, row) => {
-      const actionLabel = optimizationGoalForDecision(row).actionLabel;
+      const actionLabel = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
       return sum + Math.max(0, adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
     }, 0);
-  const hasAcceptedOptimizationActions = acceptedDecisionRows.length > 0;
+  const hasAcceptedOptimizationActions = (acceptedImpactSummary?.activeCount ?? acceptedDecisionRows.length) > 0;
   const displayedPendingOptimizationCountLabel = numberFormat.format(displayedPendingOptimizationCount);
   const displayedPendingDecisionRows = shouldBlankOptimizationSummary ? [] : pendingDecisionRows;
   const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
@@ -1563,6 +1585,7 @@ function SkuPortfolioOptimizationPanel({
     }
     const firstDecision = pendingDecisionRows[0];
     setSelectedDecisionRow(firstDecision);
+    setIsSkuOperationsOpen(false);
     setSkuChannel("all");
     setExpandedSku(firstDecision.skuId);
   }, [isResolvingOptimizationState, optimizationStarted, pendingDecisionRows, selectedDecisionRow]);
@@ -1600,6 +1623,10 @@ function SkuPortfolioOptimizationPanel({
 
         const matchedRow = decisionRows.find((row) => persistedActionMatchesDecisionRow(action, row));
         if (!matchedRow) continue;
+        const persistedInstanceKey = typeof action.action_payload?.decision_instance_key === "string"
+          ? action.action_payload.decision_instance_key
+          : null;
+        if (persistedInstanceKey && persistedInstanceKey !== decisionInstanceKey(matchedRow, optimizationReportInstanceKey)) continue;
 
         const key = decisionRowKey(matchedRow);
         nextStatuses[key] = status;
@@ -1622,102 +1649,203 @@ function SkuPortfolioOptimizationPanel({
     return () => {
       cancelled = true;
     };
-  }, [actionStatusHydrationKey, optimizationStarted, decisionRows]);
+  }, [actionStatusHydrationKey, optimizationReportInstanceKey, optimizationStarted, decisionRows]);
+
+  useEffect(() => {
+    if (!optimizationStarted) {
+      setAcceptedImpactSummary(null);
+      return;
+    }
+    let cancelled = false;
+
+    async function loadAcceptedImpactSummary() {
+      const response = await fetch(`/api/policy/actions?decisionInstancePrefix=${encodeURIComponent(`${optimizationReportInstanceKey}:`)}`, { cache: "no-store" }).catch(() => null);
+      if (!response?.ok) {
+        if (!cancelled) setAcceptedImpactSummary(null);
+        return;
+      }
+
+      const payload = await response.json().catch(() => null) as {
+        activeDecisions?: Array<{ expectedImpact?: number | null }>;
+      } | null;
+      const activeDecisions = Array.isArray(payload?.activeDecisions) ? payload.activeDecisions : [];
+      const expectedProfitImpact = activeDecisions.reduce((sum, row) => sum + safeNumber(row.expectedImpact), 0);
+
+      if (!cancelled) {
+        setAcceptedImpactSummary({
+          activeCount: activeDecisions.length,
+          expectedProfitImpact
+        });
+      }
+    }
+
+    void loadAcceptedImpactSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [optimizationReportInstanceKey, optimizationStarted]);
 
   const selectOptimizationQueueRow = (row: PortfolioDecisionRow) => {
     setSelectedDecisionRow(row);
     setFocusedOpsSku(row.skuId);
-    setIsSkuOperationsOpen(true);
+    setIsSkuOperationsOpen(false);
     setSkuChannel("all");
     setExpandedSku(row.skuId);
   };
 
   const acceptDecisionAction = async (row: PortfolioDecisionRow) => {
     const recommendation = portfolioRowsBySku.get(row.skuId);
-    const goal = optimizationGoalForDecision(row);
-    setActionStatuses((current) => ({ ...current, [decisionRowKey(row)]: "accepted" }));
-    setAcceptedAtByDecision((current) => ({ ...current, [decisionRowKey(row)]: todayDateOnly() }));
-    if (recommendation) {
-      setTrackedOutcomeRows((current) => upsertOutcomeRow(current, portfolioRowToOutcomeRow(recommendation, locale)));
-    }
-
-    await fetch("/api/actions/accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const goal = optimizationGoalForDecision(row, recommendation);
+    const key = decisionRowKey(row);
+    const instanceKey = decisionInstanceKey(row, optimizationReportInstanceKey);
+    if (!hasConcreteOptimizationReportKey(optimizationReportInstanceKey)) {
+      console.warn("Cannot accept optimization action before the optimization report instance is resolved.", {
         sku: row.skuId,
-        lifecycle_stage: row.lifecycle_stage,
-        action_type: row.action,
-        action_payload: {
-          action: row.sourceAction,
-          optimization_goal: `${goal.goalLabel} Optimization`,
-          display_action: goal.actionLabel,
-          sku_role: row.skuRole,
-          recommended_actions: row.recommendedActions,
-          decision_drivers: row.decisionDrivers,
-          ai_evidence: row.ai_evidence,
-          scenarios: row.scenarios,
-          selected_scenario: row.selected_scenario,
-          decision_explanation: row.decision_explanation,
-          simulation_horizon_days: row.simulation_horizon?.days ?? simulationHorizonDays,
-          confidence_breakdown: row.confidence_breakdown,
-          constraints_passed: row.constraints_passed
-        },
-        baseline_metrics: recommendation ? {
-          profit: recommendation.current_profit,
-          ad_spend: recommendation.simulation.current_ads_spend
-        } : {},
-        predicted_metrics: recommendation ? {
-          profit: recommendation.predicted_profit,
-          revenue: recommendation.simulation.predicted_revenue,
-          ad_spend: recommendation.simulation.recommended_ads_spend
-        } : {
-          profit_delta: row.expectedProfitImpact ?? row.estimatedProfitImpact
-        },
-        observation_window_days: row.simulation_horizon?.days ?? simulationHorizonDays,
-        confidence_score: row.confidence
-      })
-    }).catch(() => null);
+        action: row.action,
+        sourceAction: row.sourceAction,
+        optimizationReportInstanceKey
+      });
+      setActionPersistenceError(isZh
+        ? "当前优化报告实例尚未解析，无法保存 Accept。请刷新后重试。"
+        : "The current optimization report instance is not resolved. Refresh and try accepting again.");
+      return;
+    }
+    const acceptedAt = todayDateOnly();
+    const acceptedImpactDelta = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta);
+    setActionStatuses((current) => ({ ...current, [key]: "accepted" }));
+    setAcceptedAtByDecision((current) => ({ ...current, [key]: acceptedAt }));
+    setAcceptedImpactSummary((current) => current
+      ? {
+        activeCount: current.activeCount + 1,
+        expectedProfitImpact: current.expectedProfitImpact + acceptedImpactDelta
+      }
+      : current);
+
+    try {
+      const response = await fetch("/api/actions/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: row.skuId,
+          lifecycle_stage: row.lifecycle_stage,
+          action_type: row.action,
+          action_payload: {
+            decision_instance_key: instanceKey,
+            action: row.sourceAction,
+            optimization_goal: `${goal.goalLabel} Optimization`,
+            display_action: goal.actionLabel,
+            sku_role: row.skuRole,
+            recommended_actions: row.recommendedActions,
+            decision_drivers: row.decisionDrivers,
+            ai_evidence: row.ai_evidence,
+            scenarios: row.scenarios,
+            selected_scenario: row.selected_scenario,
+            decision_explanation: row.decision_explanation,
+            simulation_horizon_days: row.simulation_horizon?.days ?? simulationHorizonDays,
+            confidence_breakdown: row.confidence_breakdown,
+            constraints_passed: row.constraints_passed
+          },
+          baseline_metrics: recommendation ? {
+            profit: recommendation.current_profit,
+            ad_spend: recommendation.simulation?.current_ads_spend ?? recommendation.before_state?.ad_spend ?? 0
+          } : {},
+          predicted_metrics: recommendation ? {
+            profit: recommendation.predicted_profit,
+            profit_delta: recommendation.profit_delta ?? row.expectedProfitImpact ?? row.estimatedProfitImpact,
+            revenue: recommendation.simulation?.predicted_revenue ?? recommendation.after_state?.revenue ?? 0,
+            ad_spend: recommendation.simulation?.recommended_ads_spend ?? recommendation.after_state?.ad_spend ?? 0
+          } : {
+            profit_delta: row.expectedProfitImpact ?? row.estimatedProfitImpact
+          },
+          observation_window_days: row.simulation_horizon?.days ?? simulationHorizonDays,
+          confidence_score: row.confidence
+        })
+      });
+
+      const responsePayload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+      if (!response.ok || responsePayload?.ok !== true) {
+        throw new Error(responsePayload?.message || "Accept action failed");
+      }
+      setActionPersistenceError(null);
+
+      if (recommendation) {
+        setTrackedOutcomeRows((current) => upsertOutcomeRow(current, portfolioRowToOutcomeRow(recommendation, locale)));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Accept action failed";
+      console.error("Optimization action accept did not persist", {
+        sku: row.skuId,
+        action: row.action,
+        sourceAction: row.sourceAction,
+        decision_instance_key: instanceKey,
+        message
+      });
+      setActionPersistenceError(isZh
+        ? `Accept 没有写入数据库：${message}`
+        : `Accept was not saved: ${message}`);
+      setActionStatuses((current) => ({ ...current, [key]: "pending" }));
+      setAcceptedImpactSummary((current) => current
+        ? {
+          activeCount: Math.max(0, current.activeCount - 1),
+          expectedProfitImpact: Math.max(0, current.expectedProfitImpact - acceptedImpactDelta)
+        }
+        : current);
+      setAcceptedAtByDecision((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
   };
 
   const rejectDecisionAction = async (row: PortfolioDecisionRow) => {
     const recommendation = portfolioRowsBySku.get(row.skuId);
-    const goal = optimizationGoalForDecision(row);
-    setActionStatuses((current) => ({ ...current, [decisionRowKey(row)]: "rejected" }));
-    await fetch("/api/actions/reject", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sku: row.skuId,
-        lifecycle_stage: row.lifecycle_stage,
-        action_type: row.action,
-        action_payload: {
-          action: row.sourceAction,
-          optimization_goal: `${goal.goalLabel} Optimization`,
-          display_action: goal.actionLabel,
-          sku_role: row.skuRole,
-          recommended_actions: row.recommendedActions,
-          decision_drivers: row.decisionDrivers,
-          ai_evidence: row.ai_evidence,
-          scenarios: row.scenarios,
-          selected_scenario: row.selected_scenario,
-          decision_explanation: row.decision_explanation,
-          rejection_reason: "User rejected recommendation"
-        },
-        baseline_metrics: recommendation ? {
-          profit: recommendation.current_profit,
-          ad_spend: recommendation.simulation.current_ads_spend
-        } : {},
-        predicted_metrics: recommendation ? {
-          profit: recommendation.predicted_profit,
-          revenue: recommendation.simulation.predicted_revenue,
-          ad_spend: recommendation.simulation.recommended_ads_spend
-        } : {
-          profit_delta: row.expectedProfitImpact ?? row.estimatedProfitImpact
-        },
-        confidence_score: row.confidence
-      })
-    }).catch(() => null);
+    const goal = optimizationGoalForDecision(row, recommendation);
+    const key = decisionRowKey(row);
+    setActionStatuses((current) => ({ ...current, [key]: "rejected" }));
+
+    try {
+      const response = await fetch("/api/actions/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: row.skuId,
+          lifecycle_stage: row.lifecycle_stage,
+          action_type: row.action,
+          action_payload: {
+            action: row.sourceAction,
+            optimization_goal: `${goal.goalLabel} Optimization`,
+            display_action: goal.actionLabel,
+            sku_role: row.skuRole,
+            recommended_actions: row.recommendedActions,
+            decision_drivers: row.decisionDrivers,
+            ai_evidence: row.ai_evidence,
+            scenarios: row.scenarios,
+            selected_scenario: row.selected_scenario,
+            decision_explanation: row.decision_explanation,
+            rejection_reason: "User rejected recommendation"
+          },
+          baseline_metrics: recommendation ? {
+            profit: recommendation.current_profit,
+            ad_spend: recommendation.simulation?.current_ads_spend ?? recommendation.before_state?.ad_spend ?? 0
+          } : {},
+          predicted_metrics: recommendation ? {
+            profit: recommendation.predicted_profit,
+            profit_delta: recommendation.profit_delta ?? row.expectedProfitImpact ?? row.estimatedProfitImpact,
+            revenue: recommendation.simulation?.predicted_revenue ?? recommendation.after_state?.revenue ?? 0,
+            ad_spend: recommendation.simulation?.recommended_ads_spend ?? recommendation.after_state?.ad_spend ?? 0
+          } : {
+            profit_delta: row.expectedProfitImpact ?? row.estimatedProfitImpact
+          },
+          confidence_score: row.confidence
+        })
+      });
+
+      if (!response.ok) throw new Error("Reject action failed");
+    } catch {
+      setActionStatuses((current) => ({ ...current, [key]: "pending" }));
+    }
   };
 
   const openDecisionIntelligence = () => {
@@ -1743,7 +1871,7 @@ function SkuPortfolioOptimizationPanel({
 
 	  return (
 		    <div className="space-y-2 bg-transparent">
-		      {!shouldShowOptimizationStarter ? (
+	      {!shouldShowOptimizationStarter ? (
 		      <div className="sticky top-0 z-30 pb-2 pt-4">
 	        <div className="mb-3 flex items-center justify-between gap-3 px-1">
 	          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
@@ -1802,6 +1930,11 @@ function SkuPortfolioOptimizationPanel({
         </div>
 	      </div>
 		      ) : null}
+	      {actionPersistenceError ? (
+	        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+	          {actionPersistenceError}
+	        </div>
+	      ) : null}
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
 				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
@@ -1862,7 +1995,7 @@ function SkuPortfolioOptimizationPanel({
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
                   <p className="text-sm font-semibold text-slate-600">
-                    {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
+                    {optimizationLoadingLabel}
                   </p>
                 </div>
               </div>
@@ -2006,12 +2139,12 @@ function SkuPortfolioOptimizationPanel({
 	            isSkuOperationsOpen ? "grid min-h-[520px] place-items-center bg-transparent p-0" : "border border-emerald-200 bg-emerald-50/80 p-2 shadow-xl shadow-emerald-950/5"
           )}>
 	            {isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isResolvingOptimizationState) ? (
-	              <div className="translate-y-8 text-center">
+	              <div className="text-center">
                 <div className="space-y-5">
                   <p className="text-lg font-bold text-slate-950">
                     {isResolvingOptimizationState
-                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
-                      : (isZh ? "开始利润优化" : "Start profit optimization")}
+                      ? optimizationLoadingLabel
+                      : optimizationStartLabel}
                   </p>
 	                  <button
 	                    type="button"
@@ -2022,7 +2155,7 @@ function SkuPortfolioOptimizationPanel({
                     disabled={isResolvingOptimizationState}
                     className="inline-grid size-12 place-items-center rounded-lg bg-[#079669] text-white shadow-sm shadow-[rgba(7,150,105,0.15)] transition hover:bg-[#067f5a] disabled:cursor-not-allowed disabled:opacity-70"
                     aria-label={isResolvingOptimizationState
-                      ? (isZh ? "正在模拟利润优化" : "Simulating profit optimization")
+                      ? optimizationLoadingLabel
                       : (isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks")}
                   >
                     {isResolvingOptimizationState ? <RefreshCw className="size-5 animate-spin" /> : <ChevronRight className="size-6" />}
@@ -2034,7 +2167,7 @@ function SkuPortfolioOptimizationPanel({
                 <div className="space-y-3">
                   <RefreshCw className="mx-auto size-7 animate-spin text-emerald-700" />
                   <p className="text-sm font-semibold text-slate-600">
-                    {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
+                    {optimizationLoadingLabel}
                   </p>
                 </div>
               </div>
@@ -2081,7 +2214,7 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
         </h2>
         {isLoadingData ? (
           <p className="mt-5 text-sm font-semibold text-[#5747e8]">
-            {isZh ? "正在模拟利润优化" : "Simulating profit optimization"}
+            {isZh ? "正在加载优化数据" : "Loading optimization data"}
           </p>
         ) : null}
       </div>
@@ -2145,6 +2278,11 @@ type PersistedActionTrackingRecord = {
   status: string;
   accepted_at?: string | null;
   action_payload?: Record<string, unknown>;
+};
+
+type AcceptedImpactSummary = {
+  activeCount: number;
+  expectedProfitImpact: number;
 };
 
 type ActionOutcomeRow = {
@@ -2211,6 +2349,25 @@ function decisionRowKey(row: PortfolioDecisionRow) {
   return `${row.skuId}:${row.action}:${row.sourceAction}`;
 }
 
+function decisionInstanceKey(row: PortfolioDecisionRow, reportKey: string) {
+  return `${reportKey}:${decisionRowKey(row)}`;
+}
+
+function optimizationReportKey(report: DecisionIntelligenceReportV1) {
+  const reportRecord = objectRecord(report);
+  const optimizationRun = objectRecord(reportRecord.optimizationRun);
+  return String(
+    optimizationRun.optimization_run_id ||
+    optimizationRun.completed_at ||
+    reportRecord.generatedAt ||
+    "current-optimization-report"
+  );
+}
+
+function hasConcreteOptimizationReportKey(reportKey: string) {
+  return reportKey.trim().length > 0 && reportKey !== "current-optimization-report";
+}
+
 function persistedActionMatchesDecisionRow(action: PersistedActionTrackingRecord, row: PortfolioDecisionRow) {
   if (action.sku !== row.skuId) return false;
   if (action.action_type !== row.action) return false;
@@ -2261,7 +2418,7 @@ function OptimizationDecisionRail({
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(selectedRow ? decisionRowKey(selectedRow) : null);
   const hasManuallySelectedGoalRef = useRef(false);
   const goalCounts = useMemo(() => rows.reduce<Record<OptimizationGoal, number>>((counts, row) => {
-    const goal = optimizationGoalForDecision(row).goal;
+    const goal = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal;
     counts[goal] = (counts[goal] ?? 0) + 1;
     return counts;
   }, {
@@ -2269,18 +2426,18 @@ function OptimizationDecisionRail({
     PROFIT: 0,
     INVENTORY: 0,
     PORTFOLIO_HEALTH: 0
-  }), [rows]);
+  }), [portfolioRowsBySku, rows]);
   const displayedRows = selectedGoal
     ? rows.filter((row) => {
-      const goal = optimizationGoalForDecision(row);
+      const goal = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId));
       return goal.goal === selectedGoal && (!selectedGoalAction || goal.actionLabel === selectedGoalAction);
     })
     : rows;
   const goalRows = selectedGoal
-    ? rows.filter((row) => optimizationGoalForDecision(row).goal === selectedGoal)
+    ? rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === selectedGoal)
     : rows;
   const actionCounts = goalRows.reduce<Record<string, number>>((counts, row) => {
-    const label = optimizationGoalForDecision(row).actionLabel;
+    const label = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
     counts[label] = (counts[label] ?? 0) + 1;
     return counts;
   }, {});
@@ -2389,7 +2546,7 @@ function OptimizationDecisionRail({
 	          const recommendation = portfolioRowsBySku.get(row.skuId);
 	          const impact = row.expectedProfitImpact ?? row.estimatedProfitImpact ?? 0;
 	          const status = actionStatuses[key] === "accepted" ? "accepted" : actionStatuses[key] === "rejected" ? "rejected" : "awaiting_decision";
-	          const goal = optimizationGoalForDecision(row);
+	          const goal = optimizationGoalForDecision(row, recommendation);
 	          const actionDisplay = actionDisplayForDecision(row, recommendation);
 
           return (
@@ -2837,44 +2994,136 @@ function isNoActionDecisionRow(row: PortfolioDecisionRow) {
   return sourceAction === "HOLD" || (!sourceAction && !hasConcreteAction && row.action === "MONITOR");
 }
 
-function canonicalActionForDecision(row: PortfolioDecisionRow): CanonicalOptimizationAction | null {
+function decisionInventoryEvidence(row: PortfolioDecisionRow, recommendation?: PortfolioRow, detail?: SelectedSkuDetail) {
+  const payload = row as PortfolioDecisionRow & {
+    decision_contract?: DecisionContract;
+    simulation?: {
+      required_inventory?: number | null;
+      current_inventory?: number | null;
+      inventory_impact?: number | null;
+    };
+    before_state?: { inventory?: number | null };
+  };
+  const contractEvidence = payload.decision_contract?.evidence;
+  const traceEvidence = payload.decision_contract?.trace.evidence;
+  const recommendationSimulation = objectRecord(recommendation?.simulation);
+  const recommendationBeforeState = objectRecord(recommendation?.before_state);
+  const currentInventory =
+    numberOrNull(traceEvidence?.current_inventory) ??
+    numberOrNull(contractEvidence?.currentInventory) ??
+    numberOrNull(payload.simulation?.current_inventory) ??
+    numberOrNull(recommendationSimulation.current_inventory) ??
+    numberOrNull(payload.before_state?.inventory) ??
+    numberOrNull(recommendationBeforeState.inventory) ??
+    (detail ? numberOrNull(detail.current_stock) : null);
+  const requiredInventory =
+    numberOrNull(traceEvidence?.required_inventory) ??
+    numberOrNull(contractEvidence?.requiredInventory) ??
+    numberOrNull(payload.simulation?.required_inventory) ??
+    numberOrNull(recommendationSimulation.required_inventory);
+  const inventoryDelta =
+    numberOrNull(traceEvidence?.inventory_delta) ??
+    numberOrNull(contractEvidence?.inventoryDelta) ??
+    numberOrNull(contractEvidence?.recommendedInventoryChange) ??
+    numberOrNull(payload.simulation?.inventory_impact) ??
+    numberOrNull(recommendationSimulation.inventory_impact);
+  const inventoryGap =
+    numberOrNull(traceEvidence?.inventory_gap) ??
+    numberOrNull(contractEvidence?.inventoryGap) ??
+    (requiredInventory !== null && currentInventory !== null ? requiredInventory - currentInventory : null);
+
+  return {
+    currentInventory,
+    requiredInventory,
+    inventoryGap,
+    inventoryDelta
+  };
+}
+
+function normalizedDecisionForDecision(row: PortfolioDecisionRow, recommendation?: PortfolioRow, detail?: SelectedSkuDetail): NormalizedDecision {
   const payload = row as PortfolioDecisionRow & {
     canonical_action?: string | null;
     unified_action?: string | null;
-    simulation?: { required_inventory?: number | null };
+    decision_contract?: DecisionContract;
+    display?: { title?: string | null };
+    stockout_risk?: boolean | string | null;
+    days_of_inventory?: number | null;
+    simulation?: {
+      required_inventory?: number | null;
+      current_inventory?: number | null;
+      inventory_impact?: number | null;
+      recommended_ads_spend?: number | null;
+      current_ads_spend?: number | null;
+    };
     before_state?: { inventory?: number | null };
   };
+  const contract = payload.decision_contract;
+  const evidence = contract?.evidence;
+  const impact = contract?.impact;
+  const inventoryEvidence = decisionInventoryEvidence(row, recommendation, detail);
+  const recommendedAdsSpend = payload.simulation?.recommended_ads_spend ?? recommendation?.simulation?.recommended_ads_spend ?? null;
+  const currentAdsSpend = payload.simulation?.current_ads_spend ?? recommendation?.simulation?.current_ads_spend ?? null;
+  const displayTitle =
+    payload.display?.title ??
+    (recommendation as { display?: { title?: string | null } } | undefined)?.display?.title ??
+    (row.sku_decision_object as { display?: { title?: string | null } } | undefined)?.display?.title ??
+    null;
+  const roas = row.simulation_estimate?.revenue_simulation?.base_roas ??
+    (detail ? detail.current_revenue / Math.max(1, detail.current_ads_spend) : null);
 
-  return canonicalOptimizationAction({
-    canonicalAction: payload.canonical_action,
+  return normalizeDecision({
+    canonicalAction: contract?.action ?? payload.canonical_action,
     sourceAction: row.sourceAction,
     action: row.action,
     unifiedAction: payload.unified_action,
-    inventoryRisk: "inventoryRisk" in row ? Boolean(row.inventoryRisk) : null,
-    requiredInventory: payload.simulation?.required_inventory ?? null,
-    currentInventory: payload.before_state?.inventory ?? null,
-    recommendedText: `${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")}`
+    inventoryRisk: evidence?.riskTypes?.inventory_shortage_risk ?? ("inventoryRisk" in row ? Boolean(row.inventoryRisk) : null),
+    stockoutRisk: evidence?.stockoutRisk ?? payload.stockout_risk,
+    requiredInventory: inventoryEvidence.requiredInventory,
+    currentInventory: inventoryEvidence.currentInventory,
+    inventoryGap: inventoryEvidence.inventoryGap,
+    inventoryDelta: inventoryEvidence.inventoryDelta,
+    recommendedInventoryChange: inventoryEvidence.inventoryDelta,
+    adBudgetChange: evidence?.adBudgetChange ?? (recommendedAdsSpend !== null && currentAdsSpend !== null ? safeNumber(recommendedAdsSpend) - safeNumber(currentAdsSpend) : null),
+    roas: evidence?.roas ?? roas,
+    expectedProfitImpact: impact?.expectedProfitChange ?? row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? null,
+    recommendedText: evidence?.recommendedText ?? `${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")}`,
+    displayTitle
   });
 }
 
-function optimizationGoalForDecision(row: PortfolioDecisionRow): { goal: OptimizationGoal; goalLabel: string; actionLabel: string } {
+function optimizationGoalForDecision(row: PortfolioDecisionRow, recommendation?: PortfolioRow): { goal: OptimizationGoal; goalLabel: string; actionLabel: string } {
   const sourceAction = String(row.sourceAction ?? "");
   const recommendedText = `${safeStringArray(row.recommendedActions).join(" ")} ${safeStringArray(row.recommendedExecution).join(" ")} ${sourceAction}`.toLowerCase();
   const backendGoal = (row as { optimization_goal?: string }).optimization_goal;
   const backendUnifiedAction = (row as { unified_action?: string }).unified_action;
   const opportunityType = (row as { opportunity_type?: string }).opportunity_type;
-  const canonicalAction = canonicalActionForDecision(row);
+  const normalized = normalizedDecisionForDecision(row, recommendation);
 
-  if (canonicalAction === "SCALE_ADS" || canonicalAction === "RESTOCK_INVENTORY" || canonicalAction === "CLEAR_EXCESS_INVENTORY") {
-    const canonicalGroup = canonicalOptimizationGroup(canonicalAction);
-    return { goal: canonicalGroup.goal, goalLabel: goalFilterDisplayLabel(canonicalGroup.goal), actionLabel: canonicalGroup.actionLabel };
+  if (normalized.action === "SCALE_ADS" || normalized.action === "INCREASE_BUDGET") {
+    return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Scale Ads" };
   }
-  if (canonicalAction === "REDUCE_ADS") {
+  if (normalized.action === "RESTOCK_INVENTORY") {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Restock Inventory" };
+  }
+  if (normalized.action === "CLEAR_EXCESS_INVENTORY" || normalized.action === "REDUCE_INVENTORY") {
+    return { goal: "INVENTORY", goalLabel: "Inventory", actionLabel: "Clear Excess Inventory" };
+  }
+  if (normalized.action === "ADJUST_PRICE") {
+    const actionLabel = sourceAction === "PRICE_DOWN_10"
+      ? "Decrease Price"
+      : sourceAction === "PROMOTION_TEST"
+        ? "Run Promotion"
+        : "Increase Price";
+    return { goal: "PROFIT", goalLabel: "Profit", actionLabel };
+  }
+  if (normalized.action === "REDUCE_ADS") {
     return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: opportunityType === "AD_EFFICIENCY" || opportunityType === "PORTFOLIO" || recommendedText.includes("waste") ? "Reduce Ad Waste" : "Reallocate Budget" };
   }
-  if (canonicalAction === "HOLD") {
-    const canonicalGroup = canonicalOptimizationGroup(canonicalAction);
-    return { goal: canonicalGroup.goal, goalLabel: goalFilterDisplayLabel(canonicalGroup.goal), actionLabel: canonicalGroup.actionLabel };
+  if (normalized.action === "STOP_SKU") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
+  }
+  if (normalized.action === "HOLD") {
+    return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "No Action Required" };
   }
   if (sourceAction === "STOP") {
     return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
@@ -2957,17 +3206,25 @@ function inventoryActionUnits(
   mode: "restock" | "clear"
 ) {
   const rowWithSimulation = row as PortfolioDecisionRow & {
-    simulation?: { required_inventory?: number; inventory_impact?: number };
+    simulation?: { required_inventory?: number; current_inventory?: number; inventory_impact?: number };
     before_state?: { inventory?: number };
   };
+  const evidence = decisionInventoryEvidence(row, recommendation, detail);
+  const recommendationSimulation = objectRecord(recommendation?.simulation);
   const simulation = recommendation?.simulation ?? rowWithSimulation.simulation;
   const beforeState = recommendation?.before_state ?? rowWithSimulation.before_state;
-  const currentInventory = beforeState?.inventory ?? detail?.current_stock ?? 0;
-  const requiredInventory = simulation?.required_inventory ?? 0;
+  const simulationCurrentInventory = simulation === recommendation?.simulation
+    ? numberOrNull(recommendationSimulation.current_inventory)
+    : numberOrNull(rowWithSimulation.simulation?.current_inventory);
+  const currentInventory = evidence.currentInventory ?? simulationCurrentInventory ?? beforeState?.inventory ?? detail?.current_stock ?? 0;
+  const requiredInventory = evidence.requiredInventory ?? simulation?.required_inventory ?? 0;
   const inventoryImpact = simulation?.inventory_impact ?? 0;
   const value = mode === "restock"
-    ? Math.max(0, requiredInventory - currentInventory, inventoryImpact)
-    : Math.max(0, currentInventory - requiredInventory, Math.abs(Math.min(0, inventoryImpact)));
+    ? inventoryRestockUnits({
+      requiredInventory,
+      currentInventory
+    })
+    : Math.max(0, currentInventory - requiredInventory, Math.abs(Math.min(0, evidence.inventoryDelta ?? inventoryImpact)));
 
   return Number.isFinite(value) ? Math.round(value) : 0;
 }
@@ -3016,7 +3273,7 @@ function actionDisplayForDecision(
   detail?: SelectedSkuDetail,
   simulationHorizonDays = 30
 ): DecisionActionDisplay {
-  const goal = optimizationGoalForDecision(row);
+  const goal = optimizationGoalForDecision(row, recommendation);
   const backendDisplay =
     (row as { display?: DecisionActionDisplay }).display ??
     (recommendation as { display?: DecisionActionDisplay } | undefined)?.display ??
@@ -3110,7 +3367,6 @@ function actionDisplayForDecision(
         reason: "Negative profit trend and limited recovery potential."
       };
     }
-    if (!backendDisplayIsNoAction) return backendDisplay;
   }
 
   const sourceAction = row.sourceAction ?? "";
@@ -3142,7 +3398,7 @@ function actionDisplayForDecision(
     };
   }
 
-  if (sourceAction.includes("PRICE") || sourceAction === "PROMOTION_TEST" || goal.actionLabel === "Increase Price" || goal.actionLabel === "Decrease Price" || goal.actionLabel === "Run Promotion") {
+  if (goal.actionLabel === "Increase Price" || goal.actionLabel === "Decrease Price" || goal.actionLabel === "Run Promotion") {
     if (sourceAction === "PROMOTION_TEST" || goal.actionLabel === "Run Promotion") {
       return {
         title: "Run Promotion 10%",
@@ -3168,7 +3424,7 @@ function actionDisplayForDecision(
     };
   }
 
-  if (goal.actionLabel === "Scale Ads" || sourceAction.includes("SCALE") || sourceAction === "TEST_AD_SPEND") {
+  if (goal.actionLabel === "Scale Ads") {
     return {
       title: "Scale Ads",
       icon: "🚀",
@@ -3180,7 +3436,7 @@ function actionDisplayForDecision(
     };
   }
 
-  if (goal.actionLabel === "Expand Channel" || sourceAction === "SHIFT_CHANNEL") {
+  if (goal.actionLabel === "Expand Channel") {
     return {
       title: "Expand Channel to TikTok",
       icon: "🌎",
@@ -3192,7 +3448,7 @@ function actionDisplayForDecision(
     };
   }
 
-  if (goal.actionLabel === "Restock Inventory" || sourceAction.includes("RESTOCK")) {
+  if (goal.actionLabel === "Restock Inventory") {
     const restockText = restockUnits > 0 ? `Restock ${restockUnits.toLocaleString("en-US")} units` : "Restock Inventory";
     const restockDescription = restockUnits > 0 ? `Add ${restockUnits.toLocaleString("en-US")} units inventory` : "Add inventory to prevent stockout risk";
     return {
@@ -3206,7 +3462,7 @@ function actionDisplayForDecision(
     };
   }
 
-  if (goal.actionLabel === "Clear Excess Inventory" || sourceAction === "REDUCE_INVENTORY") {
+  if (goal.actionLabel === "Clear Excess Inventory") {
     const clearText = clearUnits > 0 ? `Clear Excess Inventory ${clearUnits.toLocaleString("en-US")} units` : "Clear Excess Inventory";
     const clearDescription = clearUnits > 0
       ? `Clear ${clearUnits.toLocaleString("en-US")} excess units from active inventory exposure`
@@ -3277,12 +3533,7 @@ function actionReasoningForDecision(
   simulationHorizonDays: number,
   recommendation?: PortfolioRow
 ): DecisionActionReasoning {
-  const backendReasoning =
-    (row as { reasoning?: DecisionActionReasoning }).reasoning ??
-    (recommendation as { reasoning?: DecisionActionReasoning } | undefined)?.reasoning ??
-    (row.sku_decision_object as { reasoning?: DecisionActionReasoning } | undefined)?.reasoning;
-
-  const goal = optimizationGoalForDecision(row);
+  const goal = optimizationGoalForDecision(row, recommendation);
   const expectedProfit = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact ?? recommendation?.profit_delta ?? detail.expected_profit_lift_30d);
   const roas = row.simulation_estimate?.revenue_simulation?.base_roas ?? detail.current_revenue / Math.max(1, detail.current_ads_spend);
   const marginalRoas = row.simulation_estimate?.revenue_simulation?.marginal_roas ?? Math.max(1.2, roas * 0.83);
@@ -3389,8 +3640,6 @@ function actionReasoningForDecision(
     };
   }
 
-  if (backendReasoning && !reasoningLooksLikeHold(backendReasoning)) return backendReasoning;
-
   return {
     title: `Why AI Recommended ${display.title}`,
     reasons: [
@@ -3400,16 +3649,6 @@ function actionReasoningForDecision(
     ],
     summary: "AI recommends exiting this SKU to protect portfolio profitability."
   };
-}
-
-function reasoningLooksLikeHold(reasoning: DecisionActionReasoning) {
-  const text = [
-    reasoning.title,
-    reasoning.summary,
-    ...reasoning.reasons.map((reason) => `${reason.signal} ${reason.metric} ${reason.explanation}`)
-  ].join(" ");
-
-  return /hold|monitor|no alternative action|current operation is already efficient|waiting for stronger signal/i.test(text);
 }
 
 function RoleBadge({ role, locale }: { role: "ACQUISITION" | "PROFIT" | "GROWTH" | "DRAIN"; locale: RendererLocale }) {
@@ -3560,6 +3799,10 @@ function SelectedSkuOptimizationPanel({
     : null;
   const accuracy = predictionError === null ? detail.tracking_summary.accuracy_score : Math.max(0, 1 - Math.abs(predictionError));
   const decision = buildSkuDecisionObject(row, recommendation, detail, visibleRows, actionStatus, simulationHorizonDays);
+  const decisionTrace = decision.decision_trace;
+  const traceRejectedActions = Array.isArray(decisionTrace?.rejectedActions) ? decisionTrace.rejectedActions : [];
+  const traceEvidence = decisionTrace?.evidence ?? {};
+  const reasoningReasons = Array.isArray(decision.reasoning?.reasons) ? decision.reasoning.reasons : [];
 
   return (
     <aside className="sticky bottom-0 top-auto mx-auto max-h-[68vh] max-w-5xl overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
@@ -3613,8 +3856,23 @@ function SelectedSkuOptimizationPanel({
             </div>
             <p className="mt-3 text-sm font-bold text-slate-950">Why AI Selected This Decision</p>
             <p className="mt-1 text-xs font-bold text-slate-700">{decision.reasoning.title}</p>
+            <div className="mt-3 rounded-md bg-white/70 p-2 text-xs font-semibold text-slate-600 ring-1 ring-emerald-100">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-950">Decision Trace</span>
+                <span>{decisionTrace?.originalAction ?? "UNKNOWN"} → {decisionTrace?.finalAction ?? decision.action}</span>
+              </div>
+              <p className="mt-1 leading-5">{decisionTrace?.validationReason ?? "Decision passed runtime normalization."}</p>
+              {traceRejectedActions.length ? (
+                <p className="mt-1 leading-5">
+                  Rejected: {traceRejectedActions.map((item) => `${item.action} (${item.reason})`).join(", ")}
+                </p>
+              ) : null}
+              <p className="mt-1 leading-5">
+                Inventory gap: {traceEvidence.inventory_gap ?? "n/a"} · Current: {traceEvidence.current_inventory ?? "n/a"} · Required: {traceEvidence.required_inventory ?? "n/a"} · ROAS: {traceEvidence.roas ?? "n/a"}
+              </p>
+            </div>
             <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700">
-              {decision.reasoning.reasons.map((item) => (
+              {reasoningReasons.map((item) => (
                 <div key={item.signal} className="rounded-md bg-white/70 p-2">
                   <span className="inline-flex items-center gap-2 text-slate-950">
                     <span className="text-emerald-700">✓</span>
@@ -3722,6 +3980,7 @@ type SkuDecisionObject = {
     change: string;
     strong?: boolean;
   }>;
+  decision_trace: DecisionContract["trace"];
   tracking: {
     current_ads_spend: number;
     current_strategy_profit: number;
@@ -3793,7 +4052,7 @@ function buildDecisionSummaryComparisonRows(
   actionDisplay: DecisionActionDisplay,
   horizonDays: number
 ): SkuDecisionObject["summary_comparison"] {
-  const goal = optimizationGoalForDecision(row);
+  const goal = optimizationGoalForDecision(row, recommendation);
   const rows: SkuDecisionObject["summary_comparison"] = [];
   const currentProfit = detail.current_profit;
   const projectedProfit = detail.predicted_profit;
@@ -4327,8 +4586,9 @@ function selectedSkuDetail(
   const currentMargin = safeNumber(recommendation?.before_state?.margin, Math.max(0.18, Math.min(0.62, currentProfit / Math.max(1, currentRevenue))));
   const predictedMargin = safeNumber(recommendation?.simulation?.predicted_margin ?? recommendation?.after_state?.margin, Math.min(0.72, currentMargin + Math.max(0.02, safeNumber(recommendation?.simulation?.margin_change, 0.056))));
   const currentAdsSpend = safeNumber(recommendation?.simulation?.current_ads_spend ?? recommendation?.before_state?.ad_spend, Math.max(0, expectedLift * 0.16));
-  const currentStock = safeNumber(recommendation?.before_state?.inventory ?? recommendation?.simulation?.required_inventory, 818);
-  const requiredInventory = numberOrNull(recommendation?.simulation?.required_inventory);
+  const inventoryEvidence = decisionInventoryEvidence(row, recommendation);
+  const currentStock = safeNumber(inventoryEvidence.currentInventory ?? objectRecord(recommendation?.simulation).current_inventory ?? recommendation?.before_state?.inventory, 818);
+  const requiredInventory = inventoryEvidence.requiredInventory ?? numberOrNull(recommendation?.simulation?.required_inventory);
   const salesVelocity = Math.max(0.2, requiredInventory ? requiredInventory / Math.max(1, simulationHorizonDays) : 3.2);
   const predictedDailyDemand = salesVelocity * (row.action === "SCALE" ? 1.5 : row.action === "REDUCE" ? 0.75 : 1.12);
   const predictedCumulativeLift = expectedLift;
@@ -4417,7 +4677,8 @@ function buildSkuDecisionObject(
   actionStatus: "pending" | "accepted" | "rejected",
   simulationHorizonDays: number
 ): SkuDecisionObject {
-  const goal = optimizationGoalForDecision(row);
+  const goal = optimizationGoalForDecision(row, recommendation);
+  const normalizedDecision = normalizedDecisionForDecision(row, recommendation, detail);
   const goalIcon = goal.goal === "GROWTH" ? "🚀" : goal.goal === "PROFIT" ? "💰" : goal.goal === "INVENTORY" ? "📦" : "🛑";
   const actionDisplay = actionDisplayForDecision(row, recommendation, detail, simulationHorizonDays);
   const actionReasoning = actionReasoningForDecision(row, detail, actionDisplay, simulationHorizonDays);
@@ -4543,6 +4804,7 @@ function buildSkuDecisionObject(
     ],
     scenarios: decisionScenarios,
     summary_comparison: buildDecisionSummaryComparisonRows(row, recommendation, detail, actionDisplay, simulationHorizonDays),
+    decision_trace: normalizedDecision.trace,
     tracking: {
       current_ads_spend: detail.current_ads_spend,
       current_strategy_profit: detail.current_profit,
@@ -5547,7 +5809,8 @@ function portfolioEvidenceSummary(row: PortfolioRow, locale: RendererLocale) {
 }
 
 function extractEvidenceNumber(evidence: string[], key: string) {
-  const line = evidence.find((item) => item.startsWith(`${key}=`));
+  const evidenceLines = Array.isArray(evidence) ? evidence : [];
+  const line = evidenceLines.find((item) => typeof item === "string" && item.startsWith(`${key}=`));
   if (!line) return null;
   const value = Number(line.split("=")[1]);
   return Number.isFinite(value) ? value : null;

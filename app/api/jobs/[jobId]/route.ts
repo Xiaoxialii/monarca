@@ -1,5 +1,6 @@
 import { WorkspaceRole } from "@prisma/client";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -38,6 +39,14 @@ export async function GET(
 
     if (!job) {
       return NextResponse.json({ ok: false, message: "Job not found." }, { status: 404 });
+    }
+
+    if (job.type === "SKU_OPTIMIZATION" && job.status === "QUEUED") {
+      after(() => {
+        void processJob(job.id).catch((error) => {
+          console.error("Failed to process queued optimization job during status polling", error);
+        });
+      });
     }
 
     return NextResponse.json({

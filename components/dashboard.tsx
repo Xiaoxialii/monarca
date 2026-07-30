@@ -9739,6 +9739,96 @@ async function fetchReportJson<T>(
     : fallbackMessage);
 }
 
+type ProfitOptimizationJobStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "PAUSED" | "CANCELLED";
+
+type ProfitOptimizationJob = {
+  id: string;
+  status: ProfitOptimizationJobStatus;
+  progress?: number | null;
+  currentStep?: string | null;
+  errorMessage?: string | null;
+  completedAt?: string | null;
+};
+
+type ProfitOptimizationJobPayload = {
+  ok?: boolean;
+  jobId?: string;
+  status?: ProfitOptimizationJobStatus;
+  currentStep?: string | null;
+  message?: string;
+};
+
+type ProfitOptimizationJobStatusPayload = {
+  ok?: boolean;
+  message?: string;
+  job?: ProfitOptimizationJob;
+};
+
+type ProfitOptimizationDecisionReportPayload = {
+  ok?: boolean;
+  message?: string | null;
+  optimizationRun?: {
+    optimization_run_id?: string | null;
+    completed_at?: string | null;
+  } | null;
+} | null;
+
+function profitOptimizationStatusMessage(
+  status: ProfitOptimizationJobStatus | undefined,
+  currentStep: string | null | undefined,
+  isZh: boolean
+) {
+  if (currentStep && currentStep !== "Queued") return currentStep;
+  switch (status) {
+    case "QUEUED":
+      return isZh ? "正在准备优化..." : "Preparing optimization...";
+    case "PROCESSING":
+      return isZh ? "正在分析 SKU 组合..." : "Analyzing SKU portfolio...";
+    case "COMPLETED":
+      return isZh ? "优化已完成。" : "Optimization completed.";
+    case "FAILED":
+      return isZh ? "优化运行失败。" : "Optimization failed.";
+    default:
+      return isZh ? "正在评估优化方案..." : "Evaluating optimization scenarios...";
+  }
+}
+
+async function waitForProfitOptimizationJob(
+  jobId: string,
+  input: {
+    isZh: boolean;
+    onStatus: (job: ProfitOptimizationJob) => void;
+  }
+) {
+  const terminalStatuses = new Set<ProfitOptimizationJobStatus>(["COMPLETED", "FAILED", "CANCELLED"]);
+
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 2000));
+    const { response, payload } = await fetchReportJson<ProfitOptimizationJobStatusPayload>(
+      `/api/jobs/${encodeURIComponent(jobId)}`,
+      { cache: "no-store" },
+      input.isZh
+        ? "无法获取优化任务状态，请刷新页面后重试。"
+        : "Could not load optimization job status. Refresh the page and try again."
+    );
+    if (!response.ok || !payload?.ok || !payload.job) {
+      throw new Error(payload?.message || (input.isZh ? "优化任务状态读取失败" : "Failed to load optimization job status"));
+    }
+
+    input.onStatus(payload.job);
+    if (terminalStatuses.has(payload.job.status)) return payload.job;
+  }
+
+  throw new Error(input.isZh ? "优化任务仍在运行，请稍后刷新查看。" : "Optimization is still running. Refresh later to view it.");
+}
+
+function optimizationDecisionReportRunId(payload: ProfitOptimizationDecisionReportPayload) {
+  const optimizationRun = payload?.optimizationRun;
+  return typeof optimizationRun?.optimization_run_id === "string" && optimizationRun.optimization_run_id.trim()
+    ? optimizationRun.optimization_run_id.trim()
+    : null;
+}
+
 function ReportDateRangeSelector({
   selectedRange,
   customStartDate,
@@ -16600,9 +16690,18 @@ function ReportsPage({
     message?: string;
     hasConnectedDataSource?: boolean;
     decision_report?: DecisionIntelligenceReportV1 | null;
+    optimizationRun?: {
+      completed_at?: string | null;
+      started_at?: string | null;
+      policy_version?: string | null;
+      analyzed_sku_count?: number | null;
+    } | null;
   } | null>(null);
-  const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(false);
+  const [isLoadingAnalysisDecisionReport, setIsLoadingAnalysisDecisionReport] = useState(() => hasConnectedDatabase);
   const [hasStartedProfitOptimization, setHasStartedProfitOptimization] = useState(false);
+  const [isRunningProfitOptimization, setIsRunningProfitOptimization] = useState(false);
+  const [profitOptimizationRunStatus, setProfitOptimizationRunStatus] = useState<ProfitOptimizationJobStatus | "IDLE">("IDLE");
+  const [profitOptimizationRunStep, setProfitOptimizationRunStep] = useState<string | null>(null);
   const analysisDecisionReportRequestRef = useRef(0);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const decisionApiHasConnectedDatabase = analysisDecisionReportPayload?.hasConnectedDataSource === true || Boolean(analysisDecisionReportPayload?.decision_report);
@@ -16616,6 +16715,9 @@ function ReportsPage({
 	    setIsLoading(false);
     setIsLoadingAnalysisDecisionReport(false);
     setHasStartedProfitOptimization(false);
+    setIsRunningProfitOptimization(false);
+    setProfitOptimizationRunStatus("IDLE");
+    setProfitOptimizationRunStep(null);
 	    setIsGenerating(false);
 	    setStatusMessage(null);
 	  }, [effectiveHasConnectedDatabase, reportData]);
@@ -16663,6 +16765,9 @@ function ReportsPage({
       if (response.ok && payload?.ok) {
         if (analysisDecisionReportRequestRef.current === requestId) {
           setAnalysisDecisionReportPayload(payload);
+          if (payload.decision_report || payload.optimizationRun?.completed_at) {
+            setHasStartedProfitOptimization(true);
+          }
         }
       }
       return payload;
@@ -16683,11 +16788,73 @@ function ReportsPage({
     }
   }, [isZh]);
 
+  useEffect(() => {
+    if (!effectiveHasConnectedDatabase) return;
+    void loadAnalysisDecisionReport("full");
+  }, [effectiveHasConnectedDatabase, loadAnalysisDecisionReport]);
+
   const startProfitOptimization = useCallback(async () => {
     setStatusMessage(null);
     setHasStartedProfitOptimization(true);
-    await loadAnalysisDecisionReport("full");
-  }, [loadAnalysisDecisionReport]);
+    setIsRunningProfitOptimization(true);
+    setProfitOptimizationRunStatus("QUEUED");
+    setProfitOptimizationRunStep(profitOptimizationStatusMessage("QUEUED", null, isZh));
+    try {
+      const { response, payload } = await fetchReportJson<ProfitOptimizationJobPayload>(
+        "/api/dashboard/ecommerce/optimize",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userRequested: true })
+        },
+        isZh
+          ? "优化任务没有到达 Monarca 服务，请刷新页面后重试。"
+          : "The optimization request did not reach Monarca. Refresh the page and try again."
+      );
+
+      if (!response.ok || !payload?.ok || !payload.jobId) {
+        throw new Error(payload?.message || (isZh ? "创建优化任务失败" : "Failed to create optimization job"));
+      }
+
+      setProfitOptimizationRunStatus(payload.status ?? "QUEUED");
+      setProfitOptimizationRunStep(profitOptimizationStatusMessage(payload.status, payload.currentStep, isZh));
+
+      const completedJob = await waitForProfitOptimizationJob(payload.jobId, {
+        isZh,
+        onStatus: (job) => {
+          setProfitOptimizationRunStatus(job.status);
+          setProfitOptimizationRunStep(profitOptimizationStatusMessage(job.status, job.currentStep, isZh));
+        }
+      });
+
+      if (completedJob.status !== "COMPLETED") {
+        throw new Error(completedJob.errorMessage || (isZh ? "优化任务未完成" : "Optimization job did not complete"));
+      }
+
+      setProfitOptimizationRunStatus("COMPLETED");
+      setProfitOptimizationRunStep(profitOptimizationStatusMessage("COMPLETED", completedJob.currentStep, isZh));
+      let latestReport = await loadAnalysisDecisionReport("full");
+      for (let attempt = 0; attempt < 8 && optimizationDecisionReportRunId(latestReport) !== completedJob.id; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 750 : 1500));
+        latestReport = await loadAnalysisDecisionReport("full");
+      }
+      if (!latestReport?.ok) {
+        throw new Error(latestReport?.message || (isZh ? "优化完成，但最新决策报表刷新失败" : "Optimization completed, but the latest decision report could not be refreshed"));
+      }
+      if (optimizationDecisionReportRunId(latestReport) !== completedJob.id) {
+        throw new Error(isZh
+          ? "优化已完成，但页面尚未读到本次优化生成的最新报表，请稍后刷新。"
+          : "Optimization completed, but the latest report for this run is not available yet. Refresh shortly.");
+      }
+      setStatusMessage(isZh ? "利润优化已完成，推荐已刷新。" : "Profit optimization completed and recommendations refreshed.");
+    } catch (error) {
+      setProfitOptimizationRunStatus("FAILED");
+      setProfitOptimizationRunStep(error instanceof Error ? error.message : (isZh ? "优化运行失败" : "Optimization failed"));
+      setStatusMessage(error instanceof Error ? error.message : (isZh ? "优化运行失败" : "Optimization failed"));
+    } finally {
+      setIsRunningProfitOptimization(false);
+    }
+  }, [isZh, loadAnalysisDecisionReport]);
 
 	  const generateAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
 	    setIsGenerating(true);
@@ -16746,7 +16913,6 @@ function ReportsPage({
 
 	  const aiReport = reportData?.briefing?.payloadJson?.aiReport ?? null;
 	  const latestMetricResults = reportData?.briefing?.payloadJson?.metricResults ?? [];
-	  const generatedAt = reportData?.briefing?.payloadJson?.generatedAt ?? reportData?.briefing?.createdAt;
 	  const isAnalysisCacheMiss = reportData?.briefing?.payloadJson?.cache?.status === "miss";
 	  const shouldShowEmptyAnalysisState = !effectiveHasConnectedDatabase;
 	  const shouldShowSkuTableEmptyState = !effectiveHasConnectedDatabase;
@@ -16802,9 +16968,9 @@ function ReportsPage({
   const reportHeaderAction = (
     <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">
       <span>
-        {generatedAt
-          ? `${isZh ? "上次更新时间" : "Last updated"} ${formatReportDate(generatedAt)}`
-          : (isZh ? "尚未生成" : "Not generated")}
+        {analysisDecisionReportPayload?.optimizationRun?.completed_at
+          ? `${isZh ? "优化完成时间" : "Optimized"} ${formatReportDate(analysisDecisionReportPayload.optimizationRun.completed_at)}`
+          : (isZh ? "尚未优化" : "Not optimized")}
       </span>
       {entitlementText ? <span className="max-w-sm text-emerald-800">{entitlementText}</span> : null}
       {entitlement?.canGenerateReport !== false ? (
@@ -16824,6 +16990,15 @@ function ReportsPage({
       )}
     </div>
   );
+  const optimizationDecisionReport = useMemo(() => {
+    const report = analysisDecisionReportPayload?.decision_report ?? null;
+    const optimizationRun = analysisDecisionReportPayload?.optimizationRun ?? null;
+    if (!report || !optimizationRun) return report;
+    return {
+      ...report,
+      optimizationRun
+    } as DecisionIntelligenceReportV1;
+  }, [analysisDecisionReportPayload?.decision_report, analysisDecisionReportPayload?.optimizationRun]);
 
 	  return (
     <section id="reports" className="dashboard-density flex min-w-0 max-w-full flex-col gap-2 overflow-hidden scroll-mt-20">
@@ -16837,13 +17012,15 @@ function ReportsPage({
       {shouldShowEmptyAnalysisState ? (
         <>
           <DecisionAnalysisEnginePanel
-            report={analysisDecisionReportPayload?.decision_report ?? null}
+            report={optimizationDecisionReport}
             message={analysisDecisionReportPayload?.message}
             locale={locale}
             headerAction={reportHeaderAction}
             optimizationStarted={hasStartedProfitOptimization}
             onStartProfitOptimization={startProfitOptimization}
-            isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+            isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+            optimizationRunStatus={profitOptimizationRunStatus}
+            optimizationRunStep={profitOptimizationRunStep}
             showSkuTableEmptyState
             showInitialShell={shouldShowInitialAnalysisShell}
             isLoadingData={false}
@@ -16851,13 +17028,15 @@ function ReportsPage({
         </>
       ) : isLoading ? (
         <DecisionAnalysisEnginePanel
-          report={analysisDecisionReportPayload?.decision_report ?? null}
+          report={optimizationDecisionReport}
           message={analysisDecisionReportPayload?.message}
           locale={locale}
           headerAction={reportHeaderAction}
           optimizationStarted={hasStartedProfitOptimization}
           onStartProfitOptimization={startProfitOptimization}
-          isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+          isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+          optimizationRunStatus={profitOptimizationRunStatus}
+          optimizationRunStep={profitOptimizationRunStep}
           showSkuTableEmptyState={shouldShowSkuTableEmptyState}
           showInitialShell
           isLoadingData={!shouldShowSkuTableEmptyState}
@@ -16865,13 +17044,15 @@ function ReportsPage({
       ) : (
 	        <>
 	          <DecisionAnalysisEnginePanel
-	            report={analysisDecisionReportPayload?.decision_report ?? null}
+	            report={optimizationDecisionReport}
 	            message={analysisDecisionReportPayload?.message}
 		          locale={locale}
               headerAction={reportHeaderAction}
               optimizationStarted={hasStartedProfitOptimization}
               onStartProfitOptimization={startProfitOptimization}
-              isLoadingOptimization={hasStartedProfitOptimization && isLoadingAnalysisDecisionReport}
+              isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+              optimizationRunStatus={profitOptimizationRunStatus}
+              optimizationRunStep={profitOptimizationRunStep}
               showSkuTableEmptyState={shouldShowSkuTableEmptyState}
               showInitialShell={shouldShowInitialAnalysisShell}
               isLoadingData={!shouldShowSkuTableEmptyState && shouldShowInitialAnalysisShell}
@@ -17059,6 +17240,8 @@ type DecisionImpactSummary = {
 type DecisionImpactRow = {
   id: string;
   sku: string;
+  actionType?: string;
+  sourceAction?: string | null;
   recommendedAction: string;
   decisionDrivers: string[];
   expectedImpact: number;
@@ -17132,13 +17315,9 @@ type DecisionOutcomeDetail = {
 };
 
 function ActionTrackerPage({
-  locale,
-  hasConnectedData,
-  isLoadingConnectedData
+  locale
 }: {
   locale: Locale;
-  hasConnectedData: boolean;
-  isLoadingConnectedData: boolean;
 }) {
   const isZh = locale === "zh";
   const [payload, setPayload] = useState<DecisionImpactPayload | null>(null);
@@ -17150,17 +17329,30 @@ function ActionTrackerPage({
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!hasConnectedData) {
-      setPayload(null);
-      setIsLoading(false);
-      return;
-    }
     setIsLoading(true);
-    const response = await fetch("/api/policy/actions", { cache: "no-store" });
-    const data = await response.json().catch(() => null) as DecisionImpactPayload | null;
-    if (data?.summary) setPayload(data);
-    setIsLoading(false);
-  }, [hasConnectedData]);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const response = await fetch("/api/policy/actions?scope=current_optimization", {
+        cache: "no-store",
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => null) as DecisionImpactPayload | null;
+
+      if (response.ok && data?.summary) {
+        setPayload(data);
+      } else {
+        setPayload(null);
+      }
+    } catch (error) {
+      console.warn("[action-tracker] Failed to load actions", error);
+      setPayload(null);
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsLoading(false);
+    }
+  }, []);
 
   const openDecisionDetail = useCallback(async (task: DecisionImpactRow) => {
     setSelectedDetailTask(task);
@@ -17181,16 +17373,16 @@ function ActionTrackerPage({
 
   const activeDecisionCount = payload?.activeDecisions.length ?? 0;
   const completedDecisionCount = payload?.completedActions.length ?? 0;
-  const shouldShowEmptyDecisionLoop = !isLoadingConnectedData && !isLoading && activeDecisionCount + completedDecisionCount === 0;
-  const shouldShowDecisionTrackerLoadingState = isLoadingConnectedData || isLoading || shouldShowEmptyDecisionLoop;
-  const shouldShowDecisionTrackerLoadingLabel = isLoadingConnectedData || (hasConnectedData && isLoading);
-  const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
-  const activeRealizedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + (row.actualImpact ?? 0), 0);
-  const activeRealizationRate = activeExpectedProfitImpact > 0
-    ? Math.round((activeRealizedProfitImpact / activeExpectedProfitImpact) * 100)
-    : null;
+  const shouldShowEmptyDecisionLoop = !isLoading && activeDecisionCount + completedDecisionCount === 0;
+  const shouldShowDecisionTrackerLoadingState = isLoading || shouldShowEmptyDecisionLoop;
+  const shouldShowDecisionTrackerLoadingLabel = isLoading;
+	  const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
+	  const activeRealizedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + (row.actualImpact ?? 0), 0);
+	  const activeRealizationRate = activeExpectedProfitImpact > 0
+	    ? Math.round((activeRealizedProfitImpact / activeExpectedProfitImpact) * 100)
+	    : null;
+  const hasAcceptedDecisionData = activeDecisionCount + completedDecisionCount > 0;
   const runningTasks = [...(payload?.activeDecisions ?? [])]
-    .filter((row) => row.lifecycle.accepted && row.status !== "pending")
     .sort((a, b) => decisionTaskProgress(a).percent - decisionTaskProgress(b).percent);
   const runningTaskProgressNodes = runningTasks.reduce<Array<{ percent: number; taskIndexes: number[] }>>((nodes, task, index) => {
     const percent = decisionTaskProgress(task).percent;
@@ -17251,11 +17443,13 @@ function ActionTrackerPage({
           value={formatSignedMoney(activeExpectedProfitImpact)}
           description={isZh ? "接受决策后预计应该产生的利润提升" : "Profit lift expected after accepted AI decisions"}
         />
-        <DecisionTextMetric
-          label={isZh ? "已实现利润影响" : "Realized Profit Impact"}
-          value={activeRealizedProfitImpact ? `${formatSignedMoney(activeRealizedProfitImpact)} (${activeRealizationRate ?? 0}% Realized / Expected)` : (isZh ? "采集中" : "Collecting")}
-          description={isZh ? "当前 active decisions 已经产生的利润提升" : "Profit lift already realized by current active decisions"}
-        />
+	        <DecisionTextMetric
+	          label={isZh ? "已实现利润影响" : "Realized Profit Impact"}
+	          value={!hasAcceptedDecisionData ? "-" : activeRealizedProfitImpact ? `${formatSignedMoney(activeRealizedProfitImpact)} (${activeRealizationRate ?? 0}% Realized / Expected)` : (isZh ? "采集中" : "Collecting")}
+	          description={!hasAcceptedDecisionData
+              ? (isZh ? "当前优化报告还没有已接受的决策" : "No accepted decisions from the current optimization report")
+              : (isZh ? "当前 active decisions 已经产生的利润提升" : "Profit lift already realized by current active decisions")}
+	        />
         <DecisionTextMetric
           label={isZh ? "实现率" : "Realization Rate"}
           value={activeRealizationRate == null ? "-" : `${activeRealizationRate}%`}
@@ -17272,6 +17466,10 @@ function ActionTrackerPage({
             {shouldShowDecisionTrackerLoadingLabel ? (
               <p className="text-sm font-semibold text-slate-500">
                 {isZh ? "正在加载数据" : "Loading data"}
+              </p>
+            ) : shouldShowEmptyDecisionLoop ? (
+              <p className="text-sm font-semibold text-slate-500">
+                {isZh ? "还没有已接受的优化决策。" : "No accepted optimization decisions yet."}
               </p>
             ) : null}
           </div>
@@ -17326,7 +17524,7 @@ function ActionTrackerPage({
               })}
             </div>
           </div>
-          <h2 className="mx-auto max-w-5xl text-xl font-bold text-slate-950">{isZh ? "进行中的任务" : "Running Tasks"}</h2>
+          <h2 className="mx-auto max-w-5xl text-xl font-bold text-slate-950">{isZh ? "进行中的任务" : "Active Tasks"}</h2>
           {selectedRunningTasks.length ? (
             <div className={cn(
               "grid w-full gap-4",
@@ -17350,7 +17548,7 @@ function ActionTrackerPage({
 		                      ) : null}
 		                    </div>
 		                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-		                      {isZh ? "衡量影响中" : "Measuring Impact"}
+		                      {decisionTaskStatusLabel(task, isZh)}
 		                    </span>
 		                  </div>
 	
@@ -17362,7 +17560,9 @@ function ActionTrackerPage({
 		                    <div className="rounded-xl bg-slate-50 p-2.5">
 		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "影响衡量" : "Impact Measurement"}</p>
 		                      <p className="mt-1 font-semibold text-slate-950">
-	                        {isZh ? `第 ${progress.currentDay} / ${progress.totalDays} 天` : `Day ${progress.currentDay} / ${progress.totalDays}`}
+	                        {progress.currentDay > 0
+                            ? (isZh ? `第 ${progress.currentDay} / ${progress.totalDays} 天` : `Day ${progress.currentDay} / ${progress.totalDays}`)
+                            : (isZh ? "等待测量数据" : "Waiting for measurement data")}
 	                      </p>
 	                    </div>
 	                  </div>
@@ -17616,6 +17816,14 @@ function decisionStageLabel(task: DecisionImpactRow, isZh: boolean) {
   return isZh ? "等待中" : "Pending";
 }
 
+function decisionTaskStatusLabel(task: DecisionImpactRow, isZh: boolean) {
+  if (task.status === "completed" || task.status === "learned") return isZh ? "已完成" : "Completed";
+  if (task.measurementStatus === "TRACKING") return isZh ? "衡量影响中" : "Measuring Impact";
+  if (task.executionStatus === "EXECUTING") return isZh ? "执行中" : "Executing";
+  if (task.lifecycle.accepted) return isZh ? "已接受" : "Accepted";
+  return isZh ? "等待中" : "Pending";
+}
+
 function executionStatusLabel(status: DecisionImpactRow["executionStatus"], isZh: boolean) {
   if (status === "COMPLETED") return isZh ? "完成" : "Completed";
   if (status === "EXECUTING") return isZh ? "执行中" : "Executing";
@@ -17684,11 +17892,11 @@ function humanizeDetailKey(value: string) {
 
 function decisionTaskProgress(task: DecisionImpactRow) {
   const totalDays = Math.max(1, task.observationWindow || 30);
-  const currentDay = Math.max(1, Math.min(totalDays, task.observationDays || 1));
+  const currentDay = Math.max(0, Math.min(totalDays, task.observationDays || 0));
   return {
     currentDay,
     totalDays,
-    percent: Math.min(100, Math.max(1, Math.round((currentDay / totalDays) * 100)))
+    percent: Math.min(100, Math.max(0, Math.round((currentDay / totalDays) * 100)))
   };
 }
 
@@ -18073,8 +18281,6 @@ export function Dashboard({
               <div id="action-tracker" className="min-w-0 xl:col-start-1">
                 <ActionTrackerPage
                   locale={getCopyLocale(locale)}
-                  hasConnectedData={hasOperationalConnectedSource}
-                  isLoadingConnectedData={isLoadingConnectedSources}
                 />
               </div>
             ) : view === "report" ? (

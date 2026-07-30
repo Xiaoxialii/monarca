@@ -1,6 +1,9 @@
 import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
 import type { PortfolioOptimizationInput, ProfitSimulationResult } from "@/lib/optimization/profit-simulation-engine";
 import { assessSelectedInventoryMix } from "@/lib/optimization/inventory-health-score";
+import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
+import { governanceActionForPortfolioAction } from "@/lib/optimization/policy/optimization-policy";
+import type { OptimizationPolicy, PortfolioGovernanceAction } from "@/lib/optimization/policy/optimization-policy-types";
 
 export type PortfolioSolverState = {
   rows: ProfitSimulationResult[];
@@ -14,10 +17,12 @@ export type PortfolioSolverState = {
 
 export function solveGlobalPortfolio(
   bySku: Map<string, ProfitSimulationResult[]>,
-  input: PortfolioOptimizationInput
+  input: PortfolioOptimizationInput,
+  policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY
 ): PortfolioSolverState {
   const skuCount = bySku.size;
-  return skuCount > 250 ? solveWithBeamSearch(bySku, input, 64) : solveWithBeamSearch(bySku, input, 128);
+  const selected = skuCount > 250 ? solveWithBeamSearch(bySku, input, 64) : solveWithBeamSearch(bySku, input, 128);
+  return enforcePortfolioGovernanceCaps(selected, bySku, policy);
 }
 
 export function portfolioObjective(state: PortfolioSolverState) {
@@ -200,5 +205,61 @@ function emptyState(): PortfolioSolverState {
     inventory: 0,
     cash: 0,
     confidence: 0
+  };
+}
+
+function enforcePortfolioGovernanceCaps(
+  state: PortfolioSolverState,
+  bySku: Map<string, ProfitSimulationResult[]>,
+  policy: OptimizationPolicy
+): PortfolioSolverState {
+  if (state.rows.length < 2) return state;
+
+  const rows = state.rows.slice();
+  for (const governanceAction of Object.keys(policy.portfolioConstraints) as PortfolioGovernanceAction[]) {
+    const maxShare = policy.portfolioConstraints[governanceAction]?.maxSkuShare;
+    if (!Number.isFinite(maxShare) || maxShare <= 0) continue;
+    const maxCount = Math.max(1, Math.floor(rows.length * maxShare));
+    const matching = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => governanceActionForPortfolioAction(row.action) === governanceAction)
+      .sort((left, right) => right.row.action_score - left.row.action_score || right.row.profit_delta - left.row.profit_delta);
+    if (matching.length <= maxCount) continue;
+
+    const overflow = matching.slice(maxCount);
+    for (const item of overflow) {
+      const replacement = replacementForCappedRow(item.row, bySku, governanceAction);
+      if (replacement) rows[item.index] = replacement;
+    }
+  }
+
+  return stateFromRows(rows);
+}
+
+function replacementForCappedRow(
+  row: ProfitSimulationResult,
+  bySku: Map<string, ProfitSimulationResult[]>,
+  cappedAction: PortfolioGovernanceAction
+) {
+  const candidates = (bySku.get(row.sku) ?? [])
+    .filter((candidate) => candidate.sku === row.sku && governanceActionForPortfolioAction(candidate.action) !== cappedAction)
+    .sort((left, right) => {
+      if (left.action === "HOLD" && right.action !== "HOLD") return -1;
+      if (right.action === "HOLD" && left.action !== "HOLD") return 1;
+      return simulationScore(right) - simulationScore(left);
+    });
+  return candidates[0] ?? null;
+}
+
+function stateFromRows(rows: ProfitSimulationResult[]): PortfolioSolverState {
+  if (!rows.length) return emptyState();
+  return {
+    rows,
+    profit: roundCurrency(rows.reduce((sum, row) => sum + row.predicted_profit, 0)),
+    delta: roundCurrency(rows.reduce((sum, row) => sum + row.profit_delta, 0)),
+    ads: roundCurrency(rows.reduce((sum, row) => sum + Math.max(0, row.recommended_ads_spend - row.current_ads_spend), 0)),
+    inventory: rows.reduce((sum, row) => sum + row.required_inventory, 0),
+    cash: roundCurrency(rows.reduce((sum, row) => sum + row.required_cash, 0)),
+    confidence: roundRatio(rows.reduce((sum, row) => sum + row.confidence, 0) / rows.length)
   };
 }

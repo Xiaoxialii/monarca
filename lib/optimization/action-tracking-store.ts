@@ -18,6 +18,7 @@ import type {
 } from "@/lib/optimization/action-tracking-types";
 
 const STORE_PATH = join(process.cwd(), ".monarca-artifacts", "action-feedback", "actions.json");
+const ACTION_TRACKING_DB_READ_TIMEOUT_MS = 2500;
 
 type AcceptActionInput = {
   workspace_id: string;
@@ -79,21 +80,14 @@ type PersistedDecisionAction = {
   } | null;
 };
 
-export async function listActionTrackingRecords(filter: { workspaceId?: string; status?: ActionTrackingStatus | null } = {}) {
-  try {
-    const rows = await (prisma as any).decisionAction.findMany({
-      where: {
-        ...(filter.workspaceId ? { workspaceId: filter.workspaceId } : {}),
-        ...(filter.status ? { status: dbStatusFromTrackingStatus(filter.status) } : {})
-      },
-      include: { outcome: true },
-      orderBy: { updatedAt: "desc" }
-    }) as PersistedDecisionAction[];
+export async function listActionTrackingRecords(filter: { workspaceId?: string; status?: ActionTrackingStatus | null; decisionInstancePrefix?: string | null } = {}) {
+  const jsonRecords = await listJsonActionTrackingRecords(filter).catch(() => []);
+  if (jsonRecords.length) return jsonRecords;
 
-    return rows.map(recordFromDecisionAction);
-  } catch {
-    return [];
-  }
+  return withTimeout(
+    listDbActionTrackingRecords(filter),
+    ACTION_TRACKING_DB_READ_TIMEOUT_MS
+  ).catch(() => []);
 }
 
 export async function getActionTrackingRecord(actionId: string) {
@@ -110,18 +104,50 @@ export async function getActionTrackingRecord(actionId: string) {
   }
 }
 
-export async function acceptActionTrackingRecord(input: AcceptActionInput) {
+export async function getActionTrackingRecordByDecisionInstanceKey(workspaceId: string, decisionInstanceKey: string) {
+  const key = decisionInstanceKey.trim();
+  if (!key) return null;
+
   try {
-    const existing = await (prisma as any).decisionAction.findFirst({
+    const row = await (prisma as any).decisionAction.findFirst({
       where: {
-        workspaceId: input.workspace_id,
-        skuId: input.sku,
-        actionType: dbActionType(input.action_type),
-        NOT: { status: "REJECTED" }
+        workspaceId,
+        actionPayload: {
+          path: ["decision_instance_key"],
+          equals: key
+        }
       },
       include: { outcome: true },
       orderBy: { updatedAt: "desc" }
     }) as PersistedDecisionAction | null;
+    if (row) return recordFromDecisionAction(row);
+  } catch (error) {
+    console.error("[action-tracking-store] Failed to verify accepted action in database", {
+      workspaceId,
+      decisionInstanceKey: key,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  const records = await listJsonActionTrackingRecords({ workspaceId }).catch(() => []);
+  return records.find((record) => actionPayloadDecisionInstanceKey(record.action_payload) === key) ?? null;
+}
+
+export async function acceptActionTrackingRecord(input: AcceptActionInput) {
+  try {
+    const hasDecisionInstanceKey = typeof input.action_payload?.decision_instance_key === "string" && input.action_payload.decision_instance_key.trim().length > 0;
+    const existing = hasDecisionInstanceKey
+      ? null
+      : await (prisma as any).decisionAction.findFirst({
+        where: {
+          workspaceId: input.workspace_id,
+          skuId: input.sku,
+          actionType: dbActionType(input.action_type),
+          NOT: { status: "REJECTED" }
+        },
+        include: { outcome: true },
+        orderBy: { updatedAt: "desc" }
+      }) as PersistedDecisionAction | null;
     const now = new Date();
 
     if (existing) {
@@ -150,7 +176,9 @@ export async function acceptActionTrackingRecord(input: AcceptActionInput) {
         }).catch(() => null);
       }
       await upsertOptimizationDecisionFromAction(input, updated, "ACCEPTED").catch(() => null);
-      return recordFromDecisionAction(updated);
+      const record = recordFromDecisionAction(updated);
+      await upsertJsonActionTrackingRecord(record).catch(() => null);
+      return record;
     }
 
     const snapshots = await createDecisionSnapshots(input);
@@ -182,8 +210,17 @@ export async function acceptActionTrackingRecord(input: AcceptActionInput) {
     }
     await upsertOptimizationDecisionFromAction(input, created, "ACCEPTED").catch(() => null);
 
-    return recordFromDecisionAction(created);
-  } catch {
+    const record = recordFromDecisionAction(created);
+    await upsertJsonActionTrackingRecord(record).catch(() => null);
+    return record;
+  } catch (error) {
+    console.error("[action-tracking-store] Failed to persist accepted action to database; falling back to JSON store", {
+      workspace_id: input.workspace_id,
+      sku: input.sku,
+      action_type: input.action_type,
+      decision_instance_key: actionPayloadDecisionInstanceKey(input.action_payload),
+      error: error instanceof Error ? error.message : String(error)
+    });
     return acceptJsonActionTrackingRecord(input);
   }
 }
@@ -228,7 +265,9 @@ export async function rejectActionTrackingRecord(input: RejectActionInput) {
         include: { outcome: true }
       }) as PersistedDecisionAction;
       await upsertOptimizationDecisionFromRejectedAction(input, created).catch(() => null);
-      return recordFromDecisionAction(created);
+      const record = recordFromDecisionAction(created);
+      await upsertJsonActionTrackingRecord(record).catch(() => null);
+      return record;
     }
 
     const updated = await (prisma as any).decisionAction.update({
@@ -243,7 +282,9 @@ export async function rejectActionTrackingRecord(input: RejectActionInput) {
     }) as PersistedDecisionAction;
     await upsertOptimizationDecisionFromRejectedAction(input, updated).catch(() => null);
 
-    return recordFromDecisionAction(updated);
+    const record = recordFromDecisionAction(updated);
+    await upsertJsonActionTrackingRecord(record).catch(() => null);
+    return record;
   } catch {
     return rejectJsonActionTrackingRecord(input);
   }
@@ -991,22 +1032,52 @@ function trackingStatusFromDbStatus(status: string): ActionTrackingStatus {
   }
 }
 
-async function listJsonActionTrackingRecords(filter: { workspaceId?: string; status?: ActionTrackingStatus | null } = {}) {
+async function listJsonActionTrackingRecords(filter: { workspaceId?: string; status?: ActionTrackingStatus | null; decisionInstancePrefix?: string | null } = {}) {
   const records = await readJsonRecords();
   return records
     .filter((record) => !filter.workspaceId || record.workspace_id === filter.workspaceId)
     .filter((record) => !filter.status || record.status === filter.status)
+    .filter((record) => !filter.decisionInstancePrefix || actionPayloadDecisionInstanceKey(record.action_payload)?.startsWith(filter.decisionInstancePrefix))
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
+async function listDbActionTrackingRecords(filter: { workspaceId?: string; status?: ActionTrackingStatus | null; decisionInstancePrefix?: string | null } = {}) {
+  const rows = await (prisma as any).decisionAction.findMany({
+    where: {
+      ...(filter.workspaceId ? { workspaceId: filter.workspaceId } : {}),
+      ...(filter.status ? { status: dbStatusFromTrackingStatus(filter.status) } : {})
+    },
+    include: { outcome: true },
+    orderBy: { updatedAt: "desc" }
+  }) as PersistedDecisionAction[];
+
+  return rows
+    .map(recordFromDecisionAction)
+    .filter((record) => !filter.decisionInstancePrefix || actionPayloadDecisionInstanceKey(record.action_payload)?.startsWith(filter.decisionInstancePrefix));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`Action tracking DB read timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
 }
 
 async function acceptJsonActionTrackingRecord(input: AcceptActionInput) {
   const records = await readJsonRecords();
   const now = new Date().toISOString();
+  const inputDecisionInstanceKey = actionPayloadDecisionInstanceKey(input.action_payload);
   const existing = records.find((record) =>
-    record.workspace_id === input.workspace_id &&
-    record.sku === input.sku &&
-    record.action_type === input.action_type &&
-    record.status !== "rejected"
+    inputDecisionInstanceKey
+      ? actionPayloadDecisionInstanceKey(record.action_payload) === inputDecisionInstanceKey && record.status !== "rejected"
+      : record.workspace_id === input.workspace_id &&
+        record.sku === input.sku &&
+        record.action_type === input.action_type &&
+        record.status !== "rejected"
   );
 
   if (existing) {
@@ -1041,6 +1112,34 @@ async function acceptJsonActionTrackingRecord(input: AcceptActionInput) {
   records.unshift(record);
   await writeJsonRecords(records);
   return record;
+}
+
+async function upsertJsonActionTrackingRecord(record: ActionTrackingRecord) {
+  const records = await readJsonRecords();
+  const existingIndex = records.findIndex((item) => actionTrackingRecordKey(item) === actionTrackingRecordKey(record));
+  if (existingIndex >= 0) {
+    records[existingIndex] = record;
+  } else {
+    records.push(record);
+  }
+  await writeJsonRecords(records);
+}
+
+function actionTrackingRecordKey(record: ActionTrackingRecord) {
+  const decisionInstanceKey = actionPayloadDecisionInstanceKey(record.action_payload);
+  if (decisionInstanceKey) return decisionInstanceKey;
+  if (record.action_id) return record.action_id;
+  return [
+    record.workspace_id,
+    record.sku,
+    record.action_type,
+    record.accepted_at ?? record.rejected_at ?? record.created_at
+  ].join(":");
+}
+
+function actionPayloadDecisionInstanceKey(payload: Record<string, unknown> | null | undefined) {
+  const value = payload?.decision_instance_key;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 async function rejectJsonActionTrackingRecord(input: RejectActionInput) {
@@ -1178,11 +1277,12 @@ function progressRatio(record: ActionTrackingRecord, now: Date) {
 
 function metricsFromUnknown(value: unknown): ActionMetricsSnapshot {
   const record = safeRecord(value);
-	  return {
-	    revenue: numberFromUnknown(record.revenue),
-	    profit: numberFromUnknown(record.profit),
-	    orders: numberFromUnknown(record.orders),
-	    roas: numberFromUnknown(record.roas),
+  return {
+    revenue: numberFromUnknown(record.revenue),
+    profit: numberFromUnknown(record.profit),
+    profit_delta: numberFromUnknown(record.profit_delta),
+    orders: numberFromUnknown(record.orders),
+    roas: numberFromUnknown(record.roas),
     sold_units: numberFromUnknown(record.sold_units),
     stock: numberFromUnknown(record.stock),
     ad_spend: numberFromUnknown(record.ad_spend)

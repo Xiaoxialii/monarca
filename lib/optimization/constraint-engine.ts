@@ -2,6 +2,8 @@ import { roundRatio } from "@/lib/optimization/objective";
 import { violatesInventoryConstraint } from "@/lib/optimization/inventory-constraint-engine";
 import type { BusinessConstraintsInput, PortfolioOptimizationInput, ProfitSimulationResult } from "@/lib/optimization/profit-simulation-engine";
 import { isActionAllowedForLifecycle } from "@/lib/lifecycle/lifecycle-optimization-router";
+import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
+import type { OptimizationPolicy } from "@/lib/optimization/policy/optimization-policy-types";
 
 export type ConstraintEvaluation = {
   valid: boolean;
@@ -11,18 +13,25 @@ export type ConstraintEvaluation = {
 
 export function evaluateActionConstraints(
   result: ProfitSimulationResult,
-  constraints: BusinessConstraintsInput
+  constraints: BusinessConstraintsInput,
+  policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY
 ): ConstraintEvaluation {
   const violations: string[] = [];
   const isStop = result.action === "STOP";
   const priceChange = Math.abs((result.simulated_price - result.current_price) / Math.max(1, result.current_price));
+  const minimumProfit = Math.max(constraints.minimum_profit, policy.thresholds.portfolioHealth.minimumProfit);
+  const targetMargin = Math.max(constraints.target_margin, policy.thresholds.pricing.minimumMarginHeadroom);
+  const minimumConfidence = Math.max(constraints.minimum_confidence ?? 0.55, policy.thresholds.portfolioHealth.minimumConfidence);
+  const maxPriceIncrease = Math.min(constraints.max_price_change, policy.thresholds.pricing.maximumIncreasePct);
+  const maxPriceDecrease = Math.min(constraints.max_price_change, policy.thresholds.pricing.maximumDecreasePct);
+  const maxPriceChange = result.simulated_price >= result.current_price ? maxPriceIncrease : maxPriceDecrease;
 
-  if (!isStop && result.predicted_profit < constraints.minimum_profit) violations.push("minimum_profit");
+  if (!isStop && result.predicted_profit < minimumProfit) violations.push("minimum_profit");
   if (!isStop && isIncrementalAdsAction(result.action) && result.profit_delta <= 0) violations.push("non_positive_incremental_profit");
   if (!isStop && isPriceAction(result.action) && result.profit_delta <= 0) violations.push("non_positive_price_profit");
-  if (!isStop && result.predicted_margin < constraints.target_margin) violations.push("target_margin");
-  if (!isStop && result.confidence < (constraints.minimum_confidence ?? 0.55)) violations.push("minimum_confidence");
-  if (priceChange > constraints.max_price_change) violations.push("max_price_change");
+  if (!isStop && result.predicted_margin < targetMargin) violations.push("target_margin");
+  if (!isStop && result.confidence < minimumConfidence) violations.push("minimum_confidence");
+  if (priceChange > maxPriceChange) violations.push("max_price_change");
   if (result.recommended_ads_spend > constraints.total_ads_budget) violations.push("total_ads_budget");
   if (violatesInventoryConstraint(result, constraints)) violations.push("inventory_capacity");
   if (typeof constraints.available_cash === "number" && result.required_cash > constraints.available_cash) violations.push("available_cash");
@@ -52,11 +61,11 @@ function isPriceAction(action: ProfitSimulationResult["action"]) {
     action === "SCALE_ADS_PRICE_UP_5";
 }
 
-export function groupValidPortfolioSimulations(input: PortfolioOptimizationInput, simulations: ProfitSimulationResult[]) {
+export function groupValidPortfolioSimulations(input: PortfolioOptimizationInput, simulations: ProfitSimulationResult[], policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY) {
   const grouped = new Map<string, ProfitSimulationResult[]>();
 
   for (const result of simulations) {
-    const evaluation = evaluateActionConstraints(result, input.constraints);
+    const evaluation = evaluateActionConstraints(result, input.constraints, policy);
     if (!evaluation.valid) continue;
     grouped.set(result.sku, [...(grouped.get(result.sku) ?? []), result]);
   }

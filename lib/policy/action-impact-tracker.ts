@@ -12,6 +12,8 @@ export type DecisionImpactSummary = {
 export type DecisionImpactRow = {
   id: string;
   sku: string;
+  actionType: string;
+  sourceAction: string | null;
   recommendedAction: string;
   decisionDrivers: string[];
   expectedImpact: number;
@@ -101,16 +103,19 @@ function decisionRowFromRecord(record: ActionTrackingRecord): DecisionImpactRow 
   const observationWindow = Math.max(1, record.observation_window_days || 30);
   const observationDays = observationDaysFromRecord(record, observationWindow);
   const isEvaluated = Boolean(record.evaluation_result);
+  const isMeasuring = record.status === "running" || record.status === "completed" || record.status === "learned";
   return {
     id: record.action_id,
     sku: record.sku,
+    actionType: record.action_type,
+    sourceAction: asString(record.action_payload.action) ?? asString(record.action_payload.sourceAction),
     recommendedAction: actionLabel(record),
     decisionDrivers: decisionDrivers(record),
     expectedImpact,
     actualImpact,
     status: record.status,
     executionStatus: executionStatusFromRecord(record),
-    measurementStatus: isEvaluated ? "COMPLETED" : record.accepted_at ? "TRACKING" : "NOT_STARTED",
+    measurementStatus: isEvaluated ? "COMPLETED" : isMeasuring ? "TRACKING" : "NOT_STARTED",
     observationDays,
     observationWindow,
     evaluationStatus: isEvaluated ? "EVALUATED" : "PENDING",
@@ -136,17 +141,22 @@ function estimatedCompletionDate(record: ActionTrackingRecord) {
 }
 
 function observationDaysFromRecord(record: ActionTrackingRecord, observationWindow: number) {
-  if (!record.accepted_at) return 0;
-  const acceptedAt = new Date(record.accepted_at);
-  if (Number.isNaN(acceptedAt.getTime())) return 0;
-  const elapsed = Math.ceil((Date.now() - acceptedAt.getTime()) / (24 * 60 * 60 * 1000));
-  return Math.max(1, Math.min(observationWindow, elapsed));
+  if (record.status !== "running" && record.status !== "completed" && record.status !== "learned") return 0;
+  const measurementStartedAt = record.status === "running"
+    ? record.updated_at
+    : record.accepted_at;
+  if (!measurementStartedAt) return 0;
+  const startedAt = new Date(measurementStartedAt);
+  if (Number.isNaN(startedAt.getTime())) return 0;
+  const elapsed = Math.floor((Date.now() - startedAt.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(0, Math.min(observationWindow, elapsed));
 }
 
 function executionStatusFromRecord(record: ActionTrackingRecord): DecisionImpactRow["executionStatus"] {
   if (!record.accepted_at || record.status === "pending") return "NOT_STARTED";
   if (record.status === "running") return "EXECUTING";
-  return "COMPLETED";
+  if (record.status === "completed" || record.status === "learned") return "COMPLETED";
+  return "NOT_STARTED";
 }
 
 function buildLearningSummary(rows: DecisionImpactRow[]): DecisionLearningSummary {
@@ -176,7 +186,11 @@ function buildLearningSummary(rows: DecisionImpactRow[]): DecisionLearningSummar
 }
 
 function actionLabel(record: ActionTrackingRecord) {
-  const payloadAction = asString(record.action_payload.action) || asString(record.action_payload.sourceAction);
+  const payloadAction = asString(record.action_payload.display_action) ||
+    asString(record.action_payload.displayAction) ||
+    asString(record.action_payload.normalized_action_title) ||
+    asString(record.action_payload.action) ||
+    asString(record.action_payload.sourceAction);
   if (payloadAction) return sentenceCase(payloadAction);
   return sentenceCase(record.action_type);
 }
@@ -204,6 +218,9 @@ function decisionDrivers(record: ActionTrackingRecord) {
 }
 
 function expectedProfitLift(record: ActionTrackingRecord) {
+  if (record.predicted_metrics.profit_delta != null) {
+    return roundMoney(Math.max(0, record.predicted_metrics.profit_delta));
+  }
   return roundMoney(Math.max(0, (record.predicted_metrics.profit ?? 0) - (record.baseline_metrics.profit ?? 0)));
 }
 

@@ -6,6 +6,9 @@ import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 import { isActionAllowedForLifecycle, lifecycleActionReason } from "@/lib/lifecycle/lifecycle-optimization-router";
 import type { DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
 import { clearInventoryQualityScore } from "@/lib/optimization/inventory-health-score";
+import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
+import { evaluateActionEligibility, policyTraceFromEligibility } from "@/lib/optimization/policy/optimization-policy";
+import type { OptimizationPolicy, PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
 
 export type GeneratedActionType =
   | "TEST_AD_SPEND"
@@ -43,6 +46,7 @@ export type GeneratedAction = {
   lifecycle_stage?: SkuLifecycleStage;
   lifecycle_confidence?: number;
   lifecycle_signals?: string[];
+  policy_trace?: PolicyTrace;
 };
 
 export function generateOptimizationActions(input: {
@@ -50,6 +54,7 @@ export function generateOptimizationActions(input: {
   opportunities: Opportunity[];
   lifecycleBySku?: Map<string, SkuLifecycleClassification>;
   thresholdProfile?: DynamicThresholdProfile;
+  policy?: OptimizationPolicy;
 }): GeneratedAction[] {
   const skuById = new Map(input.skus.map((sku) => [sku.sku, sku]));
 
@@ -57,13 +62,35 @@ export function generateOptimizationActions(input: {
     const sku = skuById.get(opportunity.sku);
     if (!sku) return [];
 
-    return generateSkuActions(sku, opportunity, input.lifecycleBySku?.get(sku.sku), input.thresholdProfile);
+    return generateSkuActions(sku, opportunity, input.lifecycleBySku?.get(sku.sku), input.thresholdProfile, input.policy);
   });
 }
 
-function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile): GeneratedAction[] {
-  const actions: GeneratedAction[] = [buildAction(sku, opportunity, "HOLD", "HOLD", 0, 0, 0, lifecycle)];
-  const baseScaleBudget = roundCurrency(Math.max(10, Math.min(1000, Math.max(sku.ads_spend * 0.45, sku.revenue * 0.006))));
+function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile, policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY): GeneratedAction[] {
+  const actions: GeneratedAction[] = [];
+  const addAction = (
+    action: GeneratedActionType,
+    portfolioAction: PortfolioAction,
+    budgetDelta: number,
+    priceDelta: number,
+    inventoryDelta: number,
+    options: { clearInventoryEligible?: boolean } = {}
+  ) => {
+    const eligibility = evaluateActionEligibility({
+      sku,
+      action: portfolioAction,
+      policy,
+      coverageDays,
+      clearInventoryEligible: options.clearInventoryEligible
+    });
+    if (!eligibility.allowed) return;
+    actions.push(buildAction(sku, opportunity, action, portfolioAction, budgetDelta, priceDelta, inventoryDelta, lifecycle, policy, policyTraceFromEligibility(policy, eligibility)));
+  };
+  const suggestedBudgetIncrease = Math.max(10, sku.revenue * 0.006);
+  const maxBudgetIncrease = sku.ads_spend > 0
+    ? sku.ads_spend * policy.thresholds.advertising.scaleAds.maximumBudgetIncreasePct
+    : 50;
+  const baseScaleBudget = roundCurrency(Math.max(10, Math.min(1000, maxBudgetIncrease, suggestedBudgetIncrease)));
   const opportunityTypes = new Set(opportunity.opportunity_types?.length ? opportunity.opportunity_types : [opportunity.opportunity_type]);
   const coverageDays = sku.sales_velocity > 0 ? sku.inventory / Math.max(0.1, sku.sales_velocity) : 999;
   const restockThreshold = thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
@@ -74,92 +101,93 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
   const hasHighInventoryPressure = coverageDays > excessThreshold;
   const hasStockoutRisk = coverageDays < restockThreshold;
   const clearInventoryQuality = clearInventoryQualityScore(sku, thresholdProfile);
+  addAction("HOLD", "HOLD", 0, 0, 0);
 
   if (lifecycle?.lifecycle_stage === "LAUNCH") {
-    actions.push(buildAction(sku, opportunity, "TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(500, Math.max(50, baseScaleBudget)), 0, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "SHIFT_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.35), 0, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "COLLECT_DATA", "HOLD", 0, 0, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "TEST_PRICE", "PROMOTION_TEST", 0, -0.05, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "MONITOR_CONVERSION", "HOLD", 0, 0, 0, lifecycle));
-    return filterLifecycleActions(uniqueActions(actions), lifecycle);
+    addAction("TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(500, Math.max(50, baseScaleBudget)), 0, 0);
+    addAction("SHIFT_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.35), 0, 0);
+    addAction("COLLECT_DATA", "HOLD", 0, 0, 0);
+    addAction("TEST_PRICE", "PROMOTION_TEST", 0, -0.05, 0);
+    addAction("MONITOR_CONVERSION", "HOLD", 0, 0, 0);
+    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
   }
 
   if (lifecycle?.lifecycle_stage === "MATURE") {
     if (canIncreasePrice) {
-      actions.push(buildAction(sku, opportunity, "OPTIMIZE_MARGIN", priceStep >= 0.1 ? "PRICE_UP_10" : "PRICE_UP_5", 0, priceStep, 0, lifecycle));
-      actions.push(buildAction(sku, opportunity, "RAISE_PRICE", "PRICE_UP_10", 0, 0.1, 0, lifecycle));
+      addAction("OPTIMIZE_MARGIN", priceStep >= 0.1 ? "PRICE_UP_10" : "PRICE_UP_5", 0, priceStep, 0);
+      addAction("RAISE_PRICE", "PRICE_UP_10", 0, 0.1, 0);
     }
     if (hasHighInventoryPressure) {
-      actions.push(buildAction(sku, opportunity, "PROMOTION_TEST", "PROMOTION_TEST", 0, -0.1, 0, lifecycle));
+      addAction("PROMOTION_TEST", "PROMOTION_TEST", 0, -0.1, 0);
       if (clearInventoryQuality.eligible) {
-        actions.push(buildAction(sku, opportunity, "INVENTORY_BALANCE", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), lifecycle));
+        addAction("INVENTORY_BALANCE", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), { clearInventoryEligible: clearInventoryQuality.eligible });
       }
     }
     if (hasStockoutRisk) {
       const requiredStock = Math.max(0, Math.ceil(sku.sales_velocity * 30 - sku.inventory));
-      actions.push(buildAction(sku, opportunity, "RESTOCK", "RESTOCK_AND_SCALE", baseScaleBudget, 0, requiredStock, lifecycle));
+      addAction("RESTOCK", "RESTOCK_AND_SCALE", baseScaleBudget, 0, requiredStock);
     }
-    actions.push(buildAction(sku, opportunity, "SCALE_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.25), 0, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.22), 0, 0, lifecycle));
-    return filterLifecycleActions(uniqueActions(actions), lifecycle);
+    addAction("SCALE_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.25), 0, 0);
+    addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.22), 0, 0);
+    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
   }
 
   if (lifecycle?.lifecycle_stage === "DECLINING") {
-    actions.push(buildAction(sku, opportunity, "REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.5), 0, 0, lifecycle));
+    addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.5), 0, 0);
     if (clearInventoryQuality.eligible) {
-      actions.push(buildAction(sku, opportunity, "CLEAR_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.2), lifecycle));
+      addAction("CLEAR_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.2), { clearInventoryEligible: clearInventoryQuality.eligible });
     }
-    actions.push(buildAction(sku, opportunity, "DISCOUNT_TEST", "PRICE_DOWN_10", 0, -0.1, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "STOP_SKU", "STOP", -sku.ads_spend, 0, -sku.inventory, lifecycle));
-    return filterLifecycleActions(uniqueActions(actions), lifecycle);
+    addAction("DISCOUNT_TEST", "PRICE_DOWN_10", 0, -0.1, 0);
+    addAction("STOP_SKU", "STOP", -sku.ads_spend, 0, -sku.inventory);
+    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
   }
 
   if (opportunityTypes.has("GROWTH")) {
     if (canScaleAds) {
-      actions.push(buildAction(sku, opportunity, "INCREASE_AD_SPEND", "SCALE_ADS", baseScaleBudget, 0, 0, lifecycle));
+      addAction("INCREASE_AD_SPEND", "SCALE_ADS", baseScaleBudget, 0, 0);
     } else {
-      actions.push(buildAction(sku, opportunity, "TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(50, baseScaleBudget), 0, 0, lifecycle));
+      addAction("TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(50, baseScaleBudget), 0, 0);
     }
-    actions.push(buildAction(sku, opportunity, "SCALE_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.35), 0, 0, lifecycle));
+    addAction("SCALE_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.35), 0, 0);
     if (canIncreasePrice) {
-      actions.push(buildAction(sku, opportunity, "OPTIMIZE_MARGIN", priceStep >= 0.1 ? "PRICE_UP_10" : "PRICE_UP_5", 0, priceStep, 0, lifecycle));
+      addAction("OPTIMIZE_MARGIN", priceStep >= 0.1 ? "PRICE_UP_10" : "PRICE_UP_5", 0, priceStep, 0);
     }
   }
 
   if (opportunityTypes.has("PROFIT") || opportunityTypes.has("MARGIN_IMPROVEMENT")) {
     if (canIncreasePrice) {
-      actions.push(buildAction(sku, opportunity, "RAISE_PRICE", "PRICE_UP_5", 0, 0.05, 0, lifecycle));
-      actions.push(buildAction(sku, opportunity, "RAISE_PRICE", "PRICE_UP_10", 0, 0.1, 0, lifecycle));
+      addAction("RAISE_PRICE", "PRICE_UP_5", 0, 0.05, 0);
+      addAction("RAISE_PRICE", "PRICE_UP_10", 0, 0.1, 0);
     }
-    actions.push(buildAction(sku, opportunity, "LOWER_PRICE", "PRICE_DOWN_10", 0, -0.1, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "PROMOTION_TEST", "PROMOTION_TEST", 0, -0.1, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.2), 0, 0, lifecycle));
+    addAction("LOWER_PRICE", "PRICE_DOWN_10", 0, -0.1, 0);
+    addAction("PROMOTION_TEST", "PROMOTION_TEST", 0, -0.1, 0);
+    addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.2), 0, 0);
   }
 
   if (opportunityTypes.has("INVENTORY")) {
     const requiredStock = Math.max(0, Math.ceil(sku.sales_velocity * 30 - sku.inventory));
     if (coverageDays < restockThreshold) {
-      actions.push(buildAction(sku, opportunity, "RESTOCK", "RESTOCK_AND_SCALE", baseScaleBudget, 0, requiredStock, lifecycle));
+      addAction("RESTOCK", "RESTOCK_AND_SCALE", baseScaleBudget, 0, requiredStock);
     }
     if (coverageDays > excessThreshold && clearInventoryQuality.eligible) {
-      actions.push(buildAction(sku, opportunity, "REDUCE_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), lifecycle));
+      addAction("REDUCE_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), { clearInventoryEligible: clearInventoryQuality.eligible });
     }
   }
 
   if (opportunityTypes.has("PORTFOLIO") || opportunityTypes.has("AD_EFFICIENCY")) {
-    actions.push(buildAction(sku, opportunity, "REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.45), 0, 0, lifecycle));
-    actions.push(buildAction(sku, opportunity, "STOP_SKU", "STOP", -sku.ads_spend, 0, -sku.inventory, lifecycle));
+    addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.45), 0, 0);
+    addAction("STOP_SKU", "STOP", -sku.ads_spend, 0, -sku.inventory);
   }
 
   if (opportunityTypes.has("CHANNEL") || opportunityTypes.has("CHANNEL_OPTIMIZATION")) {
-    actions.push(buildAction(sku, opportunity, "SHIFT_CHANNEL", "SHIFT_CHANNEL", baseScaleBudget * 0.25, 0, 0, lifecycle));
+    addAction("SHIFT_CHANNEL", "SHIFT_CHANNEL", baseScaleBudget * 0.25, 0, 0);
   }
 
   if (coverageDays > excessThreshold && sku.sales_velocity > 0 && clearInventoryQuality.eligible) {
-    actions.push(buildAction(sku, opportunity, "REDUCE_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), lifecycle));
+    addAction("REDUCE_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), { clearInventoryEligible: clearInventoryQuality.eligible });
   }
 
-  return filterLifecycleActions(uniqueActions(actions), lifecycle);
+  return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
 }
 
 function buildAction(
@@ -170,7 +198,9 @@ function buildAction(
   budgetDelta: number,
   priceDelta: number,
   inventoryDelta: number,
-  lifecycle?: SkuLifecycleClassification
+  lifecycle?: SkuLifecycleClassification,
+  policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY,
+  policyTrace?: PolicyTrace
 ): GeneratedAction {
   return {
     action_id: `${sku.sku}:${portfolioAction}:${action}`,
@@ -181,11 +211,12 @@ function buildAction(
     price_delta: priceDelta,
     inventory_delta: inventoryDelta,
     opportunity_type: opportunity.opportunity_type,
-    signals: lifecycle ? [...opportunity.signals, ...lifecycle.signals, lifecycleActionReason(portfolioAction, lifecycle)] : opportunity.signals,
+    signals: lifecycle ? [...opportunity.signals, ...lifecycle.signals, lifecycleActionReason(portfolioAction, lifecycle, policy)] : opportunity.signals,
     feasibility: opportunity.feasibility,
     lifecycle_stage: lifecycle?.lifecycle_stage,
     lifecycle_confidence: lifecycle?.confidence,
-    lifecycle_signals: lifecycle?.signals
+    lifecycle_signals: lifecycle?.signals,
+    policy_trace: policyTrace
   };
 }
 
@@ -195,9 +226,9 @@ function uniqueActions(actions: GeneratedAction[]) {
   return Array.from(map.values());
 }
 
-function filterLifecycleActions(actions: GeneratedAction[], lifecycle?: SkuLifecycleClassification) {
+function filterLifecycleActions(actions: GeneratedAction[], lifecycle?: SkuLifecycleClassification, policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY) {
   if (!lifecycle) return actions;
-  return actions.filter((action) => isActionAllowedForLifecycle(action.portfolio_action, lifecycle));
+  return actions.filter((action) => isActionAllowedForLifecycle(action.portfolio_action, lifecycle, policy));
 }
 
 function isPriceIncreaseEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicThresholdProfile, coverageDays = 0) {

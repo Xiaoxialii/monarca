@@ -4,6 +4,8 @@ import type { GeneratedAction } from "@/lib/optimization/action-generator";
 import type { SkuLifecycleClassification } from "@/lib/lifecycle/sku-lifecycle-classifier";
 import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 import { lifecycleThresholdMultiplier, type BusinessObjective, type DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
+import type { PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
+import type { DecisionContractValidationMetadata } from "@/lib/optimization/decision-contract-validator";
 
 export type PortfolioSkuInput = {
   sku: string;
@@ -241,6 +243,8 @@ export type ProfitSimulationResult = {
   strategic_fit: number;
   feasibility: number;
   evidence_tags: string[];
+  policy_trace?: PolicyTrace;
+  validation?: DecisionContractValidationMetadata;
   before_state: {
     revenue: number;
     profit: number;
@@ -496,6 +500,7 @@ export function simulateSkuAction(
     strategic_fit: roundRatio(strategicFit * lifecycleFit),
     feasibility,
     evidence_tags: generatedAction?.signals ?? evidenceTagsForSku(sku, profitDelta, requiredInventory),
+    policy_trace: generatedAction?.policy_trace,
     before_state: beforeState,
     after_state: afterState,
     revenue_delta: roundCurrency(afterState.revenue - beforeState.revenue),

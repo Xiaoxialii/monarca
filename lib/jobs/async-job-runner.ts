@@ -835,11 +835,20 @@ async function processSkuOptimizationAsyncJob(
     currentStep: "Generating decision snapshot"
   });
 
+  const snapshotStartedAt = Date.now();
   const decisionSnapshots = await generateEcommerceDecisionSnapshots(client, {
     workspaceId: input.workspaceId,
     dataSourceId: null,
     sourceJobId: input.id,
     modes: decisionMode ? [decisionMode] : undefined
+  });
+  console.info("[sku-optimization-job]", {
+    job_id: input.id,
+    workspace_id: input.workspaceId,
+    decision_mode: decisionMode ?? "all",
+    generated_count: decisionSnapshots.generated.length,
+    snapshot_duration_ms: Date.now() - snapshotStartedAt,
+    timestamp: new Date().toISOString()
   });
 
   await input.setJobState({

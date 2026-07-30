@@ -11,6 +11,7 @@ export type ActionTrackingStatus =
 export type ActionMetricsSnapshot = {
   revenue?: number;
   profit?: number;
+  profit_delta?: number;
   orders?: number;
   roas?: number;
   sold_units?: number;

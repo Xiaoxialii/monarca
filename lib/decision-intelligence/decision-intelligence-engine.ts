@@ -11,7 +11,8 @@ import {
   type SKUDecision,
   type DecisionSummary
 } from "@/lib/optimization/portfolio-optimizer";
-import { buildDynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
+import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
+import { dynamicThresholdProfileFromPolicy } from "@/lib/optimization/policy/optimization-policy";
 import type { AdsCampaignInput, PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
@@ -623,17 +624,8 @@ function buildDeferredPortfolioOptimization(input: {
       prediction_type: "rule_based",
       prediction_confidence: input.confidence
     },
-    threshold_profile: buildDynamicThresholdProfile({
-      skus: [],
-      constraints: {
-        total_ads_budget: input.adsBudget,
-        inventory_capacity: 0,
-        target_margin: 0,
-        max_price_change: 0.1,
-        minimum_profit: 0,
-        simulation_horizon_days: 30
-      }
-    }),
+    optimization_policy: DEFAULT_OPTIMIZATION_POLICY,
+    threshold_profile: dynamicThresholdProfileFromPolicy(DEFAULT_OPTIMIZATION_POLICY),
     recommended_portfolio: [],
     portfolioSummary,
     lifecycleSummary: {

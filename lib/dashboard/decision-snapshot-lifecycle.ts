@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export const DECISION_ALGORITHM_VERSION = "decision-intelligence-v2.1";
-export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.3";
+export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.4-policy-v1";
 export const SIMULATION_VERSION = "sku-portfolio-simulation-v2";
 export const METRIC_SNAPSHOT_VERSION = "metrics-from-canonical-v1";
 

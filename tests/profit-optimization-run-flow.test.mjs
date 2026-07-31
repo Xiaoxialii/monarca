@@ -64,22 +64,27 @@ test("completed optimization jobs generate decision snapshots from internal data
   assert.match(generator, /upsertOptimizationReportCache\(prisma/);
 });
 
-test("new optimization snapshots exclude already accepted optimization actions", () => {
+test("new optimization snapshots include active decision context without excluding accepted SKUs", () => {
   const generator = read("lib/dashboard/decision-snapshot-generator.ts");
 
-  assert.match(generator, /loadAcceptedOptimizationSkuIds\(prisma, input\.workspaceId\)/);
-  assert.match(generator, /acceptedOptimizationSkuIds/);
-  assert.match(generator, /decision_instance_key/);
-  assert.match(generator, /filterRowsByAcceptedSkus/);
-  assert.match(generator, /accepted_optimization_actions_excluded/);
+  assert.match(generator, /loadActiveDecisionContexts\(prisma/);
+  assert.match(generator, /activeDecisionContexts/);
+  assert.match(generator, /previous_decision_context/);
+  assert.match(generator, /active_decision_context_included/);
+  assert.doesNotMatch(generator, /filterRowsByAcceptedSkus/);
+  assert.doesNotMatch(generator, /accepted_optimization_actions_excluded/);
   assert.match(generator, /total_opportunities: compactSkuDecisions\.length/);
   assert.match(generator, /total_expected_profit_gain: totalProfitImpact/);
 });
 
 test("new decision snapshots include optimization run metadata", () => {
   const generator = read("lib/dashboard/decision-snapshot-generator.ts");
+  const identity = read("lib/optimization/recommendation-identity.ts");
 
   assert.match(generator, /optimization_run_id/);
+  assert.match(generator, /recommendation_id/);
+  assert.match(generator, /recommendationFingerprint/);
+  assert.match(generator, /recommendationIdentityForDecision/);
   assert.match(generator, /started_at/);
   assert.match(generator, /completed_at/);
   assert.match(generator, /optimizer_version/);
@@ -88,6 +93,14 @@ test("new decision snapshots include optimization run metadata", () => {
   assert.match(generator, /data_version/);
   assert.match(generator, /analyzed_sku_count/);
   assert.match(generator, /optimizationRun:\s*content\.optimizationRun/);
+  assert.match(identity, /sku_id/);
+  assert.match(identity, /action_type/);
+  assert.match(identity, /action_parameters/);
+  assert.match(identity, /policy_version/);
+  assert.match(identity, /optimizer_version/);
+  assert.match(identity, /simulation_version/);
+  assert.match(identity, /metric_snapshot_version/);
+  assert.doesNotMatch(identity, /optimization_run_id/);
 });
 
 test("frontend normalization uses simulation current inventory instead of restock copy fallback", () => {
@@ -141,7 +154,8 @@ test("optimization tracker uses action tracking records as the source of truth",
   const refreshFunction = dashboard.match(/const refresh = useCallback\(async \(\) => \{[\s\S]*?const openDecisionDetail/);
 
   assert.ok(refreshFunction, "action tracker refresh function should exist");
-  assert.match(refreshFunction[0], /\/api\/policy\/actions\?scope=current_optimization/);
+  assert.match(refreshFunction[0], /\/api\/policy\/actions/);
+  assert.doesNotMatch(refreshFunction[0], /scope=current_optimization/);
   assert.match(refreshFunction[0], /setPayload\(data\)/);
   assert.doesNotMatch(refreshFunction[0], /\/api\/dashboard\/ecommerce\/decision-report\?mode=full/);
   assert.doesNotMatch(dashboard, /filterDecisionImpactPayloadToCurrentReport/);
@@ -149,7 +163,7 @@ test("optimization tracker uses action tracking records as the source of truth",
   assert.doesNotMatch(dashboard, /function decisionImpactRowKey/);
   assert.match(dashboard, /No accepted optimization decisions yet/);
   assert.match(dashboard, /const hasAcceptedDecisionData = activeDecisionCount \+ completedDecisionCount > 0/);
-  assert.match(dashboard, /No accepted decisions from the current optimization report/);
+  assert.match(dashboard, /No accepted optimization decisions yet/);
   assert.match(policyActionsRoute, /listActionTrackingRecords\(\{ workspaceId, decisionInstancePrefix \}\)/);
   assert.doesNotMatch(policyActionsRoute, /dataSourceConnection\.count/);
   assert.doesNotMatch(policyActionsRoute, /hasConnectedDataSource/);
@@ -160,10 +174,11 @@ test("action tracking list falls back to local JSON records when database reads 
   const listFunction = store.match(/export async function listActionTrackingRecords[\s\S]*?\n\}/);
 
   assert.ok(listFunction, "action tracking list function should exist");
-  assert.match(listFunction[0], /const jsonRecords = await listJsonActionTrackingRecords\(filter\)\.catch\(\(\) => \[\]\)/);
-  assert.match(listFunction[0], /if \(jsonRecords\.length\) return jsonRecords/);
-  assert.match(listFunction[0], /return withTimeout\(/);
-  assert.doesNotMatch(listFunction[0], /catch \{\s*return \[\]/);
+  assert.match(listFunction[0], /return await withTimeout\(/);
+  assert.match(listFunction[0], /listDbActionTrackingRecords\(filter\)/);
+  assert.match(listFunction[0], /Falling back to local action tracking records/);
+  assert.match(listFunction[0], /return listJsonActionTrackingRecords\(filter\)\.catch\(\(\) => \[\]\)/);
+  assert.doesNotMatch(listFunction[0], /if \(jsonRecords\.length\) return jsonRecords/);
   assert.match(store, /function listDbActionTrackingRecords/);
   assert.match(store, /function withTimeout/);
   assert.match(store, /function upsertJsonActionTrackingRecord/);
@@ -179,8 +194,8 @@ test("optimization accepted impact uses the action tracker source of truth", () 
   assert.ok(acceptedImpactEffect, "optimization page should load accepted impact summary");
   assert.ok(acceptedProfitLine, "accepted profit gain calculation should exist");
   assert.ok(acceptFunction, "accept function should exist");
-  assert.match(acceptedImpactEffect[0], /\/api\/policy\/actions\?decisionInstancePrefix=/);
-  assert.match(acceptedImpactEffect[0], /optimizationReportInstanceKey/);
+  assert.match(acceptedImpactEffect[0], /\/api\/policy\/actions/);
+  assert.doesNotMatch(acceptedImpactEffect[0], /decisionInstancePrefix/);
   assert.match(acceptedImpactEffect[0], /activeDecisions/);
   assert.match(acceptedProfitLine[0], /acceptedImpactSummary\?\.expectedProfitImpact/);
   assert.match(renderer, /const hasAcceptedOptimizationActions = \(acceptedImpactSummary\?\.activeCount \?\? acceptedDecisionRows\.length\) > 0/);
@@ -188,13 +203,14 @@ test("optimization accepted impact uses the action tracker source of truth", () 
   assert.match(renderer, /responsePayload\?\.ok !== true/);
 });
 
-test("optimization tracker reads accepted actions from the current optimization scope", () => {
+test("optimization tracker reads active accepted actions across optimization runs", () => {
   const dashboard = read("components/dashboard.tsx");
   const policyActionsRoute = read("app/api/policy/actions/route.ts");
   const trackerFunction = dashboard.match(/function ActionTrackerPage\([\s\S]*?\nfunction DecisionTextMetric/);
 
   assert.ok(trackerFunction, "action tracker page should exist");
-  assert.match(trackerFunction[0], /\/api\/policy\/actions\?scope=current_optimization/);
+  assert.match(trackerFunction[0], /\/api\/policy\/actions/);
+  assert.doesNotMatch(trackerFunction[0], /scope=current_optimization/);
   assert.match(policyActionsRoute, /url\.searchParams\.get\("scope"\) === "current_optimization"/);
   assert.match(policyActionsRoute, /currentOptimizationDecisionInstancePrefix/);
   assert.match(policyActionsRoute, /findOptimizationReportCache/);
@@ -318,27 +334,107 @@ test("optimization accepted actions are persisted by decision instance", () => {
 
   assert.ok(acceptFunction, "accept handler should exist");
   assert.ok(hydrationFunction, "status hydration should exist");
-  assert.match(renderer, /function decisionInstanceKey/);
+  assert.match(renderer, /function recommendationIdForDecision/);
   assert.match(renderer, /function optimizationReportKey/);
   assert.match(renderer, /function hasConcreteOptimizationReportKey/);
-  assert.match(acceptFunction[0], /const instanceKey = decisionInstanceKey\(row, optimizationReportInstanceKey\)/);
-  assert.match(acceptFunction[0], /hasConcreteOptimizationReportKey\(optimizationReportInstanceKey\)/);
+  assert.match(acceptFunction[0], /const optimizationRunId = optimizationReportRunId/);
+  assert.match(acceptFunction[0], /const decisionId = decisionRowKey\(row\)/);
+  assert.match(acceptFunction[0], /const recommendationId = recommendationIdForDecision\(row, report\)/);
+  assert.match(acceptFunction[0], /const instanceKey = recommendationId/);
+  assert.match(acceptFunction[0], /hasConcreteOptimizationReportKey\(optimizationRunId\)/);
+  assert.match(acceptFunction[0], /\[optimization accept click\]/);
+  assert.match(acceptFunction[0], /optimization_run_id: optimizationRunId/);
+  assert.match(acceptFunction[0], /recommendation_id: recommendationId/);
+  assert.match(acceptFunction[0], /sku_id: row\.skuId/);
+  assert.match(acceptFunction[0], /decision_id: decisionId/);
   assert.match(acceptFunction[0], /decision_instance_key: instanceKey/);
-  assert.match(hydrationFunction[0], /persistedInstanceKey !== decisionInstanceKey\(matchedRow, optimizationReportInstanceKey\)/);
+  assert.match(renderer, /function shouldShowInOptimizationQueue/);
+  assert.match(renderer, /const pendingDecisionRows = filteredDecisionRows\.filter\(\(row\) => shouldShowInOptimizationQueue\(row, actionStatuses\)\)/);
+  assert.match(hydrationFunction[0], /persistedRecommendationId/);
+  assert.match(hydrationFunction[0], /persistedRecommendationId === recommendationIdForDecision\(row, report\)/);
+  assert.match(hydrationFunction[0], /legacyActionMatchesDecisionRecommendation\(action, row\)/);
+  assert.match(renderer, /function legacyActionMatchesDecisionRecommendation/);
+  assert.match(renderer, /persistedDecisionId !== currentDecisionId && !persistedInstanceKey\.endsWith/);
+  assert.match(renderer, /Math\.abs\(persistedProfitDelta - currentProfitDelta\) > 1/);
+  assert.doesNotMatch(renderer, /function persistedActionMatchesDecisionRow/);
+  assert.doesNotMatch(hydrationFunction[0], /persistedActionMatchesDecisionRow/);
   assert.match(store, /const hasDecisionInstanceKey = typeof input\.action_payload\?\.decision_instance_key === "string"/);
-  assert.match(store, /const existing = hasDecisionInstanceKey\s*\?\s*null/);
+  assert.match(store, /const recommendationId = typeof input\.action_payload\?\.recommendation_id === "string"/);
+  assert.doesNotMatch(store, /const existing = hasDecisionInstanceKey\s*\?\s*null/);
+  assert.match(store, /require_database\?: boolean/);
+  assert.match(store, /export async function getDbActionTrackingRecordByDecisionInstanceKey/);
+  assert.match(store, /export async function getDbActionTrackingRecordByRecommendationId/);
   assert.match(store, /function actionPayloadDecisionInstanceKey/);
   assert.match(store, /actionPayloadDecisionInstanceKey\(record\.action_payload\)/);
   assert.match(store, /export async function getActionTrackingRecordByDecisionInstanceKey/);
   assert.match(store, /path: \["decision_instance_key"\]/);
+  assert.match(store, /path: \["recommendation_id"\]/);
+  assert.match(store, /\[action persisted\]/);
+  assert.match(store, /if \(input\.require_database\)/);
   assert.match(acceptRoute, /requestedDecisionInstanceKey/);
-  assert.match(acceptRoute, /Current optimization decision key is required before accepting an action/);
-  assert.match(acceptRoute, /getActionTrackingRecordByDecisionInstanceKey/);
+  assert.match(acceptRoute, /canonicalDecisionInstanceKey\(recommendationId\)/);
+  assert.match(acceptRoute, /currentOptimizationRecommendationExists\(workspaceId, recommendationId\)/);
+  assert.match(acceptRoute, /findOptimizationReportCache\(prisma/);
+  assert.match(acceptRoute, /optimizationReportCachePayload\(cache\)/);
+  assert.match(acceptRoute, /Accepted recommendation is not present in the current optimization snapshot/);
+  assert.match(acceptRoute, /recommendation_id: recommendationId/);
+  assert.match(acceptRoute, /Current optimization run, decision id, and recommendation id are required before accepting an action/);
+  assert.match(acceptRoute, /getDbActionTrackingRecordByRecommendationId/);
+  assert.match(acceptRoute, /getDbActionTrackingRecordByDecisionInstanceKey/);
+  assert.match(acceptRoute, /require_database: true/);
   assert.match(acceptRoute, /Accepted action was not readable after persistence/);
   assert.match(acceptRoute, /persistedDecisionInstanceKey !== requestedDecisionInstanceKey/);
   assert.match(acceptRoute, /Accepted action was not persisted for the current optimization decision/);
-  assert.match(acceptRoute, /\[action-accept:request\]/);
+  assert.match(acceptRoute, /\[accept request\]/);
   assert.match(acceptRoute, /\[action-accept:persisted\]/);
+});
+
+test("recommendation identity is stable across optimization runs", () => {
+  const identity = read("lib/optimization/recommendation-identity.ts");
+  const generator = read("lib/dashboard/decision-snapshot-generator.ts");
+
+  assert.match(identity, /export function recommendationFingerprint/);
+  assert.match(identity, /sku_id: input\.skuId/);
+  assert.match(identity, /action_type: input\.actionType/);
+  assert.match(identity, /action_parameters: normalizeIdentityValue/);
+  assert.match(identity, /policy_version: input\.policyVersion/);
+  assert.match(identity, /optimizer_version: input\.optimizerVersion/);
+  assert.match(identity, /simulation_version: input\.simulationVersion/);
+  assert.match(identity, /evidence: normalizeIdentityValue/);
+  assert.match(identity, /metric_snapshot_version: input\.metricSnapshotVersion/);
+  assert.doesNotMatch(identity, /optimization_run_id/);
+  assert.match(generator, /optimization_run_id: recommendationIdentityContext\?\.optimizationRunId/);
+  assert.match(generator, /recommendation_id: recommendationIdentityForDecision/);
+  assert.match(generator, /sku_id: skuId/);
+  assert.match(generator, /action_type: record\.action/);
+  assert.match(generator, /expected_profit_impact:/);
+});
+
+test("queue filtering uses recommendation id and active statuses, not sku or run id", () => {
+  const renderer = read("components/report-renderer-engine.tsx");
+  const impactTracker = read("lib/policy/action-impact-tracker.ts");
+  const queueFilter = renderer.match(/function shouldShowInOptimizationQueue\([\s\S]*?\n\}/);
+  const hydrationFunction = renderer.match(/async function loadPersistedDecisionStatuses\(\) \{[\s\S]*?\n    \}/);
+
+  assert.ok(queueFilter, "queue filter should exist");
+  assert.ok(hydrationFunction, "status hydration should exist");
+  assert.match(hydrationFunction[0], /persistedRecommendationId === recommendationIdForDecision\(row, report\)/);
+  assert.match(hydrationFunction[0], /action\.status === "accepted" \|\| action\.status === "running"/);
+  assert.doesNotMatch(hydrationFunction[0], /action\.status === "completed"/);
+  assert.doesNotMatch(hydrationFunction[0], /optimization_run_id.*===/);
+  assert.match(queueFilter[0], /status !== "accepted" && status !== "rejected"/);
+  assert.match(impactTracker, /activeDecisions: rows\.filter\(\(row\) => row\.status === "accepted" \|\| row\.status === "running"\)/);
+});
+
+test("active strategies UI is backed by DecisionAction records", () => {
+  const dashboard = read("components/dashboard.tsx");
+  const policyActionsRoute = read("app/api/policy/actions/route.ts");
+
+  assert.match(dashboard, /function ActionTrackerPage/);
+  assert.match(dashboard, /fetch\("\/api\/policy\/actions"/);
+  assert.match(dashboard, /Active Strategies/);
+  assert.match(policyActionsRoute, /listActionTrackingRecords\(\{ workspaceId, decisionInstancePrefix \}\)/);
+  assert.doesNotMatch(policyActionsRoute, /scope=current_optimization[\s\S]*fetch/);
 });
 
 test("optimization page passes optimization run metadata into renderer report", () => {

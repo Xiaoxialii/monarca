@@ -82,7 +82,7 @@ export function buildDecisionImpactPayload(records: ActionTrackingRecord[]): Dec
       realizedProfitImpact,
       predictionAccuracy
     },
-    activeDecisions: rows.filter((row) => row.status !== "completed" && row.status !== "learned" && row.status !== "rejected"),
+    activeDecisions: rows.filter((row) => row.status === "accepted" || row.status === "running"),
     completedActions: completed,
     outcomeAnalysis: completed.map((row) => ({
       id: row.id,

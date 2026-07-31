@@ -8,6 +8,10 @@ import { upsertDecisionSnapshot, upsertReportSnapshot } from "@/lib/dashboard/sn
 import { upsertOptimizationReportCache } from "@/lib/dashboard/optimization-report-cache";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { applyDecisionLearningToDecisionReport } from "@/lib/decision-outcome/optimizer-learning-integration";
+import { activeDecisionContextForSku } from "@/lib/optimization/decision-context/active-decision-context";
+import { loadActiveDecisionContexts } from "@/lib/optimization/decision-context/decision-context-loader";
+import type { ActiveDecisionContext } from "@/lib/optimization/decision-context/decision-context-types";
+import { recommendationFingerprint } from "@/lib/optimization/recommendation-identity";
 
 type DecisionMode = "full" | "sku";
 
@@ -31,9 +35,17 @@ type OptimizationRunMetadata = {
   analyzed_sku_count: number;
 };
 
+type RecommendationIdentityContext = {
+  optimizationRunId: string | null;
+  policyVersion: string;
+  optimizerVersion: string;
+  simulationVersion: string;
+  dataVersion: string;
+};
+
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
   "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
-const SNAPSHOT_ROW_LIMIT = 250;
+const PROFIT_INPUT_ROW_LIMIT = 250;
 
 export async function generateEcommerceDecisionSnapshots(
   prisma: PrismaClient,
@@ -61,14 +73,16 @@ export async function generateEcommerceDecisionSnapshots(
       decisionMode: mode
     });
     const loadDurationMs = Date.now() - loadStartedAt;
-    const acceptedOptimizationSkuIds = await loadAcceptedOptimizationSkuIds(prisma, input.workspaceId);
+    const activeDecisionContexts = await loadActiveDecisionContexts(prisma, {
+      workspaceId: input.workspaceId
+    });
     const contentStartedAt = Date.now();
     const content = await applyDecisionLearningToDecisionReport(prisma, {
       workspaceId: input.workspaceId,
       content: decisionSnapshotContent(loaded, versions, {
         optimizationRunId: input.sourceJobId ?? null,
         startedAt: runStartedAt,
-        acceptedOptimizationSkuIds
+        activeDecisionContexts
       })
     }) as ReturnType<typeof decisionSnapshotContent>;
     const contentDurationMs = Date.now() - contentStartedAt;
@@ -131,7 +145,7 @@ export async function generateEcommerceDecisionSnapshots(
       state: loaded.state,
       load_duration_ms: loadDurationMs,
       content_duration_ms: contentDurationMs,
-      accepted_optimization_sku_count: acceptedOptimizationSkuIds.size,
+      active_decision_context_sku_count: activeDecisionContexts.size,
       persist_duration_ms: Date.now() - persistStartedAt,
       total_duration_ms: Date.now() - startedAt,
       timestamp: new Date().toISOString()
@@ -205,46 +219,6 @@ async function writeDecisionGenerationLog(
   });
 }
 
-async function loadAcceptedOptimizationSkuIds(prisma: PrismaClient, workspaceId: string) {
-  const decisionAction = (prisma as unknown as {
-    decisionAction?: {
-      findMany: (args: { where: Record<string, unknown>; select: Record<string, boolean>; take: number; orderBy: Record<string, string> }) => Promise<Array<{ skuId?: string | null; actionPayload?: unknown }>>;
-    };
-  }).decisionAction;
-  if (!decisionAction) return new Set<string>();
-
-  try {
-    const rows = await decisionAction.findMany({
-      where: {
-        workspaceId,
-        status: { in: ["ACCEPTED", "EXECUTING", "COMPLETED", "EVALUATED", "LEARNED"] }
-      },
-      select: {
-        skuId: true,
-        actionPayload: true
-      },
-      take: 1000,
-      orderBy: { updatedAt: "desc" }
-    });
-
-    return new Set(
-      rows
-        .filter((row) => {
-          const payload = asRecord(row.actionPayload) ?? {};
-          return typeof payload.decision_instance_key === "string" && payload.decision_instance_key.trim().length > 0;
-        })
-        .map((row) => String(row.skuId ?? "").trim())
-        .filter(Boolean)
-    );
-  } catch (error) {
-    console.error("[decision-snapshot-generator] Failed to load accepted optimization actions", {
-      workspace_id: workspaceId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return new Set<string>();
-  }
-}
-
 async function saveSimulationSnapshot(
   prisma: PrismaClient,
   input: {
@@ -297,7 +271,7 @@ function decisionSnapshotContent(
   runInput: {
     optimizationRunId?: string | null;
     startedAt?: string | null;
-    acceptedOptimizationSkuIds?: Set<string>;
+    activeDecisionContexts?: Map<string, ActiveDecisionContext>;
   } = {}
 ) {
   const report = loaded.data.decision_report;
@@ -318,24 +292,31 @@ function decisionSnapshotContent(
   const skuDecisions = optimizerSkuDecisions.length
     ? optimizerSkuDecisions
     : partialSkuRecommendations(loaded, profitInputModel);
-  const compactReport = exposedReport
-    ? compactDecisionReport(exposedReport, skuDecisions, runInput.acceptedOptimizationSkuIds ?? new Set())
-    : null;
-  const compactProfitInputModel = {
-    ...profitInputModel,
-    rows: profitInputModel.rows.slice(0, SNAPSHOT_ROW_LIMIT)
+  const recommendationIdentityContext: RecommendationIdentityContext = {
+    optimizationRunId: runInput.optimizationRunId ?? null,
+    policyVersion: typeof policy?.version === "string" ? policy.version : "expert-baseline-v1",
+    optimizerVersion: versions.optimizationVersion,
+    simulationVersion: versions.simulationVersion,
+    dataVersion: versions.canonicalSnapshotVersion ?? versions.metricSnapshotVersion ?? versions.inputHash
   };
   const optimizationRun: OptimizationRunMetadata = {
     optimization_run_id: runInput.optimizationRunId ?? null,
     started_at: runInput.startedAt ?? new Date().toISOString(),
     completed_at: null,
-    optimizer_version: versions.optimizationVersion,
-    policy_version: typeof policy?.version === "string" ? policy.version : "expert-baseline-v1",
-    simulation_version: versions.simulationVersion,
-    data_version: versions.canonicalSnapshotVersion ?? versions.metricSnapshotVersion ?? versions.inputHash,
+    optimizer_version: recommendationIdentityContext.optimizerVersion,
+    policy_version: recommendationIdentityContext.policyVersion,
+    simulation_version: recommendationIdentityContext.simulationVersion,
+    data_version: recommendationIdentityContext.dataVersion,
     analyzed_sku_count: toNumber(optimizationSummaryRecord.input_sku_count)
       ?? toNumber(optimizationSummaryRecord.portfolio_size)
       ?? skuDecisions.length
+  };
+  const compactReport = exposedReport
+    ? compactDecisionReport(exposedReport, skuDecisions, runInput.activeDecisionContexts, recommendationIdentityContext)
+    : null;
+  const compactProfitInputModel = {
+    ...profitInputModel,
+    rows: profitInputModel.rows.slice(0, PROFIT_INPUT_ROW_LIMIT)
   };
 
   return {
@@ -390,9 +371,10 @@ function estimatedOptimizationMessage(coverage: number) {
 function compactDecisionReport(
   report: NonNullable<LoadDashboardResult["data"]["decision_report"]>,
   skuDecisions: unknown[],
-  acceptedOptimizationSkuIds: Set<string> = new Set()
+  activeDecisionContexts?: Map<string, ActiveDecisionContext>,
+  recommendationIdentityContext?: RecommendationIdentityContext
 ) {
-  const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions, acceptedOptimizationSkuIds);
+  const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions, activeDecisionContexts, recommendationIdentityContext);
   const compactSkuBreakdown = compactSkuBreakdownRows(report.sku_breakdown, compactPortfolio.skuDecisions);
 
   return {
@@ -452,7 +434,6 @@ function compactSkuRows<T extends { sku: string }>(rows: T[], prioritySkuIds: Se
   }
 
   for (const row of rows) {
-    if (selected.length >= SNAPSHOT_ROW_LIMIT) break;
     if (selectedSkuIds.has(row.sku)) continue;
     selected.push(row);
     selectedSkuIds.add(row.sku);
@@ -461,9 +442,14 @@ function compactSkuRows<T extends { sku: string }>(rows: T[], prioritySkuIds: Se
   return selected;
 }
 
-function compactDecisionRows(rows: unknown[]) {
+function compactDecisionRows(
+  rows: unknown[],
+  activeDecisionContexts?: Map<string, ActiveDecisionContext>,
+  recommendationIdentityContext?: RecommendationIdentityContext
+) {
   return rows.map((row) => {
     const record = asRecord(row) ?? {};
+    const skuId = String(record.skuId ?? record.sku ?? "").trim();
     const timing = asRecord(record.timing) ?? {};
     const simulationHorizon = asRecord(record.simulation_horizon) ?? {};
     const simulation = asRecord(record.simulation) ?? {};
@@ -471,8 +457,14 @@ function compactDecisionRows(rows: unknown[]) {
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
 
     return {
+      recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
+      optimization_run_id: recommendationIdentityContext?.optimizationRunId ?? null,
+      sku_id: skuId || record.skuId || record.sku,
+      action_type: record.action,
+      expected_profit_impact: record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
       skuId: record.skuId,
       sku: record.sku ?? record.skuId,
+      previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
       action: record.action,
       sourceAction: record.sourceAction,
       canonical_action: record.canonical_action,
@@ -517,15 +509,26 @@ function compactDecisionRows(rows: unknown[]) {
   });
 }
 
-function compactPortfolioRows(rows: unknown[]) {
-  return rows.slice(0, SNAPSHOT_ROW_LIMIT).map((row) => {
+function compactPortfolioRows(
+  rows: unknown[],
+  activeDecisionContexts?: Map<string, ActiveDecisionContext>,
+  recommendationIdentityContext?: RecommendationIdentityContext
+) {
+  return rows.map((row) => {
     const record = asRecord(row) ?? {};
+    const skuId = String(record.sku ?? record.skuId ?? "").trim();
     const simulation = asRecord(record.simulation) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
 
     return {
+      recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
+      optimization_run_id: recommendationIdentityContext?.optimizationRunId ?? null,
+      sku_id: skuId || record.sku || record.skuId,
+      action_type: record.action ?? record.canonical_action ?? record.unified_action,
+      expected_profit_impact: record.profit_delta ?? record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
       sku: record.sku,
+      previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
       product_name: record.product_name,
       current_profit: record.current_profit,
       predicted_profit: record.predicted_profit,
@@ -552,15 +555,6 @@ function compactPortfolioRows(rows: unknown[]) {
   });
 }
 
-function filterRowsByAcceptedSkus(rows: unknown[], acceptedSkuIds: Set<string>) {
-  if (!acceptedSkuIds.size) return rows;
-  return rows.filter((row) => {
-    const record = asRecord(row) ?? {};
-    const sku = String(record.skuId ?? record.sku ?? "").trim();
-    return !sku || !acceptedSkuIds.has(sku);
-  });
-}
-
 function decisionContractInventoryEvidence(value: unknown) {
   const contract = asRecord(value) ?? {};
   const contractEvidence = asRecord(contract.evidence) ?? {};
@@ -574,19 +568,72 @@ function decisionContractInventoryEvidence(value: unknown) {
   };
 }
 
+function recommendationIdentityForDecision(
+  record: Record<string, unknown>,
+  context?: RecommendationIdentityContext
+) {
+  const existingId = typeof record.recommendation_id === "string" ? record.recommendation_id.trim() : "";
+  if (existingId) return existingId;
+
+  const skuId = String(record.skuId ?? record.sku ?? "").trim();
+  const actionType = String(record.action ?? record.canonical_action ?? record.unified_action ?? record.sourceAction ?? "HOLD").trim();
+  const simulation = asRecord(record.simulation) ?? {};
+  const beforeState = asRecord(record.before_state) ?? {};
+  const afterState = asRecord(record.after_state) ?? {};
+  const decisionContract = asRecord(record.decision_contract) ?? {};
+  const contractEvidence = asRecord(decisionContract.evidence) ?? {};
+  const policyTrace = asRecord(record.policy_trace) ?? {};
+  const policyMetrics = asRecord(policyTrace.metrics) ?? {};
+  const selectedScenario = asRecord(record.selected_scenario) ?? {};
+
+  return recommendationFingerprint({
+    skuId,
+    actionType,
+    actionParameters: {
+      source_action: record.sourceAction ?? null,
+      recommended_action: record.recommended_action ?? null,
+      recommended_actions: record.recommendedActions ?? null,
+      expected_profit_impact: record.expectedProfitImpact ?? record.estimatedProfitImpact ?? record.profit_delta ?? null,
+      ad_budget_change: toNumber(simulation.recommended_ads_spend) != null || toNumber(simulation.current_ads_spend) != null
+        ? (toNumber(simulation.recommended_ads_spend) ?? 0) - (toNumber(simulation.current_ads_spend) ?? 0)
+        : null,
+      inventory_change: simulation.inventory_impact ?? contractEvidence.recommendedInventoryChange ?? null,
+      required_inventory: simulation.required_inventory ?? contractEvidence.requiredInventory ?? null,
+      current_inventory: simulation.current_inventory ?? beforeState.inventory ?? contractEvidence.currentInventory ?? null,
+      current_price: beforeState.price ?? null,
+      new_price: afterState.price ?? selectedScenario.price ?? null
+    },
+    policyVersion: context?.policyVersion,
+    optimizerVersion: context?.optimizerVersion,
+    simulationVersion: context?.simulationVersion,
+    metricSnapshotVersion: context?.dataVersion,
+    evidence: {
+      roas: contractEvidence.roas ?? policyMetrics.roas ?? record.roas ?? null,
+      margin: contractEvidence.margin ?? policyMetrics.margin ?? record.margin ?? null,
+      confidence: record.confidence ?? selectedScenario.confidence ?? null,
+      inventory_gap: contractEvidence.inventoryGap ?? contractEvidence.inventory_gap ?? null,
+      inventory_coverage_days: contractEvidence.inventoryCoverageDays ?? policyMetrics.inventoryCoverageDays ?? null,
+      conversion_rate: contractEvidence.conversionRate ?? policyMetrics.conversionRate ?? null
+    }
+  });
+}
+
 function compactPortfolioOptimization(
   optimization: LoadDashboardResult["data"]["decision_report"]["sku_portfolio_optimization"],
   fallbackSkuDecisions: unknown[] = [],
-  acceptedOptimizationSkuIds: Set<string> = new Set()
+  activeDecisionContexts?: Map<string, ActiveDecisionContext>,
+  recommendationIdentityContext?: RecommendationIdentityContext
 ) {
   const portfolioSkuDecisions = optimization.skuDecisions.length
     ? optimization.skuDecisions
     : fallbackSkuDecisions;
-  const availableSkuDecisions = filterRowsByAcceptedSkus(portfolioSkuDecisions, acceptedOptimizationSkuIds);
+  const availableSkuDecisions = portfolioSkuDecisions;
   const queueDecisionRows = availableSkuDecisions.filter(isOptimizationCandidateRow);
-  const compactSkuDecisions = compactDecisionRows(queueDecisionRows.length ? queueDecisionRows : availableSkuDecisions).slice(0, SNAPSHOT_ROW_LIMIT);
+  const compactSkuDecisions = compactDecisionRows(queueDecisionRows.length ? queueDecisionRows : availableSkuDecisions, activeDecisionContexts, recommendationIdentityContext);
   const compactRecommendedPortfolio = compactPortfolioRows(
-    filterRowsByAcceptedSkus(optimization.recommended_portfolio, acceptedOptimizationSkuIds)
+    optimization.recommended_portfolio,
+    activeDecisionContexts,
+    recommendationIdentityContext
   );
   const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
   const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
@@ -604,7 +651,7 @@ function compactPortfolioOptimization(
       total_expected_profit_gain: totalProfitImpact,
       constraints_applied: Array.from(new Set([
         ...optimization.optimization_summary.constraints_applied,
-        ...(acceptedOptimizationSkuIds.size ? ["accepted_optimization_actions_excluded"] : []),
+        ...(activeDecisionContexts?.size ? ["active_decision_context_included"] : []),
         ...(optimization.skuDecisions.length ? [] : ["partial_recommendations_from_profit_input_model"])
       ]))
     },
@@ -621,13 +668,13 @@ function compactPortfolioOptimization(
     currentPortfolio: undefined,
     allocationRecommendation: {
       ...optimization.allocationRecommendation,
-      current: optimization.allocationRecommendation.current.slice(0, SNAPSHOT_ROW_LIMIT),
-      recommended: optimization.allocationRecommendation.recommended.slice(0, SNAPSHOT_ROW_LIMIT)
+      current: optimization.allocationRecommendation.current,
+      recommended: optimization.allocationRecommendation.recommended
     },
     skuDecisions: compactSkuDecisions,
     riskAlerts: optimization.riskAlerts.slice(0, 50),
     executionPlan: optimization.executionPlan.length
-      ? filterExecutionPlanByAcceptedSkus(optimization.executionPlan, acceptedOptimizationSkuIds).slice(0, 50)
+      ? optimization.executionPlan.slice(0, 50)
       : compactSkuDecisions.length
         ? [{
           step: 1,
@@ -642,19 +689,6 @@ function compactPortfolioOptimization(
     inventory_plan: [],
     simulations: []
   };
-}
-
-function filterExecutionPlanByAcceptedSkus(
-  rows: LoadDashboardResult["data"]["decision_report"]["sku_portfolio_optimization"]["executionPlan"],
-  acceptedSkuIds: Set<string>
-) {
-  if (!acceptedSkuIds.size) return rows;
-  return rows
-    .map((row) => ({
-      ...row,
-      skuIds: row.skuIds.filter((sku) => !acceptedSkuIds.has(sku))
-    }))
-    .filter((row) => row.skuIds.length > 0);
 }
 
 function isOptimizationCandidateRow(row: unknown) {
@@ -687,7 +721,7 @@ function partialSkuRecommendations(
       ? loaded.data.decision_report.sku_breakdown.top_revenue_skus
       : loaded.data.sku_analysis.top_skus;
 
-  return topRows.slice(0, SNAPSHOT_ROW_LIMIT).map((row, index) => {
+  return topRows.slice(0, PROFIT_INPUT_ROW_LIMIT).map((row, index) => {
     const profitRow = profitInputModel.rows.find((item) => item.sku === row.sku);
     const confidence = Math.max(0.25, profitRow?.confidence ?? profitInputModel.confidenceScore);
     const action = "OPTIMIZE";

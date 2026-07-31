@@ -182,10 +182,11 @@ test("decision snapshots degrade gracefully when profit inputs are incomplete", 
   assert.match(generator, /profitDataCoverage/);
   assert.match(generator, /PARTIAL_OPTIMIZATION_INPUTS/);
   assert.match(generator, /partialSkuRecommendations/);
-  assert.match(generator, /SNAPSHOT_ROW_LIMIT/);
+  assert.match(generator, /PROFIT_INPUT_ROW_LIMIT/);
   assert.match(generator, /compactDecisionReport/);
-  assert.match(generator, /compactSkuOptimizationAlgorithm/);
-  assert.match(generator, /profitInputModel\.rows\.slice\(0, SNAPSHOT_ROW_LIMIT\)/);
+  assert.match(generator, /compactPortfolioOptimization/);
+  assert.match(generator, /profitInputModel\.rows\.slice\(0, PROFIT_INPUT_ROW_LIMIT\)/);
+  assert.doesNotMatch(generator, /compactSkuDecisions = .*\.slice\(0, PROFIT_INPUT_ROW_LIMIT\)/);
   assert.doesNotMatch(generator, /OPTIMIZATION_INPUTS_INCOMPLETE/);
   assert.doesNotMatch(generator, /const exposedReport = needsProfitInputs \? null : report/);
 });

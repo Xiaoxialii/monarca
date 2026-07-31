@@ -17334,7 +17334,7 @@ function ActionTrackerPage({
     const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
     try {
-      const response = await fetch("/api/policy/actions?scope=current_optimization", {
+      const response = await fetch("/api/policy/actions", {
         cache: "no-store",
         signal: controller.signal
       });
@@ -17416,7 +17416,7 @@ function ActionTrackerPage({
               : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-emerald-700"
           )}
         >
-          {isZh ? `进行中决策 ${activeDecisionCount}` : `Active Decisions ${activeDecisionCount}`}
+          {isZh ? `Active Strategies ${activeDecisionCount}` : `Active Strategies ${activeDecisionCount}`}
         </button>
         <button
           type="button"
@@ -17428,15 +17428,15 @@ function ActionTrackerPage({
               : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-800"
           )}
         >
-          {isZh ? `已完成决策 ${completedDecisionCount}` : `Completed Decisions ${completedDecisionCount}`}
+          {isZh ? `Completed Strategies ${completedDecisionCount}` : `Completed Strategies ${completedDecisionCount}`}
         </button>
       </div>
 
       <div className="flex flex-wrap items-start gap-x-16 gap-y-6">
         <DecisionTextMetric
-          label={isZh ? "进行中决策" : "Active Decisions"}
+          label={isZh ? "Active Strategies" : "Active Strategies"}
           value={formatInteger(activeDecisionCount)}
-          description={isZh ? "当前正在执行并等待效果验证的 AI 决策数量" : "AI decisions currently executing and waiting for outcome validation"}
+          description={isZh ? "已接受或正在执行并等待效果验证的优化策略" : "Accepted or executing optimization strategies waiting for outcome validation"}
         />
         <DecisionTextMetric
           label={isZh ? "预计利润影响" : "Expected Profit Impact"}
@@ -17447,7 +17447,7 @@ function ActionTrackerPage({
 	          label={isZh ? "已实现利润影响" : "Realized Profit Impact"}
 	          value={!hasAcceptedDecisionData ? "-" : activeRealizedProfitImpact ? `${formatSignedMoney(activeRealizedProfitImpact)} (${activeRealizationRate ?? 0}% Realized / Expected)` : (isZh ? "采集中" : "Collecting")}
 	          description={!hasAcceptedDecisionData
-              ? (isZh ? "当前优化报告还没有已接受的决策" : "No accepted decisions from the current optimization report")
+              ? (isZh ? "还没有已接受的优化决策" : "No accepted optimization decisions yet")
               : (isZh ? "当前 active decisions 已经产生的利润提升" : "Profit lift already realized by current active decisions")}
 	        />
         <DecisionTextMetric

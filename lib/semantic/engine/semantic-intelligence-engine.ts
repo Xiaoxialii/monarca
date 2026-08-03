@@ -18,7 +18,7 @@ const CONCEPTS: ConceptProfile[] = [
   { concept: "price", aliases: ["price", "unit_price", "item_price", "product_price"], expectedTypes: ["number", "string"] },
   { concept: "unit_price", aliases: ["unit_price", "item_price", "selling_price", "sale_price"], expectedTypes: ["number", "string"] },
   { concept: "cogs", aliases: ["cogs", "cost_of_goods_sold", "unit_cogs"], expectedTypes: ["number", "string"] },
-  { concept: "product_cost", aliases: ["product_cost", "unit_cost", "item_cost", "landed_cost"], expectedTypes: ["number", "string"] },
+  { concept: "product_cost", aliases: ["product_cost", "unit_cost", "item_cost", "landed_cost", "cost"], expectedTypes: ["number", "string"] },
   { concept: "platform_fee", aliases: ["platform_fee", "marketplace_fee", "selling_fee", "commission_fee"], expectedTypes: ["number", "string"] },
   { concept: "payment_fee", aliases: ["payment_fee", "processing_fee", "transaction_fee", "stripe_fee"], expectedTypes: ["number", "string"] },
   { concept: "shipping_cost", aliases: ["shipping_cost", "shipping_fee", "carrier_cost", "postage_cost"], expectedTypes: ["number", "string"] },

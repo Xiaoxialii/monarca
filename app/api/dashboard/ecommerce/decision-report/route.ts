@@ -78,6 +78,7 @@ export async function GET(request: Request) {
         snapshot: {
           id: reportCache.id,
           type: "OptimizationReportCache",
+          sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           createdAt: dateToIso(reportCache.createdAt),
           updatedAt: dateToIso(reportCache.updatedAt),
           stale: true
@@ -125,6 +126,7 @@ export async function GET(request: Request) {
         snapshot: {
           id: reportCache.id,
           type: "OptimizationReportCache",
+          sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           createdAt: dateToIso(reportCache.createdAt),
           updatedAt: dateToIso(reportCache.updatedAt),
           stale: true
@@ -138,6 +140,7 @@ export async function GET(request: Request) {
       snapshot: {
         id: reportCache.id,
         type: "OptimizationReportCache",
+        sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
         createdAt: dateToIso(reportCache.createdAt),
         updatedAt: dateToIso(reportCache.updatedAt),
         latestSnapshot: true

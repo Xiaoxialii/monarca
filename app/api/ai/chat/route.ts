@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_CHAT_INPUT_CHARS = 12_000;
 const MAX_OUTPUT_TOKENS = 700;
+const OPENAI_REASONING_EFFORTS = new Set(["none", "low", "medium", "high", "xhigh"]);
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -74,6 +75,11 @@ function extractOutputText(payload: unknown) {
     .trim();
 }
 
+function getReasoningEffort() {
+  const effort = process.env.OPENAI_REASONING_EFFORT ?? "high";
+  return OPENAI_REASONING_EFFORTS.has(effort) ? effort : "high";
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspace();
@@ -111,7 +117,10 @@ export async function POST(request: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+        model: process.env.OPENAI_MODEL ?? "gpt-5.5",
+        reasoning: {
+          effort: getReasoningEffort()
+        },
         instructions: [
           "You are Monarca AI, an analytics SaaS assistant embedded in the user's dashboard.",
           "Help with business metrics, data sources, reports, dashboard setup, and growth analysis.",

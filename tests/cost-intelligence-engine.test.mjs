@@ -17,6 +17,7 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 
 const jiti = jitiFactory(process.cwd() + "/");
 const { calculateCostIntelligence } = jiti("./lib/cost/cost-intelligence-engine.ts");
+const { allocateAdSpendToSkus } = jiti("./lib/sku/sku-ad-allocation-engine.ts");
 const { resolveCogsSemantic } = jiti("./lib/semantic/cost/cogs-semantic-resolver.ts");
 
 test("COGS semantic resolver normalizes unit cost", () => {
@@ -58,7 +59,7 @@ test("cost intelligence aggregates real SKU fulfillment platform payment and ref
 
   assert.equal(result.totals.cogs, 120);
   assert.equal(result.totals.shipping_cost, 20);
-  assert.equal(result.totals.fulfillment_cost, 27);
+  assert.equal(result.totals.fulfillment_cost, 7);
   assert.equal(result.totals.platform_fee, 9);
   assert.equal(result.totals.payment_fee, 8.7);
   assert.equal(result.totals.refund_cost, 25);
@@ -114,6 +115,48 @@ test("cost intelligence carries product name category and variant attributes to 
   assert.equal(row.variant_name, "夏季基础款");
   assert.equal(row.size, "M");
   assert.equal(row.color, "白色");
+});
+
+test("portfolio profitability reconciles to SKU unit economics when order and item revenue differ", () => {
+  const result = calculateCostIntelligence({
+    revenue: 100,
+    refundAmount: 4,
+    refunds: [{ refund_id: "R-1", amount: 4 }],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU-A", quantity: 1, revenue: 100, price: 100, unit_cost: 40 },
+      { order_id: "O-1", sku: "SKU-B", quantity: 1, revenue: 50, price: 50, unit_cost: 10 }
+    ],
+    products: [],
+    orders: [
+      { order_id: "O-1", revenue: 100, shipping_cost: 8, handling_cost: 0, warehouse_cost: 0, platform_fee: 3, payment_fee: 2.9 }
+    ],
+    ads: [],
+    inventory: []
+  });
+
+  const skuRevenue = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.revenue) * 100) / 100, 0);
+  const skuNetProfit = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.net_profit) * 100) / 100, 0);
+  const skuShipping = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.shipping_cost) * 100) / 100, 0);
+  const skuPlatformFee = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.platform_fee) * 100) / 100, 0);
+  const skuPaymentFee = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.payment_fee) * 100) / 100, 0);
+  const skuRefundCost = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.refund_cost) * 100) / 100, 0);
+
+  assert.equal(result.totals.revenue, 150);
+  assert.equal(result.totals.net_profit, skuNetProfit);
+  assert.equal(result.totals.shipping_cost, skuShipping);
+  assert.equal(result.totals.platform_fee, skuPlatformFee);
+  assert.equal(result.totals.payment_fee, skuPaymentFee);
+  assert.equal(result.totals.refund_cost, skuRefundCost);
+  assert.equal(skuRevenue, 150);
+  assert.equal(skuShipping, 8);
+  assert.equal(skuPlatformFee, 3);
+  assert.equal(skuPaymentFee, 2.9);
+  assert.equal(skuRefundCost, 4);
+  assert.equal(result.data_quality.portfolio_reconciliation.source, "sku_unit_economics");
+  assert.equal(result.data_quality.portfolio_reconciliation.order_revenue, 100);
+  assert.equal(result.data_quality.portfolio_reconciliation.sku_revenue, 150);
+  assert.equal(result.data_quality.portfolio_reconciliation.revenue_difference, -50);
+  assert.equal(result.data_quality.portfolio_reconciliation.duplicated_costs, 0);
 });
 
 test("cost intelligence safely degrades when cost fields are missing", () => {
@@ -259,18 +302,99 @@ test("SKU profit allocation computes full P&L with campaign ad allocation and ch
   assert.equal(skuA?.net_profit, 40);
   assert.equal(skuA?.margin, 0.4);
   assert.equal(skuA?.channel_breakdown.shopify, 100);
-  assert.equal(skuA?.ad_allocation_method, "campaign_window");
-  assert.equal(skuA?.attribution_method, "campaign_window_fallback");
-  assert.equal(skuA?.roas_status, "estimated");
-  assert.equal(skuA?.roas_display, "Estimated 5.00");
+  assert.equal(skuA?.ad_allocation_method, "campaign_revenue_share");
+  assert.equal(skuA?.attribution_method, "campaign_revenue_share");
+  assert.equal(skuA?.roas_status, "attributed");
+  assert.equal(skuA?.roas_display, "5.00");
   assert.equal(skuA?.cost_breakdown.ads, 20);
 
   assert.equal(skuB?.ad_cost_allocated, 60);
   assert.equal(skuB?.net_profit, 120);
   assert.equal(skuB?.margin, 0.4);
   assert.equal(skuB?.channel_breakdown.amazon, 300);
-  assert.equal(skuB?.ad_allocation_method, "campaign_window");
+  assert.equal(skuB?.ad_allocation_method, "campaign_revenue_share");
   assert.equal(skuB?.cost_breakdown.ads, 60);
+});
+
+test("campaign spend allocation reconciles by SKU campaign revenue share", () => {
+  const rows = allocateAdSpendToSkus({
+    skuRows: [
+      { sku: "SKU-A", revenue: 500, quantity: 5 },
+      { sku: "SKU-B", revenue: 300, quantity: 3 },
+      { sku: "SKU-C", revenue: 200, quantity: 2 }
+    ],
+    orderItems: [
+      { sku: "SKU-A", revenue: 500, campaign_id: "CMP-1", order_date: "2026-07-02" },
+      { sku: "SKU-B", revenue: 300, campaign_id: "CMP-1", order_date: "2026-07-02" },
+      { sku: "SKU-C", revenue: 200, campaign_id: "CMP-1", order_date: "2026-07-02" }
+    ],
+    ads: [{ campaign_id: "CMP-1", spend: 1000, date: "2026-07-01" }]
+  });
+
+  const bySku = new Map(rows.map((row) => [row.sku, row]));
+  assert.equal(bySku.get("SKU-A")?.allocated_ad_spend, 500);
+  assert.equal(bySku.get("SKU-B")?.allocated_ad_spend, 300);
+  assert.equal(bySku.get("SKU-C")?.allocated_ad_spend, 200);
+  assert.equal(rows.reduce((sum, row) => sum + (row.allocated_ad_spend ?? 0), 0), 1000);
+  assert.equal(bySku.get("SKU-A")?.allocation_method, "campaign_revenue_share");
+  assert.equal(bySku.get("SKU-A")?.ads_validation_status, "PASSED");
+});
+
+test("campaign allocation does not duplicate campaign spend across matched SKUs", () => {
+  const rows = allocateAdSpendToSkus({
+    skuRows: [
+      { sku: "SKU-A", revenue: 1000, quantity: 10 },
+      { sku: "SKU-B", revenue: 1000, quantity: 10 },
+      { sku: "SKU-C", revenue: 1000, quantity: 10 }
+    ],
+    orderItems: [
+      { sku: "SKU-A", revenue: 1000, campaign_id: "CMP-1" },
+      { sku: "SKU-B", revenue: 1000, campaign_id: "CMP-1" },
+      { sku: "SKU-C", revenue: 1000, campaign_id: "CMP-1" }
+    ],
+    ads: [{ campaign_id: "CMP-1", spend: 1000 }]
+  });
+
+  assert.equal(rows.reduce((sum, row) => sum + (row.allocated_ad_spend ?? 0), 0), 1000);
+  assert.ok(rows.every((row) => row.allocated_ad_spend < 1000));
+});
+
+test("direct SKU attribution overrides fallback allocation for tagged ad rows", () => {
+  const rows = allocateAdSpendToSkus({
+    skuRows: [
+      { sku: "SKU-A", revenue: 900, quantity: 9 },
+      { sku: "SKU-B", revenue: 100, quantity: 1 }
+    ],
+    orderItems: [
+      { sku: "SKU-A", revenue: 900 },
+      { sku: "SKU-B", revenue: 100 }
+    ],
+    ads: [
+      { campaign_id: "CMP-DIRECT", sku: "SKU-B", spend: 300 },
+      { campaign_id: "CMP-FALLBACK", spend: 100 }
+    ]
+  });
+
+  const bySku = new Map(rows.map((row) => [row.sku, row]));
+  assert.equal(bySku.get("SKU-B")?.allocation_method, "direct");
+  assert.equal(bySku.get("SKU-B")?.lineage.sku_direct_attribution, 300);
+  assert.equal(bySku.get("SKU-B")?.allocated_ad_spend, 310);
+  assert.equal(bySku.get("SKU-A")?.allocation_method, "revenue_share");
+  assert.equal(rows.reduce((sum, row) => sum + (row.allocated_ad_spend ?? 0), 0), 400);
+});
+
+test("Meta ad source_id matching known SKU is treated as direct SKU attribution", () => {
+  const rows = allocateAdSpendToSkus({
+    skuRows: [{ sku: "SKU_00479", revenue: 23218, quantity: 131 }],
+    orderItems: [{ sku: "SKU_00479", revenue: 23218 }],
+    ads: [{ platform: "meta_ads", source_id: "SKU_00479", campaign_id: "CMP_479", ad_id: "AD_479", spend: 441 }]
+  });
+
+  assert.equal(rows[0]?.allocated_ad_spend, 441);
+  assert.equal(rows[0]?.allocation_method, "direct");
+  assert.equal(rows[0]?.allocation_confidence, 1);
+  assert.equal(rows[0]?.lineage.sku_direct_attribution, 441);
+  assert.equal(rows[0]?.lineage.revenue_share_fallback, 0);
 });
 
 test("SKU channel breakdown excludes inventory and file transport sources", () => {
@@ -346,4 +470,101 @@ test("low stock profitable SKU recommends restock before scaling ads", () => {
 
   assert.equal(result.sku_unit_economics[0].stockout_risk, "high");
   assert.equal(result.sku_unit_economics[0].recommended_action, "RESTOCK_FIRST");
+});
+
+test("SKU profitability uses direct channel source costs without duplicated allocation", () => {
+  const result = calculateCostIntelligence({
+    revenue: 23218,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      {
+        order_id: "AMZ-00479",
+        sku: "SKU_00479",
+        platform: "amazon",
+        quantity: 40,
+        revenue: 7600,
+        cogs: 2780.47,
+        shipping_cost: 6.25,
+        platform_fee: 180,
+        payment_fee: 120
+      },
+      {
+        order_id: "META-00479",
+        sku: "SKU_00479",
+        platform: "meta",
+        quantity: 48,
+        revenue: 8290,
+        cogs: 3000,
+        shipping_cost: 5.95,
+        platform_fee: 186.91,
+        payment_fee: 139.1
+      },
+      {
+        order_id: "SHOP-00479",
+        sku: "SKU_00479",
+        platform: "shopify",
+        quantity: 43,
+        revenue: 7328,
+        cogs: 2700,
+        shipping_cost: 6.75,
+        platform_fee: 200,
+        payment_fee: 140
+      }
+    ],
+    products: [],
+    orders: [
+      { order_id: "AMZ-00479", revenue: 7600 },
+      { order_id: "META-00479", revenue: 8290 },
+      { order_id: "SHOP-00479", revenue: 7328 }
+    ],
+    ads: [
+      { ad_id: "AD-AMZ-00479", sku: "SKU_00479", platform: "amazon", spend: 183 },
+      { ad_id: "AD-META-00479", sku: "SKU_00479", platform: "meta", spend: 288 },
+      { ad_id: "AD-SHOP-00479", sku: "SKU_00479", platform: "shopify", spend: 335 }
+    ],
+    inventory: [{ sku: "SKU_00479", stock_level: 100 }]
+  });
+
+  const row = result.sku_unit_economics.find((item) => item.sku === "SKU_00479");
+  assert.equal(row?.quantity, 131);
+  assert.equal(row?.revenue, 23218);
+  assert.equal(row?.cogs, 8480.47);
+  assert.equal(row?.ad_cost_allocated, 806);
+  assert.equal(row?.shipping_cost, 18.95);
+  assert.equal(row?.platform_fee, 566.91);
+  assert.equal(row?.payment_fee, 399.1);
+  assert.equal(row?.cost_breakdown.fulfillment, 0);
+  assert.equal(row?.net_profit, 12946.57);
+  assert.equal(row?.margin, 0.5576);
+  assert.equal(row?.ad_allocation_method, "direct");
+});
+
+test("SKU direct ads keep multiple same-campaign source rows instead of collapsing spend", () => {
+  const result = calculateCostIntelligence({
+    revenue: 1000,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU-A", quantity: 1, revenue: 600, cogs: 200 },
+      { order_id: "O-2", sku: "SKU-B", quantity: 1, revenue: 400, cogs: 120 }
+    ],
+    products: [],
+    orders: [
+      { order_id: "O-1", revenue: 600, shipping_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "O-2", revenue: 400, shipping_cost: 0, platform_fee: 0, payment_fee: 0 }
+    ],
+    ads: [
+      { campaign_id: "CAMP-SHARED", sku: "SKU-A", spend: 183, platform: "amazon", date: "2026-07-01" },
+      { campaign_id: "CAMP-SHARED", sku: "SKU-A", spend: 288, platform: "meta", date: "2026-07-01" },
+      { campaign_id: "CAMP-SHARED", sku: "SKU-B", spend: 335, platform: "shopify", date: "2026-07-01" }
+    ]
+  });
+
+  const bySku = new Map(result.sku_unit_economics.map((row) => [row.sku, row]));
+  assert.equal(result.totals.ad_spend, 806);
+  assert.equal(bySku.get("SKU-A")?.ad_cost_allocated, 471);
+  assert.equal(bySku.get("SKU-B")?.ad_cost_allocated, 335);
+  assert.equal(bySku.get("SKU-A")?.ad_allocation_method, "direct");
+  assert.equal(bySku.get("SKU-B")?.ad_allocation_method, "direct");
 });

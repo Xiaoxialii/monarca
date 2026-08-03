@@ -10,6 +10,7 @@ const PRODUCT_FIELDS = new Set<CanonicalConcept>(["product_id", "product_name", 
 const CUSTOMER_FIELDS = new Set<CanonicalConcept>(["customer_id", "email_hash", "country"]);
 const REFUND_FIELDS = new Set<CanonicalConcept>(["refund_id", "order_id", "refund_amount", "refund_reason"]);
 const ADS_FIELDS = new Set<CanonicalConcept>([
+  "sku",
   "campaign_id",
   "adset_id",
   "ad_id",
@@ -207,7 +208,7 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       sourceId: stableSourceId,
       fields,
       allowedFields: ITEM_FIELDS,
-      triggerFields: ["product_id", "sku", "quantity", "price", "unit_price", "revenue", "gross_sales", "net_sales", "cogs", "product_cost", "refund_amount"],
+      triggerFields: ["product_id", "price", "unit_price", "revenue", "gross_sales", "net_sales", "cogs", "product_cost", "refund_amount"],
       requiredFields: ["order_id", "sku"],
       defaults: { order_id: stableSourceId || `source-${canonicalKey({ platform, sku: fields.sku ?? "" }).slice(0, 12)}`, quantity: 1 }
     }),

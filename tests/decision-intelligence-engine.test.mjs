@@ -29,8 +29,8 @@ function metricOutput() {
         { order_id: "2", revenue: 200, order_date: "2026-06-02", customer_id: "C1", ad_id: "A2", campaign_id: "CMP1" }
       ],
       ecommerce_order_items: [
-        { order_id: "1", sku: "SKU-A", product_id: "P1", price: 50, quantity: 2, cogs: 60, ad_id: "A1", campaign_id: "CMP1" },
-        { order_id: "2", sku: "SKU-B", product_id: "P2", price: 100, quantity: 2, cogs: 120, ad_id: "A2", campaign_id: "CMP1" }
+        { order_id: "1", sku: "SKU-A", product_id: "P1", price: 50, quantity: 2, cogs: 20, ad_id: "A1", campaign_id: "CMP1" },
+        { order_id: "2", sku: "SKU-B", product_id: "P2", price: 100, quantity: 2, cogs: 40, ad_id: "A2", campaign_id: "CMP1" }
       ],
       ecommerce_products: [
         { product_id: "P1", product_name: "Product A", sku: "SKU-A" },

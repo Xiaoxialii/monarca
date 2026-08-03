@@ -15,11 +15,12 @@ type PersistedDecisionActionContextRow = {
   expectedImpact: number | null;
   actualImpact: number | null;
   acceptedAt: Date | null;
+  recommendationId?: string | null;
   actionPayload: unknown;
   updatedAt: Date;
 };
 
-const ACTIVE_DECISION_STATUSES = ["ACCEPTED", "EXECUTING", "COMPLETED", "EVALUATED", "LEARNED"] as const;
+const ACTIVE_DECISION_STATUSES = ["ACCEPTED", "EXECUTING"] as const;
 
 export async function loadActiveDecisionContexts(
   prisma: PrismaClient,
@@ -50,6 +51,7 @@ export async function loadActiveDecisionContexts(
       expectedImpact: true,
       actualImpact: true,
       acceptedAt: true,
+      recommendationId: true,
       actionPayload: true,
       updatedAt: true
     },
@@ -65,9 +67,12 @@ export async function loadActiveDecisionContexts(
     if (!skuId) continue;
     const payload = asRecord(row.actionPayload);
     const tracking = asRecord(payload.tracking);
+    const baselineMetrics = asRecord(tracking.baseline_metrics);
+    const predictedMetrics = asRecord(tracking.predicted_metrics);
     const acceptedAt = row.acceptedAt ? row.acceptedAt.toISOString() : null;
     const action: Omit<ActiveDecisionActionContext, "evaluation"> = {
       actionId: row.id,
+      recommendationId: stringOrNull(payload.recommendation_id) ?? stringOrNull(row.recommendationId),
       actionType: String(tracking.action_type_original ?? payload.action ?? row.recommendedAction ?? row.actionType),
       status: activeDecisionStatus(row.status),
       acceptedAt,
@@ -75,6 +80,7 @@ export async function loadActiveDecisionContexts(
       decisionInstanceKey: stringOrNull(payload.decision_instance_key),
       expectedProfitImpact: numberOrNull(row.expectedImpact),
       actualProfitImpact: numberOrNull(row.actualImpact),
+      adBudgetChange: metricDelta(predictedMetrics.ad_spend, baselineMetrics.ad_spend),
       daysSinceAccepted: acceptedAt ? Math.max(0, Math.floor((now.getTime() - Date.parse(acceptedAt)) / 86_400_000)) : null
     };
     const activeAction = {
@@ -106,6 +112,13 @@ function stringOrNull(value: unknown) {
 
 function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function metricDelta(after: unknown, before: unknown) {
+  const next = numberOrNull(after);
+  const current = numberOrNull(before);
+  if (next == null || current == null) return null;
+  return Math.round((next - current) * 100) / 100;
 }
 
 function optimizationRunIdFromInstanceKey(value: unknown) {

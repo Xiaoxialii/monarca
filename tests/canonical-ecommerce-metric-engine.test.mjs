@@ -124,14 +124,18 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.business.sku_unit_economics.length, 3);
   assert.equal(result.metrics.business.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.net_profit) * 100) / 100, 0), 124.6);
   assert.ok(result.metrics.business.profit_confidence < 1);
-  assert.equal(result.metrics.growth.revenue_growth_rate, 4);
-  assert.equal(result.metrics.growth.order_growth_rate, 1);
-  assert.equal(result.metrics.growth.sku_growth_rate, 1);
+  assert.equal(result.metrics.growth.growth_window_days, 7);
+  assert.equal(result.metrics.growth.revenue_growth_rate, 0);
+  assert.equal(result.metrics.growth.order_growth_rate, 0);
+  assert.equal(result.metrics.growth.sku_growth_rate, 0);
   assert.deepEqual(result.metrics.growth.daily.map((row) => [row.period, row.revenue, row.orders]), [
     ["2026-06-01", 100, 1],
     ["2026-06-02", 500, 2]
   ]);
   assert.equal(result.metrics.customer.ltv, 300);
+  assert.equal(result.metrics.customer.customer_revenue_ltv, 300);
+  assert.ok(result.metrics.customer.customer_profit_ltv > 0);
+  assert.ok(Number.isFinite(result.metrics.customer.customer_contribution_ltv));
   assert.equal(result.metrics.customer.avg_order_value_per_customer, 300);
   assert.equal(result.metrics.customer.repeat_purchase_rate, 0.5);
   assert.equal(result.metrics.customer.customer_count, 2);
@@ -155,7 +159,7 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.customer.revenue_per_customer_segment[0].segment, "Top 1%");
   assert.equal(result.metrics.customer.ltv_cac_ratio, 2);
   assert.equal(result.metrics.customer.payback_period_days, 0.75);
-  assert.equal(result.metrics.ads.roas, 0);
+  assert.equal(result.metrics.ads.roas, 4);
   assert.equal(result.metrics.ads.cac, 150);
   assert.equal(result.metrics.ads.cpa, 50);
   assert.equal(result.metrics.ads.mer, 4);
@@ -357,7 +361,8 @@ test("attribution layer does not report order-level coverage from aggregate ads 
   assert.equal(result.metrics.attribution.attribution_model, "none");
   assert.equal(result.metrics.attribution.order_attribution_coverage, 0);
   assert.equal(result.metrics.attribution.sku_attribution_coverage, 0);
-  assert.equal(result.metrics.ads.roas, 0);
+  assert.equal(result.metrics.ads.roas, 6);
+  assert.equal(result.metrics.ads.cac, null);
   assert.equal(result.metrics.ads.mer, 6);
   assert.ok(result.metadata.missing_fields.includes("ecommerce_orders.utm_campaign"));
   assert.ok(result.metadata.estimated_metrics.includes("attribution.order_to_ad"));

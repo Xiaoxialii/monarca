@@ -18,6 +18,7 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 const jiti = jitiFactory(process.cwd() + "/");
 const { buildCanonicalDatasetFromMappedRecords } = jiti("./lib/semantic/mapper/canonical-schema-engine.ts");
 const { validateSemanticMapping } = jiti("./lib/semantic/mapper/mapping-validation.ts");
+const { SemanticIntelligenceEngine } = jiti("./lib/semantic/engine/semantic-intelligence-engine.ts");
 
 test("canonical engine normalizes Shopify-like adapter output into ecommerce tables", () => {
   const result = buildCanonicalDatasetFromMappedRecords([
@@ -47,6 +48,21 @@ test("canonical engine normalizes Shopify-like adapter output into ecommerce tab
   assert.equal(result.tables.ecommerce_products[0].product_name, "Snowboard");
   assert.equal(result.tables.ecommerce_customers[0].customer_id, "customer-1");
   assert.equal(result.metadata.unknown_fields[0].path, "raw.admin_graphql_api_id");
+});
+
+test("semantic engine maps generic cost fields to product cost", () => {
+  const engine = new SemanticIntelligenceEngine();
+  const result = engine.analyzeFields([
+    {
+      field: "cost",
+      path: "cost",
+      valueType: "number",
+      samples: [12.5, 14],
+      context: []
+    }
+  ]);
+
+  assert.equal(result.candidates[0]?.maps_to, "product_cost");
 });
 
 test("canonical engine normalizes Amazon-like and TikTok-like records without provider branches", () => {
@@ -138,6 +154,7 @@ test("canonical engine normalizes ads mapped records into ecommerce_ads", () => 
       platform: "meta",
       source_id: "camp-1:ad-1:2026-06-01",
       fields: {
+        sku: "SKU-AD",
         campaign_id: "camp-1",
         adset_id: "adset-1",
         ad_id: "ad-1",
@@ -153,6 +170,7 @@ test("canonical engine normalizes ads mapped records into ecommerce_ads", () => 
 
   assert.equal(result.tables.ecommerce_ads.length, 1);
   assert.equal(result.tables.ecommerce_ads[0].platform, "meta");
+  assert.equal(result.tables.ecommerce_ads[0].sku, "SKU-AD");
   assert.equal(result.tables.ecommerce_ads[0].campaign_id, "camp-1");
   assert.equal(result.tables.ecommerce_ads[0].spend, 100);
   assert.equal(result.tables.ecommerce_ads[0].date, "2026-06-01");
@@ -203,6 +221,7 @@ test("canonical engine builds inventory rows from stock fields", () => {
   assert.equal(result.tables.ecommerce_inventory.length, 1);
   assert.equal(result.tables.ecommerce_inventory[0].stock_level, 20);
   assert.equal(result.tables.ecommerce_inventory[0].warehouse_id, "WH-1");
+  assert.equal(result.tables.ecommerce_order_items.length, 0);
 });
 
 test("semantic mapping validation rejects corrupt memory mappings", () => {

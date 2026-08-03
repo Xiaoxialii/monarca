@@ -13,6 +13,7 @@ export type ExistingActionEvaluation =
 
 export type ActiveDecisionActionContext = {
   actionId: string;
+  recommendationId: string | null;
   actionType: string;
   status: ActiveDecisionStatus;
   acceptedAt: string | null;
@@ -20,6 +21,7 @@ export type ActiveDecisionActionContext = {
   decisionInstanceKey: string | null;
   expectedProfitImpact: number | null;
   actualProfitImpact: number | null;
+  adBudgetChange: number | null;
   daysSinceAccepted: number | null;
   evaluation: ExistingActionEvaluation;
 };

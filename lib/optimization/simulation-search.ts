@@ -1,4 +1,4 @@
-import { roundCurrency, roundRatio, safeRatio, type CommerceSkuState } from "@/lib/optimization/objective";
+import { commerceSkuMargin, commerceSkuNetProfit, roundCurrency, roundRatio, safeRatio, type CommerceSkuState } from "@/lib/optimization/objective";
 
 export type OptimizationScenarioAction = "SCALE_ADS" | "REDUCE_ADS" | "STOP_SKU" | "PRICE_UP" | "PRICE_DOWN" | "HOLD";
 
@@ -92,7 +92,7 @@ function simulateActionSet(sku: CommerceSkuState, actions: OptimizationScenarioA
 }
 
 function scenarioRisk(sku: CommerceSkuState, actions: OptimizationScenarioAction[], inventoryCoverage: number) {
-  const margin = sku.margin ?? safeRatio(sku.grossProfit, sku.revenue);
+  const margin = commerceSkuMargin(sku);
   const attributionRisk = sku.roas == null && sku.adSpend > 0 ? 0.12 : 0;
   const inventoryRisk = inventoryCoverage < 14 && actions.includes("SCALE_ADS") ? 0.22 : inventoryCoverage < 7 ? 0.16 : 0.04;
   const marginRisk = margin < 0.12 && !actions.includes("PRICE_UP") ? 0.18 : 0.04;
@@ -100,5 +100,5 @@ function scenarioRisk(sku: CommerceSkuState, actions: OptimizationScenarioAction
 }
 
 function baselineProfit(sku: CommerceSkuState) {
-  return roundCurrency(sku.grossProfit - sku.adSpend);
+  return commerceSkuNetProfit(sku);
 }

@@ -29,10 +29,12 @@ export function activeDecisionContextForSku(
     previous_status: currentAction.status,
     previous_expected_profit: currentAction.expectedProfitImpact,
     previous_actual_profit: currentAction.actualProfitImpact,
+    previous_ad_budget_change: currentAction.adBudgetChange,
     accepted_at: currentAction.acceptedAt,
     days_since_accepted: currentAction.daysSinceAccepted,
     optimization_run_id: currentAction.optimizationRunId,
     decision_instance_key: currentAction.decisionInstanceKey,
+    recommendation_id: currentAction.recommendationId,
     evaluation: currentAction.evaluation,
     active_actions: context.activeActions
   };

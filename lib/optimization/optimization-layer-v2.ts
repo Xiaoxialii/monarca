@@ -1,6 +1,6 @@
 import { allocateBudgetByMarginalRoi, type BudgetAllocation } from "@/lib/optimization/budget-allocation";
 import { buildJointOptimizationResults, type JointOptimizationResult } from "@/lib/optimization/joint-optimization";
-import { roundCurrency, roundRatio, safeRatio, type CommerceState } from "@/lib/optimization/objective";
+import { commerceSkuNetProfit, roundCurrency, roundRatio, safeRatio, type CommerceState } from "@/lib/optimization/objective";
 import { riskPenalty, simulateAllScenarios, type SimulationResult } from "@/lib/optimization/simulation-search";
 
 export type OptimizationLayerV2Report = {
@@ -43,7 +43,7 @@ export function runOptimizationLayerV2(state: CommerceState): OptimizationLayerV
     budgetLimit: state.constraints.budgetLimit
   });
   const jointResults = buildJointOptimizationResults(simulations);
-  const currentProfit = roundCurrency(state.skus.reduce((sum, sku) => sum + sku.grossProfit - sku.adSpend, 0));
+  const currentProfit = roundCurrency(state.skus.reduce((sum, sku) => sum + commerceSkuNetProfit(sku), 0));
   const optimizedProfit = roundCurrency(Array.from(selectedBySku.values()).reduce((sum, result) => sum + result.profit, 0));
   const profitChange = roundCurrency(optimizedProfit - currentProfit);
   const bestActions = Array.from(selectedBySku.values())

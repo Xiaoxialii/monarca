@@ -15,6 +15,7 @@ import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-p
 import { dynamicThresholdProfileFromPolicy } from "@/lib/optimization/policy/optimization-policy";
 import type { AdsCampaignInput, PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
+import { calculateSkuProfitability, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
 import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
 
@@ -107,7 +108,7 @@ export type DecisionIntelligenceReportV1 = {
     margin: number;
     ad_spend: number;
     roas: number;
-    cac: number;
+    cac: number | null;
   };
   sku_breakdown: {
     top_revenue_skus: Array<{ sku: string; product_name?: string; category?: string; variant_name?: string; size?: string; color?: string; revenue: number; quantity: number; share?: number; estimated: boolean }>;
@@ -130,8 +131,17 @@ export type DecisionIntelligenceReportV1 = {
       attribution_method?: SkuAttributionMethod;
       attribution_confidence?: number;
       total_cost: number;
-      ad_cost_allocated: number;
+      gross_profit?: number;
+      operating_cost?: number;
+      contribution_profit?: number;
+      ad_cost_allocated: number | null;
       profit_confidence: number;
+      profitability_confidence?: number;
+      validation_status?: ProfitValidationStatus;
+      optimization_allowed?: boolean;
+      warnings?: string[];
+      cogs_status?: CogsStatus;
+      cogs_confidence?: number;
       channel_breakdown: Record<string, number>;
       channel_details?: Array<{
         platform: string;
@@ -141,8 +151,25 @@ export type DecisionIntelligenceReportV1 = {
         margin: number;
         share: number;
       }>;
-      ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "none";
+      ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "unknown" | "none";
       ad_allocation_confidence: number;
+      attribution_source?: "meta_ads" | "amazon_ads" | "shopify_ads" | "campaign_attribution" | "sku_allocation" | "revenue_share_fallback" | "unknown" | "none";
+      attributed_campaigns?: Array<{
+        campaign_id: string;
+        raw_spend: number;
+        attributed_revenue: number;
+        allocated_spend: number;
+        allocation_method: "direct" | "campaign_revenue_share";
+      }>;
+      ads_validation_status?: "PASSED" | "FAILED" | "UNKNOWN";
+      ads_validation_warnings?: string[];
+      ads_lineage?: {
+        raw_platform_spend: number;
+        sku_direct_attribution: number;
+        campaign_allocation: number;
+        revenue_share_fallback: number;
+        final_allocated_ads: number | null;
+      };
       campaign_ids?: string[];
       attribution_window_start?: string | null;
       attribution_window_end?: string | null;
@@ -181,7 +208,7 @@ export type DecisionIntelligenceReportV1 = {
     ad_spend: number;
     roas: number;
     mer: number;
-    cac: number;
+    cac: number | null;
     campaign_performance: Array<{
       campaign_id: string;
       ad_spend: number;
@@ -203,7 +230,7 @@ export type DecisionIntelligenceReportV1 = {
     avg_order_value_per_customer: number;
     repeat_purchase_rate: number;
     new_vs_returning_ratio: number;
-    acquisition_cost: number;
+    acquisition_cost: number | null;
     median_ltv: number;
     p90_ltv: number;
     p95_ltv: number;
@@ -276,6 +303,10 @@ export type DecisionIntelligenceReportV1 = {
 export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): DecisionIntelligenceReportV1 {
   const metrics = metricOutput.metrics;
   const metadata = metricOutput.metadata;
+  const profitabilityRevenue = Number.isFinite(metrics.business.revenue)
+    ? metrics.business.revenue
+    : metrics.core.revenue;
+  const profitabilityAov = metrics.core.orders > 0 ? roundCurrency(profitabilityRevenue / metrics.core.orders) : 0;
   const totalSkuRevenue = metrics.core.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
   const topRevenueSkus = metrics.core.sku_revenue.map((row) => ({
     sku: row.sku,
@@ -346,14 +377,14 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
   const campaignSpend = metrics.attribution.campaign_performance.reduce((sum, row) => sum + row.ad_spend, 0);
   const healthScore = businessHealthScore({
     margin: metrics.business.margin,
-    roas: metrics.ads.roas,
+    roas: metrics.business.roas,
     confidence: metadata.confidence_score,
     dataCoverage: metadata.data_coverage
   });
   const analysisSkuRows = shouldDeferPortfolioOptimization ? topProfitSkus.slice(0, 100) : topProfitSkus;
   const profitControlInsights = buildProfitControlInsights({
     skuRows: analysisSkuRows,
-    totalRevenue: metrics.core.revenue,
+    totalRevenue: profitabilityRevenue,
     totalNetProfit: metrics.business.net_profit,
     portfolioMargin: metrics.business.margin,
     overallRevenueGrowthRate: metrics.growth.revenue_growth_rate,
@@ -380,7 +411,9 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
         quantity: row.quantity,
         price: row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0,
         cogs: row.cost_breakdown.cogs,
-        ads_spend: row.ad_cost_allocated,
+        operating_cost: row.total_cost - row.cost_breakdown.cogs,
+        net_profit: row.net_profit,
+        ads_spend: row.ad_cost_allocated ?? 0,
         inventory: row.available_stock ?? row.stock_level ?? 0,
         sales_velocity: row.sales_velocity ?? 0,
         margin: row.margin
@@ -428,10 +461,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
 
   return {
     executive_summary: {
-      revenue: metrics.core.revenue,
+      revenue: profitabilityRevenue,
       net_profit: metrics.business.net_profit,
       margin: metrics.business.margin,
-      roas: metrics.ads.roas,
+      roas: metrics.business.roas,
       mer: metrics.ads.mer,
       sku_count: metrics.total_sku_count ?? metrics.core.sku_revenue.length,
       customer_count: metrics.customer.customer_count,
@@ -439,14 +472,14 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
       health_label: healthLabel(healthScore)
     },
     performance_overview: {
-      revenue: metrics.core.revenue,
+      revenue: profitabilityRevenue,
       orders: metrics.core.orders,
-      aov: metrics.core.aov,
+      aov: profitabilityAov,
       gross_profit: metrics.business.gross_profit,
       net_profit: metrics.business.net_profit,
       margin: metrics.business.margin,
       ad_spend: metrics.business.ad_spend,
-      roas: metrics.ads.roas,
+      roas: metrics.business.roas,
       cac: metrics.ads.cac
     },
     sku_breakdown: {
@@ -460,7 +493,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     },
     ads_breakdown: {
       ad_spend: metrics.ads.ad_spend,
-      roas: metrics.ads.roas,
+      roas: metrics.business.roas,
       mer: metrics.ads.mer,
       cac: metrics.ads.cac,
       campaign_performance: metrics.attribution.campaign_performance.slice(0, 10),
@@ -928,6 +961,13 @@ function buildPortfolioOptimizationSkuInputs(input: {
       ads_spend: row.ad_cost_allocated ?? 0,
       margin: row.margin,
       net_profit: row.net_profit,
+      profitability_confidence: row.profitability_confidence ?? row.profit_confidence ?? input.confidence,
+      optimization_allowed: row.optimization_allowed,
+      warnings: row.warnings,
+      cogs_status: row.cogs_status,
+      cogs_confidence: row.cogs_confidence,
+      ad_allocation_method: row.ad_allocation_method,
+      attribution_confidence: row.attribution_confidence ?? row.ad_allocation_confidence,
       inventory: row.available_stock ?? row.stock_level ?? 0,
       sales_velocity: row.sales_velocity ?? 0,
       refund_rate: row.refund_rate ?? 0,
@@ -947,7 +987,18 @@ function buildPortfolioOptimizationSkuInputs(input: {
         ? roundCurrency(input.metrics.ads.ad_spend * row.revenue / totalRevenue)
         : roundCurrency(row.revenue * 0.055);
       const margin = clamp(portfolioMargin + (((index % 7) - 3) * 0.012), 0.12, 0.48);
-      const netProfit = roundCurrency(row.revenue * margin - adsSpend - row.revenue * 0.035);
+      const cogs = roundCurrency(price * Math.max(0.15, 1 - margin) * 0.62);
+      const profitability = calculateSkuProfitability({
+        revenue: row.revenue,
+        cogs,
+        fulfillmentCost: roundCurrency(row.revenue * 0.035),
+        adSpend: adsSpend,
+        cogsStatus: "ESTIMATED",
+        cogsConfidence: 0.55,
+        adAllocationMethod: input.metrics.ads.ad_spend > 0 ? "REVENUE_SHARE" : "UNKNOWN",
+        attributionConfidence: input.metrics.ads.ad_spend > 0 ? 0.5 : 0.25,
+        criticalFieldsMissing: ["sku_profit_rows"]
+      });
 
       return {
         sku: row.sku,
@@ -956,10 +1007,17 @@ function buildPortfolioOptimizationSkuInputs(input: {
         revenue: row.revenue,
         quantity,
         price,
-        cogs: roundCurrency(price * Math.max(0.15, 1 - margin) * 0.62),
+        cogs,
         ads_spend: adsSpend,
-        margin,
-        net_profit: netProfit,
+        margin: profitability.margin,
+        net_profit: profitability.net_profit,
+        profitability_confidence: profitability.profitability_confidence,
+        optimization_allowed: profitability.validation.optimization_allowed,
+        warnings: profitability.validation.warnings,
+        cogs_status: profitability.cogs_status,
+        cogs_confidence: profitability.cogs_confidence,
+        ad_allocation_method: "revenue_share",
+        attribution_confidence: profitability.attribution_confidence,
         inventory: Math.max(quantity * 2, 120 + ((index * 37) % 900)),
         sales_velocity: roundRatio(quantity / 30),
         refund_rate: 0.04 + ((index % 5) * 0.006),
@@ -998,7 +1056,18 @@ function buildSyntheticPortfolioSkuInputs(confidence: number): PortfolioSkuInput
     const margin = index % 17 === 0 ? 0.08 : index % 11 === 0 ? 0.14 : 0.3 + ((index * 11) % 16) / 100;
     const adsSpend = roundCurrency(18 + ((index * 23) % 82));
     const variableCost = roundCurrency(revenue * (0.12 + ((index % 6) * 0.008)));
-    const netProfit = roundCurrency(revenue * margin - adsSpend - variableCost);
+    const cogs = roundCurrency(price * Math.max(0.18, 1 - margin) * 0.58);
+    const profitability = calculateSkuProfitability({
+      revenue,
+      cogs,
+      fulfillmentCost: variableCost,
+      adSpend: adsSpend,
+      cogsStatus: "ESTIMATED",
+      cogsConfidence: 0.5,
+      adAllocationMethod: "UNKNOWN",
+      attributionConfidence: 0.25,
+      criticalFieldsMissing: ["synthetic_profit_rows"]
+    });
     const inventory = index % 23 === 0 ? 18 + (index % 7) : 160 + ((index * 41) % 840);
     const rowConfidence = index % 13 === 0 ? 0.38 : clamp((confidence || 0.72) + ((index % 5) * 0.025), 0.62, 0.88);
 
@@ -1009,10 +1078,17 @@ function buildSyntheticPortfolioSkuInputs(confidence: number): PortfolioSkuInput
       revenue,
       quantity,
       price,
-      cogs: roundCurrency(price * Math.max(0.18, 1 - margin) * 0.58),
+      cogs,
       ads_spend: adsSpend,
-      margin,
-      net_profit: netProfit,
+      margin: profitability.margin,
+      net_profit: profitability.net_profit,
+      profitability_confidence: profitability.profitability_confidence,
+      optimization_allowed: profitability.validation.optimization_allowed,
+      warnings: profitability.validation.warnings,
+      cogs_status: profitability.cogs_status,
+      cogs_confidence: profitability.cogs_confidence,
+      ad_allocation_method: "unavailable",
+      attribution_confidence: profitability.attribution_confidence,
       inventory,
       sales_velocity: roundRatio(quantity / 30),
       refund_rate: 0.025 + ((index % 8) * 0.006),
@@ -1035,7 +1111,8 @@ function buildRootCauses(input: {
   const causes: ProfitControlInsight["root_causes"] = [];
   const affectedChannel = primaryChannel(row);
   const costRatio = safeRatio(row.total_cost, row.revenue);
-  const adRatio = safeRatio(row.ad_cost_allocated, row.revenue);
+  const adCostAllocated = row.ad_cost_allocated ?? 0;
+  const adRatio = safeRatio(adCostAllocated, row.revenue);
   const refundRatio = row.refund_rate ?? 0;
   const revenueChannels = revenueChannelEntries(row.channel_breakdown);
   const channelConcentration = Math.max(0, ...revenueChannels.map(([, value]) => safeRatio(value, row.revenue)));
@@ -1048,8 +1125,8 @@ function buildRootCauses(input: {
   if (row.margin < input.portfolioMargin - 0.05 || costRatio > 0.75) {
     causes.push(driverCause("Cost", -Math.abs(row.revenue * Math.max(0, input.portfolioMargin - row.margin)), "negative", affectedChannel, row.sku));
   }
-  if ((row.ad_cost_allocated ?? 0) > 0 && ((row.roas_value ?? row.sku_roas) < 1.5 || adRatio > 0.15 || row.roas_status === "spent_no_revenue")) {
-    causes.push(driverCause("Ad Spend", -Math.abs(row.ad_cost_allocated), "negative", affectedChannel, row.sku));
+  if (adCostAllocated > 0 && ((row.roas_value ?? row.sku_roas) < 1.5 || adRatio > 0.15 || row.roas_status === "spent_no_revenue")) {
+    causes.push(driverCause("Ad Spend", -Math.abs(adCostAllocated), "negative", affectedChannel, row.sku));
   }
   if (refundRatio > 0.05 || row.refund_risk === "high" || row.refund_risk === "medium") {
     causes.push(driverCause("Returns", -Math.abs(row.revenue * refundRatio), "negative", affectedChannel, row.sku));

@@ -1,9 +1,13 @@
+import { calculateSkuProfitability } from "../profit/canonical-profitability-engine";
+
 export type SkuOptimizationInputRow = {
   sku: string;
   revenue: number;
   quantity: number;
   price: number;
   cogs: number;
+  operating_cost?: number;
+  net_profit?: number;
   ads_spend: number;
   inventory: number;
   sales_velocity: number;
@@ -98,10 +102,16 @@ export function buildSkuOptimizationAlgorithm(input: {
 function scoreSku(row: SkuOptimizationInputRow): SkuOptimizationRow {
   const unitRevenue = row.quantity > 0 ? row.revenue / row.quantity : row.price;
   const unitCogs = row.quantity > 0 ? row.cogs / row.quantity : row.cogs;
+  const profitability = calculateSkuProfitability({
+    revenue: row.revenue,
+    cogs: row.cogs,
+    fulfillmentCost: row.operating_cost ?? 0,
+    adSpend: row.ads_spend
+  });
   const unitProfit = roundCurrency(unitRevenue - unitCogs);
-  const grossProfit = roundCurrency(row.revenue - row.cogs);
-  const contributionProfit = roundCurrency(grossProfit - row.ads_spend);
-  const adEfficiency = row.ads_spend > 0 ? roundRatio(grossProfit / row.ads_spend) : null;
+  const grossProfit = profitability.gross_profit;
+  const contributionProfit = row.net_profit ?? profitability.net_profit;
+  const adEfficiency = row.ads_spend > 0 ? roundRatio(profitability.contribution_profit / row.ads_spend) : null;
   const inventoryCoverageDays = row.sales_velocity > 0 ? roundRatio(row.inventory / row.sales_velocity) : null;
   const demandScore = demandSignal(row.quantity, row.sales_velocity, row.inventory);
   const profitScore = profitSignal(row.margin, contributionProfit, adEfficiency);

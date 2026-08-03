@@ -1,4 +1,4 @@
-import { roundRatio, safeRatio, type CommerceState } from "@/lib/optimization/objective";
+import { commerceSkuMargin, roundRatio, safeRatio, type CommerceState } from "@/lib/optimization/objective";
 import type { EvolutionEngineResult, GeneratedPolicy } from "@/lib/evolution/types";
 
 export function generatePoliciesFromFeedback(input: {
@@ -11,7 +11,7 @@ export function generatePoliciesFromFeedback(input: {
   const generated = new Map<string, GeneratedPolicy>();
   for (const sku of input.state.skus) {
     const roas = sku.roas ?? safeRatio(sku.revenue, sku.adSpend);
-    const margin = sku.margin ?? safeRatio(sku.grossProfit, sku.revenue);
+    const margin = commerceSkuMargin(sku);
     const velocity = sku.salesVelocity;
 
     if (roas > 3 && margin > 0.22 && sku.inventory > velocity * 21) {

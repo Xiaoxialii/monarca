@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import type { PrismaClient } from "@prisma/client";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
 
 export const DECISION_ALGORITHM_VERSION = "decision-intelligence-v2.1";
 export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.4-policy-v1";
@@ -9,6 +10,7 @@ export const METRIC_SNAPSHOT_VERSION = "metrics-from-canonical-v1";
 export type DecisionSnapshotVersions = {
   algorithmVersion: string;
   optimizationVersion: string;
+  profitabilityEngineVersion: typeof CANONICAL_PROFITABILITY_ENGINE_VERSION;
   canonicalSnapshotVersion: string | null;
   metricSnapshotVersion: string | null;
   simulationVersion: string;
@@ -110,6 +112,7 @@ export async function currentDecisionSnapshotVersions(
   const inputHash = hashJson({
     algorithmVersion: DECISION_ALGORITHM_VERSION,
     optimizationVersion: OPTIMIZATION_VERSION,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
     simulationVersion: SIMULATION_VERSION,
     canonicalVersion,
     metricVersion
@@ -118,6 +121,7 @@ export async function currentDecisionSnapshotVersions(
   return {
     algorithmVersion: DECISION_ALGORITHM_VERSION,
     optimizationVersion: OPTIMIZATION_VERSION,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
     canonicalSnapshotVersion: canonicalVersion,
     metricSnapshotVersion: metricVersion ?? METRIC_SNAPSHOT_VERSION,
     simulationVersion: SIMULATION_VERSION,

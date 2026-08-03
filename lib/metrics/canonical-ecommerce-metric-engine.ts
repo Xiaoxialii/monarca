@@ -1,7 +1,8 @@
 import type { CanonicalDataset } from "@/lib/semantic/types";
-import { calculateCostIntelligence } from "@/lib/cost/cost-intelligence-engine";
+import { calculateCostIntelligence, type CostSkuUnit } from "@/lib/cost/cost-intelligence-engine";
 import { enrichOrderItemsWithCanonicalSku, normalizeProductSkuRows } from "@/lib/sku/sku-intelligence-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
+import type { CogsStatus, ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 const SUPPORTED_SCHEMA_VERSION = "ecommerce_canonical_v1" as const;
 
@@ -70,15 +71,22 @@ export type SkuUnitEconomicsMetric = {
   revenue: number;
   quantity: number;
   cogs: number;
-  ad_cost_allocated: number;
+  ad_cost_allocated: number | null;
   shipping_cost: number;
   platform_fee: number;
   payment_fee: number;
   fulfillment_cost: number;
   refund_amount: number;
   total_cost: number;
+  gross_profit?: number;
+  operating_cost?: number;
+  contribution_profit?: number;
   net_profit: number;
   margin: number;
+  profitability_confidence?: number;
+  validation_status?: ProfitValidationStatus;
+  optimization_allowed?: boolean;
+  warnings?: string[];
   sku_roas: number;
   roas_value?: number | null;
   roas_display?: string;
@@ -90,8 +98,14 @@ export type SkuUnitEconomicsMetric = {
   profit_confidence: number;
   channel_breakdown: Record<string, number>;
   channel_details?: Array<{ platform: string; revenue: number; quantity: number; profit: number; margin: number; share: number }>;
-  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "none";
+  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "unknown" | "none";
   ad_allocation_confidence: number;
+  attribution_source?: "meta_ads" | "amazon_ads" | "shopify_ads" | "campaign_attribution" | "sku_allocation" | "revenue_share_fallback" | "unknown" | "none";
+  attributed_campaigns?: CostSkuUnit["attributed_campaigns"];
+  ads_validation_status?: "PASSED" | "FAILED" | "UNKNOWN";
+  ads_validation_warnings?: string[];
+  ads_lineage?: CostSkuUnit["ads_lineage"];
+  cogs_status?: CogsStatus;
   campaign_ids?: string[];
   attribution_window_start?: string | null;
   attribution_window_end?: string | null;
@@ -141,9 +155,11 @@ export type CanonicalEcommerceMetricOutput = {
       product_performance: ProductPerformanceMetric[];
     };
     business: {
+      revenue: number;
       gross_profit: number;
       net_profit: number;
       margin: number;
+      roas: number;
       cogs: number;
       ad_spend: number;
       shipping_cost: number;
@@ -152,13 +168,33 @@ export type CanonicalEcommerceMetricOutput = {
       fulfillment_cost: number;
       refund_amount: number;
       total_cost: number;
+      operating_cost: number;
+      contribution_profit: number;
       real_cost: number;
       estimated_cost: number;
       estimated_cost_ratio: number;
       cost_confidence: number;
       profit_confidence: number;
+      profitability_confidence: number;
+      validation_status: ProfitValidationStatus;
+      optimization_allowed: boolean;
+      warnings: string[];
+      engine_version: string;
       missing_cost_fields: string[];
       estimated_components: string[];
+      portfolio_reconciliation?: {
+        source: "sku_unit_economics" | "portfolio_totals";
+        order_revenue: number;
+        sku_revenue: number;
+        revenue_difference: number;
+        cogs_difference: number;
+        ads_difference: number;
+        operating_cost_difference: number;
+        net_profit_difference: number;
+        unallocated_costs: number;
+        duplicated_costs: number;
+        warnings: string[];
+      };
       sku_unit_economics: SkuUnitEconomicsMetric[];
       sku_velocity: Array<{ sku: string; quantity: number; revenue: number }>;
     };
@@ -166,17 +202,21 @@ export type CanonicalEcommerceMetricOutput = {
       revenue_growth_rate: number;
       order_growth_rate: number;
       sku_growth_rate: number;
+      growth_window_days: number;
       daily: TimeSeriesMetric[];
       weekly: TimeSeriesMetric[];
       monthly: TimeSeriesMetric[];
     };
     customer: {
       ltv: number;
+      customer_revenue_ltv: number;
+      customer_profit_ltv: number;
+      customer_contribution_ltv: number;
       avg_order_value_per_customer: number;
       repeat_purchase_rate: number;
       customer_count: number;
       new_vs_returning_ratio: number;
-      acquisition_cost: number;
+      acquisition_cost: number | null;
       median_ltv: number;
       p90_ltv: number;
       p95_ltv: number;
@@ -211,7 +251,7 @@ export type CanonicalEcommerceMetricOutput = {
     };
     ads: {
       roas: number;
-      cac: number;
+      cac: number | null;
       cpa: number;
       mer: number;
       ad_spend: number;
@@ -275,7 +315,7 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
   const enrichedOrderItems = enrichOrderItemsWithCanonicalSku(dataset.tables.ecommerce_order_items ?? [], products);
   const orderItems = dedupeBy(enrichedOrderItems, (row) => stringValue(row.canonical_key) || [row.order_id, row.variant_id, row.product_id, row.sku].map(stringValue).join(":"));
   const refunds = dedupeBy(dataset.tables.ecommerce_refunds ?? [], (row) => stringValue(row.refund_id) || stringValue(row.canonical_key));
-  const ads = dedupeBy(dataset.tables.ecommerce_ads ?? [], (row) => stringValue(row.ad_id) || stringValue(row.campaign_id) || stringValue(row.canonical_key));
+  const ads = dedupeBy(dataset.tables.ecommerce_ads ?? [], (row) => stringValue(row.canonical_key) || adRowIdentity(row));
   const customers = dedupeBy(dataset.tables.ecommerce_customers ?? [], (row) => stringValue(row.customer_id) || stringValue(row.canonical_key));
   const inventory = dedupeBy(dataset.tables.ecommerce_inventory ?? dataset.tables.inventory ?? [], (row) => [row.sku, row.warehouse_id, row.date].map(stringValue).join(":") || stringValue(row.canonical_key));
 
@@ -295,13 +335,15 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
   const business = buildBusinessMetrics({ revenue, refundAmount: effectiveRefundAmount, refunds, orderItems, products, orders, ads, inventory, quality });
   const growth = buildGrowthMetrics({ orders, orderItems, quality });
   const attribution = buildAttributionMetrics({ orders, orderItems, ads, skuUnitEconomics: business.sku_unit_economics, revenue, quality });
-  const customer = buildCustomerMetrics({ orders, customers, orderCount, adSpend: business.ad_spend, netProfit: business.net_profit, quality });
+  const customerReliability = customerAcquisitionReliability(orders, customers);
+  const customer = buildCustomerMetrics({ orders, customers, orderCount, adSpend: business.ad_spend, netProfit: business.net_profit, quality, acquisitionReliable: customerReliability.reliable });
   const adsMetrics = buildAdsMetrics({
-    revenue,
+    revenue: business.revenue,
     orderCount,
     adSpend: business.ad_spend,
     customerCount: customer.customer_count,
     newCustomers: newCustomerCount(orders, customers),
+    newCustomerReliable: customerReliability.reliable,
     attributionCoverage: attribution.order_attribution_coverage,
     quality
   });
@@ -389,9 +431,9 @@ function buildSkuRevenue(rows: Array<Record<string, unknown>>, quality: QualityA
     const sku = stringValue(row.sku);
     if (!sku) continue;
 
-    const price = numberValue(row.price);
     const quantity = numberValue(row.quantity, 1);
-    const estimated = !hasFiniteNumber(row.price) || !hasFiniteNumber(row.quantity);
+    const itemRevenue = lineItemRevenue(row, quantity);
+    const estimated = !hasFiniteNumber(row.revenue) && !hasFiniteNumber(row.net_sales) && (!hasFiniteNumber(row.price) || !hasFiniteNumber(row.quantity));
     if (estimated) quality.estimatedMetrics.add("sku_revenue");
 
     const current = bySku.get(sku) ?? {
@@ -405,7 +447,7 @@ function buildSkuRevenue(rows: Array<Record<string, unknown>>, quality: QualityA
       quantity: 0,
       estimated: false
     };
-    current.revenue = roundCurrency(current.revenue + (price * quantity));
+    current.revenue = roundCurrency(current.revenue + itemRevenue);
     current.quantity += quantity;
     current.estimated = current.estimated || estimated;
     bySku.set(sku, current);
@@ -426,9 +468,9 @@ function buildProductPerformance(
     const productId = stringValue(row.product_id);
     if (!productId) continue;
 
-    const price = numberValue(row.price);
     const quantity = numberValue(row.quantity, 1);
-    const estimated = !hasFiniteNumber(row.price) || !hasFiniteNumber(row.quantity);
+    const itemRevenue = lineItemRevenue(row, quantity);
+    const estimated = !hasFiniteNumber(row.revenue) && !hasFiniteNumber(row.net_sales) && (!hasFiniteNumber(row.price) || !hasFiniteNumber(row.quantity));
     if (estimated) quality.estimatedMetrics.add("product_performance");
 
     const current = byProduct.get(productId) ?? {
@@ -438,7 +480,7 @@ function buildProductPerformance(
       quantity: 0,
       estimated: false
     };
-    current.revenue = roundCurrency(current.revenue + (price * quantity));
+    current.revenue = roundCurrency(current.revenue + itemRevenue);
     current.quantity += quantity;
     current.estimated = current.estimated || estimated;
     byProduct.set(productId, current);
@@ -488,9 +530,11 @@ function buildBusinessMetrics(input: {
   }
 
   return {
+    revenue: cost.totals.revenue,
     gross_profit: cost.totals.gross_profit,
     net_profit: cost.totals.net_profit,
     margin: cost.totals.margin,
+    roas: safeRatio(cost.totals.revenue, cost.totals.ad_spend),
     cogs: cost.totals.cogs,
     ad_spend: cost.totals.ad_spend,
     shipping_cost: cost.totals.shipping_cost,
@@ -499,13 +543,21 @@ function buildBusinessMetrics(input: {
     fulfillment_cost: cost.totals.fulfillment_cost,
     refund_amount: cost.totals.refund_amount,
     total_cost: cost.totals.total_cost,
+    operating_cost: cost.totals.operating_cost,
+    contribution_profit: cost.totals.contribution_profit,
     real_cost: roundCurrency(Math.max(0, cost.totals.total_cost - cost.totals.estimated_cost)),
     estimated_cost: cost.totals.estimated_cost,
     estimated_cost_ratio: cost.data_quality.estimated_cost_ratio,
     cost_confidence: cost.data_quality.cost_confidence,
     profit_confidence: cost.data_quality.profit_confidence,
+    profitability_confidence: cost.totals.profitability_confidence,
+    validation_status: cost.totals.validation_status,
+    optimization_allowed: cost.totals.optimization_allowed,
+    warnings: cost.totals.warnings,
+    engine_version: cost.totals.engine_version,
     missing_cost_fields: cost.data_quality.missing_cost_fields,
     estimated_components: cost.data_quality.estimated_components,
+    portfolio_reconciliation: cost.data_quality.portfolio_reconciliation,
     sku_unit_economics: cost.sku_unit_economics,
     sku_velocity: buildSkuVelocity(orderItems)
   };
@@ -552,7 +604,7 @@ function buildGrowthMetrics(input: {
   const weekly = rollupSeries(daily, (period) => weekKey(period));
   const monthly = rollupSeries(daily, (period) => monthKey(period));
 
-  if (daily.length < 2) {
+  if (daily.length < 14) {
     quality.estimatedMetrics.add("growth.revenue_growth_rate");
     quality.estimatedMetrics.add("growth.order_growth_rate");
     quality.estimatedMetrics.add("growth.sku_growth_rate");
@@ -562,6 +614,7 @@ function buildGrowthMetrics(input: {
     revenue_growth_rate: latestGrowthRate(daily, "revenue"),
     order_growth_rate: latestGrowthRate(daily, "orders"),
     sku_growth_rate: latestGrowthRate(daily, "sku_count"),
+    growth_window_days: 7,
     daily,
     weekly,
     monthly
@@ -574,9 +627,10 @@ function buildCustomerMetrics(input: {
   orderCount: number;
   adSpend: number;
   netProfit: number;
+  acquisitionReliable: boolean;
   quality: QualityAccumulator;
 }) {
-  const { orders, customers, orderCount, adSpend, netProfit, quality } = input;
+  const { orders, customers, orderCount, adSpend, netProfit, acquisitionReliable, quality } = input;
   const orderIdsByCustomer = new Map<string, Set<string>>();
   const revenueByCustomer = new Map<string, number>();
   const orderDatesByCustomer = new Map<string, string[]>();
@@ -644,18 +698,28 @@ function buildCustomerMetrics(input: {
     totalProfit: netProfit,
     totalAdSpend: adSpend
   });
-  const ltvCacRatio = safeRatio(customerLifetimeValue, safeRatio(adSpend, newCustomers));
-  const paybackPeriodDays = customerLifetimeValue > 0 && adSpend > 0 && newCustomers > 0
-    ? roundRatio((safeRatio(adSpend, newCustomers) / customerLifetimeValue) * Math.max(1, lifecycle.avgCustomerLifetimeDays))
+  const avgOrderValue = safeRatio(eventLevelCustomerRevenue, orderCount);
+  const purchaseFrequency = safeRatio(orderCount, activeCustomerCount || customerCount);
+  const customerRevenueLtv = roundCurrency(avgOrderValue * purchaseFrequency);
+  const grossMargin = safeRatio(netProfit + adSpend, eventLevelCustomerRevenue);
+  const customerProfitLtv = roundCurrency(customerRevenueLtv * grossMargin);
+  const cac = acquisitionReliable ? safeRatio(adSpend, newCustomers) : null;
+  const ltvCacRatio = cac === null ? 0 : safeRatio(customerLifetimeValue, cac);
+  const customerContributionLtv = cac === null ? 0 : roundCurrency(customerRevenueLtv - cac);
+  const paybackPeriodDays = customerLifetimeValue > 0 && cac !== null
+    ? roundRatio((cac / customerLifetimeValue) * Math.max(1, lifecycle.avgCustomerLifetimeDays))
     : null;
 
   return {
     ltv: roundCurrency(customerLifetimeValue),
+    customer_revenue_ltv: customerRevenueLtv,
+    customer_profit_ltv: customerProfitLtv,
+    customer_contribution_ltv: customerContributionLtv,
     avg_order_value_per_customer: customerCount ? roundCurrency(eventLevelCustomerRevenue / customerCount) : 0,
     repeat_purchase_rate: safeRatio(returningCustomers, customerCount),
     customer_count: customerCount,
     new_vs_returning_ratio: safeRatio(newCustomers, customerCount || orderCount),
-    acquisition_cost: safeRatio(adSpend, newCustomers),
+    acquisition_cost: cac,
     median_ltv: roundCurrency(percentile(ltvValues, 0.5)),
     p90_ltv: roundCurrency(percentile(ltvValues, 0.9)),
     p95_ltv: roundCurrency(percentile(ltvValues, 0.95)),
@@ -689,10 +753,11 @@ function buildAdsMetrics(input: {
   adSpend: number;
   customerCount: number;
   newCustomers: number;
+  newCustomerReliable: boolean;
   attributionCoverage: number;
   quality: QualityAccumulator;
 }) {
-  const { revenue, orderCount, adSpend, newCustomers, attributionCoverage, quality } = input;
+  const { revenue, orderCount, adSpend, newCustomers, newCustomerReliable, attributionCoverage, quality } = input;
 
   if (!adSpend) {
     quality.estimatedMetrics.add("ads.roas");
@@ -705,14 +770,14 @@ function buildAdsMetrics(input: {
     quality.missingFields.add("fact_attribution.campaign_id");
     quality.estimatedMetrics.add("ads.roas");
   }
-  if (adSpend > 0 && !newCustomers) {
+  if (adSpend > 0 && !newCustomerReliable) {
     quality.missingFields.add("dim_customers.is_new_customer");
     quality.estimatedMetrics.add("ads.cac");
   }
 
   return {
-    roas: attributionCoverage > 0 ? safeRatio(revenue, adSpend) : 0,
-    cac: safeRatio(adSpend, newCustomers),
+    roas: safeRatio(revenue, adSpend),
+    cac: newCustomerReliable ? safeRatio(adSpend, newCustomers) : null,
     cpa: safeRatio(adSpend, orderCount),
     mer: safeRatio(revenue, adSpend),
     ad_spend: adSpend
@@ -1047,6 +1112,27 @@ function newCustomerCount(orders: Array<Record<string, unknown>>, customers: Arr
   return Array.from(orderIdsByCustomer.values()).filter((orderIds) => orderIds.size <= 1).length;
 }
 
+function customerAcquisitionReliability(orders: Array<Record<string, unknown>>, customers: Array<Record<string, unknown>>) {
+  const explicitNewCustomerRows = customers.filter((customer) => typeof customer.is_new_customer === "boolean").length;
+  const customerOrderRows = customers.filter((customer) => firstFiniteNumber(customer.total_orders, customer.order_count) !== null).length;
+  const orderCustomerRows = orders.filter((order) => explicitCustomerIdFromOrder(order)).length;
+  const customerCoverage = safeRatio(orderCustomerRows, orders.length);
+  const customerProfileCoverage = safeRatio(explicitNewCustomerRows + customerOrderRows, customers.length);
+  const newCustomers = newCustomerCount(orders, customers);
+  const reliable = newCustomers > 0 && (
+    explicitNewCustomerRows > 0 ||
+    customerProfileCoverage >= 0.8 ||
+    (orders.length > 0 && customerCoverage >= 0.8)
+  );
+
+  return {
+    reliable,
+    customerCoverage,
+    customerProfileCoverage,
+    newCustomers
+  };
+}
+
 function explicitCustomerIdFromOrder(order: Record<string, unknown>) {
   return stringValue(order.customer_id) || stringValue(order.source_customer_id);
 }
@@ -1112,10 +1198,13 @@ function rollupSeries(rows: TimeSeriesMetric[], getPeriod: (period: string) => s
 }
 
 function latestGrowthRate(rows: TimeSeriesMetric[], field: keyof Pick<TimeSeriesMetric, "revenue" | "orders" | "sku_count">) {
-  if (rows.length < 2) return 0;
+  const windowDays = 7;
+  if (rows.length < windowDays * 2) return 0;
 
-  const current = rows[rows.length - 1][field];
-  const previous = rows[rows.length - 2][field];
+  const currentRows = rows.slice(-windowDays);
+  const previousRows = rows.slice(-(windowDays * 2), -windowDays);
+  const current = sum(currentRows.map((row) => Number(row[field]) || 0)) / windowDays;
+  const previous = sum(previousRows.map((row) => Number(row[field]) || 0)) / windowDays;
   return safeRatio(current - previous, previous);
 }
 
@@ -1224,12 +1313,43 @@ function dedupeBy(rows: Array<Record<string, unknown>>, getKey: (row: Record<str
   return Array.from(seen.values());
 }
 
+function adRowIdentity(row: Record<string, unknown>) {
+  const adId = stringValue(row.ad_id);
+  if (adId) {
+    return [
+      "ad",
+      adId,
+      stringValue(row.sku),
+      stringValue(row.product_sku),
+      firstString(row.ad_date, row.date, row.report_date),
+      stringValue(row.platform),
+      stringValue(row.source_provider)
+    ].join(":");
+  }
+
+  return [
+    "adrow",
+    stringValue(row.campaign_id),
+    stringValue(row.utm_campaign),
+    stringValue(row.sku),
+    stringValue(row.product_sku),
+    firstString(row.ad_date, row.date, row.report_date),
+    stringValue(row.platform),
+    stringValue(row.source_provider),
+    String(firstNumber(row.spend, row.ad_spend))
+  ].join(":");
+}
+
 function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0);
 }
 
 function orderRevenue(row: Record<string, unknown>) {
   return firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales);
+}
+
+function lineItemRevenue(row: Record<string, unknown>, quantity = numberValue(row.quantity, 1)) {
+  return roundCurrency(firstNumber(row.revenue, row.net_sales, firstNumber(row.price, row.unit_price) * quantity));
 }
 
 function firstNumber(...values: unknown[]) {

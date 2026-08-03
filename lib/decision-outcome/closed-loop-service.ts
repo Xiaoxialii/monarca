@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { readR2ObjectText } from "@/lib/r2-storage";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
+import { calculateSkuProfitability } from "../profit/canonical-profitability-engine";
 
 export type ClosedLoopRecommendationType = "AD_OPTIMIZATION" | "SKU_OPTIMIZATION" | "INVENTORY_OPTIMIZATION";
 export type ClosedLoopMetricType = "AD" | "SKU" | "INVENTORY";
@@ -739,8 +740,25 @@ function aggregateDecisionMetrics(
   }, 0);
   const adSpend = ads.reduce((sum, row) => sum + numberValue(row, ["ad_spend", "spend", "cost"]), 0);
   const refund = refunds.reduce((sum, row) => sum + numberValue(row, ["refund_amount", "amount"]), 0);
-  const shippingCost = orders.reduce((sum, row) => sum + numberValue(row, ["shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"]), 0);
-  const profit = roundMoney(revenue - cogs - adSpend - refund - shippingCost);
+  const shippingCost = orders.reduce((sum, row) => sum + numberValue(row, ["shipping_cost", "shipping_expense"]), 0);
+  const fulfillmentCost = orders.reduce((sum, row) => sum + numberValue(row, ["fulfillment_cost", "warehouse_cost", "handling_cost", "pick_pack_cost"]), 0);
+  const platformFee = orders.reduce((sum, row) => sum + numberValue(row, ["platform_fee", "marketplace_fee", "selling_fee"]), 0);
+  const paymentFee = orders.reduce((sum, row) => sum + numberValue(row, ["payment_fee", "processing_fee", "transaction_fee"]), 0);
+  const profitability = calculateSkuProfitability({
+    revenue,
+    cogs,
+    shippingCost,
+    fulfillmentCost,
+    platformFee,
+    paymentFee,
+    refundCost: refund,
+    adSpend,
+    cogsStatus: cogs > 0 ? "AVAILABLE" : revenue > 0 ? "MISSING" : "AVAILABLE",
+    cogsConfidence: cogs > 0 ? 0.85 : 0,
+    adAllocationMethod: adSpend > 0 ? "UNKNOWN" : "UNKNOWN",
+    attributionConfidence: adSpend > 0 ? 0.25 : 1
+  });
+  const profit = profitability.net_profit;
   const inventoryLevel = inventoryRows.reduce((sum, row) => sum + numberValue(row, ["available_stock", "stock_level", "inventory_quantity", "stock"]), 0);
   const inventoryValue = inventoryRows.reduce((sum, row) => {
     const qty = numberValue(row, ["available_stock", "stock_level", "inventory_quantity", "stock"]);
@@ -761,7 +779,7 @@ function aggregateDecisionMetrics(
     refund: roundMoney(refund),
     profit,
     roas: adSpend > 0 ? roundRatio((adRevenue || revenue) / adSpend) : null,
-    margin: revenue > 0 ? roundRatio(profit / revenue) : null,
+    margin: revenue > 0 ? profitability.margin : null,
     inventoryLevel: roundMoney(inventoryLevel),
     inventoryValue: roundMoney(inventoryValue),
     salesVelocity,
@@ -778,7 +796,7 @@ function aggregateDecisionMetrics(
       hasOrders: orders.length > 0 || orderItems.length > 0,
       hasAds: ads.length > 0,
       hasInventory: inventoryRows.length > 0,
-      hasProfitInputs: revenue > 0 && (cogs > 0 || adSpend > 0 || refund > 0 || shippingCost > 0)
+      hasProfitInputs: revenue > 0 && (cogs > 0 || adSpend > 0 || refund > 0 || shippingCost > 0 || fulfillmentCost > 0 || platformFee > 0 || paymentFee > 0)
     }
   };
 }

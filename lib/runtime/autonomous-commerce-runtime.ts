@@ -72,7 +72,7 @@ type RuntimeSkuRow = {
   sku_roas: number;
   roas_value?: number | null;
   roas_status?: string;
-  ad_cost_allocated: number;
+  ad_cost_allocated: number | null;
   stock_level?: number | null;
   available_stock?: number | null;
   sales_velocity?: number;
@@ -164,9 +164,9 @@ function buildSkuOptimizationActions(input: AutonomousCommerceRuntimeInput): Aut
         actionType: row.net_profit < 0 ? "kill_sku" : "reduce_ads",
         sku: row.sku,
         priority: priority(Math.abs(row.net_profit), input.confidence_score, 0.9),
-        expectedProfit: Math.abs(row.net_profit) || row.ad_cost_allocated * 0.3,
+        expectedProfit: Math.abs(row.net_profit) || (row.ad_cost_allocated ?? 0) * 0.3,
         confidence: input.confidence_score,
-        evidence: [`net_profit=${roundCurrency(row.net_profit)}`, `ad_cost_allocated=${roundCurrency(row.ad_cost_allocated)}`]
+        evidence: [`net_profit=${roundCurrency(row.net_profit)}`, `ad_cost_allocated=${roundCurrency(row.ad_cost_allocated ?? 0)}`]
       }));
     }
   }

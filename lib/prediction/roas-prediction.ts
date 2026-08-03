@@ -1,4 +1,4 @@
-import { roundRatio, safeRatio, type CommerceSkuState } from "@/lib/optimization/objective";
+import { commerceSkuMargin, roundRatio, safeRatio, type CommerceSkuState } from "@/lib/optimization/objective";
 
 export type RoasPrediction = {
   skuId: string;
@@ -8,7 +8,7 @@ export type RoasPrediction = {
 
 export function predictSkuRoas(sku: CommerceSkuState): RoasPrediction {
   const observedRoas = sku.roas ?? safeRatio(sku.revenue, sku.adSpend);
-  const margin = sku.margin ?? safeRatio(sku.grossProfit, sku.revenue);
+  const margin = commerceSkuMargin(sku);
   const inventoryFactor = sku.inventory > sku.salesVelocity * 14 ? 1 : 0.85;
   const predictedRoas = roundRatio(Math.max(0, observedRoas * (0.8 + margin * 0.25) * inventoryFactor));
 

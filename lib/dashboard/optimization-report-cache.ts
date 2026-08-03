@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
 
 export type OptimizationReportMode = "sku" | "full";
 
@@ -40,7 +41,7 @@ export type OptimizationReportCacheRecord = {
 type OptimizationReportCacheClient = PrismaClient & {
   optimizationReportCache?: {
     findUnique: (args: Record<string, unknown>) => Promise<OptimizationReportCacheRecord | null>;
-    upsert: (args: Record<string, unknown>) => Promise<OptimizationReportCacheRecord>;
+    upsert: (args: Record<string, unknown>) => Promise<unknown>;
   };
 };
 
@@ -69,7 +70,13 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
   const report = asRecord(content.decision_report);
   const optimization = asRecord(report.sku_portfolio_optimization);
   const versions = asRecord(content.decisionSnapshotVersions);
-  const portfolioSummary = report.portfolioSummary ?? optimization.portfolioSummary ?? content.portfolioSummary ?? null;
+  const rawPortfolioSummary = asRecord(report.portfolioSummary ?? optimization.portfolioSummary ?? content.portfolioSummary ?? null);
+  const portfolioSummary = Object.keys(rawPortfolioSummary).length
+    ? {
+      ...rawPortfolioSummary,
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
+    }
+    : null;
   const allocationRecommendation = report.allocationRecommendation ?? optimization.allocationRecommendation ?? content.allocationRecommendation ?? null;
   const riskAlerts = report.riskAlerts ?? optimization.riskAlerts ?? content.riskAlerts ?? [];
   const executionPlan = report.executionPlan ?? optimization.executionPlan ?? content.executionPlan ?? [];
@@ -97,6 +104,11 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
   };
   const portfolioOptimization = {
     ...portfolioOptimizationBase,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
+    decisionSnapshotVersions: {
+      ...versions,
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
+    },
     skuDecisions: [],
     recommended_portfolio: [],
     lifecycleClassifications: [],
@@ -249,7 +261,14 @@ export async function upsertOptimizationReportCache(
       mode: input.mode,
       ...data
     },
-    update: data
+    update: data,
+    select: {
+      id: true,
+      workspaceId: true,
+      mode: true,
+      state: true,
+      updatedAt: true
+    }
   });
 }
 
@@ -298,6 +317,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     decisionSnapshotVersions: {
       algorithmVersion: cache.algorithmVersion,
       optimizationVersion: cache.optimizationVersion,
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       canonicalSnapshotVersion: cache.canonicalSnapshotVersion,
       metricSnapshotVersion: cache.metricSnapshotVersion,
       simulationVersion: cache.simulationVersion,

@@ -70,6 +70,7 @@ export function evaluateActionEligibility(input: {
   const rule = policyRuleForAction(action);
   const coverageDays = input.coverageDays ?? inventoryCoverageDays(sku);
   const confidence = input.confidence ?? sku.prediction_confidence ?? 0.55;
+  const attributionConfidence = sku.attribution_confidence ?? sku.prediction_confidence ?? 0;
   const marginalRoas = input.marginalRoas ?? (sku.ads_spend > 0 ? sku.revenue / Math.max(1, sku.ads_spend) : 0);
   const reasons: string[] = [];
   const rejectedReasons: string[] = [];
@@ -81,7 +82,9 @@ export function evaluateActionEligibility(input: {
     inventoryCoverageDays: roundRatio(coverageDays),
     salesVelocity: roundRatio(sku.sales_velocity),
     conversionRate: roundRatio(sku.conversion_rate),
-    netProfit: roundCurrency(sku.net_profit)
+    netProfit: roundCurrency(sku.net_profit),
+    attributionConfidence,
+    profitabilityConfidence: sku.profitability_confidence ?? null
   };
 
   const requireRule = (passed: boolean, passedReason: string, rejectedReason: string) => {
@@ -100,6 +103,9 @@ export function evaluateActionEligibility(input: {
     requireRule(marginalRoas >= threshold.minimumMarginalRoas, "ROAS exceeds threshold.", "ROAS below scale ads threshold.");
     requireRule(sku.margin >= threshold.minimumMargin, "Margin sufficient.", "Margin below scale ads threshold.");
     requireRule(confidence >= threshold.minimumConfidence, "Confidence sufficient.", "Confidence below scale ads threshold.");
+    requireRule(attributionConfidence >= 0.65, "Ad attribution confidence sufficient.", "Ad attribution confidence below scale ads threshold.");
+    requireRule(sku.cogs_status !== "MISSING", "COGS available for growth action.", "COGS missing; growth action blocked.");
+    requireRule(sku.optimization_allowed !== false, "Profit validation allows optimization.", "Profit validation blocks aggressive optimization.");
     requireRule(coverageDays >= threshold.minimumInventoryCoverageDays, "Inventory sufficient.", "Inventory coverage below scale ads threshold.");
     requireRule(sku.net_profit > 0, "Profit is positive.", "Current profit is not positive.");
   } else if (action === "TEST_AD_SPEND") {

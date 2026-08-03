@@ -18,7 +18,7 @@ import type {
 } from "@/lib/optimization/action-tracking-types";
 
 const STORE_PATH = join(process.cwd(), ".monarca-artifacts", "action-feedback", "actions.json");
-const ACTION_TRACKING_DB_READ_TIMEOUT_MS = 2500;
+const ACTION_TRACKING_DB_READ_TIMEOUT_MS = 10000;
 
 type AcceptActionInput = {
   workspace_id: string;
@@ -444,7 +444,7 @@ export async function updateActionTrackingRecords(workspaceId?: string) {
     const rows = await (prisma as any).decisionAction.findMany({
       where: {
         ...(workspaceId ? { workspaceId } : {}),
-        status: { in: ["ACCEPTED", "EXECUTING"] }
+        status: { in: ["EXECUTING"] }
       },
       include: { outcome: true }
     }) as PersistedDecisionAction[];
@@ -818,10 +818,16 @@ function extractDecisionDrivers(payload?: Record<string, unknown>) {
 }
 
 function expectedProfitLiftFromInput(input: AcceptActionInput) {
+  if (input.predicted_metrics?.profit_delta != null) {
+    return roundMoney(Math.max(0, input.predicted_metrics.profit_delta));
+  }
   return roundMoney(Math.max(0, (input.predicted_metrics?.profit ?? 0) - (input.baseline_metrics?.profit ?? 0)));
 }
 
 function expectedProfitLiftFromRejectInput(input: RejectActionInput) {
+  if (input.predicted_metrics?.profit_delta != null) {
+    return roundMoney(Math.max(0, input.predicted_metrics.profit_delta));
+  }
   return roundMoney(Math.max(0, (input.predicted_metrics?.profit ?? 0) - (input.baseline_metrics?.profit ?? 0)));
 }
 
@@ -1247,7 +1253,7 @@ async function updateJsonActionTrackingRecords(workspaceId?: string) {
 
   for (const record of records) {
     if (workspaceId && record.workspace_id !== workspaceId) continue;
-    if (record.status !== "accepted" && record.status !== "running") continue;
+    if (record.status !== "running") continue;
     const elapsedRatio = progressRatio(record, now);
 
     record.status = elapsedRatio >= 1 ? "completed" : "running";
@@ -1351,7 +1357,7 @@ function progressRatio(record: ActionTrackingRecord, now: Date) {
   const acceptedAt = Date.parse(record.accepted_at);
   if (!Number.isFinite(acceptedAt)) return 0;
   const windowMs = Math.max(1, record.observation_window_days) * 24 * 60 * 60 * 1000;
-  return Math.min(1, Math.max(0.08, (now.getTime() - acceptedAt) / windowMs));
+  return Math.min(1, Math.max(0, (now.getTime() - acceptedAt) / windowMs));
 }
 
 function metricsFromUnknown(value: unknown): ActionMetricsSnapshot {

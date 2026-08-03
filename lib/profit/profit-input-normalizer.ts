@@ -1,4 +1,5 @@
 import type { EcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-data";
+import { calculateSkuProfitability, canonicalAdAllocationMethod } from "@/lib/profit/canonical-profitability-engine";
 
 export type ProfitInputRow = {
   sku: string;
@@ -7,8 +8,22 @@ export type ProfitInputRow = {
   units: number;
   refunds: number;
   cogs: number;
+  shipping_cost: number;
   fulfillment_cost: number;
   warehouse_cost: number;
+  platform_fee: number;
+  payment_fee: number;
+  operating_cost: number;
+  total_cost: number;
+  net_profit: number;
+  margin: number;
+  cogs_status: string;
+  cogs_confidence: number;
+  ad_allocation_method: string;
+  attribution_confidence: number;
+  profitability_confidence: number;
+  validation_status: string;
+  optimization_allowed: boolean;
   gross_profit: number;
   contribution_margin: number;
   confidence: number;
@@ -82,11 +97,26 @@ export function normalizeProfitInputs(data: EcommerceSalesDashboardData): Profit
     const cogs = numberValue(costBreakdown?.cogs);
     const fulfillment = numberValue(costBreakdown?.fulfillment);
     const warehouse = numberValue((costBreakdown as Record<string, unknown> | null)?.warehouse);
+    const shipping = numberValue(costBreakdown?.shipping);
+    const platformFee = numberValue(costBreakdown?.platform_fee);
+    const paymentFee = numberValue(costBreakdown?.payment_fee);
     const refunds = numberValue(costBreakdown?.refund);
     const adSpend = "ad_cost_allocated" in row ? numberValue(row.ad_cost_allocated) : 0;
     const revenue = numberValue(row.revenue);
-    const grossProfit = "net_profit" in row ? numberValue(row.net_profit) + adSpend : revenue - cogs - fulfillment - warehouse - refunds;
-    const margin = revenue > 0 ? roundRatio(grossProfit / revenue) : 0;
+    const profitability = calculateSkuProfitability({
+      revenue,
+      cogs,
+      shippingCost: shipping,
+      fulfillmentCost: fulfillment + warehouse,
+      platformFee,
+      paymentFee,
+      refundCost: refunds,
+      adSpend,
+      cogsStatus: "cogs_status" in row ? row.cogs_status : undefined,
+      cogsConfidence: "cogs_confidence" in row ? numberValue(row.cogs_confidence) : undefined,
+      adAllocationMethod: canonicalAdAllocationMethod("ad_allocation_method" in row ? row.ad_allocation_method : undefined),
+      attributionConfidence: "attribution_confidence" in row ? numberValue(row.attribution_confidence) : undefined
+    });
     const rowMissingFields = missingFields.filter((field) => /cogs|fulfillment|handling|warehouse|refund|ads|spend/i.test(field));
 
     totals.cogs += cogs;
@@ -100,10 +130,24 @@ export function normalizeProfitInputs(data: EcommerceSalesDashboardData): Profit
       units: numberValue(row.quantity ?? revenueRow?.quantity),
       refunds,
       cogs,
+      shipping_cost: shipping,
       fulfillment_cost: fulfillment,
       warehouse_cost: warehouse,
-      gross_profit: roundCurrency(grossProfit),
-      contribution_margin: margin,
+      platform_fee: platformFee,
+      payment_fee: paymentFee,
+      operating_cost: profitability.operating_cost,
+      total_cost: profitability.total_cost,
+      net_profit: profitability.net_profit,
+      margin: profitability.margin,
+      cogs_status: profitability.cogs_status,
+      cogs_confidence: profitability.cogs_confidence,
+      ad_allocation_method: profitability.ad_allocation_method,
+      attribution_confidence: profitability.attribution_confidence,
+      profitability_confidence: profitability.profitability_confidence,
+      validation_status: profitability.validation.validation_status,
+      optimization_allowed: profitability.validation.optimization_allowed,
+      gross_profit: profitability.gross_profit,
+      contribution_margin: profitability.margin,
       confidence: numberValue("profit_confidence" in row ? row.profit_confidence : data.quality.confidence_score),
       missingFields: rowMissingFields
     };

@@ -1,5 +1,6 @@
 import { resolveCogsSemantic, type CogsSemanticType } from "../semantic/cost/cogs-semantic-resolver";
 import { calculateSkuProfitAndAllocation, type SkuAttributionMethod, type SkuRoasStatus } from "../sku/sku-profit-allocation-engine";
+import { calculateSkuProfitability, CANONICAL_PROFITABILITY_ENGINE_VERSION, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type CostInputRow = Record<string, unknown>;
 
@@ -13,7 +14,7 @@ export type CostSkuUnit = {
   revenue: number;
   quantity: number;
   cogs: number;
-  ad_cost_allocated: number;
+  ad_cost_allocated: number | null;
   fulfillment_cost: number;
   shipping_cost: number;
   platform_fee: number;
@@ -24,6 +25,13 @@ export type CostSkuUnit = {
   total_cost: number;
   net_profit: number;
   margin: number;
+  gross_profit?: number;
+  operating_cost?: number;
+  contribution_profit?: number;
+  profitability_confidence?: number;
+  validation_status?: ProfitValidationStatus;
+  optimization_allowed?: boolean;
+  warnings?: string[];
   sku_roas: number;
   roas_value?: number | null;
   roas_display?: string;
@@ -35,8 +43,25 @@ export type CostSkuUnit = {
   profit_confidence: number;
   channel_breakdown: Record<string, number>;
   channel_details?: Array<{ platform: string; revenue: number; quantity: number; profit: number; margin: number; share: number }>;
-  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "none";
+  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "unknown" | "none";
   ad_allocation_confidence: number;
+  attribution_source?: "meta_ads" | "amazon_ads" | "shopify_ads" | "campaign_attribution" | "sku_allocation" | "revenue_share_fallback" | "unknown" | "none";
+  attributed_campaigns?: Array<{
+    campaign_id: string;
+    raw_spend: number;
+    attributed_revenue: number;
+    allocated_spend: number;
+    allocation_method: "direct" | "campaign_revenue_share";
+  }>;
+  ads_validation_status?: "PASSED" | "FAILED" | "UNKNOWN";
+  ads_validation_warnings?: string[];
+  ads_lineage?: {
+    raw_platform_spend: number;
+    sku_direct_attribution: number;
+    campaign_allocation: number;
+    revenue_share_fallback: number;
+    final_allocated_ads: number | null;
+  };
   campaign_ids?: string[];
   attribution_window_start?: string | null;
   attribution_window_end?: string | null;
@@ -72,6 +97,7 @@ export type CostSkuUnit = {
     refund: number;
   };
   cogs_type: CogsSemanticType | "mixed";
+  cogs_status?: CogsStatus;
   cogs_confidence: number;
   cogs_semantic_warnings: string[];
   estimated_components: string[];
@@ -80,6 +106,7 @@ export type CostSkuUnit = {
 
 export type CostIntelligenceOutput = {
   totals: {
+    revenue: number;
     cogs: number;
     ad_spend: number;
     fulfillment_cost: number;
@@ -92,8 +119,15 @@ export type CostIntelligenceOutput = {
     total_cost: number;
     estimated_cost: number;
     gross_profit: number;
+    operating_cost: number;
+    contribution_profit: number;
     net_profit: number;
     margin: number;
+    profitability_confidence: number;
+    validation_status: ProfitValidationStatus;
+    optimization_allowed: boolean;
+    warnings: string[];
+    engine_version: typeof CANONICAL_PROFITABILITY_ENGINE_VERSION;
   };
   sku_unit_economics: CostSkuUnit[];
   data_quality: {
@@ -106,6 +140,19 @@ export type CostIntelligenceOutput = {
     cogs_confidence: number;
     cogs_type_breakdown: Record<CogsSemanticType, number>;
     cogs_semantic_warnings: string[];
+    portfolio_reconciliation: {
+      source: "sku_unit_economics" | "portfolio_totals";
+      order_revenue: number;
+      sku_revenue: number;
+      revenue_difference: number;
+      cogs_difference: number;
+      ads_difference: number;
+      operating_cost_difference: number;
+      net_profit_difference: number;
+      unallocated_costs: number;
+      duplicated_costs: number;
+      warnings: string[];
+    };
   };
 };
 
@@ -212,6 +259,15 @@ export function calculateCostIntelligence(input: {
     current.revenue = roundCurrency(current.revenue + itemRevenue);
     current.quantity += quantity;
     current.cogs = roundCurrency(current.cogs + rowCogs);
+    current.shipping_cost = roundCurrency(current.shipping_cost + itemCostValue(item, ["shipping_cost", "shipping_expense", "shipping_fee", "carrier_cost", "postage_cost"]));
+    current.platform_fee = roundCurrency(current.platform_fee + itemCostValue(item, ["platform_fee", "marketplace_fee", "selling_fee", "commission_fee"]));
+    current.payment_fee = roundCurrency(current.payment_fee + itemCostValue(item, ["payment_fee", "processing_fee", "transaction_fee", "stripe_fee"]));
+    current.fulfillment_cost = roundCurrency(current.fulfillment_cost + itemCostValue(item, ["fulfillment_cost", "handling_cost", "pick_pack_cost", "warehouse_cost", "storage_cost"]));
+    const itemRefundAmount = itemCostValue(item, ["refund_amount", "refund", "returned_amount"]);
+    const itemReverseLogistics = itemCostValue(item, ["reverse_logistics_cost", "return_shipping_cost", "refund_shipping_cost"]);
+    current.refund_amount = roundCurrency(current.refund_amount + itemRefundAmount);
+    current.reverse_logistics_cost = roundCurrency(current.reverse_logistics_cost + itemReverseLogistics);
+    current.refund_cost = roundCurrency(current.refund_cost + itemRefundAmount + itemReverseLogistics);
     current.estimated = current.estimated || !costResolution || Boolean(costResolution.resolution.estimated_cost_flag);
     if (costResolution) {
       current.cogs_type = mergeCogsType(current.cogs_type, costResolution.resolution.cogs_type);
@@ -275,9 +331,6 @@ export function calculateCostIntelligence(input: {
     componentName: "warehouse_cost",
     estimateWhenMissing: false
   });
-  const fulfillmentCost = roundCurrency(shipping.total + handling.total + warehouse.total);
-  const estimatedFulfillmentCost = roundCurrency(shipping.estimated + handling.estimated + warehouse.estimated);
-
   const platformFee = aggregateOrderCost({
     rows: orders,
     fields: ["platform_fee", "marketplace_fee", "selling_fee"],
@@ -298,24 +351,55 @@ export function calculateCostIntelligence(input: {
     componentName: "payment_fee"
   });
 
+  const directSkuShippingCost = roundCurrency(sum(Array.from(skuRows.values()).map((row) => row.shipping_cost)));
+  const directSkuPlatformFee = roundCurrency(sum(Array.from(skuRows.values()).map((row) => row.platform_fee)));
+  const directSkuPaymentFee = roundCurrency(sum(Array.from(skuRows.values()).map((row) => row.payment_fee)));
+  const directSkuFulfillmentCost = roundCurrency(sum(Array.from(skuRows.values()).map((row) => row.fulfillment_cost)));
+  const shippingTotal = directSkuShippingCost > 0 ? directSkuShippingCost : shipping.total;
+  const platformFeeTotal = directSkuPlatformFee > 0 ? directSkuPlatformFee : platformFee.total;
+  const paymentFeeTotal = directSkuPaymentFee > 0 ? directSkuPaymentFee : paymentFee.total;
+  const nonShippingFulfillmentCost = directSkuFulfillmentCost > 0 ? directSkuFulfillmentCost : roundCurrency(handling.total + warehouse.total);
+  const fulfillmentCost = nonShippingFulfillmentCost;
+  const estimatedFulfillmentCost = directSkuShippingCost > 0 || directSkuFulfillmentCost > 0 ? 0 : roundCurrency(shipping.estimated + handling.estimated + warehouse.estimated);
+
   const adSpend = roundCurrency(sum(ads.map((row) => firstNumber(row.spend, row.ad_spend))));
   if (!ads.length) missingCostFields.add("ecommerce_ads.spend");
 
   const reverseLogisticsCost = roundCurrency(sum(refunds.map((row) => firstNumber(row.reverse_logistics_cost, row.return_shipping_cost, row.refund_shipping_cost))));
-  const refundCost = roundCurrency(refundAmount + reverseLogisticsCost);
-  const estimatedRefundCost = refunds.length ? 0 : refundAmount;
+  const directSkuRefundCost = roundCurrency(sum(Array.from(skuRows.values()).map((row) => row.refund_cost)));
+  const refundCost = directSkuRefundCost > 0 ? directSkuRefundCost : roundCurrency(refundAmount + reverseLogisticsCost);
+  const estimatedRefundCost = refunds.length || directSkuRefundCost > 0 ? 0 : refundAmount;
   if (!refunds.length && refundAmount > 0) {
     missingCostFields.add("ecommerce_refunds.*");
     estimatedComponents.add("refund_cost");
   }
 
-  const totalCost = roundCurrency(cogs + fulfillmentCost + platformFee.total + paymentFee.total + refundCost);
-  const estimatedCost = roundCurrency(estimatedCogs + estimatedFulfillmentCost + platformFee.estimated + paymentFee.estimated + estimatedRefundCost);
-  const grossProfit = roundCurrency(revenue - cogs);
-  const netProfit = roundCurrency(revenue - totalCost - adSpend);
+  const totalCost = roundCurrency(cogs + shippingTotal + fulfillmentCost + platformFeeTotal + paymentFeeTotal + refundCost);
+  const estimatedCost = roundCurrency(
+    estimatedCogs +
+      estimatedFulfillmentCost +
+      (directSkuPlatformFee > 0 ? 0 : platformFee.estimated) +
+      (directSkuPaymentFee > 0 ? 0 : paymentFee.estimated) +
+      estimatedRefundCost
+  );
   const estimatedCostRatio = safeRatio(estimatedCost, Math.max(totalCost, 1));
   const realCostAvailability = roundRatio(1 - estimatedCostRatio);
   const cogsConfidence = cogsConfidenceWeight > 0 ? roundRatio(cogsConfidenceTotal / cogsConfidenceWeight) : (!orderItems.length && revenue > 0 ? 0.2 : 1);
+  const portfolioProfitability = calculateSkuProfitability({
+    revenue,
+    cogs,
+    shippingCost: shippingTotal,
+    fulfillmentCost: nonShippingFulfillmentCost,
+    platformFee: platformFeeTotal,
+    paymentFee: paymentFeeTotal,
+    refundCost,
+    adSpend,
+    cogsStatus: realCostRows > 0 ? (estimatedCogs > 0 ? "ESTIMATED" : "AVAILABLE") : (revenue > 0 ? "MISSING" : "AVAILABLE"),
+    cogsConfidence,
+    adAllocationMethod: adSpend > 0 ? "REVENUE_SHARE" : "UNKNOWN",
+    attributionConfidence: ads.length ? 0.5 : 0.25,
+    criticalFieldsMissing: Array.from(missingCostFields)
+  });
   const costConfidence = roundRatio(Math.max(0, realCostAvailability * cogsConfidence));
   const profitConfidence = roundRatio(Math.max(0, costConfidence - (!ads.length ? 0.08 : 0)));
 
@@ -325,43 +409,95 @@ export function calculateCostIntelligence(input: {
     ads,
     revenue,
     adSpend,
-    shippingCost: shipping.total,
-    platformFee: platformFee.total,
-    paymentFee: paymentFee.total,
+    shippingCost: shippingTotal,
+    platformFee: platformFeeTotal,
+    paymentFee: paymentFeeTotal,
     fulfillmentCost,
     refundCost,
     estimatedComponents,
     inventory
   });
+  const skuTotals = summarizeSkuUnitEconomics(skuUnitEconomics);
+  const portfolioSource = skuUnitEconomics.length ? "sku_unit_economics" : "portfolio_totals";
+  const reconciledProfitability = portfolioSource === "sku_unit_economics"
+    ? calculateSkuProfitability({
+        revenue: skuTotals.revenue,
+        cogs: skuTotals.cogs,
+        shippingCost: skuTotals.shipping_cost,
+        fulfillmentCost: skuTotals.fulfillment_cost,
+        platformFee: skuTotals.platform_fee,
+        paymentFee: skuTotals.payment_fee,
+        refundCost: skuTotals.refund_cost,
+        adSpend: skuTotals.ad_spend,
+        cogsStatus: realCostRows > 0 ? (estimatedCogs > 0 ? "ESTIMATED" : "AVAILABLE") : (skuTotals.revenue > 0 ? "MISSING" : "AVAILABLE"),
+        cogsConfidence,
+        adAllocationMethod: skuTotals.ad_spend > 0 ? "REVENUE_SHARE" : "UNKNOWN",
+        attributionConfidence: ads.length ? 0.5 : 0.25,
+        criticalFieldsMissing: Array.from(missingCostFields)
+      })
+    : portfolioProfitability;
+  const reconciledTotalCost = portfolioSource === "sku_unit_economics" ? skuTotals.total_cost : totalCost;
+  const reconciledEstimatedCost = portfolioSource === "sku_unit_economics"
+    ? roundCurrency(Math.min(estimatedCost, reconciledTotalCost))
+    : estimatedCost;
+  const reconciledEstimatedCostRatio = safeRatio(reconciledEstimatedCost, Math.max(reconciledTotalCost, 1));
+  const reconciledRealCostAvailability = roundRatio(1 - reconciledEstimatedCostRatio);
+  const reconciliation = buildPortfolioReconciliation({
+    orderRevenue: revenue,
+    skuTotals,
+    portfolioTotals: {
+      revenue,
+      cogs,
+      ad_spend: adSpend,
+      shipping_cost: shippingTotal,
+      platform_fee: platformFeeTotal,
+      payment_fee: paymentFeeTotal,
+      fulfillment_cost: fulfillmentCost,
+      refund_cost: refundCost,
+      total_cost: totalCost,
+      operating_cost: portfolioProfitability.operating_cost,
+      net_profit: portfolioProfitability.net_profit
+    },
+    source: portfolioSource
+  });
 
   return {
     totals: {
-      cogs: roundCurrency(cogs),
-      ad_spend: adSpend,
-      fulfillment_cost: fulfillmentCost,
-      shipping_cost: shipping.total,
-      platform_fee: platformFee.total,
-      payment_fee: paymentFee.total,
-      refund_cost: refundCost,
+      revenue: portfolioSource === "sku_unit_economics" ? skuTotals.revenue : revenue,
+      cogs: portfolioSource === "sku_unit_economics" ? skuTotals.cogs : roundCurrency(cogs),
+      ad_spend: portfolioSource === "sku_unit_economics" ? skuTotals.ad_spend : adSpend,
+      fulfillment_cost: portfolioSource === "sku_unit_economics" ? skuTotals.fulfillment_cost : fulfillmentCost,
+      shipping_cost: portfolioSource === "sku_unit_economics" ? skuTotals.shipping_cost : shippingTotal,
+      platform_fee: portfolioSource === "sku_unit_economics" ? skuTotals.platform_fee : platformFeeTotal,
+      payment_fee: portfolioSource === "sku_unit_economics" ? skuTotals.payment_fee : paymentFeeTotal,
+      refund_cost: portfolioSource === "sku_unit_economics" ? skuTotals.refund_cost : refundCost,
       refund_amount: refundAmount,
       reverse_logistics_cost: reverseLogisticsCost,
-      total_cost: totalCost,
-      estimated_cost: estimatedCost,
-      gross_profit: grossProfit,
-      net_profit: netProfit,
-      margin: safeRatio(netProfit, revenue)
+      total_cost: reconciledTotalCost,
+      estimated_cost: reconciledEstimatedCost,
+      gross_profit: reconciledProfitability.gross_profit,
+      operating_cost: reconciledProfitability.operating_cost,
+      contribution_profit: reconciledProfitability.contribution_profit,
+      net_profit: reconciledProfitability.net_profit,
+      margin: reconciledProfitability.margin,
+      profitability_confidence: reconciledProfitability.profitability_confidence,
+      validation_status: reconciledProfitability.validation.validation_status,
+      optimization_allowed: reconciledProfitability.validation.optimization_allowed,
+      warnings: Array.from(new Set([...reconciledProfitability.validation.warnings, ...reconciliation.warnings])),
+      engine_version: reconciledProfitability.engine_version
     },
     sku_unit_economics: skuUnitEconomics,
     data_quality: {
       cost_confidence: costConfidence,
       profit_confidence: profitConfidence,
-      estimated_cost_ratio: estimatedCostRatio,
+      estimated_cost_ratio: reconciledEstimatedCostRatio,
       missing_cost_fields: Array.from(missingCostFields).sort(),
       estimated_components: Array.from(estimatedComponents).sort(),
-      real_cost_availability: realCostAvailability,
+      real_cost_availability: reconciledRealCostAvailability,
       cogs_confidence: cogsConfidence,
       cogs_type_breakdown: cogsTypeBreakdown,
-      cogs_semantic_warnings: Array.from(cogsSemanticWarnings).sort()
+      cogs_semantic_warnings: Array.from(cogsSemanticWarnings).sort(),
+      portfolio_reconciliation: reconciliation
     }
   };
 }
@@ -382,13 +518,11 @@ function resolveItemCogs(input: {
     { value: item.procurement_cost, fieldName: "procurement_cost" },
     { value: item.unit_cost, fieldName: "unit_cost" },
     { value: item.total_cogs, fieldName: "total_cogs" },
-    { value: item.total_cost, fieldName: "total_cost" },
     { value: item.line_cogs, fieldName: "line_cogs" },
     { value: item.line_cost, fieldName: "line_cost" },
     { value: item.row_cogs, fieldName: "row_cogs" },
     { value: item.row_cost, fieldName: "row_cost" },
     { value: item.cogs, fieldName: "cogs" },
-    { value: item.cost, fieldName: "cost" },
     { value: productCostByProductId.get(stringValue(item.product_id)), fieldName: "unit_cost" },
     { value: productCostBySku.get(stringValue(item.sku)), fieldName: "unit_cost" }
   ];
@@ -407,6 +541,94 @@ function resolveItemCogs(input: {
   return null;
 }
 
+function summarizeSkuUnitEconomics(rows: CostSkuUnit[]) {
+  const totals = {
+    revenue: roundCurrency(sum(rows.map((row) => row.revenue))),
+    cogs: roundCurrency(sum(rows.map((row) => row.cogs))),
+    ad_spend: roundCurrency(sum(rows.map((row) => row.ad_cost_allocated ?? 0))),
+    shipping_cost: roundCurrency(sum(rows.map((row) => row.shipping_cost))),
+    platform_fee: roundCurrency(sum(rows.map((row) => row.platform_fee))),
+    payment_fee: roundCurrency(sum(rows.map((row) => row.payment_fee))),
+    fulfillment_cost: roundCurrency(sum(rows.map((row) => row.fulfillment_cost))),
+    refund_cost: roundCurrency(sum(rows.map((row) => row.refund_cost))),
+    total_cost: roundCurrency(sum(rows.map((row) => row.total_cost))),
+    net_profit: roundCurrency(sum(rows.map((row) => row.net_profit)))
+  };
+
+  return totals;
+}
+
+function buildPortfolioReconciliation(input: {
+  orderRevenue: number;
+  skuTotals: ReturnType<typeof summarizeSkuUnitEconomics>;
+  portfolioTotals: {
+    revenue: number;
+    cogs: number;
+    ad_spend: number;
+    shipping_cost: number;
+    platform_fee: number;
+    payment_fee: number;
+    fulfillment_cost: number;
+    refund_cost: number;
+    total_cost: number;
+    operating_cost: number;
+    net_profit: number;
+  };
+  source: "sku_unit_economics" | "portfolio_totals";
+}) {
+  const portfolioOperatingCost = roundCurrency(
+    input.portfolioTotals.ad_spend +
+      input.portfolioTotals.shipping_cost +
+      input.portfolioTotals.platform_fee +
+      input.portfolioTotals.payment_fee +
+      input.portfolioTotals.fulfillment_cost +
+      input.portfolioTotals.refund_cost
+  );
+  const skuOperatingCost = roundCurrency(
+    input.skuTotals.ad_spend +
+      input.skuTotals.shipping_cost +
+      input.skuTotals.platform_fee +
+      input.skuTotals.payment_fee +
+      input.skuTotals.fulfillment_cost +
+      input.skuTotals.refund_cost
+  );
+  const revenueDifference = roundCurrency(input.orderRevenue - input.skuTotals.revenue);
+  const cogsDifference = roundCurrency(input.portfolioTotals.cogs - input.skuTotals.cogs);
+  const adsDifference = roundCurrency(input.portfolioTotals.ad_spend - input.skuTotals.ad_spend);
+  const operatingCostDifference = roundCurrency(portfolioOperatingCost - skuOperatingCost);
+  const netProfitDifference = roundCurrency(input.portfolioTotals.net_profit - input.skuTotals.net_profit);
+  const unallocatedCosts = roundCurrency(Math.max(0, input.portfolioTotals.total_cost - input.skuTotals.total_cost));
+  const duplicatedCosts = roundCurrency(Math.max(0, input.skuTotals.total_cost - input.portfolioTotals.total_cost));
+  const warnings: string[] = [];
+
+  if (Math.abs(revenueDifference) > 0.01) {
+    warnings.push(`order revenue and SKU revenue differ by ${revenueDifference}`);
+  }
+  if (Math.abs(cogsDifference) > 0.01 || Math.abs(adsDifference) > 0.01 || Math.abs(operatingCostDifference) > 0.01) {
+    warnings.push("portfolio profitability reconciled from SKU unit economics");
+  }
+  if (unallocatedCosts > 0.01) {
+    warnings.push(`unallocated portfolio costs ${unallocatedCosts}`);
+  }
+  if (duplicatedCosts > 0.01) {
+    warnings.push(`duplicated SKU costs ${duplicatedCosts}`);
+  }
+
+  return {
+    source: input.source,
+    order_revenue: roundCurrency(input.orderRevenue),
+    sku_revenue: input.skuTotals.revenue,
+    revenue_difference: revenueDifference,
+    cogs_difference: cogsDifference,
+    ads_difference: adsDifference,
+    operating_cost_difference: operatingCostDifference,
+    net_profit_difference: netProfitDifference,
+    unallocated_costs: unallocatedCosts,
+    duplicated_costs: duplicatedCosts,
+    warnings
+  };
+}
+
 function aggregateOrderCost(input: {
   rows: CostInputRow[];
   fields: string[];
@@ -422,7 +644,7 @@ function aggregateOrderCost(input: {
   const explicitRows = values.filter((value): value is number => value !== null);
   const explicit = roundCurrency(sum(explicitRows));
   const shouldEstimate = estimateWhenMissing && input.rows.length > 0 && explicitRows.length < input.rows.length;
-  const estimated = shouldEstimate ? input.fallback : 0;
+  const estimated = shouldEstimate ? estimateMissingOrderCost(input.rows, values, input.fallback) : 0;
 
   if (input.rows.length && explicitRows.length < input.rows.length) {
     input.missingCostFields.add(input.missingField);
@@ -450,18 +672,28 @@ function allocateSkuEconomics(input: {
   estimatedComponents: Set<string>;
   inventory: CostInputRow[];
 }) {
-  const { rows, revenue, shippingCost, platformFee, paymentFee, fulfillmentCost, refundCost, estimatedComponents } = input;
+  const { rows, shippingCost, platformFee, paymentFee, fulfillmentCost, refundCost, estimatedComponents } = input;
   if (!rows.length) return [];
-  const nonShippingFulfillmentCost = roundCurrency(Math.max(0, fulfillmentCost - shippingCost));
+  const allocationRevenue = roundCurrency(sum(rows.map((row) => row.revenue)));
+  const directShippingCost = roundCurrency(sum(rows.map((row) => row.shipping_cost)));
+  const directPlatformFee = roundCurrency(sum(rows.map((row) => row.platform_fee)));
+  const directPaymentFee = roundCurrency(sum(rows.map((row) => row.payment_fee)));
+  const directFulfillmentCost = roundCurrency(sum(rows.map((row) => row.fulfillment_cost)));
+  const directRefundCost = roundCurrency(sum(rows.map((row) => row.refund_cost)));
+  const allocatableShippingCost = roundCurrency(Math.max(0, shippingCost - directShippingCost));
+  const allocatablePlatformFee = roundCurrency(Math.max(0, platformFee - directPlatformFee));
+  const allocatablePaymentFee = roundCurrency(Math.max(0, paymentFee - directPaymentFee));
+  const allocatableFulfillmentCost = roundCurrency(Math.max(0, fulfillmentCost - directFulfillmentCost));
+  const allocatableRefundCost = roundCurrency(Math.max(0, refundCost - directRefundCost));
 
   const allocatedNonAdCosts = rows
     .map((row) => {
-      const share = revenue > 0 ? row.revenue / revenue : 1 / rows.length;
-      const allocatedShippingCost = roundCurrency(shippingCost * share);
-      const allocatedPlatformFee = roundCurrency(platformFee * share);
-      const allocatedPaymentFee = roundCurrency(paymentFee * share);
-      const allocatedFulfillmentCost = roundCurrency(nonShippingFulfillmentCost * share);
-      const allocatedRefundCost = roundCurrency(refundCost * share);
+      const share = allocationRevenue > 0 ? row.revenue / allocationRevenue : 1 / rows.length;
+      const allocatedShippingCost = roundCurrency(row.shipping_cost + allocatableShippingCost * share);
+      const allocatedPlatformFee = roundCurrency(row.platform_fee + allocatablePlatformFee * share);
+      const allocatedPaymentFee = roundCurrency(row.payment_fee + allocatablePaymentFee * share);
+      const allocatedFulfillmentCost = roundCurrency(row.fulfillment_cost + allocatableFulfillmentCost * share);
+      const allocatedRefundCost = roundCurrency(row.refund_cost + allocatableRefundCost * share);
       const skuEstimatedComponents = skuEstimatedComponentsForRow(row, estimatedComponents);
 
       return {
@@ -521,6 +753,25 @@ function skuEstimatedComponentsForRow(row: CostSkuUnit, globalEstimatedComponent
   return Array.from(components).sort();
 }
 
+function itemCostValue(row: CostInputRow, fields: string[]) {
+  return firstFiniteNumber(...fields.map((field) => row[field])) ?? 0;
+}
+
+function estimateMissingOrderCost(rows: CostInputRow[], values: Array<number | null>, fallback: number) {
+  const missingRows = rows.filter((_, index) => values[index] === null);
+  if (!missingRows.length) return 0;
+  const totalRevenue = sum(rows.map(orderCostRevenue));
+  const missingRevenue = sum(missingRows.map(orderCostRevenue));
+  if (totalRevenue > 0) {
+    return roundCurrency(fallback * (missingRevenue / totalRevenue));
+  }
+  return roundCurrency(fallback * (missingRows.length / rows.length));
+}
+
+function orderCostRevenue(row: CostInputRow) {
+  return firstFiniteNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales) ?? 0;
+}
+
 function emptySkuCostRow(sku: string): CostSkuUnit {
   return {
     sku,
@@ -560,6 +811,7 @@ function emptySkuCostRow(sku: string): CostSkuUnit {
       refund: 0
     },
     cogs_type: "unknown",
+    cogs_status: "MISSING",
     cogs_confidence: 0,
     cogs_semantic_warnings: [],
     estimated_components: [],

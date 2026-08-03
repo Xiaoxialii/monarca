@@ -31,6 +31,7 @@ const { buildDynamicThresholdProfile } = jiti("./lib/optimization/dynamic-thresh
 const { solveGlobalPortfolio } = jiti("./lib/optimization/portfolio-solver.ts");
 const { getOptimizationPolicy } = jiti("./lib/optimization/policy/policy-loader.ts");
 const { evaluateActionEligibility } = jiti("./lib/optimization/policy/optimization-policy.ts");
+const { DEFAULT_OPTIMIZATION_POLICY } = jiti("./lib/optimization/policy/default-policies.ts");
 const { validateDecisionContract } = jiti("./lib/optimization/decision-contract-validator.ts");
 const { assessSelectedInventoryMix, clearInventoryQualityScore } = jiti("./lib/optimization/inventory-health-score.ts");
 const { generatePortfolioOptimizationReport } = jiti("./lib/optimization/optimization-report-generator.ts");
@@ -635,6 +636,197 @@ test("policy eligibility rejects scale ads below expert thresholds", () => {
   assert.ok(eligibility.rejectedReasons.includes("ROAS below scale ads threshold."));
   assert.ok(eligibility.rejectedReasons.includes("Margin below scale ads threshold."));
   assert.ok(eligibility.rejectedReasons.includes("Confidence below scale ads threshold."));
+});
+
+test("low attribution confidence blocks SCALE_ADS but allows controlled ad test", () => {
+  const sku = {
+    sku: "SKU_LOW_ATTRIBUTION",
+    revenue: 5000,
+    quantity: 100,
+    price: 50,
+    cogs: 1500,
+    ads_spend: 500,
+    margin: 0.45,
+    net_profit: 1800,
+    inventory: 500,
+    sales_velocity: 5,
+    refund_rate: 0.01,
+    customer_ltv: 120,
+    conversion_rate: 0.04,
+    prediction_confidence: 0.8,
+    attribution_confidence: 0.45,
+    ad_allocation_method: "revenue_share",
+    optimization_allowed: true
+  };
+
+  const scale = evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 100
+  });
+  const testSpend = evaluateActionEligibility({
+    sku,
+    action: "TEST_AD_SPEND",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 100
+  });
+
+  assert.equal(scale.allowed, false);
+  assert.ok(scale.rejectedReasons.includes("Ad attribution confidence below scale ads threshold."));
+  assert.equal(testSpend.allowed, true);
+});
+
+test("SCALE_ADS eligibility requires margin ROAS confidence inventory coverage and v2 profit", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_SCALE_INVARIANT",
+    revenue: 10000,
+    ads_spend: 500,
+    margin: 0.42,
+    net_profit: 3200,
+    inventory: 900,
+    sales_velocity: 12,
+    prediction_confidence: 0.82,
+    attribution_confidence: 0.82,
+    profitability_confidence: 0.9,
+    cogs_status: "AVAILABLE",
+    optimization_allowed: true
+  });
+
+  assert.equal(evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 45,
+    marginalRoas: 12,
+    confidence: 0.82
+  }).allowed, true);
+
+  const lowRoas = evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 45,
+    marginalRoas: 1.2,
+    confidence: 0.82
+  });
+  assert.equal(lowRoas.allowed, false);
+  assert.ok(lowRoas.rejectedReasons.some((reason) => /ROAS below/i.test(reason)));
+
+  const lowMargin = evaluateActionEligibility({
+    sku: { ...sku, margin: 0.12 },
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 45,
+    marginalRoas: 12,
+    confidence: 0.82
+  });
+  assert.equal(lowMargin.allowed, false);
+  assert.ok(lowMargin.rejectedReasons.some((reason) => /Margin below/i.test(reason)));
+
+  const lowCoverage = evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 10,
+    marginalRoas: 12,
+    confidence: 0.82
+  });
+  assert.equal(lowCoverage.allowed, false);
+  assert.ok(lowCoverage.rejectedReasons.some((reason) => /Inventory coverage below/i.test(reason)));
+});
+
+test("RESTOCK_AND_SCALE eligibility requires low inventory coverage and positive sales velocity", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_RESTOCK_INVARIANT",
+    margin: 0.38,
+    net_profit: 1800,
+    inventory: 12,
+    sales_velocity: 4,
+    prediction_confidence: 0.78
+  });
+
+  assert.equal(evaluateActionEligibility({
+    sku,
+    action: "RESTOCK_AND_SCALE",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 3
+  }).allowed, true);
+
+  const enoughCoverage = evaluateActionEligibility({
+    sku,
+    action: "RESTOCK_AND_SCALE",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 45
+  });
+  assert.equal(enoughCoverage.allowed, false);
+  assert.ok(enoughCoverage.rejectedReasons.some((reason) => /coverage does not indicate/i.test(reason)));
+
+  const noVelocity = evaluateActionEligibility({
+    sku: { ...sku, sales_velocity: 0 },
+    action: "RESTOCK_AND_SCALE",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 3
+  });
+  assert.equal(noVelocity.allowed, false);
+  assert.ok(noVelocity.rejectedReasons.some((reason) => /Sales velocity does not support/i.test(reason)));
+});
+
+test("ad scale simulation uses canonical v2 SKU net profit as current profit baseline", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_V2_PROFIT_BASELINE",
+    revenue: 16267.4,
+    cogs: 5,
+    ads_spend: 1520.59,
+    margin: 0.8,
+    net_profit: 8000,
+    inventory: 5000,
+    conversion_rate: 0.08,
+    refund_rate: 0.01,
+    prediction_confidence: 0.95,
+    attribution_confidence: 0.95,
+    shipping_cost: 0,
+    fulfillment_cost: 0,
+    fees: 0,
+    profitabilityEngineVersion: "v2"
+  });
+  const [result] = simulateGeneratedActions({
+    skus: [sku],
+    ads: [{ campaign_id: "CMP_V2", sku: sku.sku, spend: sku.ads_spend, roas: 20, attribution_confidence: 0.95 }],
+    actions: [adsSimulationAction(sku.sku, 50, "SCALE_ADS")],
+    simulationHorizonDays: 30
+  });
+
+  assert.equal(result.current_profit, sku.net_profit);
+  assert.equal(result.before_state.profit, sku.net_profit);
+  assert.equal(result.predicted_profit, roundCurrency(sku.net_profit + result.profit_delta));
+  assert.ok(result.simulation_estimate.profit_simulation.expected_profit_impact > 0);
+});
+
+test("HOLD simulation is a no-op baseline and contributes no profit lift", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_HOLD_BASELINE",
+    revenue: 10000,
+    ads_spend: 800,
+    margin: 0.4,
+    net_profit: 3000,
+    inventory: 500,
+    sales_velocity: 8
+  });
+  const [result] = simulateGeneratedActions({
+    skus: [sku],
+    ads: [],
+    actions: [adsSimulationAction(sku.sku, 0, "HOLD")],
+    simulationHorizonDays: 30
+  });
+
+  assert.equal(result.action, "HOLD");
+  assert.equal(result.current_profit, sku.net_profit);
+  assert.equal(result.predicted_profit, sku.net_profit);
+  assert.equal(result.profit_delta, 0);
+  assert.equal(result.revenue_delta, 0);
+  assert.equal(result.inventory_impact, 0);
+  assert.equal(result.cost_delta, 0);
 });
 
 test("portfolio solver enforces hard SCALE_ADS cap from policy", () => {

@@ -6,12 +6,13 @@ import {
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { upsertDecisionSnapshot, upsertReportSnapshot } from "@/lib/dashboard/snapshot-store";
 import { upsertOptimizationReportCache } from "@/lib/dashboard/optimization-report-cache";
-import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
+import { normalizeProfitInputs, type ProfitInputRow } from "@/lib/profit/profit-input-normalizer";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "@/lib/profit/canonical-profitability-engine";
 import { applyDecisionLearningToDecisionReport } from "@/lib/decision-outcome/optimizer-learning-integration";
 import { activeDecisionContextForSku } from "@/lib/optimization/decision-context/active-decision-context";
 import { loadActiveDecisionContexts } from "@/lib/optimization/decision-context/decision-context-loader";
 import type { ActiveDecisionContext } from "@/lib/optimization/decision-context/decision-context-types";
-import { recommendationFingerprint } from "@/lib/optimization/recommendation-identity";
+import { recommendationIdFromRecord } from "@/lib/optimization/recommendation-identity";
 
 type DecisionMode = "full" | "sku";
 
@@ -96,7 +97,7 @@ export async function generateEcommerceDecisionSnapshots(
     const snapshot = await upsertDecisionSnapshot(prisma, {
       workspaceId: input.workspaceId,
       optimizationType,
-      content,
+      content: compactReportSnapshotContent(content),
       assumptions: {
         generatedFrom: "canonical_snapshot",
         dashboardState: loaded.state,
@@ -110,18 +111,18 @@ export async function generateEcommerceDecisionSnapshots(
         : null,
       ...versions
     });
-    const reportSnapshot = await upsertReportSnapshot(prisma, {
-      workspaceId: input.workspaceId,
-      reportType: `optimization_decision_report:${mode}`,
-      cacheKey: "latest",
-      content
-    });
     await upsertOptimizationReportCache(prisma, {
       workspaceId: input.workspaceId,
       mode,
       content,
-      sourceReportSnapshotId: typeof reportSnapshot?.id === "string" ? reportSnapshot.id : null,
+      sourceReportSnapshotId: null,
       sourceDecisionSnapshotId: typeof snapshot?.id === "string" ? snapshot.id : null
+    });
+    await upsertReportSnapshot(prisma, {
+      workspaceId: input.workspaceId,
+      reportType: `optimization_decision_report:${mode}`,
+      cacheKey: "latest",
+      content: compactReportSnapshotContent(content)
     });
     await saveSimulationSnapshot(prisma, {
       workspaceId: input.workspaceId,
@@ -160,6 +161,37 @@ export async function generateEcommerceDecisionSnapshots(
   }
 
   return { generated };
+}
+
+function compactReportSnapshotContent(content: ReturnType<typeof decisionSnapshotContent>) {
+  const record = asRecord(content) ?? {};
+  const decisionReport = asRecord(record.decision_report) ?? {};
+  const optimization = asRecord(decisionReport.sku_portfolio_optimization) ?? {};
+  const profitInputModel = asRecord(record.profitInputModel) ?? {};
+
+  return {
+    ...record,
+    decision_report: {
+      ...decisionReport,
+      sku_portfolio_optimization: {
+        ...optimization,
+        skuDecisions: [],
+        recommended_portfolio: [],
+        currentPortfolio: undefined,
+        lifecycleClassifications: [],
+        budget_plan: [],
+        pricing_plan: [],
+        inventory_plan: [],
+        simulations: []
+      },
+      skuDecisions: []
+    },
+    skuDecisions: [],
+    profitInputModel: {
+      ...profitInputModel,
+      rows: []
+    }
+  };
 }
 
 async function writeDecisionGenerationLog(
@@ -311,8 +343,9 @@ function decisionSnapshotContent(
       ?? toNumber(optimizationSummaryRecord.portfolio_size)
       ?? skuDecisions.length
   };
+  const profitabilityBySku = new Map(profitInputModel.rows.map((row) => [row.sku, row]));
   const compactReport = exposedReport
-    ? compactDecisionReport(exposedReport, skuDecisions, runInput.activeDecisionContexts, recommendationIdentityContext)
+    ? compactDecisionReport(exposedReport, skuDecisions, runInput.activeDecisionContexts, recommendationIdentityContext, profitabilityBySku)
     : null;
   const compactProfitInputModel = {
     ...profitInputModel,
@@ -341,6 +374,7 @@ function decisionSnapshotContent(
     decisionSnapshotVersions: {
       algorithmVersion: versions.algorithmVersion,
       optimizationVersion: versions.optimizationVersion,
+      profitabilityEngineVersion: versions.profitabilityEngineVersion,
       policyVersion: optimizationRun.policy_version,
       canonicalSnapshotVersion: versions.canonicalSnapshotVersion,
       metricSnapshotVersion: versions.metricSnapshotVersion,
@@ -372,9 +406,10 @@ function compactDecisionReport(
   report: NonNullable<LoadDashboardResult["data"]["decision_report"]>,
   skuDecisions: unknown[],
   activeDecisionContexts?: Map<string, ActiveDecisionContext>,
-  recommendationIdentityContext?: RecommendationIdentityContext
+  recommendationIdentityContext?: RecommendationIdentityContext,
+  profitabilityBySku?: Map<string, ProfitInputRow>
 ) {
-  const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions, activeDecisionContexts, recommendationIdentityContext);
+  const compactPortfolio = compactPortfolioOptimization(report.sku_portfolio_optimization, skuDecisions, activeDecisionContexts, recommendationIdentityContext, profitabilityBySku);
   const compactSkuBreakdown = compactSkuBreakdownRows(report.sku_breakdown, compactPortfolio.skuDecisions);
 
   return {
@@ -445,11 +480,13 @@ function compactSkuRows<T extends { sku: string }>(rows: T[], prioritySkuIds: Se
 function compactDecisionRows(
   rows: unknown[],
   activeDecisionContexts?: Map<string, ActiveDecisionContext>,
-  recommendationIdentityContext?: RecommendationIdentityContext
+  recommendationIdentityContext?: RecommendationIdentityContext,
+  profitabilityBySku?: Map<string, ProfitInputRow>
 ) {
   return rows.map((row) => {
     const record = asRecord(row) ?? {};
     const skuId = String(record.skuId ?? record.sku ?? "").trim();
+    const profitability = profitabilityBySku?.get(skuId) ?? profitabilityBySku?.get(String(record.sku ?? ""));
     const timing = asRecord(record.timing) ?? {};
     const simulationHorizon = asRecord(record.simulation_horizon) ?? {};
     const simulation = asRecord(record.simulation) ?? {};
@@ -459,9 +496,32 @@ function compactDecisionRows(
     return {
       recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
       optimization_run_id: recommendationIdentityContext?.optimizationRunId ?? null,
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       sku_id: skuId || record.skuId || record.sku,
       action_type: record.action,
       expected_profit_impact: record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
+      revenue: profitability?.revenue ?? null,
+      cogs: profitability?.cogs ?? null,
+      shipping_cost: profitability?.shipping_cost ?? null,
+      fulfillment_cost: profitability?.fulfillment_cost ?? null,
+      warehouse_cost: profitability?.warehouse_cost ?? null,
+      platform_fee: profitability?.platform_fee ?? null,
+      payment_fee: profitability?.payment_fee ?? null,
+      refund_cost: profitability?.refunds ?? null,
+      operating_cost: profitability?.operating_cost ?? null,
+      ads_spend: profitability?.ad_spend ?? null,
+      ad_cost_allocated: profitability?.ad_spend ?? null,
+      total_cost: profitability?.total_cost ?? null,
+      gross_profit: profitability?.gross_profit ?? null,
+      net_profit: profitability?.net_profit ?? null,
+      margin: profitability?.margin ?? null,
+      cogs_status: profitability?.cogs_status ?? null,
+      cogs_confidence: profitability?.cogs_confidence ?? null,
+      ad_allocation_method: profitability?.ad_allocation_method ?? null,
+      attribution_confidence: profitability?.attribution_confidence ?? null,
+      profitability_confidence: profitability?.profitability_confidence ?? null,
+      validation_status: profitability?.validation_status ?? null,
+      optimization_allowed: profitability?.optimization_allowed ?? null,
       skuId: record.skuId,
       sku: record.sku ?? record.skuId,
       previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
@@ -512,11 +572,13 @@ function compactDecisionRows(
 function compactPortfolioRows(
   rows: unknown[],
   activeDecisionContexts?: Map<string, ActiveDecisionContext>,
-  recommendationIdentityContext?: RecommendationIdentityContext
+  recommendationIdentityContext?: RecommendationIdentityContext,
+  profitabilityBySku?: Map<string, ProfitInputRow>
 ) {
   return rows.map((row) => {
     const record = asRecord(row) ?? {};
     const skuId = String(record.sku ?? record.skuId ?? "").trim();
+    const profitability = profitabilityBySku?.get(skuId) ?? profitabilityBySku?.get(String(record.sku_id ?? ""));
     const simulation = asRecord(record.simulation) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
@@ -524,9 +586,32 @@ function compactPortfolioRows(
     return {
       recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
       optimization_run_id: recommendationIdentityContext?.optimizationRunId ?? null,
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       sku_id: skuId || record.sku || record.skuId,
       action_type: record.action ?? record.canonical_action ?? record.unified_action,
       expected_profit_impact: record.profit_delta ?? record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
+      revenue: profitability?.revenue ?? null,
+      cogs: profitability?.cogs ?? null,
+      shipping_cost: profitability?.shipping_cost ?? null,
+      fulfillment_cost: profitability?.fulfillment_cost ?? null,
+      warehouse_cost: profitability?.warehouse_cost ?? null,
+      platform_fee: profitability?.platform_fee ?? null,
+      payment_fee: profitability?.payment_fee ?? null,
+      refund_cost: profitability?.refunds ?? null,
+      operating_cost: profitability?.operating_cost ?? null,
+      ads_spend: profitability?.ad_spend ?? null,
+      ad_cost_allocated: profitability?.ad_spend ?? null,
+      total_cost: profitability?.total_cost ?? null,
+      gross_profit: profitability?.gross_profit ?? null,
+      net_profit: profitability?.net_profit ?? null,
+      margin: profitability?.margin ?? null,
+      cogs_status: profitability?.cogs_status ?? null,
+      cogs_confidence: profitability?.cogs_confidence ?? null,
+      ad_allocation_method: profitability?.ad_allocation_method ?? null,
+      attribution_confidence: profitability?.attribution_confidence ?? null,
+      profitability_confidence: profitability?.profitability_confidence ?? null,
+      validation_status: profitability?.validation_status ?? null,
+      optimization_allowed: profitability?.optimization_allowed ?? null,
       sku: record.sku,
       previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
       product_name: record.product_name,
@@ -572,68 +657,27 @@ function recommendationIdentityForDecision(
   record: Record<string, unknown>,
   context?: RecommendationIdentityContext
 ) {
-  const existingId = typeof record.recommendation_id === "string" ? record.recommendation_id.trim() : "";
-  if (existingId) return existingId;
-
-  const skuId = String(record.skuId ?? record.sku ?? "").trim();
-  const actionType = String(record.action ?? record.canonical_action ?? record.unified_action ?? record.sourceAction ?? "HOLD").trim();
-  const simulation = asRecord(record.simulation) ?? {};
-  const beforeState = asRecord(record.before_state) ?? {};
-  const afterState = asRecord(record.after_state) ?? {};
-  const decisionContract = asRecord(record.decision_contract) ?? {};
-  const contractEvidence = asRecord(decisionContract.evidence) ?? {};
-  const policyTrace = asRecord(record.policy_trace) ?? {};
-  const policyMetrics = asRecord(policyTrace.metrics) ?? {};
-  const selectedScenario = asRecord(record.selected_scenario) ?? {};
-
-  return recommendationFingerprint({
-    skuId,
-    actionType,
-    actionParameters: {
-      source_action: record.sourceAction ?? null,
-      recommended_action: record.recommended_action ?? null,
-      recommended_actions: record.recommendedActions ?? null,
-      expected_profit_impact: record.expectedProfitImpact ?? record.estimatedProfitImpact ?? record.profit_delta ?? null,
-      ad_budget_change: toNumber(simulation.recommended_ads_spend) != null || toNumber(simulation.current_ads_spend) != null
-        ? (toNumber(simulation.recommended_ads_spend) ?? 0) - (toNumber(simulation.current_ads_spend) ?? 0)
-        : null,
-      inventory_change: simulation.inventory_impact ?? contractEvidence.recommendedInventoryChange ?? null,
-      required_inventory: simulation.required_inventory ?? contractEvidence.requiredInventory ?? null,
-      current_inventory: simulation.current_inventory ?? beforeState.inventory ?? contractEvidence.currentInventory ?? null,
-      current_price: beforeState.price ?? null,
-      new_price: afterState.price ?? selectedScenario.price ?? null
-    },
-    policyVersion: context?.policyVersion,
-    optimizerVersion: context?.optimizerVersion,
-    simulationVersion: context?.simulationVersion,
-    metricSnapshotVersion: context?.dataVersion,
-    evidence: {
-      roas: contractEvidence.roas ?? policyMetrics.roas ?? record.roas ?? null,
-      margin: contractEvidence.margin ?? policyMetrics.margin ?? record.margin ?? null,
-      confidence: record.confidence ?? selectedScenario.confidence ?? null,
-      inventory_gap: contractEvidence.inventoryGap ?? contractEvidence.inventory_gap ?? null,
-      inventory_coverage_days: contractEvidence.inventoryCoverageDays ?? policyMetrics.inventoryCoverageDays ?? null,
-      conversion_rate: contractEvidence.conversionRate ?? policyMetrics.conversionRate ?? null
-    }
-  });
+  return recommendationIdFromRecord(record, context);
 }
 
 function compactPortfolioOptimization(
   optimization: LoadDashboardResult["data"]["decision_report"]["sku_portfolio_optimization"],
   fallbackSkuDecisions: unknown[] = [],
   activeDecisionContexts?: Map<string, ActiveDecisionContext>,
-  recommendationIdentityContext?: RecommendationIdentityContext
+  recommendationIdentityContext?: RecommendationIdentityContext,
+  profitabilityBySku?: Map<string, ProfitInputRow>
 ) {
   const portfolioSkuDecisions = optimization.skuDecisions.length
     ? optimization.skuDecisions
     : fallbackSkuDecisions;
   const availableSkuDecisions = portfolioSkuDecisions;
-  const queueDecisionRows = availableSkuDecisions.filter(isOptimizationCandidateRow);
-  const compactSkuDecisions = compactDecisionRows(queueDecisionRows.length ? queueDecisionRows : availableSkuDecisions, activeDecisionContexts, recommendationIdentityContext);
+  const queueDecisionRows = availableSkuDecisions.filter((row) => isOptimizationCandidateRow(row, activeDecisionContexts, recommendationIdentityContext));
+  const compactSkuDecisions = compactDecisionRows(queueDecisionRows, activeDecisionContexts, recommendationIdentityContext, profitabilityBySku);
   const compactRecommendedPortfolio = compactPortfolioRows(
     optimization.recommended_portfolio,
     activeDecisionContexts,
-    recommendationIdentityContext
+    recommendationIdentityContext,
+    profitabilityBySku
   );
   const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
   const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
@@ -691,12 +735,50 @@ function compactPortfolioOptimization(
   };
 }
 
-function isOptimizationCandidateRow(row: unknown) {
+function isOptimizationCandidateRow(
+  row: unknown,
+  activeDecisionContexts?: Map<string, ActiveDecisionContext>,
+  recommendationIdentityContext?: RecommendationIdentityContext
+) {
   const record = asRecord(row) ?? {};
+  const skuId = String(record.skuId ?? record.sku ?? record.sku_id ?? "").trim();
+  const recommendationId = recommendationIdentityForDecision(record, recommendationIdentityContext);
+  const matchingAcceptedAction = skuId
+    ? activeDecisionContexts?.get(skuId)?.activeActions.find((action) =>
+      (action.status === "ACCEPTED" || action.status === "EXECUTING") &&
+      (action.recommendationId === recommendationId || legacyActiveActionMatchesRecommendation(action, record))
+    )
+    : null;
+  if (matchingAcceptedAction) {
+    return false;
+  }
+
   const action = typeof record.action === "string" ? record.action : "";
   const impact = Math.abs(toNumber(record.expectedProfitImpact) ?? toNumber(record.estimatedProfitImpact) ?? 0);
 
   return action !== "MONITOR" || impact > 1 || record.inventoryRisk === true || record.budgetOpportunity === true;
+}
+
+function legacyActiveActionMatchesRecommendation(
+  action: ActiveDecisionContext["activeActions"][number],
+  record: Record<string, unknown>
+) {
+  const currentAction = String(record.action ?? record.action_type ?? "").trim().toUpperCase();
+  const activeAction = String(action.actionType ?? "").trim().toUpperCase();
+  if (!currentAction || !activeAction || currentAction !== activeAction) return false;
+
+  const simulation = asRecord(record.simulation) ?? {};
+  const currentAdDelta = metricDelta(simulation.recommended_ads_spend, simulation.current_ads_spend);
+  if (currentAdDelta == null || action.adBudgetChange == null) return false;
+
+  return Math.abs(currentAdDelta - action.adBudgetChange) <= 0.01;
+}
+
+function metricDelta(after: unknown, before: unknown) {
+  const next = toNumber(after);
+  const current = toNumber(before);
+  if (next == null || current == null) return null;
+  return Math.round((next - current) * 100) / 100;
 }
 
 function partialOptimizationMessage(coverage: number) {

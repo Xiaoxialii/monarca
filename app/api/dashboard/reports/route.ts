@@ -19,6 +19,7 @@ import {
   stableHash,
   type ReportMetricCachePayload
 } from "@/lib/report-metric-cache";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "@/lib/profit/canonical-profitability-engine";
 import {
   attachReportRunMetadata,
   findCompletedReportRun,
@@ -474,6 +475,7 @@ async function latestWorkspaceSnapshotMeta(workspaceId: string, dataSourceIds: s
 function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss" | "stale", cacheKey: string) {
   return {
     ...payload,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
     cache: {
       status,
       cacheKey,
@@ -481,6 +483,15 @@ function withCacheMeta(payload: ReportMetricCachePayload, status: "hit" | "miss"
       staleAt: null
     }
   };
+}
+
+function reportPayloadUsesCurrentProfitabilityEngine(payload: unknown) {
+  const record = asRecord(payload);
+  const direct = record.profitabilityEngineVersion ?? record.profitability_engine_version;
+  if (direct === CANONICAL_PROFITABILITY_ENGINE_VERSION) return true;
+
+  const versions = asRecord(record.decisionSnapshotVersions);
+  return (versions.profitabilityEngineVersion ?? versions.profitability_engine_version) === CANONICAL_PROFITABILITY_ENGINE_VERSION;
 }
 
 function ensureAiReportPayload<T extends Record<string, unknown>>(payload: T): T {
@@ -903,7 +914,10 @@ export async function GET(request: Request) {
       cacheKey: cacheResult.cacheKey
     };
     const existingReportRun = await findCompletedReportRun(prisma, reportRunScope);
-    const reportRun = existingReportRun ?? (reusableCachePayload
+    const currentReportRun = existingReportRun && reportPayloadUsesCurrentProfitabilityEngine(existingReportRun.payloadJson)
+      ? existingReportRun
+      : null;
+    const reportRun = currentReportRun ?? (reusableCachePayload
       ? await upsertCompletedReportRun(prisma, {
           ...reportRunScope,
           payload: reusableCachePayload,

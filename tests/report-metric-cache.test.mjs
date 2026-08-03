@@ -4,6 +4,7 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(process.cwd() + "/");
 const {
+  CANONICAL_PROFITABILITY_ENGINE_VERSION,
   cachedReportDateRangePresets,
   isCacheableReportRange,
   reportMetricCacheKey,
@@ -34,6 +35,23 @@ test("cache key includes workspace, metric, date field, range and filters", () =
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dateRange: { ...base.dateRange, preset: "90D" } }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, dateRange: { ...base.dateRange, previousStartDate: "2026-05-01", previousEndDate: "2026-05-31" } }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, filters: { channel: "web" } }));
+});
+
+test("cache key is bound to canonical profitability engine version", () => {
+  const base = {
+    workspaceId: "workspace-a",
+    metricIds: ["orders", "gmv"],
+    dataSourceIds: ["source-a"],
+    dateField: "order_date",
+    dateRange: { preset: "30D", startDate: "2026-05-09", endDate: "2026-06-07" },
+    filters: { channel: "app" }
+  };
+
+  assert.equal(CANONICAL_PROFITABILITY_ENGINE_VERSION, "v2");
+  assert.notEqual(
+    reportMetricCacheKey(base),
+    reportMetricCacheKey({ ...base, profitabilityEngineVersion: "v1" })
+  );
 });
 
 test("cache key is bound to semantic source, domain and snapshot", () => {

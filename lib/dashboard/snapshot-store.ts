@@ -1,9 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
 
 type SnapshotClient = PrismaClient;
 type SnapshotPrismaClient = SnapshotClient & {
   reportSnapshot?: {
     findFirst: (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+    findMany: (args: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
     upsert: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
   decisionSnapshot?: {
@@ -16,6 +18,20 @@ type SnapshotPrismaClient = SnapshotClient & {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function payloadProfitabilityEngineVersion(value: unknown) {
+  const record = asRecord(value);
+  const direct = record.profitabilityEngineVersion ?? record.profitability_engine_version;
+  if (typeof direct === "string") return direct;
+
+  const versions = asRecord(record.decisionSnapshotVersions);
+  const nested = versions.profitabilityEngineVersion ?? versions.profitability_engine_version;
+  return typeof nested === "string" ? nested : null;
+}
+
+export function isCurrentProfitabilitySnapshot(value: unknown) {
+  return payloadProfitabilityEngineVersion(value) === CANONICAL_PROFITABILITY_ENGINE_VERSION;
 }
 
 function dateOrNull(value?: string | null) {
@@ -39,6 +55,59 @@ function isFallbackDecisionSnapshot(snapshot: Record<string, unknown> | null) {
 }
 
 export async function findLatestReportSnapshot(
+  prisma: SnapshotClient,
+  input: {
+    workspaceId: string;
+    reportType: string;
+    periodStart?: string | null;
+    periodEnd?: string | null;
+    cacheKey?: string | null;
+  }
+) {
+  const reportSnapshot = (prisma as SnapshotPrismaClient).reportSnapshot;
+
+  if (!reportSnapshot) return null;
+
+  const cacheKey = input.cacheKey ?? null;
+  const periodStart = dateOrNull(input.periodStart);
+  const periodEnd = dateOrNull(input.periodEnd);
+
+  if (cacheKey) {
+    const exact = await reportSnapshot.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        reportType: input.reportType,
+        cacheKey
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+
+    if (exact && isCurrentProfitabilitySnapshot(exact.contentJson)) return exact;
+  }
+
+  const snapshots = await reportSnapshot.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      reportType: input.reportType,
+      ...(periodStart || periodEnd
+        ? {
+            periodStart,
+            periodEnd
+          }
+        : {})
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: 10
+  });
+
+  return snapshots.find((snapshot) => isCurrentProfitabilitySnapshot(snapshot?.contentJson)) ?? null;
+}
+
+export async function findLatestReportSnapshotLegacy(
   prisma: SnapshotClient,
   input: {
     workspaceId: string;
@@ -107,11 +176,15 @@ export async function upsertReportSnapshot(
   if (!reportSnapshot) return null;
 
   const cacheKey = input.cacheKey ?? `${input.reportType}:${Date.now()}`;
+  const content = {
+    ...input.content,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
+  };
   const data = {
     reportType: input.reportType,
     periodStart: dateOrNull(input.periodStart),
     periodEnd: dateOrNull(input.periodEnd),
-    contentJson: input.content as Prisma.InputJsonValue,
+    contentJson: content as Prisma.InputJsonValue,
     sourceSnapshotId: input.sourceSnapshotId ?? null,
     sourceSnapshotVersion: input.sourceSnapshotVersion ?? null,
     cacheKey,
@@ -130,7 +203,14 @@ export async function upsertReportSnapshot(
       workspaceId: input.workspaceId,
       ...data
     },
-    update: data
+    update: data,
+    select: {
+      id: true,
+      workspaceId: true,
+      reportType: true,
+      cacheKey: true,
+      updatedAt: true
+    }
   });
 }
 
@@ -174,6 +254,20 @@ export async function findLatestDecisionSnapshot(
   return decisionSnapshot.findUnique({
     where: {
       id: latest.id
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      optimizationType: true,
+      algorithmVersion: true,
+      optimizationVersion: true,
+      canonicalSnapshotVersion: true,
+      metricSnapshotVersion: true,
+      simulationVersion: true,
+      inputHash: true,
+      generatedAt: true,
+      createdAt: true,
+      recommendationsJson: true
     }
   });
 }

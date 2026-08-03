@@ -1,5 +1,6 @@
 import { allocateAdSpendToSkus } from "./sku-ad-allocation-engine";
 import { revenueChannelOrNull } from "@/lib/channels/revenue-channel";
+import { calculateSkuProfitability, canonicalAdAllocationMethod, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type SkuProfitInputRow = {
   sku: string;
@@ -21,6 +22,7 @@ export type SkuProfitInputRow = {
   estimated_components: string[];
   estimated: boolean;
   cogs_type: "unit" | "total" | "unknown" | "mixed";
+  cogs_status?: CogsStatus;
   cogs_confidence: number;
   cogs_semantic_warnings: string[];
 };
@@ -34,13 +36,21 @@ export type SkuAttributionMethod =
   | "revenue_share_fallback"
   | "campaign_window_fallback"
   | "unavailable"
+  | "unknown"
   | "none";
 
 export type SkuProfitAllocationRow = SkuProfitInputRow & {
-  ad_cost_allocated: number;
+  ad_cost_allocated: number | null;
   total_cost: number;
+  gross_profit: number;
+  operating_cost: number;
+  contribution_profit: number;
   net_profit: number;
   margin: number;
+  profitability_confidence: number;
+  validation_status: ProfitValidationStatus;
+  optimization_allowed: boolean;
+  warnings: string[];
   sku_roas: number;
   roas_value: number | null;
   roas_display: string;
@@ -52,8 +62,25 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
   profit_confidence: number;
   channel_breakdown: Record<string, number>;
   channel_details: Array<{ platform: string; revenue: number; quantity: number; profit: number; margin: number; share: number }>;
-  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "none";
+  ad_allocation_method: "direct" | "campaign_window" | "campaign_revenue_share" | "conversion_share" | "revenue_share" | "equal_distribution" | "unavailable" | "unknown" | "none";
   ad_allocation_confidence: number;
+  attribution_source: "meta_ads" | "amazon_ads" | "shopify_ads" | "campaign_attribution" | "sku_allocation" | "revenue_share_fallback" | "unknown" | "none";
+  attributed_campaigns: Array<{
+    campaign_id: string;
+    raw_spend: number;
+    attributed_revenue: number;
+    allocated_spend: number;
+    allocation_method: "direct" | "campaign_revenue_share";
+  }>;
+  ads_validation_status: "PASSED" | "FAILED" | "UNKNOWN";
+  ads_validation_warnings: string[];
+  ads_lineage: {
+    raw_platform_spend: number;
+    sku_direct_attribution: number;
+    campaign_allocation: number;
+    revenue_share_fallback: number;
+    final_allocated_ads: number | null;
+  };
   campaign_ids: string[];
   attribution_window_start: string | null;
   attribution_window_end: string | null;
@@ -112,18 +139,32 @@ export function calculateSkuProfitAndAllocation(input: {
 
   const allocated = rows.map((row) => {
     const adAllocation = adAllocations.get(row.sku);
-    const adCostAllocated = roundCurrency(adAllocation?.allocated_ad_spend ?? 0);
-    const totalCost = roundCurrency(
-      row.cogs +
-        row.shipping_cost +
-        row.fulfillment_cost +
-        row.platform_fee +
-        row.payment_fee +
-        row.refund_cost +
-        adCostAllocated
-    );
-    const netProfit = roundCurrency(row.revenue - totalCost);
-    const margin = safeRatio(netProfit, row.revenue);
+    const adCostAllocated = adAllocation?.allocated_ad_spend === null
+      ? null
+      : roundCurrency(adAllocation?.allocated_ad_spend ?? 0);
+    const adSpendForProfit = adCostAllocated ?? 0;
+    const adAllocationMethod = adAllocation?.allocation_method ?? "none";
+    const adAllocationConfidence = adAllocation?.allocation_confidence ?? 0.25;
+    const hasUnknownAds = adAllocationMethod === "unknown" || adAllocation?.ads_validation_status === "UNKNOWN";
+    const profitability = calculateSkuProfitability({
+      sku: row.sku,
+      revenue: row.revenue,
+      cogs: row.cogs,
+      shippingCost: row.shipping_cost,
+      fulfillmentCost: row.fulfillment_cost,
+      platformFee: row.platform_fee,
+      paymentFee: row.payment_fee,
+      refundCost: row.refund_cost,
+      adSpend: adSpendForProfit,
+      cogsStatus: row.cogs_status ?? (row.cogs > 0 ? (row.estimated_components.includes("cogs") ? "ESTIMATED" : "AVAILABLE") : row.revenue > 0 ? "MISSING" : "AVAILABLE"),
+      cogsConfidence: row.cogs_confidence,
+      adAllocationMethod: canonicalAdAllocationMethod(adAllocationMethod),
+      attributionConfidence: adAllocationConfidence,
+      criticalFieldsMissing: row.estimated_components
+    });
+    const totalCost = profitability.total_cost;
+    const netProfit = profitability.net_profit;
+    const margin = profitability.margin;
     const inventory = inventoryBySku.get(row.sku);
     const inventoryConfidence = inventory ? 1 : 0;
     const salesVelocity = roundRatio(row.quantity / Math.max(1, activeDaysBySku.get(row.sku) ?? 1));
@@ -134,12 +175,12 @@ export function calculateSkuProfitAndAllocation(input: {
     const refundRisk = refundRiskLevel(refundRate, row.estimated_components.includes("refund_cost"));
     const channelRecord = channelBreakdowns.get(row.sku) ?? {};
     const channelConcentrationRisk = Object.values(channelRecord).some((value) => row.revenue > 0 && value / row.revenue > 0.7);
-    const attributionRisk = (adAllocation?.allocation_confidence ?? 1) < 0.6 || adAllocation?.allocation_method === "unavailable";
+    const attributionRisk = adAllocationConfidence < 0.6 || adAllocation?.allocation_method === "unavailable" || hasUnknownAds;
     const roasState = buildSkuRoasState({
       revenue: row.revenue,
-      adSpendAllocated: adCostAllocated,
+      adSpendAllocated: adSpendForProfit,
       allocationMethod: adAllocation?.allocation_method ?? "none",
-      allocationConfidence: adAllocation?.allocation_confidence ?? 1,
+      allocationConfidence: adAllocationConfidence,
       campaignIds: adAllocation?.campaign_ids ?? []
     });
     const estimatedComponents = Array.from(new Set([
@@ -152,7 +193,7 @@ export function calculateSkuProfitAndAllocation(input: {
     const profitConfidence = skuProfitConfidence({
       estimatedComponentCount: estimatedComponents.length,
       cogsConfidence: row.cogs_confidence,
-      adAllocationConfidence: adAllocation?.allocation_confidence ?? 1,
+      adAllocationConfidence,
       inventoryConfidence
     });
     const marginRisk = margin < 0.15;
@@ -177,14 +218,16 @@ export function calculateSkuProfitAndAllocation(input: {
       salesVelocity,
       netProfit,
       profitConfidence,
-      inventoryAvailable: Boolean(inventory)
+      inventoryAvailable: Boolean(inventory),
+      attributionConfidence: roasState.attribution_confidence,
+      adAllocationMethod
     });
     const expectedImpact = expectedSkuImpact({
       action: decision.action,
       revenue: row.revenue,
       netProfit,
       margin,
-      adCostAllocated,
+      adCostAllocated: adSpendForProfit,
       totalCost
     });
 
@@ -192,8 +235,18 @@ export function calculateSkuProfitAndAllocation(input: {
       ...row,
       ad_cost_allocated: adCostAllocated,
       total_cost: totalCost,
+      gross_profit: profitability.gross_profit,
+      operating_cost: profitability.operating_cost,
+      contribution_profit: profitability.contribution_profit,
       net_profit: netProfit,
       margin,
+      profitability_confidence: profitability.profitability_confidence,
+      validation_status: profitability.validation.validation_status,
+      optimization_allowed: profitability.validation.optimization_allowed && !hasUnknownAds && adAllocationConfidence >= 0.4,
+      warnings: Array.from(new Set([
+        ...profitability.validation.warnings,
+        ...(adAllocation?.warnings ?? [])
+      ])),
       sku_roas: roasState.roas_value ?? 0,
       roas_value: roasState.roas_value,
       roas_display: roasState.roas_display,
@@ -205,8 +258,19 @@ export function calculateSkuProfitAndAllocation(input: {
       profit_confidence: profitConfidence,
       channel_breakdown: channelRecord,
       channel_details: buildChannelDetails({ channelRecord, totalRevenue: row.revenue, netProfit, quantity: row.quantity }),
-      ad_allocation_method: adAllocation?.allocation_method ?? "none",
-      ad_allocation_confidence: adAllocation?.allocation_confidence ?? 1,
+      ad_allocation_method: adAllocationMethod,
+      ad_allocation_confidence: adAllocationConfidence,
+      attribution_source: adAllocation?.attribution_source ?? "none",
+      attributed_campaigns: adAllocation?.attributed_campaigns ?? [],
+      ads_validation_status: adAllocation?.ads_validation_status ?? "PASSED",
+      ads_validation_warnings: adAllocation?.warnings ?? [],
+      ads_lineage: adAllocation?.lineage ?? {
+        raw_platform_spend: 0,
+        sku_direct_attribution: 0,
+        campaign_allocation: 0,
+        revenue_share_fallback: 0,
+        final_allocated_ads: adCostAllocated
+      },
       campaign_ids: adAllocation?.campaign_ids ?? [],
       attribution_window_start: adAllocation?.attribution_window_start ?? null,
       attribution_window_end: adAllocation?.attribution_window_end ?? null,
@@ -229,7 +293,7 @@ export function calculateSkuProfitAndAllocation(input: {
       cost_breakdown: {
         cogs: row.cogs,
         shipping: row.shipping_cost,
-        ads: adCostAllocated,
+        ads: adSpendForProfit,
         platform_fee: row.platform_fee,
         payment_fee: row.payment_fee,
         fulfillment: row.fulfillment_cost,
@@ -378,6 +442,8 @@ function recommendSkuAction(input: {
   quantity: number;
   roasStatus: SkuRoasStatus;
   roasValue: number | null;
+  attributionConfidence: number;
+  adAllocationMethod: SkuProfitAllocationRow["ad_allocation_method"];
   stockoutRisk: "high" | "medium" | "low" | "unknown";
   overstockRisk: "high" | "medium" | "low" | "unknown";
   salesVelocity: number;
@@ -387,6 +453,9 @@ function recommendSkuAction(input: {
 }) {
   if (input.roasStatus === "attribution_missing") {
     return { action: "NEED_MORE_DATA" as const, reason: "This SKU has sales, but advertising-to-order attribution data is missing; ad contribution cannot be judged." };
+  }
+  if (input.adAllocationMethod === "unknown" || input.attributionConfidence < 0.4) {
+    return { action: "NEED_MORE_DATA" as const, reason: "Advertising spend exists, but SKU-level attribution is too weak to make a profitability decision." };
   }
   if (input.roasStatus === "spent_no_revenue" && input.margin < 0.2) {
     return { action: "REDUCE_AD_SPEND" as const, reason: "This SKU has ad spend but no attributed revenue; check campaign efficiency." };
@@ -401,8 +470,11 @@ function recommendSkuAction(input: {
   if (input.roasValue !== null && input.roasValue > 2 && input.margin > 0.2 && input.stockoutRisk === "high" && input.inventoryAvailable) {
     return { action: "RESTOCK_FIRST" as const, reason: "Profitable demand exists, but inventory is constrained." };
   }
-  if (input.roasValue !== null && input.roasValue > 2 && input.margin > 0.2 && input.stockoutRisk !== "high") {
+  if (input.roasValue !== null && input.roasValue > 2 && input.margin > 0.2 && input.stockoutRisk !== "high" && input.attributionConfidence >= 0.65) {
     return { action: "SCALE_ADS" as const, reason: "SKU has strong ROAS, margin, and no high stockout risk." };
+  }
+  if (input.roasValue !== null && input.roasValue > 2 && input.margin > 0.2 && input.stockoutRisk !== "high") {
+    return { action: "NEED_MORE_DATA" as const, reason: "ROAS is estimated from low-confidence ad attribution; run a controlled spend test before scaling." };
   }
   if (input.margin < 0.18) return { action: "FIX_MARGIN" as const, reason: "Margin is below operating threshold." };
   if (input.roasStatus === "not_advertised") {

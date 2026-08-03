@@ -6,6 +6,7 @@ import type { SkuLifecycleStage } from "@/lib/lifecycle/lifecycle-score";
 import { lifecycleThresholdMultiplier, type BusinessObjective, type DynamicThresholdProfile } from "@/lib/optimization/dynamic-threshold-engine";
 import type { PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
 import type { DecisionContractValidationMetadata } from "@/lib/optimization/decision-contract-validator";
+import type { CogsStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type PortfolioSkuInput = {
   sku: string;
@@ -24,6 +25,13 @@ export type PortfolioSkuInput = {
   customer_ltv: number;
   conversion_rate: number;
   prediction_confidence?: number;
+  profitability_confidence?: number;
+  optimization_allowed?: boolean;
+  warnings?: string[];
+  cogs_status?: CogsStatus;
+  cogs_confidence?: number;
+  ad_allocation_method?: string;
+  attribution_confidence?: number;
   shipping_cost?: number;
   fees?: number;
   fulfillment_cost?: number;
@@ -317,6 +325,7 @@ export function simulateSkuAction(
   lifecycle?: SkuLifecycleClassification,
   thresholdProfile?: DynamicThresholdProfile
 ): ProfitSimulationResult {
+  const isHoldAction = action === "HOLD";
   const priceChange = priceChangeForAction(action);
   const adsMultiplier = adsMultiplierForAction(action);
   const restockLift = action === "RESTOCK_AND_SCALE" ? 0.16 : action === "REDUCE_INVENTORY" ? -0.04 : 0;
@@ -368,24 +377,32 @@ export function simulateSkuAction(
       demandElasticity
     })
     : null;
-  const estimatedRevenue = explicitPriceSimulation
-    ? explicitPriceSimulation.predicted_revenue
-    : simulationEstimate
-    ? roundCurrency(sku.revenue + simulationEstimate.revenue_simulation.incremental_revenue)
-    : revenuePrediction.predicted_revenue;
-  const predictedProfit = action === "STOP"
+  const estimatedRevenue = isHoldAction
+    ? roundCurrency(sku.revenue)
+    : explicitPriceSimulation
+      ? explicitPriceSimulation.predicted_revenue
+      : simulationEstimate
+        ? roundCurrency(sku.revenue + simulationEstimate.revenue_simulation.incremental_revenue)
+        : revenuePrediction.predicted_revenue;
+  const predictedProfit = isHoldAction
+    ? currentProfit
+    : action === "STOP"
     ? 0
     : explicitPriceSimulation
       ? explicitPriceSimulation.predicted_profit
       : simulationEstimate
       ? roundCurrency(currentProfit + simulationEstimate.profit_simulation.expected_profit_impact)
       : standardProfitPrediction.predicted_profit;
-  const predictedMargin = action === "STOP" ? 0 : explicitPriceSimulation ? explicitPriceSimulation.predicted_margin : standardProfitPrediction.predicted_margin;
-  const requiredInventory = action === "STOP"
+  const predictedMargin = isHoldAction ? roundRatio(sku.margin) : action === "STOP" ? 0 : explicitPriceSimulation ? explicitPriceSimulation.predicted_margin : standardProfitPrediction.predicted_margin;
+  const requiredInventory = isHoldAction
+    ? sku.inventory
+    : action === "STOP"
     ? 0
     : Math.ceil(Math.max(0, sku.quantity * safeRatio(estimatedRevenue, Math.max(1, sku.revenue))));
   const risk = predictionRisk(sku, revenuePrediction.confidence, action, requiredInventory);
-  const profitDelta = simulationEstimate
+  const profitDelta = isHoldAction
+    ? 0
+    : simulationEstimate
     ? simulationEstimate.profit_simulation.expected_profit_impact
     : roundCurrency(predictedProfit - currentProfit);
   const confidenceBreakdown = buildConfidenceBreakdown({
@@ -410,7 +427,7 @@ export function simulateSkuAction(
     requiredInventory,
     thresholdProfile
   });
-  const actionScore = roundCurrency(profitDelta * confidence * feasibility * lifecycleFit * strategicValue - riskPenalty - priceRiskPenalty);
+  const actionScore = isHoldAction ? 0 : roundCurrency(profitDelta * confidence * feasibility * lifecycleFit * strategicValue - riskPenalty - priceRiskPenalty);
   const opportunityScore = roundCurrency(Math.max(0, actionScore));
   const requiredCash = roundCurrency(
     Math.max(0, recommendedAdsSpend - sku.ads_spend) +
@@ -456,7 +473,7 @@ export function simulateSkuAction(
     demand_elasticity: demandElasticity,
     ads_response: adsResponse,
     simulation_estimate: simulationEstimate,
-    predicted_cost: action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost,
+    predicted_cost: isHoldAction ? Math.max(0, sku.revenue - currentProfit) : action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost,
     simulation_source: "prediction_model",
     simulation_horizon: {
       days: simulationHorizonDays,
@@ -504,7 +521,7 @@ export function simulateSkuAction(
     before_state: beforeState,
     after_state: afterState,
     revenue_delta: roundCurrency(afterState.revenue - beforeState.revenue),
-    cost_delta: roundCurrency((action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost) - Math.max(0, sku.revenue - currentProfit)),
+    cost_delta: isHoldAction ? 0 : roundCurrency((action === "STOP" ? 0 : explicitPriceSimulation?.predicted_cost ?? standardProfitPrediction.predicted_cost) - Math.max(0, sku.revenue - currentProfit)),
     margin_change: roundRatio(afterState.margin - beforeState.margin),
     inventory_impact: requiredInventory - sku.inventory
   };

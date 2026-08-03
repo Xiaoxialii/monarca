@@ -256,6 +256,9 @@ function isPriceIncreaseEligible(sku: PortfolioSkuInput, thresholdProfile?: Dyna
 
 function isScaleAdsEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicThresholdProfile, coverageDays = 0) {
   if (sku.ads_spend <= 0) return false;
+  if (sku.optimization_allowed === false) return false;
+  if (sku.cogs_status === "MISSING") return false;
+  if ((sku.attribution_confidence ?? sku.prediction_confidence ?? 0) < 0.65) return false;
 
   const confidenceThreshold = thresholdProfile?.scale_ads_threshold.confidence ?? 0.6;
   const coverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 30;

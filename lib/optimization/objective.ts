@@ -1,8 +1,13 @@
+import { calculateSkuProfitability } from "@/lib/profit/canonical-profitability-engine";
+
 export type CommerceSkuState = {
   skuId: string;
   revenue: number;
   quantity: number;
   grossProfit: number;
+  netProfit?: number;
+  cogs?: number;
+  operatingCost?: number;
   adSpend: number;
   inventory: number;
   salesVelocity: number;
@@ -54,14 +59,37 @@ export const defaultPolicyWeights: PolicyWeights = {
   stability: 0.1
 };
 
+export function calculateCommerceSkuProfitability(sku: CommerceSkuState) {
+  const cogs = sku.cogs ?? Math.max(0, sku.revenue - sku.grossProfit);
+
+  return calculateSkuProfitability({
+    revenue: sku.revenue,
+    cogs,
+    fulfillmentCost: sku.operatingCost ?? 0,
+    adSpend: sku.adSpend,
+    cogsStatus: sku.cogs != null ? "AVAILABLE" : "ESTIMATED",
+    cogsConfidence: sku.cogs != null ? 1 : 0.6,
+    adAllocationMethod: sku.adSpend > 0 ? "UNKNOWN" : "DIRECT_SKU",
+    attributionConfidence: sku.adSpend > 0 ? 0.25 : 1
+  });
+}
+
+export function commerceSkuNetProfit(sku: CommerceSkuState) {
+  return roundCurrency(sku.netProfit ?? calculateCommerceSkuProfitability(sku).net_profit);
+}
+
+export function commerceSkuMargin(sku: CommerceSkuState) {
+  return sku.margin ?? calculateCommerceSkuProfitability(sku).margin;
+}
+
 export function calculateProfitObjective(candidates: OptimizationCandidate[]) {
   return roundCurrency(candidates.reduce((sum, candidate) => sum + candidate.expectedProfitImpact - candidate.expectedAdSpend, 0));
 }
 
 export function buildOptimizationCandidates(sku: CommerceSkuState, weights: PolicyWeights = defaultPolicyWeights): OptimizationCandidate[] {
-  const baselineProfit = sku.grossProfit - sku.adSpend;
+  const baselineProfit = commerceSkuNetProfit(sku);
   const roas = sku.roas ?? safeRatio(sku.revenue, sku.adSpend);
-  const margin = sku.margin ?? safeRatio(sku.grossProfit, sku.revenue);
+  const margin = commerceSkuMargin(sku);
   const scaleProfitImpact = roundCurrency(Math.max(0, baselineProfit * 0.16 + sku.grossProfit * 0.04));
   const fixProfitImpact = roundCurrency(Math.max(0, Math.abs(Math.min(0, baselineProfit)) * 0.35 + sku.revenue * Math.max(0, 0.18 - margin)));
   const stopProfitImpact = roundCurrency(sku.adSpend + Math.abs(Math.min(0, baselineProfit)));

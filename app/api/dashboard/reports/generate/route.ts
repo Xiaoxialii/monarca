@@ -26,6 +26,7 @@ import { buildReportPrompt } from "@/lib/report-generation/report-prompt-builder
 import { buildStructuredAiReport } from "@/lib/report-generation/report-section-builder";
 import { buildReportDataAudit } from "@/lib/report-data-audit";
 import { buildKpiAiReportJson } from "@/lib/kpi-ai-report";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "@/lib/profit/canonical-profitability-engine";
 import {
   composeReport,
   loadMetricSnapshots,
@@ -735,6 +736,7 @@ async function runReportGenerationJob(input: {
       };
       const payloadJson = {
         generatedFrom: "full_data_guardrail",
+        profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
         locale: input.reportLocale,
         reportMode: effectiveReportMode,
         requestedReportMode: input.reportMode,
@@ -1036,6 +1038,7 @@ async function runReportGenerationJob(input: {
     };
     const payloadJson = {
       generatedFrom: "async_ai_brief",
+      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       locale: input.reportLocale,
       reportMode: effectiveReportMode,
       requestedReportMode: input.reportMode,

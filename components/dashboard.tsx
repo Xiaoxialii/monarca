@@ -9748,6 +9748,14 @@ type ProfitOptimizationJob = {
   currentStep?: string | null;
   errorMessage?: string | null;
   completedAt?: string | null;
+  resultReference?: {
+    generated?: Array<{
+      snapshotId?: string | null;
+      mode?: string | null;
+      state?: string | null;
+      optimizationType?: string | null;
+    }>;
+  } | null;
 };
 
 type ProfitOptimizationJobPayload = {
@@ -9767,6 +9775,11 @@ type ProfitOptimizationJobStatusPayload = {
 type ProfitOptimizationDecisionReportPayload = {
   ok?: boolean;
   message?: string | null;
+  snapshot?: {
+    id?: string | null;
+    sourceDecisionSnapshotId?: string | null;
+    latestSnapshot?: boolean | null;
+  } | null;
   optimizationRun?: {
     optimization_run_id?: string | null;
     completed_at?: string | null;
@@ -9827,6 +9840,21 @@ function optimizationDecisionReportRunId(payload: ProfitOptimizationDecisionRepo
   return typeof optimizationRun?.optimization_run_id === "string" && optimizationRun.optimization_run_id.trim()
     ? optimizationRun.optimization_run_id.trim()
     : null;
+}
+
+function optimizationJobSnapshotId(job: ProfitOptimizationJob | null | undefined) {
+  const generated = job?.resultReference?.generated;
+  if (!Array.isArray(generated)) return null;
+  const fullSnapshot = generated.find((item) => item?.mode === "full" && typeof item.snapshotId === "string" && item.snapshotId.trim());
+  const firstSnapshot = generated.find((item) => typeof item?.snapshotId === "string" && item.snapshotId.trim());
+  return (fullSnapshot?.snapshotId ?? firstSnapshot?.snapshotId ?? null)?.trim() || null;
+}
+
+function optimizationDecisionReportSnapshotId(payload: ProfitOptimizationDecisionReportPayload) {
+  const snapshot = payload?.snapshot;
+  const sourceDecisionSnapshotId = typeof snapshot?.sourceDecisionSnapshotId === "string" ? snapshot.sourceDecisionSnapshotId.trim() : "";
+  if (sourceDecisionSnapshotId) return sourceDecisionSnapshotId;
+  return typeof snapshot?.id === "string" && snapshot.id.trim() ? snapshot.id.trim() : null;
 }
 
 function ReportDateRangeSelector({
@@ -16833,15 +16861,25 @@ function ReportsPage({
 
       setProfitOptimizationRunStatus("COMPLETED");
       setProfitOptimizationRunStep(profitOptimizationStatusMessage("COMPLETED", completedJob.currentStep, isZh));
+      const completedSnapshotId = optimizationJobSnapshotId(completedJob);
       let latestReport = await loadAnalysisDecisionReport("full");
-      for (let attempt = 0; attempt < 8 && optimizationDecisionReportRunId(latestReport) !== completedJob.id; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 8 && (completedSnapshotId
+          ? optimizationDecisionReportSnapshotId(latestReport) !== completedSnapshotId
+          : optimizationDecisionReportRunId(latestReport) !== completedJob.id);
+        attempt += 1
+      ) {
         await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 750 : 1500));
         latestReport = await loadAnalysisDecisionReport("full");
       }
       if (!latestReport?.ok) {
         throw new Error(latestReport?.message || (isZh ? "优化完成，但最新决策报表刷新失败" : "Optimization completed, but the latest decision report could not be refreshed"));
       }
-      if (optimizationDecisionReportRunId(latestReport) !== completedJob.id) {
+      const latestReportMatchesJob = completedSnapshotId
+        ? optimizationDecisionReportSnapshotId(latestReport) === completedSnapshotId
+        : optimizationDecisionReportRunId(latestReport) === completedJob.id;
+      if (!latestReportMatchesJob) {
         throw new Error(isZh
           ? "优化已完成，但页面尚未读到本次优化生成的最新报表，请稍后刷新。"
           : "Optimization completed, but the latest report for this run is not available yet. Refresh shortly.");
@@ -17327,11 +17365,12 @@ function ActionTrackerPage({
   const [selectedDetailTask, setSelectedDetailTask] = useState<DecisionImpactRow | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DecisionOutcomeDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [emptyRefreshAttempt, setEmptyRefreshAttempt] = useState(0);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
 
     try {
       const response = await fetch("/api/policy/actions", {
@@ -17342,6 +17381,9 @@ function ActionTrackerPage({
 
       if (response.ok && data?.summary) {
         setPayload(data);
+        if (data.activeDecisions.length + data.completedActions.length > 0) {
+          setEmptyRefreshAttempt(0);
+        }
       } else {
         setPayload(null);
       }
@@ -17370,6 +17412,19 @@ function ActionTrackerPage({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (isLoading || !payload?.summary || payload.activeDecisions.length + payload.completedActions.length > 0 || emptyRefreshAttempt >= 4) {
+      return;
+    }
+
+    const retryId = window.setTimeout(() => {
+      setEmptyRefreshAttempt((current) => current + 1);
+      void refresh();
+    }, 3000);
+
+    return () => window.clearTimeout(retryId);
+  }, [emptyRefreshAttempt, isLoading, payload, refresh]);
 
   const activeDecisionCount = payload?.activeDecisions.length ?? 0;
   const completedDecisionCount = payload?.completedActions.length ?? 0;

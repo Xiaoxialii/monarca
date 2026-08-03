@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ReportDateRangeInput, ResolvedReportDateRange } from "@/lib/report-date-range";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "./profit/canonical-profitability-engine";
+
+export { CANONICAL_PROFITABILITY_ENGINE_VERSION };
 
 export const cachedReportDateRangePresets = ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"] as const;
 
@@ -21,6 +24,7 @@ export type ReportMetricCachePayload = Record<string, unknown> & {
     generatedAt?: string;
     staleAt?: string | null;
   };
+  profitabilityEngineVersion?: string;
 };
 
 type CacheIdentityInput = {
@@ -35,6 +39,7 @@ type CacheIdentityInput = {
   semanticSnapshotVersion?: string | null;
   semanticSchemaHash?: string | null;
   queryHash?: string | null;
+  profitabilityEngineVersion?: string | null;
 };
 
 export function stableHash(value: unknown) {
@@ -70,6 +75,7 @@ function jsonSafe(value: unknown): unknown {
 export function reportMetricCacheKey(input: CacheIdentityInput) {
   return stableHash({
     workspaceId: input.workspaceId,
+    profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION,
     metricIds: [...(input.metricIds ?? [])].sort(),
     dataSourceIds: [...(input.dataSourceIds ?? [])].sort(),
     dateField: input.dateField ?? null,
@@ -85,6 +91,12 @@ export function reportMetricCacheKey(input: CacheIdentityInput) {
     semanticSchemaHash: input.semanticSchemaHash ?? null,
     queryHash: input.queryHash ?? null
   });
+}
+
+function payloadProfitabilityEngineVersion(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record.profitabilityEngineVersion === "string" ? record.profitabilityEngineVersion : null;
 }
 
 export function isCacheableReportRange(range: Pick<ReportDateRangeInput, "preset">) {
@@ -170,6 +182,20 @@ export async function getReportMetricCache(
     return { cacheKey, payload: null, cache: null, status: "miss" as const };
   }
 
+  const expectedProfitabilityEngineVersion = input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION;
+  if (payloadProfitabilityEngineVersion(cache.payloadJson) !== expectedProfitabilityEngineVersion) {
+    await prisma.reportMetricCache.update({
+      where: { id: cache.id },
+      data: {
+        refreshStatus: "stale",
+        staleAt: now,
+        lastAccessedAt: now
+      }
+    }).catch(() => null);
+
+    return { cacheKey, payload: null, cache, status: "miss" as const };
+  }
+
   await prisma.reportMetricCache.update({
     where: { id: cache.id },
     data: { lastAccessedAt: now }
@@ -192,6 +218,10 @@ export async function upsertReportMetricCache(
   now = new Date()
 ) {
   const cacheKey = reportMetricCacheKey(input);
+  const payload = {
+    ...input.payload,
+    profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION
+  };
   const data = {
     workspaceId: input.workspaceId,
     dataSourceIds: [...(input.dataSourceIds ?? [])].sort(),
@@ -201,7 +231,7 @@ export async function upsertReportMetricCache(
     startDate: input.dateRange.startDate ? new Date(input.dateRange.startDate) : null,
     endDate: input.dateRange.endDate ? new Date(input.dateRange.endDate) : null,
     filtersHash: stableHash(input.filters ?? null),
-    payloadJson: jsonSafe(input.payload) as Prisma.InputJsonValue,
+    payloadJson: jsonSafe(payload) as Prisma.InputJsonValue,
     sourceSnapshotVersion: input.sourceSnapshotVersion ?? null,
     refreshStatus: "fresh",
     generatedAt: now,

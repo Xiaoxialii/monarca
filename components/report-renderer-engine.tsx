@@ -36,7 +36,7 @@ import {
   type DecisionContract,
   type NormalizedDecision
 } from "@/lib/optimization/action-taxonomy";
-import { recommendationFingerprint } from "@/lib/optimization/recommendation-identity";
+import { recommendationIdFromRecord } from "@/lib/optimization/recommendation-identity";
 import { cn } from "@/lib/utils";
 
 type ReportRendererEngineProps = {
@@ -509,6 +509,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   const performance = report.performance_overview;
   const summary = report.executive_summary;
   const hasTimeHistory = report.growth_overview.daily.length >= 2;
+  const cacValue = typeof performance.cac === "number" && Number.isFinite(performance.cac) ? performance.cac : null;
 
   return (
     <div className="flex w-full flex-col gap-5">
@@ -539,8 +540,8 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
         <KpiCard
           icon={Users}
           label="CAC"
-          value={performance.cac ? formatKpiCurrency(performance.cac) : "No Data"}
-          fullValue={performance.cac ? currencyDecimal.format(performance.cac) : undefined}
+          value={cacValue === null ? "N/A" : formatKpiCurrency(cacValue)}
+          fullValue={cacValue === null ? undefined : currencyDecimal.format(cacValue)}
         />
       </section>
 
@@ -1536,7 +1537,11 @@ function SkuPortfolioOptimizationPanel({
     decisionRowsExpectedProfitGain;
   const expectedProfitLiftRate = currentPortfolioProfit > 0 ? expectedProfitGain / currentPortfolioProfit : liftRate;
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
-  const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
+  const displayedCurrentSkuCount = shouldBlankOptimizationSummary
+    ? 0
+    : optimizationStarted
+      ? pendingDecisionRows.length
+      : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
   const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : safeNumber(summary.ads_budget_used);
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
@@ -1626,9 +1631,9 @@ function SkuPortfolioOptimizationPanel({
         const persistedRecommendationId = typeof action.action_payload?.recommendation_id === "string"
           ? action.action_payload.recommendation_id.trim()
           : "";
-        const matchedRow = persistedRecommendationId
+        const matchedRow = (persistedRecommendationId
           ? decisionRows.find((row) => persistedRecommendationId === recommendationIdForDecision(row, report))
-          : decisionRows.find((row) => legacyActionMatchesDecisionRecommendation(action, row));
+          : null) ?? decisionRows.find((row) => legacyActionMatchesDecisionRecommendation(action, row));
         if (!matchedRow) continue;
 
         const key = decisionRowKey(matchedRow);
@@ -2380,49 +2385,13 @@ function decisionRowKey(row: PortfolioDecisionRow) {
 
 function recommendationIdForDecision(row: PortfolioDecisionRow, report: DecisionIntelligenceReportV1) {
   const rowRecord = objectRecord(row);
-  const existingId = typeof rowRecord.recommendation_id === "string" ? rowRecord.recommendation_id.trim() : "";
-  if (existingId) return existingId;
-
   const reportRecord = objectRecord(report);
   const optimizationRun = objectRecord(reportRecord.optimizationRun);
-  const simulation = objectRecord(rowRecord.simulation);
-  const beforeState = objectRecord(rowRecord.before_state);
-  const afterState = objectRecord(rowRecord.after_state);
-  const decisionContract = objectRecord(rowRecord.decision_contract);
-  const contractEvidence = objectRecord(decisionContract.evidence);
-  const policyTrace = objectRecord(rowRecord.policy_trace);
-  const policyMetrics = objectRecord(policyTrace.metrics);
-  const selectedScenario = objectRecord(rowRecord.selected_scenario);
-
-  return recommendationFingerprint({
-    skuId: row.skuId,
-    actionType: String(row.action ?? rowRecord.canonical_action ?? rowRecord.unified_action ?? row.sourceAction ?? "HOLD"),
-    actionParameters: {
-      source_action: row.sourceAction ?? null,
-      recommended_action: rowRecord.recommended_action ?? null,
-      recommended_actions: row.recommendedActions ?? null,
-      expected_profit_impact: row.expectedProfitImpact ?? row.estimatedProfitImpact ?? null,
-      ad_budget_change: safeNumber(simulation.recommended_ads_spend) || safeNumber(simulation.current_ads_spend)
-        ? safeNumber(simulation.recommended_ads_spend) - safeNumber(simulation.current_ads_spend)
-        : null,
-      inventory_change: simulation.inventory_impact ?? contractEvidence.recommendedInventoryChange ?? null,
-      required_inventory: simulation.required_inventory ?? contractEvidence.requiredInventory ?? null,
-      current_inventory: simulation.current_inventory ?? beforeState.inventory ?? contractEvidence.currentInventory ?? null,
-      current_price: beforeState.price ?? null,
-      new_price: afterState.price ?? selectedScenario.price ?? null
-    },
+  return recommendationIdFromRecord(rowRecord, {
     policyVersion: typeof optimizationRun.policy_version === "string" ? optimizationRun.policy_version : null,
     optimizerVersion: typeof optimizationRun.optimizer_version === "string" ? optimizationRun.optimizer_version : null,
     simulationVersion: typeof optimizationRun.simulation_version === "string" ? optimizationRun.simulation_version : null,
-    metricSnapshotVersion: typeof optimizationRun.data_version === "string" ? optimizationRun.data_version : null,
-    evidence: {
-      roas: contractEvidence.roas ?? policyMetrics.roas ?? rowRecord.roas ?? null,
-      margin: contractEvidence.margin ?? policyMetrics.margin ?? rowRecord.margin ?? null,
-      confidence: row.confidence ?? selectedScenario.confidence ?? null,
-      inventory_gap: contractEvidence.inventoryGap ?? contractEvidence.inventory_gap ?? null,
-      inventory_coverage_days: contractEvidence.inventoryCoverageDays ?? policyMetrics.inventoryCoverageDays ?? null,
-      conversion_rate: contractEvidence.conversionRate ?? policyMetrics.conversionRate ?? null
-    }
+    dataVersion: typeof optimizationRun.data_version === "string" ? optimizationRun.data_version : null
   });
 }
 
@@ -2458,21 +2427,29 @@ function legacyActionMatchesDecisionRecommendation(
   const persistedDecisionId = typeof payload.decision_id === "string" ? payload.decision_id.trim() : "";
   const persistedInstanceKey = typeof payload.decision_instance_key === "string" ? payload.decision_instance_key.trim() : "";
   const persistedSourceAction = typeof payload.action === "string" ? payload.action.trim() : "";
-  const persistedProfitDelta = safeNumber(actionPayloadNestedNumber(action, "predicted_metrics", "profit_delta") ?? payload.expected_profit_impact);
-  const currentProfitDelta = safeNumber(row.expectedProfitImpact ?? row.estimatedProfitImpact);
+  const actionRecord = action as unknown as Record<string, unknown>;
+  const persistedPredictedMetrics = objectRecord(actionRecord.predicted_metrics);
+  const persistedBaselineMetrics = objectRecord(actionRecord.baseline_metrics);
+  const persistedAdDelta = safeNumber(persistedPredictedMetrics.ad_spend) - safeNumber(persistedBaselineMetrics.ad_spend);
+  const currentSimulation = objectRecord((row as Record<string, unknown>).simulation);
+  const currentAdDelta = safeNumber(currentSimulation.recommended_ads_spend) - safeNumber(currentSimulation.current_ads_spend);
 
   if (action.sku !== row.skuId) return false;
   if (action.action_type !== row.action) return false;
   if (persistedSourceAction !== row.sourceAction) return false;
-  if (persistedDecisionId !== currentDecisionId && !persistedInstanceKey.endsWith(`:${currentDecisionId}`)) return false;
-  if (persistedProfitDelta && currentProfitDelta && Math.abs(persistedProfitDelta - currentProfitDelta) > 1) return false;
+  if (
+    persistedDecisionId &&
+    persistedDecisionId !== currentDecisionId &&
+    persistedInstanceKey &&
+    !persistedInstanceKey.endsWith(`:${currentDecisionId}`)
+  ) {
+    return false;
+  }
+  if (Number.isFinite(persistedAdDelta) && Number.isFinite(currentAdDelta) && Math.abs(persistedAdDelta - currentAdDelta) > 0.01) {
+    return false;
+  }
 
   return true;
-}
-
-function actionPayloadNestedNumber(action: PersistedActionTrackingRecord, objectKey: string, valueKey: string) {
-  const nested = objectRecord((action as Record<string, unknown>)[objectKey]);
-  return nested[valueKey];
 }
 
 function isOptimizationQueueRow(row: PortfolioDecisionRow) {
@@ -2702,7 +2679,6 @@ function OptimizationDecisionRail({
                   {status === "awaiting_decision" ? (
                     <ActionDecisionButtons
                       locale={locale}
-                      acceptLabel={previousDecisionStatus ? (locale === "zh" ? "接受新建议" : "Accept New") : undefined}
                       onAccept={(event) => {
                         event?.stopPropagation();
                         onAccept(row);

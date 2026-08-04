@@ -52,6 +52,31 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
   assert.match(runner, /if \(!isStaleSkuOptimizationJob\(existing, now\)\) return existing/);
 });
 
+test("optimization jobs use short heartbeat stale recovery", () => {
+  const runner = read("lib/jobs/async-job-runner.ts");
+
+  assert.match(runner, /const DEFAULT_STALE_ASYNC_JOB_MS = 2 \* 60 \* 1000/);
+  assert.match(runner, /const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 2 \* 60 \* 1000/);
+  assert.match(runner, /SKU_OPTIMIZATION_JOB_STALE_MS/);
+  assert.match(runner, /isStaleSkuOptimizationJob/);
+  assert.match(runner, /Superseded because SKU optimization heartbeat was stale/);
+});
+
+test("decision report route refreshes non-ready optimization caches when canonical data is ready", () => {
+  const route = read("app/api/dashboard/ecommerce/decision-report/route.ts");
+
+  assert.match(route, /recoverAsyncJobs/);
+  assert.match(route, /cacheNeedsOptimizationRefresh/);
+  assert.match(route, /hasReadyCanonicalSources/);
+  assert.match(route, /latestOptimizationJob/);
+  assert.match(route, /non_ready_decision_report_cache/);
+  assert.match(route, /decision_snapshot_missing_with_ready_sources/);
+  assert.match(route, /state:\s*"processing"/);
+  assert.match(route, /Optimization data is ready and a decision analysis refresh is running/);
+  assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
+  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+});
+
 test("completed optimization jobs generate decision snapshots from internal data and refresh cache", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const generator = read("lib/dashboard/decision-snapshot-generator.ts");

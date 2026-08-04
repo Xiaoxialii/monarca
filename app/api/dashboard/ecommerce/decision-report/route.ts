@@ -9,7 +9,7 @@ import {
   findOptimizationReportCache,
   optimizationReportCachePayload
 } from "@/lib/dashboard/optimization-report-cache";
-import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
+import { enqueueSkuOptimizationJob, processJob, recoverAsyncJobs } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -31,6 +31,84 @@ function dateToIso(value: unknown) {
   return null;
 }
 
+function isPendingOptimizationStatus(status: string | null | undefined) {
+  return status === "QUEUED" || status === "PROCESSING" || status === "PAUSED";
+}
+
+function cacheNeedsOptimizationRefresh(payload: unknown) {
+  const record = asRecord(payload);
+  const state = typeof record.state === "string" ? record.state : null;
+  const report = asRecord(record.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return state !== "ready" || (decisionRows.length === 0 && portfolioRows.length === 0);
+}
+
+async function hasReadyCanonicalSources(workspaceId: string) {
+  const readySnapshots = await prisma.schemaSnapshot.count({
+    where: {
+      workspaceId,
+      dataSourceId: { not: null },
+      canonicalStatus: "READY",
+      canonicalVersion: { not: null },
+      dataSource: {
+        isActive: true,
+        status: "CONNECTED"
+      }
+    }
+  });
+
+  return readySnapshots > 0;
+}
+
+async function latestOptimizationJob(workspaceId: string) {
+  return prisma.asyncJob.findFirst({
+    where: {
+      workspaceId,
+      type: "SKU_OPTIMIZATION",
+      status: {
+        in: ["QUEUED", "PROCESSING", "PAUSED"]
+      }
+    },
+    select: {
+      id: true,
+      status: true,
+      currentStep: true,
+      updatedAt: true
+    },
+    orderBy: {
+      updatedAt: "desc"
+    }
+  });
+}
+
+function queuedOptimizationResponse(input: {
+  payload?: Record<string, unknown>;
+  jobId: string;
+  status: string;
+  currentStep?: string | null;
+  message: string;
+  startedAt: number;
+}) {
+  return NextResponse.json({
+    ...(input.payload ?? {}),
+    ok: true,
+    state: "processing",
+    status: input.status,
+    latestSnapshot: false,
+    message: input.message,
+    jobId: input.jobId,
+    optimizationRun: {
+      ...asRecord(input.payload?.optimizationRun),
+      optimization_run_id: input.jobId,
+      current_step: input.currentStep ?? null
+    },
+    performance: snapshotPerformance(input.startedAt, "snapshot")
+  });
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const url = new URL(request.url);
@@ -44,6 +122,11 @@ export async function GET(request: Request) {
   });
   if (session instanceof NextResponse) return session;
   logWorkspaceContext("[workspace-context] dashboard.ecommerce.decision-report.GET", session);
+  after(() => {
+    void recoverAsyncJobs({ workspaceId: session.workspace.id, limit: 5 }).catch((error) => {
+      console.error("Failed to recover stale optimization jobs from decision report route", error);
+    });
+  });
 
   const reportCache = await findOptimizationReportCache(prisma, {
     workspaceId: session.workspace.id,
@@ -52,6 +135,35 @@ export async function GET(request: Request) {
 
   if (reportCache) {
     const cachedPayload = optimizationReportCachePayload(reportCache);
+    if (cacheNeedsOptimizationRefresh(cachedPayload) && await hasReadyCanonicalSources(session.workspace.id)) {
+      let job = await latestOptimizationJob(session.workspace.id);
+
+      if (!job || !isPendingOptimizationStatus(job.status)) {
+        const queuedJob = await enqueueSkuOptimizationJob(prisma, {
+          workspaceId: session.workspace.id,
+          reason: `non_ready_decision_report_cache:${reportCache.state || "unknown"}`,
+          decisionMode,
+          inputHash: reportCache.inputHash
+        });
+        job = queuedJob;
+
+        after(() => {
+          void processJob(queuedJob.id).catch((error) => {
+            console.error("Failed to process non-ready decision report cache refresh job", error);
+          });
+        });
+      }
+
+      return queuedOptimizationResponse({
+        payload: cachedPayload,
+        jobId: job.id,
+        status: job.status,
+        currentStep: job.currentStep,
+        message: "Optimization data is ready and a decision analysis refresh is running.",
+        startedAt
+      });
+    }
+
     if (cachedOptimizationReportMissingOpsRows(cachedPayload)) {
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
@@ -219,6 +331,34 @@ export async function GET(request: Request) {
         generatedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null
       },
       performance: snapshotPerformance(startedAt, "snapshot")
+    });
+  }
+
+  if (await hasReadyCanonicalSources(session.workspace.id)) {
+    let job = await latestOptimizationJob(session.workspace.id);
+
+    if (!job || !isPendingOptimizationStatus(job.status)) {
+      const queuedJob = await enqueueSkuOptimizationJob(prisma, {
+        workspaceId: session.workspace.id,
+        reason: "decision_snapshot_missing_with_ready_sources",
+        decisionMode,
+        inputHash: null
+      });
+      job = queuedJob;
+
+      after(() => {
+        void processJob(queuedJob.id).catch((error) => {
+          console.error("Failed to process missing decision snapshot refresh job", error);
+        });
+      });
+    }
+
+    return queuedOptimizationResponse({
+      jobId: job.id,
+      status: job.status,
+      currentStep: job.currentStep,
+      message: "Optimization data is ready and a decision analysis refresh is running.",
+      startedAt
     });
   }
 

@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { ConnectionStatus } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
+import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
+import { recoverAsyncJobs } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -91,6 +93,31 @@ function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   if (syncStatus === "DISCONNECTED") return "RECONNECT";
 
   return null;
+}
+
+async function recoverStaleDataSourceJobs(workspaceId: string) {
+  try {
+    const [ingestionRecovery, asyncRecovery] = await Promise.all([
+      recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
+      recoverAsyncJobs({ workspaceId, limit: 5 })
+    ]);
+
+    if (ingestionRecovery.attempted || asyncRecovery.attempted || asyncRecovery.bridgedIngestionJobs) {
+      console.info("[data-sources] recovered stale jobs", {
+        workspaceId,
+        ingestionAttempted: ingestionRecovery.attempted,
+        ingestionRecovered: ingestionRecovery.recovered,
+        asyncAttempted: asyncRecovery.attempted,
+        asyncRecovered: asyncRecovery.recovered,
+        bridgedIngestionJobs: asyncRecovery.bridgedIngestionJobs
+      });
+    }
+  } catch (error) {
+    console.warn("[data-sources] stale job recovery failed", {
+      workspaceId,
+      message: error instanceof Error ? error.message : "Unknown recovery error"
+    });
+  }
 }
 
 function syncStatusFromSource(source: {
@@ -303,6 +330,9 @@ export async function GET(request: Request) {
   try {
     const session = await requireWorkspace(request);
     logWorkspaceContext("[workspace-context] data-sources.GET", session);
+    after(() => {
+      void recoverStaleDataSourceJobs(session.workspace.id);
+    });
     const includeDeleted = true;
 
     const dataSources = await prisma.dataSourceConnection.findMany({

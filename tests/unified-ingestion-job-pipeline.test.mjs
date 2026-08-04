@@ -118,6 +118,18 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
 });
 
+test("data sources listing recovers stale ingestion jobs so sources do not stay syncing forever", () => {
+  const dataSourcesRoute = read("app/api/data-sources/route.ts");
+
+  assert.match(dataSourcesRoute, /import \{ after, NextResponse \} from "next\/server"/);
+  assert.match(dataSourcesRoute, /recoverStaleIngestionJobs/);
+  assert.match(dataSourcesRoute, /recoverAsyncJobs/);
+  assert.match(dataSourcesRoute, /async function recoverStaleDataSourceJobs\(workspaceId: string\)/);
+  assert.match(dataSourcesRoute, /recoverStaleIngestionJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
+  assert.match(dataSourcesRoute, /recoverAsyncJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
+  assert.match(dataSourcesRoute, /after\(\(\) => \{\s*void recoverStaleDataSourceJobs\(session\.workspace\.id\)/);
+});
+
 test("worker owns canonicalization and commits schema state without long interactive transactions", () => {
   const worker = read("lib/ingestion/unified-ingestion-worker.ts");
   const statusRoute = read("app/api/ingestion/jobs/[jobId]/route.ts");

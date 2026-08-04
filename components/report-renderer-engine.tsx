@@ -1937,7 +1937,7 @@ function SkuPortfolioOptimizationPanel({
 	  return (
 		    <div className="space-y-2 bg-transparent">
 	      {!shouldShowOptimizationStarter ? (
-		      <div className="sticky top-0 z-30 pb-2 pt-4">
+		      <div className="pb-2 pt-4">
 	        <div className="mb-3 flex items-center justify-between gap-3 px-1">
 	          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
 	            <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
@@ -2014,7 +2014,7 @@ function SkuPortfolioOptimizationPanel({
 				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
 			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-visible xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
-	          <div className="sticky top-0 z-20 flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
+	          <div className="sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
             <button
               type="button"
               onClick={() => {
@@ -2583,7 +2583,7 @@ function OptimizationDecisionRail({
 
   return (
     <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
+      <div className="sticky top-24 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
         <div className="rounded-lg bg-emerald-950 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>

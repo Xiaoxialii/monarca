@@ -75,19 +75,40 @@ export async function loadEcommerceSalesDashboardData(input: {
     message: string;
   }> = [];
 
-  for (const snapshot of snapshots) {
+  const loadedSnapshots = await Promise.all(snapshots.map(async (snapshot) => {
     const schemaJson = objectValue(snapshot.schemaJson);
     const embeddedDashboard = dashboardSnapshotValue(schemaJson.dashboardSnapshot);
     try {
-      artifactDatasets.push(await readCanonicalDatasetFromSnapshot(schemaJson));
+      return {
+        snapshot,
+        schemaJson,
+        embeddedDashboard,
+        dataset: await readCanonicalDatasetFromSnapshot(schemaJson),
+        error: null as unknown
+      };
     } catch (error) {
-      if (embeddedDashboard) dashboardSnapshots.push(embeddedDashboard);
-      unavailableSnapshots.push({
-        snapshotId: snapshot.id,
-        dataSourceId: snapshot.dataSourceId,
-        message: readableArtifactError(error)
-      });
+      return {
+        snapshot,
+        schemaJson,
+        embeddedDashboard,
+        dataset: null,
+        error
+      };
     }
+  }));
+
+  for (const loaded of loadedSnapshots) {
+    if (loaded.dataset) {
+      artifactDatasets.push(loaded.dataset);
+      continue;
+    }
+
+    if (loaded.embeddedDashboard) dashboardSnapshots.push(loaded.embeddedDashboard);
+    unavailableSnapshots.push({
+      snapshotId: loaded.snapshot.id,
+      dataSourceId: loaded.snapshot.dataSourceId,
+      message: readableArtifactError(loaded.error)
+    });
   }
 
   if (!artifactDatasets.length) {
@@ -140,12 +161,16 @@ async function readCanonicalDatasetFromSnapshot(schemaJson: Record<string, unkno
     ecommerce_inventory: []
   };
 
-  for (const tableName of TABLE_NAMES) {
+  const tableRows = await Promise.all(TABLE_NAMES.map(async (tableName) => {
     const table = tableArtifacts.find((item) => objectValue(item).name === tableName);
     const artifactKey = typeof objectValue(table).artifactKey === "string" ? objectValue(table).artifactKey as string : null;
-    if (!artifactKey) continue;
+    if (!artifactKey) return [tableName, [] as Record<string, unknown>[]] as const;
 
-    tables[tableName] = parseJsonl(await readR2ObjectText(artifactKey));
+    return [tableName, parseJsonl(await readR2ObjectText(artifactKey))] as const;
+  }));
+
+  for (const [tableName, rows] of tableRows) {
+    tables[tableName] = rows;
   }
 
   return {

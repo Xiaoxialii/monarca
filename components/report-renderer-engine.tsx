@@ -1075,7 +1075,7 @@ function SkuBreakdownTable({
         onMouseUp={stopTableDrag}
         onMouseLeave={stopTableDrag}
         className={cn(
-          "relative max-h-[560px] w-full max-w-full min-w-0 overflow-x-scroll overflow-y-auto bg-white xl:max-h-none xl:flex-1",
+          "relative max-h-[920px] w-full max-w-full min-w-0 overflow-x-scroll overflow-y-auto bg-white",
           "cursor-grab overscroll-x-contain overscroll-y-auto [scrollbar-gutter:stable]",
           "[&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3",
           "[&::-webkit-scrollbar-track]:bg-slate-100",

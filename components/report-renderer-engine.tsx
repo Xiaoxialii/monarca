@@ -2582,8 +2582,8 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:h-full xl:max-h-full">
-      <div className="sticky top-24 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
         <div className="rounded-lg bg-emerald-950 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>

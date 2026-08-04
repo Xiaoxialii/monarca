@@ -491,11 +491,14 @@ test("optimization portfolio controls stay visible and current portfolio uses ac
   assert.match(displaySnippet[0], /optimizationStarted\s*\?\s*pendingDecisionRows\.length\s*:\s*currentSkuCount/);
   assert.match(renderer, /SKU operating data/);
   assert.match(renderer, /SKU optimization decision/);
-  assert.match(renderer, /sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
+  assert.match(renderer, /flex min-h-0 min-w-0 flex-col gap-3/);
+  assert.match(renderer, /z-20 flex w-full shrink-0 flex-wrap items-center gap-2 rounded-full/);
+  assert.match(renderer, /min-h-0 min-w-0 flex-1 overflow-auto/);
+  assert.doesNotMatch(renderer, /sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
   assert.match(renderer, /sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b/);
   assert.match(renderer, /xl:sticky xl:top-24 xl:h-full xl:max-h-full/);
   assert.match(renderer, /sticky top-0 z-20 bg-emerald-50\/95 p-2 pb-1 backdrop-blur/);
-  assert.match(renderer, /xl:overflow-visible/);
+  assert.match(renderer, /xl:overflow-hidden/);
   assert.match(renderer, /All channels/);
 });
 

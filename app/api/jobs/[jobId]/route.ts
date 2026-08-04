@@ -1,6 +1,5 @@
 import { WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -15,7 +14,7 @@ export async function GET(
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.VIEWER]);
     const { jobId } = await context.params;
-    let job = await prisma.asyncJob.findFirst({
+    const job = await prisma.asyncJob.findFirst({
       where: {
         id: jobId,
         workspaceId: session.workspace.id
@@ -40,32 +39,6 @@ export async function GET(
 
     if (!job) {
       return NextResponse.json({ ok: false, message: "Job not found." }, { status: 404 });
-    }
-
-    if (job.type === "SKU_OPTIMIZATION" && job.status === "QUEUED") {
-      await processJob(job.id);
-      job = await prisma.asyncJob.findFirst({
-        where: {
-          id: jobId,
-          workspaceId: session.workspace.id
-        },
-        select: {
-          id: true,
-          type: true,
-          status: true,
-          progress: true,
-          currentStep: true,
-          errorMessage: true,
-          retryCount: true,
-          maxRetries: true,
-          heartbeatAt: true,
-          startedAt: true,
-          completedAt: true,
-          createdAt: true,
-          updatedAt: true,
-          resultReference: true
-        }
-      });
     }
 
     return NextResponse.json({

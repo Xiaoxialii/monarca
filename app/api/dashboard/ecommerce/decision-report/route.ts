@@ -135,15 +135,20 @@ function queuedOptimizationResponse(input: {
   });
 }
 
-async function processQueuedOptimizationJob(job: { id: string; status: string }) {
+async function processQueuedOptimizationJob(job: { id: string; status: string }): Promise<Awaited<ReturnType<typeof processJob>> | null> {
   if (job.status !== "QUEUED") return null;
 
-  const result = await processJob(job.id);
-  if (!result.ok && !result.skipped) {
-    console.error("Failed to process queued decision report optimization job", result);
-  }
+  after(() => {
+    void processJob(job.id).then((result) => {
+      if (!result.ok && !result.skipped) {
+        console.error("Failed to process queued decision report optimization job", result);
+      }
+    }).catch((error) => {
+      console.error("Failed to process queued decision report optimization job", { jobId: job.id, error });
+    });
+  });
 
-  return result;
+  return null;
 }
 
 async function freshOptimizationCacheResponse(input: {

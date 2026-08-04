@@ -1,5 +1,5 @@
 import { WorkspaceRole } from "@prisma/client";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
@@ -24,14 +24,18 @@ export async function POST(request: Request) {
       inputHash: versions.inputHash
     });
 
-    const result = await processJob(job.id);
+    after(() => {
+      void processJob(job.id).catch((error) => {
+        console.error("Failed to process queued optimization job", { jobId: job.id, error });
+      });
+    });
 
     return NextResponse.json({
-      ok: result.ok || result.skipped,
+      ok: true,
       jobId: job.id,
-      status: result.ok ? "COMPLETED" : job.status === "QUEUED" ? "QUEUED" : job.status,
-      currentStep: result.ok ? "Completed" : job.currentStep,
-      error: result.ok || result.skipped ? null : result.error ?? "Failed to process optimization job.",
+      status: job.status,
+      currentStep: job.currentStep,
+      error: null,
       versions
     });
   } catch (error) {

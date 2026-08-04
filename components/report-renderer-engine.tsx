@@ -2012,9 +2012,9 @@ function SkuPortfolioOptimizationPanel({
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
 				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
-			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-visible xl:p-5">
+			        <div className="flex min-h-0 min-w-0 flex-col gap-3 p-4 xl:order-3 xl:h-full xl:overflow-hidden xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
-	          <div className="sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
+	          <div className="z-20 flex w-full shrink-0 flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
             <button
               type="button"
               onClick={() => {
@@ -2042,6 +2042,7 @@ function SkuPortfolioOptimizationPanel({
             </button>
 	          </div>
 	          ) : null}
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         {isResolvingOptimizationState ? (
           <div className="min-w-0 overflow-hidden">
             <EmptySkuProfitPortfolioTable locale={locale} isLoadingData />
@@ -2092,6 +2093,7 @@ function SkuPortfolioOptimizationPanel({
             )}
           </div>
         )}
+        </div>
         </div>
         <div className="hidden min-w-0 flex-col gap-4">
         <div className="flex flex-1 flex-col rounded-lg border p-4">

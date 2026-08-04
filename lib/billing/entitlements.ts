@@ -179,7 +179,9 @@ export async function getBillingAccessState(workspaceId: string): Promise<Billin
     subscription.planType === PlanType.ONE_TIME &&
     subscription.status === SubscriptionStatus.ACTIVE
   );
-  const canConnectDataSource = hasMonthlyAccess || hasOneTimePurchase;
+  // Data-source connection is available to every authenticated workspace.
+  // Report generation remains controlled by report entitlements below.
+  const canConnectDataSource = true;
   const canGenerateReport = reportEntitlement.canGenerateReport;
   const planType: BillingAccessPlanType = hasMonthlyAccess
     ? "MONTHLY"
@@ -227,10 +229,6 @@ export async function canGenerateReport(workspaceId: string) {
 
 export async function requireCanConnectDataSource(workspaceId: string) {
   const state = await getBillingAccessState(workspaceId);
-
-  if (!state.canConnectDataSource) {
-    throw new BillingEntitlementError("PLAN_REQUIRED", "Please choose a plan to connect data sources.");
-  }
 
   return state;
 }

@@ -5577,7 +5577,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     ? isZh ? "无限" : "Unlimited"
     : String(entitlement?.remainingReportGenerations ?? 0);
   const stateMessage = !entitlement || entitlement.planType === "FREE"
-    ? isZh ? "免费版只能查看 dashboard，请升级后连接数据并生成报告" : "Free: view dashboard only. Upgrade to connect data and generate reports."
+    ? isZh ? "注册用户可连接数据源；报告生成需要套餐权限" : "Registered users can connect data sources. Report generation requires plan access."
     : entitlement.planType === "MONTHLY" && entitlement.cancelAtPeriodEnd
         ? isZh ? `套餐仍可使用至 ${formatDate(entitlement.currentPeriodEnd)}` : `Your plan remains active until ${formatDate(entitlement.currentPeriodEnd)}.`
         : entitlement.status === "expired"
@@ -5587,7 +5587,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     ? [
         ["当前套餐", currentPlan],
         ["套餐类型", planTypeLabel],
-        ["数据源连接", entitlement?.canConnectDataSource ? "允许，不限数量" : "需要升级"],
+        ["数据源连接", "注册用户可用"],
         ["报告生成", entitlement?.canGenerateReport ? usageLabel : "需要升级"],
         ["有效期", formatDate(entitlement?.currentPeriodEnd ?? null)],
         ["订阅状态", statusLabel]
@@ -5595,7 +5595,7 @@ function SettingsBillingPanel({ copy }: { copy: DashboardCopy }) {
     : [
         ["Current plan", currentPlan],
         ["Plan type", planTypeLabel],
-        ["Data source connections", entitlement?.canConnectDataSource ? "Allowed, unlimited" : "Upgrade required"],
+        ["Data source connections", "Available to registered users"],
         ["Report generations", entitlement?.canGenerateReport ? usageLabel : "Upgrade required"],
         ["Valid until", formatDate(entitlement?.currentPeriodEnd ?? null)],
         ["Subscription status", statusLabel]

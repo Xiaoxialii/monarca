@@ -72,8 +72,7 @@ const consultingCopy: Record<CopyLocale, {
     ],
     heroTitle: "Book a business consultation",
     heroSubtitle: "",
-    heroNote:
-      "Best for teams that want to automate daily, weekly, and monthly business analysis while reducing manual data cleanup and reporting work.",
+    heroNote: "",
     clarifyTitle: "What this consultation helps clarify",
     clarifyItems: [
       "Which data sources your business should connect first",

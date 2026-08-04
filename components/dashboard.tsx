@@ -17122,6 +17122,7 @@ function ReportPage({
     state?: "ready" | "empty" | "unavailable" | "stale";
     status?: string;
     message?: string;
+    hasConnectedDataSource?: boolean;
     decision_report?: DecisionIntelligenceReportV1 | null;
     generated_at?: string;
     source_platforms?: string[];
@@ -17140,9 +17141,11 @@ function ReportPage({
   const shouldShowDecisionReportEmpty = Boolean(decisionReportPayload)
     && !decisionReportIsReady;
   const decisionReportIsRefreshing = decisionReportPayload?.state === "stale" || decisionReportPayload?.status === "STALE";
+  const reportApiHasConnectedDatabase = decisionReportPayload?.hasConnectedDataSource === true || Boolean(decisionReportPayload?.decision_report);
+  const effectiveHasConnectedDatabase = hasConnectedDatabase || reportApiHasConnectedDatabase;
 
   const loadDecisionReport = useCallback(async () => {
-    if (isLoadingConnectedSources || !hasConnectedDatabase) return;
+    if (isLoadingConnectedSources) return;
 
     const cacheKey = reportDateRangeQuery(decisionReportRange);
     setIsLoadingDecisionReport(true);
@@ -17169,7 +17172,7 @@ function ReportPage({
     } finally {
       setIsLoadingDecisionReport(false);
     }
-  }, [decisionReportRange, hasConnectedDatabase, isLoadingConnectedSources, isZh]);
+  }, [decisionReportRange, isLoadingConnectedSources, isZh]);
 
   const handleDecisionReportRangeChange = useCallback((range: ReportTimeRange) => {
     setDecisionReportRange((current) => ({
@@ -17199,15 +17202,9 @@ function ReportPage({
 
   useEffect(() => {
     if (isLoadingConnectedSources) return;
-    if (!hasConnectedDatabase) {
-      setDecisionReportPayload(null);
-      setDecisionReportError(null);
-      setIsLoadingDecisionReport(false);
-      return;
-    }
 
     void loadDecisionReport();
-  }, [hasConnectedDatabase, isLoadingConnectedSources, loadDecisionReport]);
+  }, [isLoadingConnectedSources, loadDecisionReport]);
 
   return (
     <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
@@ -17218,7 +17215,7 @@ function ReportPage({
         <Button
           type="button"
           onClick={() => void loadDecisionReport()}
-          disabled={isLoadingDecisionReport || isLoadingConnectedSources || !hasConnectedDatabase}
+          disabled={isLoadingDecisionReport || isLoadingConnectedSources}
         >
           <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
           {isLoadingDecisionReport ? (isZh ? "加载中..." : "Loading...") : (isZh ? "刷新报表" : "Refresh report")}
@@ -17239,7 +17236,9 @@ function ReportPage({
 
       {isLoadingConnectedSources ? (
         <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
-      ) : !hasConnectedDatabase ? (
+      ) : !effectiveHasConnectedDatabase && isLoadingDecisionReport ? (
+        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+      ) : !effectiveHasConnectedDatabase && !decisionReportPayload && !decisionReportError ? (
         <ReportRendererEngine report={null} showEmptyShell locale={locale} />
       ) : isLoadingDecisionReport && !decisionReportPayload ? (
         <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />

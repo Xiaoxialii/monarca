@@ -26,6 +26,7 @@ export async function POST(
         currentStep: "Queued for retry",
         errorMessage: null,
         heartbeatAt: null,
+        lastHeartbeatAt: null,
         lockedAt: null,
         lockedBy: null,
         startedAt: null,

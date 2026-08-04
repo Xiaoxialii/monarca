@@ -1243,7 +1243,7 @@ async function enqueueMissingIngestionAsyncJobs(
       },
       type: "INGESTION",
       status: {
-        notIn: ["CANCELLED"]
+        in: ["QUEUED", "PROCESSING", "PAUSED"]
       }
     },
     select: {

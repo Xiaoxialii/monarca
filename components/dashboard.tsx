@@ -3796,6 +3796,11 @@ function sourceStatusLabel(status: string | null | undefined, isZh: boolean) {
   const labels: Record<string, string> = isZh
     ? {
         CONNECTED: "已连接",
+        COMPLETED: "已连接",
+        QUEUED: "等待中",
+        RUNNING: "同步中",
+        TIMEOUT: "需要重试",
+        FAILED: "失败",
         SYNCING: "同步中",
         PENDING_PERMISSION: "等待授权",
         PENDING_FIRST_SYNC: "等待首次同步",
@@ -3805,6 +3810,11 @@ function sourceStatusLabel(status: string | null | undefined, isZh: boolean) {
       }
     : {
         CONNECTED: "Connected",
+        COMPLETED: "Connected",
+        QUEUED: "Waiting",
+        RUNNING: "Syncing",
+        TIMEOUT: "Needs retry",
+        FAILED: "Failed",
         SYNCING: "Syncing",
         PENDING_PERMISSION: "Permission needed",
         PENDING_FIRST_SYNC: "Pending first sync",
@@ -3819,10 +3829,11 @@ function sourceStatusLabel(status: string | null | undefined, isZh: boolean) {
 function sourceStatusBadgeClass(status: string | null | undefined) {
   const normalized = (status ?? "").toUpperCase();
 
-  if (normalized === "CONNECTED") return "bg-emerald-50 text-emerald-800";
-  if (normalized === "SYNCING" || normalized === "PENDING_FIRST_SYNC") return "bg-sky-50 text-sky-800";
+  if (normalized === "CONNECTED" || normalized === "COMPLETED") return "bg-emerald-50 text-emerald-800";
+  if (normalized === "RUNNING" || normalized === "SYNCING" || normalized === "PENDING_FIRST_SYNC") return "bg-sky-50 text-sky-800";
+  if (normalized === "QUEUED") return "bg-slate-100 text-slate-700";
   if (normalized === "PENDING_PERMISSION") return "bg-amber-50 text-amber-800";
-  if (normalized === "FAILED_AUTH" || normalized === "FAILED_SYNC") return "bg-rose-50 text-rose-800";
+  if (normalized === "TIMEOUT" || normalized === "FAILED" || normalized === "FAILED_AUTH" || normalized === "FAILED_SYNC") return "bg-rose-50 text-rose-800";
   if (normalized === "DISCONNECTED") return "bg-slate-100 text-slate-600";
 
   return "bg-slate-100 text-slate-700";

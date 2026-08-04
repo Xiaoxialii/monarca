@@ -308,7 +308,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      status: "PROCESSING",
+      status: "QUEUED",
       jobId: ingestionJob.id,
       asyncJobId: asyncJob.id,
       dataSource: {
@@ -316,7 +316,7 @@ export async function POST(request: Request) {
         name: result.dataSource.name,
         provider: result.dataSource.provider,
         type: result.dataSource.type,
-        status: "PROCESSING",
+        status: "QUEUED",
         connectionMode: result.dataSource.connectionMode,
         authMethod: result.dataSource.authMethod,
         config: {

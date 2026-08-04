@@ -28,15 +28,18 @@ test("unified ingestion uses a dedicated async job model and schema status field
   const migration = read("prisma/migrations/20260721_add_unified_ingestion_jobs/migration.sql");
   const recoveryMigration = read("prisma/migrations/20260722_add_ingestion_job_recovery/migration.sql");
   const asyncMigration = read("prisma/migrations/20260723_add_unified_async_jobs/migration.sql");
+  const lifecycleMigration = read("prisma/migrations/20260804_ingestion_lifecycle_state/migration.sql");
 
   assert.match(schema, /model UnifiedIngestionJob \{[\s\S]*status\s+String\s+@default\("QUEUED"\)/);
   assert.match(schema, /progress\s+Int\s+@default\(0\)/);
   assert.match(schema, /currentStep\s+String\?/);
   assert.match(schema, /errorMessage\s+String\?/);
   assert.match(schema, /heartbeatAt\s+DateTime\?/);
+  assert.match(schema, /lastHeartbeatAt\s+DateTime\?/);
   assert.match(schema, /lockedAt\s+DateTime\?/);
   assert.match(schema, /lockedBy\s+String\?/);
   assert.match(schema, /retryCount\s+Int\s+@default\(0\)/);
+  assert.match(schema, /attemptCount\s+Int\s+@default\(0\)/);
   assert.match(schema, /schemaStatus\s+String\s+@default\("PENDING"\)/);
   assert.match(schema, /canonicalStatus\s+String\s+@default\("NOT_STARTED"\)/);
   assert.match(schema, /canonicalVersion\s+String\?/);
@@ -46,6 +49,9 @@ test("unified ingestion uses a dedicated async job model and schema status field
   assert.match(migration, /ADD COLUMN IF NOT EXISTS "canonicalStatus"/);
   assert.match(recoveryMigration, /ADD COLUMN IF NOT EXISTS "heartbeatAt"/);
   assert.match(recoveryMigration, /ADD COLUMN IF NOT EXISTS "retryCount"/);
+  assert.match(lifecycleMigration, /ADD COLUMN IF NOT EXISTS "lastHeartbeatAt"/);
+  assert.match(lifecycleMigration, /ADD COLUMN IF NOT EXISTS "attemptCount"/);
+  assert.match(lifecycleMigration, /"UnifiedIngestionJob_status_lastHeartbeatAt_idx"/);
 
   assert.match(schema, /model AsyncJob \{/);
   assert.match(schema, /type\s+String/);
@@ -70,7 +76,7 @@ test("upload routes enqueue ingestion jobs instead of running legacy post-proces
     assert.match(source, /unifiedIngestionJobId:\s*ingestionJob\.id/);
     assert.match(source, /status:\s*"QUEUED"/);
     assert.match(source, /after\(\(\) => \{\s*void processJob\(asyncJob\.id\)/);
-    assert.match(source, /status:\s*"PROCESSING"/);
+    assert.doesNotMatch(source, /status:\s*"PROCESSING"/);
     assert.match(source, /asyncJobId:\s*asyncJob\.id/);
     assert.doesNotMatch(source, /runUploadPostProcessing\(/);
     assert.doesNotMatch(source, /runDirectUploadPostProcessing\(/);
@@ -104,6 +110,7 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(runner, /generateEcommerceDecisionSnapshots\(client/);
   assert.match(runner, /client\.snapshot\.create/);
   assert.match(runner, /enqueueMissingIngestionAsyncJobs/);
+  assert.match(runner, /status:\s*\{\s*in:\s*\["QUEUED", "PROCESSING", "PAUSED"\]\s*\}/);
   assert.match(runner, /retryableIngestionJobWhere/);
   assert.match(runner, /Recovered legacy ingestion job/);
   assert.match(runner, /staleQueuedJobWhere/);
@@ -125,6 +132,10 @@ test("data sources listing recovers stale ingestion jobs so sources do not stay 
   assert.match(dataSourcesRoute, /recoverStaleIngestionJobs/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs/);
   assert.match(dataSourcesRoute, /function isActiveIngestionStatus/);
+  assert.match(dataSourcesRoute, /"QUEUED"/);
+  assert.match(dataSourcesRoute, /"RUNNING"/);
+  assert.match(dataSourcesRoute, /"TIMEOUT"/);
+  assert.match(dataSourcesRoute, /ingestionJob:/);
   assert.match(dataSourcesRoute, /async function recoverStaleDataSourceJobs\(workspaceId: string\)/);
   assert.match(dataSourcesRoute, /recoverStaleIngestionJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
@@ -132,8 +143,16 @@ test("data sources listing recovers stale ingestion jobs so sources do not stay 
   assert.match(dataSourcesRoute, /prisma\.unifiedIngestionJob\.findMany/);
   assert.match(dataSourcesRoute, /latestIngestionJobBySourceId/);
   assert.match(dataSourcesRoute, /latestIngestionJob:\s*latestIngestionJobBySourceId\.get\(source\.id\) \?\? null/);
-  assert.match(dataSourcesRoute, /if \(isActiveIngestionStatus\(ingestionStatus\)\)[\s\S]*syncStatus = "SYNCING"/);
+  assert.match(dataSourcesRoute, /ingestionStatus === "QUEUED"[\s\S]*syncStatus = "QUEUED"/);
+  assert.match(dataSourcesRoute, /if \(isActiveIngestionStatus\(ingestionStatus\)\)[\s\S]*syncStatus = "RUNNING"/);
+  assert.match(dataSourcesRoute, /ingestionStatus === "TIMEOUT"[\s\S]*syncStatus = "TIMEOUT"/);
   assert.match(dataSourcesRoute, /syncStatus = "FAILED_SYNC"[\s\S]*Data source sync did not finish/);
+
+  const dashboard = read("components/dashboard.tsx");
+  assert.match(dashboard, /QUEUED:\s*"Waiting"/);
+  assert.match(dashboard, /RUNNING:\s*"Syncing"/);
+  assert.match(dashboard, /TIMEOUT:\s*"Needs retry"/);
+  assert.match(dashboard, /FAILED:\s*"Failed"/);
 });
 
 test("worker owns canonicalization and commits schema state without long interactive transactions", () => {
@@ -145,10 +164,17 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /export async function processIngestionJob/);
   assert.match(worker, /STALE_INGESTION_JOB_MS/);
   assert.match(worker, /QUEUED_INGESTION_JOB_MS/);
-  assert.match(worker, /ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["PROCESSING", "SCHEMA_READY", "CANONICALIZING"\]/);
+  assert.match(worker, /ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["RUNNING"\]/);
+  assert.match(worker, /LEGACY_ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["PROCESSING", "SCHEMA_READY", "CANONICALIZING"\]/);
+  assert.match(worker, /MAX_INGESTION_ATTEMPTS\s*=\s*3/);
   assert.match(worker, /staleActiveJobWhere/);
   assert.match(worker, /staleQueuedJobWhere/);
+  assert.match(worker, /lastHeartbeatAt/);
+  assert.match(worker, /status:\s*"TIMEOUT"/);
+  assert.match(worker, /markIngestionJobExhausted/);
+  assert.match(worker, /Maximum retry attempts reached/);
   assert.match(worker, /retryCount:\s*\{\s*increment:/);
+  assert.match(worker, /attemptCount:\s*\{\s*increment:\s*1/);
   assert.match(worker, /startHeartbeat/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
@@ -165,7 +191,9 @@ test("worker owns canonicalization and commits schema state without long interac
 
   assert.match(statusRoute, /export async function GET/);
   assert.match(statusRoute, /heartbeatAt/);
+  assert.match(statusRoute, /lastHeartbeatAt/);
   assert.match(statusRoute, /retryCount/);
+  assert.match(statusRoute, /attemptCount/);
   assert.match(statusRoute, /progress/);
   assert.match(statusRoute, /currentStep/);
   assert.match(retryRoute, /export async function POST/);

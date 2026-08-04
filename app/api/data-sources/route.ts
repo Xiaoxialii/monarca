@@ -62,6 +62,11 @@ function publicConfig(configValue: unknown) {
 
 type DataSourceSyncStatus =
   | "CONNECTED"
+  | "COMPLETED"
+  | "QUEUED"
+  | "RUNNING"
+  | "TIMEOUT"
+  | "FAILED"
   | "SYNCING"
   | "PENDING_PERMISSION"
   | "PENDING_FIRST_SYNC"
@@ -89,14 +94,14 @@ function currentMissingScopesFromConfig(config: Record<string, unknown> | null) 
 
 function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   if (syncStatus === "PENDING_PERMISSION" || syncStatus === "FAILED_AUTH") return "UPDATE_PERMISSION";
-  if (syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC") return "SYNC_NOW";
+  if (syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC" || syncStatus === "TIMEOUT" || syncStatus === "FAILED") return "SYNC_NOW";
   if (syncStatus === "DISCONNECTED") return "RECONNECT";
 
   return null;
 }
 
 function isActiveIngestionStatus(status: string | null | undefined) {
-  return ["QUEUED", "PROCESSING", "SCHEMA_READY", "CANONICALIZING"].includes((status ?? "").toUpperCase());
+  return ["RUNNING", "PROCESSING", "SCHEMA_READY", "CANONICALIZING"].includes((status ?? "").toUpperCase());
 }
 
 async function recoverStaleDataSourceJobs(workspaceId: string) {
@@ -106,11 +111,19 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
       recoverAsyncJobs({ workspaceId, limit: 5 })
     ]);
 
-    if (ingestionRecovery.attempted || asyncRecovery.attempted || asyncRecovery.bridgedIngestionJobs) {
+    if (
+      ingestionRecovery.attempted ||
+      ingestionRecovery.timedOut ||
+      ingestionRecovery.exhausted ||
+      asyncRecovery.attempted ||
+      asyncRecovery.bridgedIngestionJobs
+    ) {
       console.info("[data-sources] recovered stale jobs", {
         workspaceId,
         ingestionAttempted: ingestionRecovery.attempted,
         ingestionRecovered: ingestionRecovery.recovered,
+        ingestionTimedOut: ingestionRecovery.timedOut,
+        ingestionExhausted: ingestionRecovery.exhausted,
         asyncAttempted: asyncRecovery.attempted,
         asyncRecovered: asyncRecovery.recovered,
         bridgedIngestionJobs: asyncRecovery.bridgedIngestionJobs
@@ -182,9 +195,22 @@ function syncStatusFromSource(source: {
     syncStatus = "CONNECTED";
     statusReason = null;
   } else if (schemaStatus === "PROCESSING" || canonicalStatus === "GENERATING") {
-    if (isActiveIngestionStatus(ingestionStatus)) {
-      syncStatus = "SYNCING";
+    if (ingestionStatus === "QUEUED") {
+      syncStatus = "QUEUED";
+      statusReason = "Data source sync is waiting to start.";
+    } else if (isActiveIngestionStatus(ingestionStatus)) {
+      syncStatus = "RUNNING";
       statusReason = "Data source is syncing.";
+    } else if (ingestionStatus === "TIMEOUT") {
+      syncStatus = "TIMEOUT";
+      statusReason =
+        latestIngestionJob?.errorMessage ??
+        "Data source sync timed out. Retry sync to resume processing.";
+    } else if (ingestionStatus === "FAILED") {
+      syncStatus = "FAILED";
+      statusReason =
+        latestIngestionJob?.errorMessage ??
+        "Data source sync failed. Retry sync to resume processing.";
     } else {
       syncStatus = "FAILED_SYNC";
       statusReason =
@@ -419,7 +445,12 @@ export async function GET(request: Request) {
             id: true,
             dataSourceId: true,
             status: true,
-            errorMessage: true,
+        errorMessage: true,
+            startedAt: true,
+            lastHeartbeatAt: true,
+            completedAt: true,
+            attemptCount: true,
+            retryCount: true,
             updatedAt: true
           },
           orderBy: {
@@ -472,6 +503,7 @@ export async function GET(request: Request) {
         latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null,
         latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null
       });
+      const latestIngestionJob = latestIngestionJobBySourceId.get(source.id) ?? null;
 
       return {
         id: source.id,
@@ -483,6 +515,18 @@ export async function GET(request: Request) {
         syncStatus: detailedStatus.syncStatus,
         statusReason: detailedStatus.statusReason,
         statusAction: detailedStatus.statusAction,
+        ingestionJob: latestIngestionJob
+          ? {
+              id: latestIngestionJob.id,
+              status: latestIngestionJob.status,
+              startedAt: latestIngestionJob.startedAt?.toISOString() ?? null,
+              lastHeartbeatAt: latestIngestionJob.lastHeartbeatAt?.toISOString() ?? null,
+              completedAt: latestIngestionJob.completedAt?.toISOString() ?? null,
+              attemptCount: latestIngestionJob.attemptCount,
+              retryCount: latestIngestionJob.retryCount,
+              updatedAt: latestIngestionJob.updatedAt.toISOString()
+            }
+          : null,
         connectionMode: source.connectionMode,
         authMethod: source.authMethod,
         config: publicConfig(null),

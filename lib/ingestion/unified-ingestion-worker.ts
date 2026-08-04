@@ -13,7 +13,9 @@ import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-sna
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
 
 const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
-const ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
+const ACTIVE_INGESTION_JOB_STATUSES = ["RUNNING"] as const;
+const LEGACY_ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
+const MAX_INGESTION_ATTEMPTS = 3;
 const DEFAULT_STALE_INGESTION_JOB_MS = 10 * 60 * 1000;
 const DEFAULT_QUEUED_INGESTION_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
@@ -53,15 +55,21 @@ function staleActiveJobWhere(now = new Date()) {
 
   return {
     status: {
-      in: [...ACTIVE_INGESTION_JOB_STATUSES]
+      in: [...ACTIVE_INGESTION_JOB_STATUSES, ...LEGACY_ACTIVE_INGESTION_JOB_STATUSES]
     },
     OR: [
+      {
+        lastHeartbeatAt: {
+          lt: staleBefore
+        }
+      },
       {
         heartbeatAt: {
           lt: staleBefore
         }
       },
       {
+        lastHeartbeatAt: null,
         heartbeatAt: null,
         updatedAt: {
           lt: staleBefore
@@ -84,7 +92,16 @@ export function retryableIngestionJobWhere(now = new Date()) {
   return {
     OR: [
       {
-        status: "FAILED"
+        status: "FAILED",
+        attemptCount: {
+          lt: MAX_INGESTION_ATTEMPTS
+        }
+      },
+      {
+        status: "TIMEOUT",
+        attemptCount: {
+          lt: MAX_INGESTION_ATTEMPTS
+        }
       },
       staleQueuedJobWhere(now),
       staleActiveJobWhere(now)
@@ -277,11 +294,13 @@ async function updateJob(
     completedAt?: Date | null;
   }
 ) {
+  const heartbeat = data.heartbeatAt === undefined ? new Date() : data.heartbeatAt;
   await client.unifiedIngestionJob.updateMany({
     where: { id: jobId },
     data: {
       ...data,
-      heartbeatAt: data.heartbeatAt === undefined ? new Date() : data.heartbeatAt
+      heartbeatAt: heartbeat,
+      lastHeartbeatAt: heartbeat
     }
   });
 }
@@ -302,6 +321,7 @@ function startHeartbeat(
       },
       data: {
         heartbeatAt: new Date(),
+        lastHeartbeatAt: new Date(),
         currentStep: state.currentStep,
         progress: state.progress
       }
@@ -359,9 +379,14 @@ export async function processIngestionJob(
     where: { id: jobId },
     select: {
       status: true,
-      retryCount: true
+      retryCount: true,
+      attemptCount: true
     }
   });
+  const previousAttempts = Math.max(previousJob?.attemptCount ?? 0, previousJob?.retryCount ?? 0);
+  if (previousAttempts >= MAX_INGESTION_ATTEMPTS) {
+    return { ok: false, skipped: true, reason: "Maximum ingestion attempts reached." };
+  }
   const shouldIncrementRetryCount = Boolean(previousJob && previousJob.status !== "QUEUED");
   const lock = await client.unifiedIngestionJob.updateMany({
     where: {
@@ -371,21 +396,34 @@ export async function processIngestionJob(
           status: "QUEUED"
         },
         {
-          status: "FAILED"
+          status: "FAILED",
+          attemptCount: {
+            lt: MAX_INGESTION_ATTEMPTS
+          }
+        },
+        {
+          status: "TIMEOUT",
+          attemptCount: {
+            lt: MAX_INGESTION_ATTEMPTS
+          }
         },
         staleActiveJobWhere()
       ]
     },
     data: {
-      status: "PROCESSING",
+      status: "RUNNING",
       progress: 5,
       currentStep: "Loading uploaded file",
       errorMessage: null,
       heartbeatAt: new Date(),
+      lastHeartbeatAt: new Date(),
       lockedAt: new Date(),
       lockedBy: owner,
       retryCount: {
         increment: shouldIncrementRetryCount ? 1 : 0
+      },
+      attemptCount: {
+        increment: 1
       },
       startedAt: new Date(),
       completedAt: null
@@ -443,7 +481,7 @@ export async function processIngestionJob(
     const content = await readUploadedFile(metadata, source);
 
     await setJobState({
-      status: "PROCESSING",
+      status: "RUNNING",
       progress: 20,
       currentStep: "Inferring source schema"
     });
@@ -488,7 +526,7 @@ export async function processIngestionJob(
     });
 
     await setJobState({
-      status: "CANONICALIZING",
+      status: "RUNNING",
       progress: 45,
       currentStep: "Building canonical model"
     });
@@ -517,7 +555,7 @@ export async function processIngestionJob(
     });
 
     await setJobState({
-      status: "CANONICALIZING",
+      status: "RUNNING",
       progress: 75,
       currentStep: "Generating canonical artifact"
     });
@@ -545,7 +583,7 @@ export async function processIngestionJob(
     } as Prisma.InputJsonValue;
 
     await setJobState({
-      status: "SCHEMA_READY",
+      status: "RUNNING",
       progress: 90,
       currentStep: "Saving schema snapshot"
     });
@@ -619,6 +657,7 @@ export async function processIngestionJob(
         progress: 100,
         currentStep: "Ready",
         heartbeatAt: new Date(),
+        lastHeartbeatAt: new Date(),
         lockedAt: null,
         lockedBy: null,
         completedAt: new Date(),
@@ -669,6 +708,7 @@ export async function processIngestionJob(
         progress: 100,
         currentStep: "Failed",
         heartbeatAt: new Date(),
+        lastHeartbeatAt: new Date(),
         lockedAt: null,
         lockedBy: null,
         completedAt: new Date(),
@@ -688,6 +728,57 @@ function countCanonicalRows(dataset: CanonicalDataset) {
   return Object.values(dataset.tables).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
 }
 
+async function markIngestionJobExhausted(
+  client: PrismaClient,
+  job: {
+    id: string;
+    dataSourceId: string;
+    metadataJson?: Prisma.JsonValue | null;
+  },
+  message: string
+) {
+  const metadata = metadataValue(job.metadataJson);
+  const schemaSnapshotId = metadata.schemaSnapshotId;
+
+  if (schemaSnapshotId) {
+    await client.schemaSnapshot.updateMany({
+      where: { id: schemaSnapshotId },
+      data: {
+        status: ConnectionStatus.FAILED,
+        schemaStatus: "FAILED",
+        canonicalStatus: "FAILED",
+        qualityReport: {
+          errorMessage: message,
+          canonicalArtifactBacked: false
+        } as Prisma.InputJsonValue
+      }
+    });
+  }
+
+  await client.dataSourceConnection.updateMany({
+    where: { id: job.dataSourceId },
+    data: {
+      status: ConnectionStatus.FAILED,
+      lastErrorMessage: message
+    }
+  });
+
+  await client.unifiedIngestionJob.updateMany({
+    where: { id: job.id },
+    data: {
+      status: "FAILED",
+      progress: 100,
+      currentStep: "Failed",
+      errorMessage: message,
+      heartbeatAt: new Date(),
+      lastHeartbeatAt: new Date(),
+      lockedAt: null,
+      lockedBy: null,
+      completedAt: new Date()
+    }
+  });
+}
+
 export async function recoverStaleIngestionJobs(
   options: {
     client?: PrismaClient;
@@ -696,12 +787,76 @@ export async function recoverStaleIngestionJobs(
   } = {}
 ) {
   const client = options.client ?? prisma;
+  const limit = options.limit ?? 10;
+  const staleRunningJobs = await client.unifiedIngestionJob.findMany({
+    where: {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...staleActiveJobWhere()
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      dataSourceId: true,
+      status: true,
+      progress: true,
+      currentStep: true,
+      heartbeatAt: true,
+      lastHeartbeatAt: true,
+      attemptCount: true,
+      retryCount: true,
+      metadataJson: true,
+      updatedAt: true
+    },
+    orderBy: {
+      updatedAt: "asc"
+    },
+    take: limit
+  });
+  const timedOutJobs = [];
+  const exhaustedJobs = [];
+
+  for (const job of staleRunningJobs) {
+    const attempts = Math.max(job.attemptCount ?? 0, job.retryCount ?? 0);
+    const timeoutMessage = "Ingestion worker timed out before completing.";
+    await client.unifiedIngestionJob.updateMany({
+      where: { id: job.id },
+      data: {
+        status: "TIMEOUT",
+        currentStep: "Timed out",
+        errorMessage: timeoutMessage,
+        heartbeatAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: new Date()
+      }
+    });
+
+    timedOutJobs.push(job);
+
+    if (attempts >= MAX_INGESTION_ATTEMPTS) {
+      await markIngestionJobExhausted(client, job, `${timeoutMessage} Maximum retry attempts reached.`);
+      exhaustedJobs.push(job);
+    }
+  }
+
   const jobs = await client.unifiedIngestionJob.findMany({
     where: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       OR: [
         staleQueuedJobWhere(),
-        staleActiveJobWhere()
+        {
+          status: "TIMEOUT",
+          attemptCount: {
+            lt: MAX_INGESTION_ATTEMPTS
+          }
+        },
+        {
+          status: "FAILED",
+          attemptCount: {
+            lt: MAX_INGESTION_ATTEMPTS
+          }
+        }
       ]
     },
     select: {
@@ -712,12 +867,15 @@ export async function recoverStaleIngestionJobs(
       progress: true,
       currentStep: true,
       heartbeatAt: true,
+      lastHeartbeatAt: true,
+      attemptCount: true,
+      retryCount: true,
       updatedAt: true
     },
     orderBy: {
       updatedAt: "asc"
     },
-    take: options.limit ?? 10
+    take: limit
   });
   const results = [];
 
@@ -732,6 +890,8 @@ export async function recoverStaleIngestionJobs(
   return {
     recovered: results.filter((item) => item.result.ok).length,
     attempted: results.length,
+    timedOut: timedOutJobs.length,
+    exhausted: exhaustedJobs.length,
     results
   };
 }

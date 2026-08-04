@@ -1167,9 +1167,11 @@ model UnifiedIngestionJob {
   currentStep  String?
   errorMessage String?
   heartbeatAt  DateTime?
+  lastHeartbeatAt DateTime?
   lockedAt     DateTime?
   lockedBy     String?
   retryCount   Int       @default(0)
+  attemptCount Int       @default(0)
   startedAt    DateTime?
   completedAt  DateTime?
   createdAt    DateTime  @default(now())

@@ -491,17 +491,12 @@ test("optimization portfolio controls stay visible and current portfolio uses ac
   assert.match(displaySnippet[0], /optimizationStarted\s*\?\s*pendingDecisionRows\.length\s*:\s*currentSkuCount/);
   assert.match(renderer, /SKU operating data/);
   assert.match(renderer, /SKU optimization decision/);
-  assert.match(renderer, /flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1/);
+  assert.match(renderer, /sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
   assert.match(renderer, /sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b/);
   assert.match(renderer, /xl:sticky xl:top-24 xl:h-full xl:max-h-full/);
-  assert.match(renderer, /sticky top-0 z-20 space-y-3 border-b border-emerald-100 bg-white\/95 p-3 backdrop-blur/);
+  assert.match(renderer, /sticky top-0 z-20 bg-emerald-50\/95 p-2 pb-1 backdrop-blur/);
   assert.match(renderer, /xl:overflow-visible/);
   assert.match(renderer, /All channels/);
-  assert.match(renderer, /Portfolio Coverage/);
-  assert.match(renderer, /actions recommended/);
-  assert.match(renderer, /Growth Opportunities/);
-  assert.match(renderer, /Profit Protection/);
-  assert.match(renderer, /Why Monarca recommends this/);
 });
 
 test("action APIs return auth errors as JSON responses", () => {

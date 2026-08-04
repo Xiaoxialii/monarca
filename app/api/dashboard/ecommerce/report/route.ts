@@ -19,6 +19,43 @@ function dateToIso(value: Date | string | null | undefined) {
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function numericValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function withOperatingReportFallbackFields(report: unknown, generatedAt: unknown) {
+  const record = asRecord(report);
+  const executiveSummary = asRecord(record.executive_summary);
+  const performanceOverview = asRecord(record.performance_overview);
+  const generatedDate = dateToIso(typeof generatedAt === "string" || generatedAt instanceof Date ? generatedAt : null)?.slice(0, 10) ??
+    new Date().toISOString().slice(0, 10);
+
+  return {
+    ...record,
+    growth_overview: {
+      revenue_growth_rate: 0,
+      order_growth_rate: 0,
+      sku_growth_rate: 0,
+      daily: [
+        {
+          date: generatedDate,
+          revenue: numericValue(executiveSummary.revenue ?? performanceOverview.revenue),
+          orders: numericValue(performanceOverview.orders),
+          sku_count: numericValue(executiveSummary.sku_count)
+        }
+      ],
+      weekly: [],
+      monthly: [],
+      ...asRecord(record.growth_overview)
+    }
+  };
+}
+
 export async function GET(request: Request) {
   const session = await getCurrentWorkspaceContext(request).catch((error) => {
     const authResponse = workspaceAuthErrorResponse(error);
@@ -46,11 +83,14 @@ export async function GET(request: Request) {
 
     if (cachedReport) {
       const payload = optimizationReportCachePayload(cachedReport);
+      const decisionReport = withOperatingReportFallbackFields(payload.decision_report, payload.generated_at);
+
       return NextResponse.json({
         ...payload,
         state: payload.state === "ready" ? "ready" : payload.state,
         status: payload.state === "ready" ? "ready" : payload.state,
         hasConnectedDataSource: payload.hasConnectedDataSource === true,
+        decision_report: decisionReport,
         message: payload.message ?? loaded.message ?? "Loaded operating report from the latest optimization snapshot.",
         fallback: {
           source: "optimization_report_cache",

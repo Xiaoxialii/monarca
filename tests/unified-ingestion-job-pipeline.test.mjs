@@ -124,10 +124,16 @@ test("data sources listing recovers stale ingestion jobs so sources do not stay 
   assert.match(dataSourcesRoute, /import \{ after, NextResponse \} from "next\/server"/);
   assert.match(dataSourcesRoute, /recoverStaleIngestionJobs/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs/);
+  assert.match(dataSourcesRoute, /function isActiveIngestionStatus/);
   assert.match(dataSourcesRoute, /async function recoverStaleDataSourceJobs\(workspaceId: string\)/);
   assert.match(dataSourcesRoute, /recoverStaleIngestionJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
   assert.match(dataSourcesRoute, /after\(\(\) => \{\s*void recoverStaleDataSourceJobs\(session\.workspace\.id\)/);
+  assert.match(dataSourcesRoute, /prisma\.unifiedIngestionJob\.findMany/);
+  assert.match(dataSourcesRoute, /latestIngestionJobBySourceId/);
+  assert.match(dataSourcesRoute, /latestIngestionJob:\s*latestIngestionJobBySourceId\.get\(source\.id\) \?\? null/);
+  assert.match(dataSourcesRoute, /if \(isActiveIngestionStatus\(ingestionStatus\)\)[\s\S]*syncStatus = "SYNCING"/);
+  assert.match(dataSourcesRoute, /syncStatus = "FAILED_SYNC"[\s\S]*Data source sync did not finish/);
 });
 
 test("worker owns canonicalization and commits schema state without long interactive transactions", () => {

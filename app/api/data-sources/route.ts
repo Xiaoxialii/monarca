@@ -95,6 +95,10 @@ function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   return null;
 }
 
+function isActiveIngestionStatus(status: string | null | undefined) {
+  return ["QUEUED", "PROCESSING", "SCHEMA_READY", "CANONICALIZING"].includes((status ?? "").toUpperCase());
+}
+
 async function recoverStaleDataSourceJobs(workspaceId: string) {
   try {
     const [ingestionRecovery, asyncRecovery] = await Promise.all([
@@ -133,6 +137,10 @@ function syncStatusFromSource(source: {
     canonicalStatus: string | null;
     canonicalVersion: string | null;
   } | null;
+  latestIngestionJob?: {
+    status: string | null;
+    errorMessage: string | null;
+  } | null;
 }): {
   syncStatus: DataSourceSyncStatus;
   statusReason: string | null;
@@ -160,8 +168,10 @@ function syncStatusFromSource(source: {
   let syncStatus: DataSourceSyncStatus;
   let statusReason: string | null = source.lastErrorMessage ?? null;
   const snapshot = source.latestSnapshot ?? null;
+  const latestIngestionJob = source.latestIngestionJob ?? null;
   const schemaStatus = snapshot?.schemaStatus?.toUpperCase() ?? null;
   const canonicalStatus = snapshot?.canonicalStatus?.toUpperCase() ?? null;
+  const ingestionStatus = latestIngestionJob?.status?.toUpperCase() ?? null;
   const hasReadyCanonicalSnapshot =
     snapshot?.status === ConnectionStatus.CONNECTED &&
     schemaStatus === "READY" &&
@@ -172,8 +182,15 @@ function syncStatusFromSource(source: {
     syncStatus = "CONNECTED";
     statusReason = null;
   } else if (schemaStatus === "PROCESSING" || canonicalStatus === "GENERATING") {
-    syncStatus = "SYNCING";
-    statusReason = "Data source is syncing.";
+    if (isActiveIngestionStatus(ingestionStatus)) {
+      syncStatus = "SYNCING";
+      statusReason = "Data source is syncing.";
+    } else {
+      syncStatus = "FAILED_SYNC";
+      statusReason =
+        latestIngestionJob?.errorMessage ??
+        "Data source sync did not finish. Retry sync to resume processing.";
+    }
   } else if (schemaStatus === "FAILED" || canonicalStatus === "FAILED") {
     syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
     statusReason ??= "Data source sync failed.";
@@ -390,6 +407,32 @@ export async function GET(request: Request) {
         latestSnapshotBySourceId.set(snapshot.dataSourceId, snapshot);
       }
     }
+    const latestIngestionJobs = dataSources.length
+      ? await prisma.unifiedIngestionJob.findMany({
+          where: {
+            workspaceId: session.workspace.id,
+            dataSourceId: {
+              in: dataSources.map((source) => source.id)
+            }
+          },
+          select: {
+            id: true,
+            dataSourceId: true,
+            status: true,
+            errorMessage: true,
+            updatedAt: true
+          },
+          orderBy: {
+            updatedAt: "desc"
+          }
+        })
+      : [];
+    const latestIngestionJobBySourceId = new Map<string, typeof latestIngestionJobs[number]>();
+    for (const job of latestIngestionJobs) {
+      if (job.dataSourceId && !latestIngestionJobBySourceId.has(job.dataSourceId)) {
+        latestIngestionJobBySourceId.set(job.dataSourceId, job);
+      }
+    }
     const deletedDataSources = includeDeleted
       ? await prisma.dataSourceConnection.findMany({
           where: {
@@ -426,7 +469,8 @@ export async function GET(request: Request) {
         : null;
       const detailedStatus = syncStatusFromSource({
         ...source,
-        latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null
+        latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null,
+        latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null
       });
 
       return {

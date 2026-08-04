@@ -78,6 +78,9 @@ test("decision report route refreshes non-ready optimization caches when canonic
   assert.match(route, /Optimization data is ready and a decision analysis refresh is running/);
   assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
   assert.match(route, /const queued = jobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
+  assert.match(route, /function processQueuedOptimizationJob/);
+  assert.match(route, /if \(job\.status !== "QUEUED"\) return/);
+  assert.match(route, /processQueuedOptimizationJob\(job\)/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
 });

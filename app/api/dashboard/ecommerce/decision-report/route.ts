@@ -134,6 +134,16 @@ function queuedOptimizationResponse(input: {
   });
 }
 
+function processQueuedOptimizationJob(job: { id: string; status: string }) {
+  if (job.status !== "QUEUED") return;
+
+  after(() => {
+    void processJob(job.id).catch((error) => {
+      console.error("Failed to process queued decision report optimization job", error);
+    });
+  });
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const url = new URL(request.url);
@@ -178,6 +188,7 @@ export async function GET(request: Request) {
           });
         });
       }
+      processQueuedOptimizationJob(job);
 
       return queuedOptimizationResponse({
         payload: cachedPayload,
@@ -377,6 +388,7 @@ export async function GET(request: Request) {
         });
       });
     }
+    processQueuedOptimizationJob(job);
 
     return queuedOptimizationResponse({
       jobId: job.id,

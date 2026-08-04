@@ -321,6 +321,7 @@ export async function enqueueSkuOptimizationJob(
         heartbeatAt: now,
         lockedAt: null,
         lockedBy: null,
+        retryCount: existing.maxRetries,
         completedAt: now
       }
     });
@@ -1107,7 +1108,10 @@ export async function recoverAsyncJobs(
   for (const job of [
     ...bridgedIngestionJobs,
     ...decisionIntelligenceJobs,
-    ...jobs.filter((item) => item.status !== "FAILED" || item.retryCount < item.maxRetries)
+    ...jobs.filter((item) => {
+      if (item.type === "SKU_OPTIMIZATION" && item.status === "FAILED") return false;
+      return item.status !== "FAILED" || item.retryCount < item.maxRetries;
+    })
   ]) {
     const result = await processJob(job.id, { client });
     results.push({

@@ -60,6 +60,8 @@ test("optimization jobs use short heartbeat stale recovery", () => {
   assert.match(runner, /SKU_OPTIMIZATION_JOB_STALE_MS/);
   assert.match(runner, /isStaleSkuOptimizationJob/);
   assert.match(runner, /Superseded because SKU optimization heartbeat was stale/);
+  assert.match(runner, /retryCount:\s*existing\.maxRetries/);
+  assert.match(runner, /if \(item\.type === "SKU_OPTIMIZATION" && item\.status === "FAILED"\) return false/);
 });
 
 test("decision report route refreshes non-ready optimization caches when canonical data is ready", () => {
@@ -72,7 +74,10 @@ test("decision report route refreshes non-ready optimization caches when canonic
   assert.match(route, /non_ready_decision_report_cache/);
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
   assert.match(route, /state:\s*"processing"/);
+  assert.match(route, /decision_report:\s*null/);
   assert.match(route, /Optimization data is ready and a decision analysis refresh is running/);
+  assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
+  assert.match(route, /const queued = jobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
 });

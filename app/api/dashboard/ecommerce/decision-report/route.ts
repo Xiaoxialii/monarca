@@ -9,7 +9,12 @@ import {
   findOptimizationReportCache,
   optimizationReportCachePayload
 } from "@/lib/dashboard/optimization-report-cache";
-import { enqueueSkuOptimizationJob, processJob, recoverAsyncJobs } from "@/lib/jobs/async-job-runner";
+import {
+  enqueueSkuOptimizationJob,
+  processJob,
+  recoverAsyncJobs,
+  SKU_OPTIMIZATION_STALE_JOB_MS
+} from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -64,7 +69,7 @@ async function hasReadyCanonicalSources(workspaceId: string) {
 }
 
 async function latestOptimizationJob(workspaceId: string) {
-  return prisma.asyncJob.findFirst({
+  const jobs = await prisma.asyncJob.findMany({
     where: {
       workspaceId,
       type: "SKU_OPTIMIZATION",
@@ -76,12 +81,26 @@ async function latestOptimizationJob(workspaceId: string) {
       id: true,
       status: true,
       currentStep: true,
+      heartbeatAt: true,
+      startedAt: true,
+      lockedAt: true,
+      createdAt: true,
       updatedAt: true
     },
     orderBy: {
-      updatedAt: "desc"
-    }
+      createdAt: "desc"
+    },
+    take: 10
   });
+
+  const queued = jobs.find((job) => job.status === "QUEUED");
+  if (queued) return queued;
+
+  const staleBefore = new Date(Date.now() - SKU_OPTIMIZATION_STALE_JOB_MS);
+  return jobs.find((job) => {
+    const heartbeat = job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt ?? job.createdAt;
+    return heartbeat >= staleBefore;
+  }) ?? null;
 }
 
 function queuedOptimizationResponse(input: {
@@ -100,6 +119,12 @@ function queuedOptimizationResponse(input: {
     latestSnapshot: false,
     message: input.message,
     jobId: input.jobId,
+    decision_report: null,
+    portfolioSummary: null,
+    allocationRecommendation: null,
+    skuDecisions: [],
+    riskAlerts: [],
+    executionPlan: [],
     optimizationRun: {
       ...asRecord(input.payload?.optimizationRun),
       optimization_run_id: input.jobId,

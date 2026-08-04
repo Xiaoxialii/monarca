@@ -1,5 +1,5 @@
 import { WorkspaceRole } from "@prisma/client";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +8,7 @@ import { logWorkspaceContext } from "@/lib/current-workspace-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
@@ -23,17 +24,14 @@ export async function POST(request: Request) {
       inputHash: versions.inputHash
     });
 
-    after(() => {
-      void processJob(job.id).catch((error) => {
-        console.error("Failed to process manual optimization refresh job", error);
-      });
-    });
+    const result = await processJob(job.id);
 
     return NextResponse.json({
-      ok: true,
+      ok: result.ok || result.skipped,
       jobId: job.id,
-      status: job.status === "QUEUED" ? "QUEUED" : job.status,
-      currentStep: job.currentStep,
+      status: result.ok ? "COMPLETED" : job.status === "QUEUED" ? "QUEUED" : job.status,
+      currentStep: result.ok ? "Completed" : job.currentStep,
+      error: result.ok || result.skipped ? null : result.error ?? "Failed to process optimization job.",
       versions
     });
   } catch (error) {

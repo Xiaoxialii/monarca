@@ -1,11 +1,12 @@
 import { WorkspaceRole } from "@prisma/client";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(
   _request: Request,
@@ -14,7 +15,7 @@ export async function GET(
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.VIEWER]);
     const { jobId } = await context.params;
-    const job = await prisma.asyncJob.findFirst({
+    let job = await prisma.asyncJob.findFirst({
       where: {
         id: jobId,
         workspaceId: session.workspace.id
@@ -42,10 +43,28 @@ export async function GET(
     }
 
     if (job.type === "SKU_OPTIMIZATION" && job.status === "QUEUED") {
-      after(() => {
-        void processJob(job.id).catch((error) => {
-          console.error("Failed to process queued optimization job during status polling", error);
-        });
+      await processJob(job.id);
+      job = await prisma.asyncJob.findFirst({
+        where: {
+          id: jobId,
+          workspaceId: session.workspace.id
+        },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          progress: true,
+          currentStep: true,
+          errorMessage: true,
+          retryCount: true,
+          maxRetries: true,
+          heartbeatAt: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          resultReference: true
+        }
       });
     }
 

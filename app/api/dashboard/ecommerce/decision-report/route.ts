@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
   "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
@@ -134,13 +135,42 @@ function queuedOptimizationResponse(input: {
   });
 }
 
-function processQueuedOptimizationJob(job: { id: string; status: string }) {
-  if (job.status !== "QUEUED") return;
+async function processQueuedOptimizationJob(job: { id: string; status: string }) {
+  if (job.status !== "QUEUED") return null;
 
-  after(() => {
-    void processJob(job.id).catch((error) => {
-      console.error("Failed to process queued decision report optimization job", error);
-    });
+  const result = await processJob(job.id);
+  if (!result.ok && !result.skipped) {
+    console.error("Failed to process queued decision report optimization job", result);
+  }
+
+  return result;
+}
+
+async function freshOptimizationCacheResponse(input: {
+  workspaceId: string;
+  mode: "full" | "sku";
+  startedAt: number;
+}) {
+  const refreshedCache = await findOptimizationReportCache(prisma, {
+    workspaceId: input.workspaceId,
+    mode: input.mode
+  });
+  if (!refreshedCache) return null;
+
+  const refreshedPayload = optimizationReportCachePayload(refreshedCache);
+  if (cacheNeedsOptimizationRefresh(refreshedPayload)) return null;
+
+  return NextResponse.json({
+    ...refreshedPayload,
+    snapshot: {
+      id: refreshedCache.id,
+      type: "OptimizationReportCache",
+      sourceDecisionSnapshotId: refreshedCache.sourceDecisionSnapshotId,
+      createdAt: dateToIso(refreshedCache.createdAt),
+      updatedAt: dateToIso(refreshedCache.updatedAt),
+      latestSnapshot: true
+    },
+    performance: snapshotPerformance(input.startedAt, "snapshot")
   });
 }
 
@@ -182,13 +212,16 @@ export async function GET(request: Request) {
         });
         job = queuedJob;
 
-        after(() => {
-          void processJob(queuedJob.id).catch((error) => {
-            console.error("Failed to process non-ready decision report cache refresh job", error);
-          });
-        });
       }
-      processQueuedOptimizationJob(job);
+      const processed = await processQueuedOptimizationJob(job);
+      if (processed?.ok) {
+        const freshResponse = await freshOptimizationCacheResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt
+        });
+        if (freshResponse) return freshResponse;
+      }
 
       return queuedOptimizationResponse({
         payload: cachedPayload,
@@ -208,11 +241,15 @@ export async function GET(request: Request) {
         inputHash: reportCache.inputHash
       });
 
-      after(() => {
-        void processJob(job.id).catch((error) => {
-          console.error("Failed to process invalid decision report cache refresh job", error);
+      const processed = await processQueuedOptimizationJob(job);
+      if (processed?.ok) {
+        const freshResponse = await freshOptimizationCacheResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt
         });
-      });
+        if (freshResponse) return freshResponse;
+      }
 
       return NextResponse.json({
         ...cachedPayload,
@@ -255,11 +292,15 @@ export async function GET(request: Request) {
         inputHash: freshness.current.inputHash
       });
 
-      after(() => {
-        void processJob(job.id).catch((error) => {
-          console.error("Failed to process stale decision report cache refresh job", error);
+      const processed = await processQueuedOptimizationJob(job);
+      if (processed?.ok) {
+        const freshResponse = await freshOptimizationCacheResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt
         });
-      });
+        if (freshResponse) return freshResponse;
+      }
 
       return NextResponse.json({
         ...cachedPayload,
@@ -325,11 +366,15 @@ export async function GET(request: Request) {
         inputHash: freshness.current.inputHash
       });
 
-      after(() => {
-        void processJob(job.id).catch((error) => {
-          console.error("Failed to process stale decision snapshot refresh job", error);
+      const processed = await processQueuedOptimizationJob(job);
+      if (processed?.ok) {
+        const freshResponse = await freshOptimizationCacheResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt
         });
-      });
+        if (freshResponse) return freshResponse;
+      }
 
       return NextResponse.json({
         ...recommendationsJson,
@@ -382,13 +427,16 @@ export async function GET(request: Request) {
       });
       job = queuedJob;
 
-      after(() => {
-        void processJob(queuedJob.id).catch((error) => {
-          console.error("Failed to process missing decision snapshot refresh job", error);
-        });
-      });
     }
-    processQueuedOptimizationJob(job);
+    const processed = await processQueuedOptimizationJob(job);
+    if (processed?.ok) {
+      const freshResponse = await freshOptimizationCacheResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt
+      });
+      if (freshResponse) return freshResponse;
+    }
 
     return queuedOptimizationResponse({
       jobId: job.id,

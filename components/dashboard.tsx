@@ -16966,8 +16966,6 @@ function ReportsPage({
 	  const shouldShowEmptyAnalysisState = !effectiveHasConnectedDatabase;
 	  const shouldShowSkuTableEmptyState = !effectiveHasConnectedDatabase;
 	  const shouldShowInitialAnalysisShell = isLoading || (isLoadingAnalysisDecisionReport && !analysisDecisionReportPayload);
-	  const entitlement = reportData?.reportEntitlement;
-	  const entitlementText = reportEntitlementMessage(entitlement, locale);
 	  const latestPayloadAudit = reportData?.briefing?.payloadJson?.reportDataAudit;
 	  const analysisAvailableDateRange: ReportAvailableDateRange | null = {
 	    startDate: reportData?.availableDateRange?.startDate ?? latestPayloadAudit?.dateRangeStart ?? latestPayloadAudit?.startDate ?? reportData?.briefing?.payloadJson?.timeConfig?.startDate ?? null,
@@ -17021,22 +17019,15 @@ function ReportsPage({
           ? `${isZh ? "优化完成时间" : "Optimized"} ${formatReportDate(analysisDecisionReportPayload.optimizationRun.completed_at)}`
           : (isZh ? "尚未优化" : "Not optimized")}
       </span>
-      {entitlementText ? <span className="max-w-sm text-emerald-800">{entitlementText}</span> : null}
-      {entitlement?.canGenerateReport !== false ? (
-        <button
-          type="button"
-          onClick={() => void generateAnalysisReport(resolvedAnalysisDateRange)}
-          disabled={isGenerating}
-          className="inline-flex items-center gap-1.5 font-bold text-slate-950 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <RefreshCw className={cn("size-3.5", isGenerating && "animate-spin")} />
-          {isGenerating ? copy.reports.generatingAction : copy.reports.generateAction}
-        </button>
-      ) : (
-        <a href="/checkout/professional" className="font-bold text-slate-950 transition hover:text-emerald-700">
-          {isZh ? "升级套餐" : "Upgrade plan"}
-        </a>
-      )}
+      <button
+        type="button"
+        onClick={() => void startProfitOptimization()}
+        disabled={isRunningProfitOptimization}
+        className="inline-flex items-center gap-1.5 font-bold text-slate-950 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <RefreshCw className={cn("size-3.5", isRunningProfitOptimization && "animate-spin")} />
+        {isRunningProfitOptimization ? (isZh ? "正在优化" : "Optimizing") : (isZh ? "更新分析" : "Update analysis")}
+      </button>
     </div>
   );
   const optimizationDecisionReport = useMemo(() => {

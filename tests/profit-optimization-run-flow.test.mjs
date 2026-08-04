@@ -32,7 +32,9 @@ test("frontend polls the shared async job status endpoint until completion", () 
   assert.match(dashboard, /"CANCELLED"/);
   assert.match(dashboard, /Optimization completed/);
   assert.match(route, /job\.type === "SKU_OPTIMIZATION" && job\.status === "QUEUED"/);
-  assert.match(route, /processJob\(job\.id\)/);
+  assert.match(route, /export const maxDuration = 60/);
+  assert.match(route, /await processJob\(job\.id\)/);
+  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
 });
 
 test("manual optimization endpoint uses the async job runner and prevents duplicate jobs", () => {
@@ -42,7 +44,9 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
   assert.match(route, /enqueueSkuOptimizationJob\(prisma/);
   assert.match(route, /reason:\s*"manual_optimization_refresh"/);
   assert.match(route, /decisionMode:\s*"full"/);
-  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.match(route, /export const maxDuration = 60/);
+  assert.match(route, /const result = await processJob\(job\.id\)/);
+  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
   assert.doesNotMatch(route, /generateEcommerceDecisionSnapshots\(/);
 
   assert.match(runner, /export async function enqueueSkuOptimizationJob/);
@@ -80,9 +84,11 @@ test("decision report route refreshes non-ready optimization caches when canonic
   assert.match(route, /const queued = jobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
   assert.match(route, /function processQueuedOptimizationJob/);
   assert.match(route, /if \(job\.status !== "QUEUED"\) return/);
-  assert.match(route, /processQueuedOptimizationJob\(job\)/);
+  assert.match(route, /await processQueuedOptimizationJob\(job\)/);
+  assert.match(route, /freshOptimizationCacheResponse/);
+  assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
-  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
 });
 
 test("completed optimization jobs generate decision snapshots from internal data and refresh cache", () => {

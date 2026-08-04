@@ -43,7 +43,7 @@ function dataSourceTypeToDatabaseType(type: DataSourceType): SupportedDatabaseTy
   return null;
 }
 
-const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
+const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000;
 
 function publicTables(tables: Array<{
   name: string;

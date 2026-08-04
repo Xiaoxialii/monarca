@@ -19,7 +19,7 @@ import { logWorkspaceContext } from "@/lib/current-workspace-context";
 export const runtime = "nodejs";
 
 const MAX_FILE_NAME_LENGTH = 180;
-const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
+const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000;
 
 function pendingUnifiedIngestionSummary(input: {
   source: "csv" | "excel";

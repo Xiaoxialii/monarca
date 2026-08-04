@@ -164,6 +164,8 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /export async function processIngestionJob/);
   assert.match(worker, /STALE_INGESTION_JOB_MS/);
   assert.match(worker, /QUEUED_INGESTION_JOB_MS/);
+  assert.match(worker, /const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000/);
+  assert.match(worker, /const DEFAULT_STALE_INGESTION_JOB_MS = 2 \* 60 \* 1000/);
   assert.match(worker, /ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["RUNNING"\]/);
   assert.match(worker, /LEGACY_ACTIVE_INGESTION_JOB_STATUSES\s*=\s*\["PROCESSING", "SCHEMA_READY", "CANONICALIZING"\]/);
   assert.match(worker, /MAX_INGESTION_ATTEMPTS\s*=\s*3/);
@@ -202,6 +204,17 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(retryRoute, /processIngestionJob\(jobId\)/);
   assert.match(recoveryRoute, /recoverStaleIngestionJobs/);
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
+});
+
+test("upload and rescan routes use a serverless-safe semantic sample size", () => {
+  const uploadRoute = read("app/api/data-sources/upload/route.ts");
+  const completeRoute = read("app/api/data-sources/upload/complete/route.ts");
+  const rescanRoute = read("app/api/data-sources/[id]/rescan/route.ts");
+
+  for (const source of [uploadRoute, completeRoute, rescanRoute]) {
+    assert.match(source, /const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000/);
+    assert.doesNotMatch(source, /MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000/);
+  }
 });
 
 test("uploaded Excel files infer business platform instead of using transport source", () => {

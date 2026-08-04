@@ -12,11 +12,11 @@ import type { CanonicalDataset } from "@/lib/semantic/types";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
 
-const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
+const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000;
 const ACTIVE_INGESTION_JOB_STATUSES = ["RUNNING"] as const;
 const LEGACY_ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
 const MAX_INGESTION_ATTEMPTS = 3;
-const DEFAULT_STALE_INGESTION_JOB_MS = 10 * 60 * 1000;
+const DEFAULT_STALE_INGESTION_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_QUEUED_INGESTION_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 

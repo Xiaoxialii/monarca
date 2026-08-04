@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 
 const MAX_FILE_NAME_LENGTH = 180;
 const INLINE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
-const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 5_000;
+const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000;
 
 function pendingUnifiedIngestionSummary(input: {
   source: "csv" | "excel";

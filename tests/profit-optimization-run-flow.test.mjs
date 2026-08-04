@@ -483,6 +483,16 @@ test("optimization page passes optimization run metadata into renderer report", 
   assert.match(dashboard, /report=\{optimizationDecisionReport\}/);
 });
 
+test("current portfolio SKU count uses analyzed portfolio rows, not action queue rows", () => {
+  const renderer = read("components/report-renderer-engine.tsx");
+  const displaySnippet = renderer.match(/const displayedCurrentSkuCount = shouldBlankOptimizationSummary[\s\S]*?const displayedCurrentProfit/);
+
+  assert.ok(displaySnippet, "current portfolio display count should be defined");
+  assert.match(renderer, /const currentSkuCount = safeNumber\(summary\.input_sku_count\) \|\| selectedRows\.length \|\| sourceRows\.length \|\| sourceSkuIds\.length/);
+  assert.match(displaySnippet[0], /const displayedCurrentSkuCount = shouldBlankOptimizationSummary\s*\?\s*0\s*:\s*currentSkuCount/);
+  assert.doesNotMatch(displaySnippet[0], /pendingDecisionRows\.length/);
+});
+
 test("action APIs return auth errors as JSON responses", () => {
   const acceptRoute = read("app/api/actions/accept/route.ts");
   const rejectRoute = read("app/api/actions/reject/route.ts");

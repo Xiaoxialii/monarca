@@ -1523,7 +1523,7 @@ function SkuPortfolioOptimizationPanel({
     ? sourceRows.map((row) => row.sku)
     : Array.from(new Set(optimizationSimulations.map((row) => String(objectRecord(row).sku ?? ""))).values()).filter(Boolean);
   const currentPortfolioProfit = safeNumber(summary.current_portfolio_profit);
-  const currentSkuCount = safeNumber(summary.input_sku_count) || sourceRows.length || sourceSkuIds.length;
+  const currentSkuCount = safeNumber(summary.input_sku_count) || selectedRows.length || sourceRows.length || sourceSkuIds.length;
   const totalExpectedProfitGain = safeNumber(optimization.total_expected_profit_gain);
   const liftRate = currentPortfolioProfit > 0 ? totalExpectedProfitGain / currentPortfolioProfit : 0;
   const simulationHorizonDays = safeNumber(summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days, 30);
@@ -1579,9 +1579,7 @@ function SkuPortfolioOptimizationPanel({
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary
     ? 0
-    : optimizationStarted
-      ? pendingDecisionRows.length
-      : currentSkuCount;
+    : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
   const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : safeNumber(summary.ads_budget_used);
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;

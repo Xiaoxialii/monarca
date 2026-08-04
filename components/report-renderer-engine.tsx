@@ -2014,7 +2014,7 @@ function SkuPortfolioOptimizationPanel({
 				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
 			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-visible xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
-	          <div className="sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
+	          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1 shadow-sm shadow-slate-950/5">
             <button
               type="button"
               onClick={() => {
@@ -2250,6 +2250,7 @@ function SkuPortfolioOptimizationPanel({
                 rows={displayedPendingDecisionRows}
                 selectedRow={selectedDecision}
                 portfolioRowsBySku={portfolioRowsBySku}
+                analyzedSkuCount={currentSkuCount}
                 trackedOutcomeRows={trackedOutcomeRows}
                 simulationHorizonDays={simulationHorizonDays}
                 actionStatuses={actionStatuses}
@@ -2326,22 +2327,11 @@ const optimizationGoalFilters: Array<{ goal: OptimizationGoal; label: string }> 
   { goal: "PORTFOLIO_HEALTH", label: "Portfolio Health" }
 ];
 
-const optimizationActionFilters: Record<OptimizationGoal, string[]> = {
-  GROWTH: ["Scale Ads", "Expand Channel"],
-  PROFIT: ["Increase Price", "Decrease Price", "Run Promotion"],
-  INVENTORY: ["Restock Inventory", "Clear Excess Inventory"],
-  PORTFOLIO_HEALTH: ["Enrich Inputs", "Reduce Ad Waste", "Reallocate Budget", "Exit SKU"]
-};
-
 function goalFilterDisplayLabel(goal: OptimizationGoal) {
   if (goal === "GROWTH") return "Growth";
   if (goal === "PROFIT") return "Profit";
   if (goal === "INVENTORY") return "Inventory";
   return "Portfolio Health";
-}
-
-function actionFilterDisplayLabel(action: string) {
-  return action;
 }
 
 type ActionOutcomeStatus = "Pending" | "Accepted" | "Running" | "Completed" | "Rejected" | "Blocked";
@@ -2499,10 +2489,118 @@ function isOptimizationQueueRow(row: PortfolioDecisionRow) {
   return row.action !== "MONITOR" || impact > 1 || row.inventoryRisk === true || row.budgetOpportunity === true;
 }
 
+function QueueCoverageMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg bg-white/10 px-2 py-2 ring-1 ring-white/10">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-100">{label}</p>
+      <p className="mt-1 text-lg font-extrabold leading-none text-white">{numberFormat.format(value)}</p>
+    </div>
+  );
+}
+
+function queueActionSummaryGroups(actionCounts: Record<string, number>) {
+  return [
+    {
+      title: "Growth Opportunities",
+      goal: "GROWTH" as OptimizationGoal,
+      actions: [
+        {
+          label: "Scale Ads",
+          count: actionCounts["Scale Ads"] ?? 0,
+          emptyLabel: "No scale opportunities"
+        },
+        {
+          label: "Expand Channel",
+          count: actionCounts["Expand Channel"] ?? 0,
+          emptyLabel: "No high-confidence channel expansion opportunities detected."
+        }
+      ]
+    },
+    {
+      title: "Profit Protection",
+      goal: "PROFIT" as OptimizationGoal,
+      actions: [
+        {
+          label: "Reduce Ads",
+          count: actionCounts["Reduce Ad Waste"] ?? actionCounts["Reallocate Budget"] ?? 0,
+          emptyLabel: "No ad waste actions"
+        },
+        {
+          label: "Pricing",
+          count: (actionCounts["Increase Price"] ?? 0) + (actionCounts["Decrease Price"] ?? 0) + (actionCounts["Run Promotion"] ?? 0),
+          emptyLabel: "No pricing actions"
+        }
+      ]
+    },
+    {
+      title: "Inventory",
+      goal: "INVENTORY" as OptimizationGoal,
+      actions: [
+        {
+          label: "Restock Inventory",
+          count: actionCounts["Restock Inventory"] ?? 0,
+          emptyLabel: "No restock actions"
+        },
+        {
+          label: "Clear Excess Inventory",
+          count: actionCounts["Clear Excess Inventory"] ?? 0,
+          emptyLabel: "No excess stock actions"
+        }
+      ]
+    }
+  ];
+}
+
+function actionMatchesSummaryFilter(actionLabel: string, selectedSummary: string) {
+  if (actionLabel === selectedSummary) return true;
+  if (selectedSummary === "Reduce Ads") return actionLabel === "Reduce Ad Waste" || actionLabel === "Reallocate Budget";
+  if (selectedSummary === "Pricing") return actionLabel === "Increase Price" || actionLabel === "Decrease Price" || actionLabel === "Run Promotion";
+  if (selectedSummary === "Restock") return actionLabel === "Restock Inventory";
+  if (selectedSummary === "Excess Stock") return actionLabel === "Clear Excess Inventory";
+  return false;
+}
+
+function queueCardEvidence(
+  row: PortfolioDecisionRow,
+  recommendation: PortfolioRow | undefined,
+  simulationHorizonDays: number
+) {
+  const detail = selectedSkuDetail(row, recommendation, [], simulationHorizonDays, "pending");
+  const roas =
+    row.simulation_estimate?.revenue_simulation?.base_roas ??
+    (detail.current_ads_spend > 0 ? detail.current_revenue / Math.max(1, detail.current_ads_spend) : null);
+  const attributionConfidence =
+    row.confidence_breakdown?.attribution_confidence ??
+    row.simulation_estimate?.confidence_breakdown?.attribution_confidence ??
+    row.confidence ??
+    recommendation?.confidence ??
+    null;
+
+  return [
+    {
+      label: "ROAS",
+      value: roas === null || !Number.isFinite(roas) ? "N/A" : ratioFormat.format(roas)
+    },
+    {
+      label: "Margin",
+      value: percent.format(detail.current_margin)
+    },
+    {
+      label: "Attribution confidence",
+      value: attributionConfidence === null ? "N/A" : percent.format(safeNumber(attributionConfidence))
+    },
+    {
+      label: "Inventory coverage",
+      value: `${ratioFormat.format(detail.inventory_runway_days)} days`
+    }
+  ];
+}
+
 function OptimizationDecisionRail({
   rows,
   selectedRow,
   portfolioRowsBySku,
+  analyzedSkuCount,
   trackedOutcomeRows,
   simulationHorizonDays,
   actionStatuses,
@@ -2516,6 +2614,7 @@ function OptimizationDecisionRail({
   rows: PortfolioDecisionRow[];
   selectedRow: PortfolioDecisionRow | null;
   portfolioRowsBySku: Map<string, PortfolioRow>;
+  analyzedSkuCount: number;
   trackedOutcomeRows: ActionOutcomeRow[];
   simulationHorizonDays: number;
   actionStatuses: Record<string, "pending" | "accepted" | "rejected">;
@@ -2544,22 +2643,17 @@ function OptimizationDecisionRail({
   const displayedRows = selectedGoal
     ? rows.filter((row) => {
       const goal = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId));
-      return goal.goal === selectedGoal && (!selectedGoalAction || goal.actionLabel === selectedGoalAction);
+      return goal.goal === selectedGoal && (!selectedGoalAction || actionMatchesSummaryFilter(goal.actionLabel, selectedGoalAction));
     })
     : rows;
-  const goalRows = selectedGoal
-    ? rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === selectedGoal)
-    : rows;
-  const actionCounts = goalRows.reduce<Record<string, number>>((counts, row) => {
+  const allActionCounts = rows.reduce<Record<string, number>>((counts, row) => {
     const label = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
     counts[label] = (counts[label] ?? 0) + 1;
     return counts;
   }, {});
-  const queueCountLabel = displayedRows.length === rows.length
-    ? (isZh ? `待优化 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} pending`)
-    : (isZh
-      ? `${numberFormat.format(displayedRows.length)} 个显示 / ${numberFormat.format(rows.length)} 个待优化`
-      : `${numberFormat.format(displayedRows.length)} shown / ${numberFormat.format(rows.length)} pending`);
+  const analyzedCount = Math.max(analyzedSkuCount, rows.length);
+  const monitoredCount = Math.max(0, analyzedCount - rows.length);
+  const actionGroups = queueActionSummaryGroups(allActionCounts);
   const visibleSelectedKey = displayedRows.some((row) => decisionRowKey(row) === selectedRowKey)
     ? selectedRowKey
     : null;
@@ -2582,80 +2676,71 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-24 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
-        <div className="rounded-lg bg-emerald-950 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
-            <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 text-xs font-bold text-emerald-50 ring-1 ring-emerald-200/25">
-              {queueCountLabel}
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {optimizationGoalFilters.map((filter) => {
-              const isSelected = selectedGoal === filter.goal;
-              return (
-              <button
-                key={filter.goal}
-                type="button"
-                onClick={() => {
-                  hasManuallySelectedGoalRef.current = true;
-                  if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
-                  setSelectedGoal(filter.goal);
-                }}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
-                  isSelected
-                    ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                    : "bg-emerald-300/10 text-emerald-50 ring-emerald-200/20 hover:bg-emerald-300/20"
-                )}
-                aria-pressed={isSelected}
-              >
-                {filter.label}
-              </button>
-              );
-            })}
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-white p-0 ring-1 ring-emerald-100 xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 space-y-3 border-b border-emerald-100 bg-white/95 p-3 backdrop-blur">
+        <div className="rounded-lg bg-emerald-950 px-4 py-3 text-white">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-200">{isZh ? "投资组合覆盖" : "Portfolio Coverage"}</p>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <QueueCoverageMetric label={isZh ? "已分析" : "Analyzed"} value={analyzedCount} />
+            <QueueCoverageMetric label={isZh ? "需处理" : "Action Required"} value={rows.length} />
+            <QueueCoverageMetric label={isZh ? "监控中" : "Monitoring"} value={monitoredCount} />
           </div>
         </div>
 
-        <div className={cn(
-          "mt-2 flex min-h-[38px] flex-wrap content-start gap-2 px-1",
-          !selectedGoal && "invisible"
-        )}>
-          {selectedGoal
-            ? optimizationActionFilters[selectedGoal].map((action) => {
-              const isSelected = selectedGoalAction === action;
-              const count = actionCounts[action] ?? 0;
-              return (
-                <button
-                  key={action}
-                  type="button"
-	                  onClick={() => {
-	                    const nextAction = selectedGoalAction === action ? null : action;
-	                    setSelectedGoalAction(nextAction);
-	                  }}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-xs font-bold transition ring-1",
-                    isSelected
-                      ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                      : "bg-white text-emerald-900 ring-emerald-200 hover:bg-emerald-50"
-                  )}
-                  aria-pressed={isSelected}
-                >
-                  {actionFilterDisplayLabel(action)}
-                  <span className={cn(
-                    "ml-1 text-[10px]",
-                    isSelected ? "text-white/80" : "text-emerald-700/70"
-                  )}>
-                    {numberFormat.format(count)}
-                  </span>
-                </button>
-              );
-            })
-            : null}
+        <div>
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-extrabold text-slate-950">{isZh ? "优化机会" : "Optimization Opportunities"}</p>
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                {isZh
+                  ? `从 ${numberFormat.format(analyzedCount)} 个 SKU 中识别出 ${numberFormat.format(rows.length)} 个可执行利润机会，${numberFormat.format(monitoredCount)} 个继续监控。`
+                  : `Actionable profit opportunities identified from ${numberFormat.format(analyzedCount)} SKUs; ${numberFormat.format(monitoredCount)} are monitored.`}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-extrabold leading-none text-emerald-950">{numberFormat.format(rows.length)}</p>
+              <p className="mt-1 text-[11px] font-bold uppercase tracking-wide text-emerald-700">{isZh ? "推荐动作" : "actions recommended"}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-2">
+          {actionGroups.map((group) => (
+            <div key={group.title} className="rounded-lg border border-slate-200 bg-slate-50/80 p-2">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">{group.title}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {group.actions.map((action) => {
+                  const isSelected = selectedGoal === group.goal && selectedGoalAction === action.label;
+                  return (
+                    <button
+                      key={action.label}
+                      type="button"
+                      onClick={() => {
+                        hasManuallySelectedGoalRef.current = true;
+                        setSelectedGoal(group.goal);
+                        setSelectedGoalAction(isSelected ? null : action.label);
+                      }}
+                      className={cn(
+                        "rounded-lg bg-white px-3 py-2 text-left ring-1 transition",
+                        isSelected ? "ring-[#5747e8] shadow-sm shadow-[#5747e8]/15" : "ring-slate-200 hover:ring-emerald-200"
+                      )}
+                    >
+                      <span className="block text-xs font-bold text-slate-700">{action.label}</span>
+                      <span className={cn("mt-1 block text-2xl font-extrabold leading-none", action.count > 0 ? "text-emerald-800" : "text-slate-400")}>
+                        {numberFormat.format(action.count)}
+                      </span>
+                      {action.count === 0 ? (
+                        <span className="mt-1 block text-[10px] font-semibold leading-4 text-slate-500">{action.emptyLabel}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
-      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-scroll overscroll-contain px-1 pb-1 pr-4 [scrollbar-color:rgba(100,116,139,0.75)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500/75">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-scroll overscroll-contain bg-emerald-50/45 px-3 py-3 pr-4 [scrollbar-color:rgba(100,116,139,0.75)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500/75">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;
@@ -2664,16 +2749,17 @@ function OptimizationDecisionRail({
 	          const status = actionStatuses[key] === "accepted" ? "accepted" : actionStatuses[key] === "rejected" ? "rejected" : "awaiting_decision";
 	          const goal = optimizationGoalForDecision(row, recommendation);
 	          const actionDisplay = actionDisplayForDecision(row, recommendation);
+            const cardEvidence = queueCardEvidence(row, recommendation, simulationHorizonDays);
             const previousDecisionStatus = previousDecisionActiveStatus(row);
 
           return (
             <div
               key={key}
               className={cn(
-                "rounded-lg border-2 bg-white transition",
+                "rounded-lg border bg-white transition",
                 isSelected
-                  ? "border-blue-600 shadow-sm"
-                  : "border-transparent ring-1 ring-slate-100"
+                  ? "border-blue-500 shadow-sm shadow-blue-500/10"
+                  : "border-slate-100"
               )}
             >
               <div
@@ -2695,28 +2781,53 @@ function OptimizationDecisionRail({
                   }
                 }}
                 className={cn(
-                  "w-full select-none rounded-lg p-3 text-left transition hover:bg-emerald-50/50",
+                  "w-full select-none rounded-lg p-4 text-left transition hover:bg-white",
                   isSelected && "bg-emerald-50"
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-950">{row.skuId}</p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-2">
+                    <p className="truncate text-xs font-bold uppercase tracking-wide text-slate-500">{row.skuId}</p>
+                    <div className="flex flex-wrap gap-1.5">
                       <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal)} />
 	                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
                     </div>
                   </div>
-                  <span className="text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "预计影响" : "Expected Impact"}</p>
+                    <p className="mt-1 text-xl font-extrabold leading-none text-emerald-700">{signedCurrency(impact)}</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500">/ {simulationHorizonDays} days</p>
+                  </div>
                 </div>
-                <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
-	                  {actionDisplay.description}
-                </p>
-                <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="mt-4 rounded-lg bg-emerald-50/75 p-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-emerald-800">{isZh ? "推荐动作" : "Recommended action"}</p>
+                  <p className="mt-1 text-sm font-bold leading-5 text-slate-950">{actionDisplay.description}</p>
+                </div>
+                <div className="mt-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">{isZh ? "推荐原因" : "Why Monarca recommends this"}</p>
+                  <div className="mt-2 grid gap-1.5">
+                    {cardEvidence.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-slate-600">✓ {item.label}</span>
+                        <span className="font-bold text-slate-950">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-2">
                   {previousDecisionStatus ? (
                     <ActiveDecisionStatusBadge status={previousDecisionStatus} locale={locale} />
                   ) : (
-                    <span />
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectRow(row);
+                      }}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:border-emerald-200 hover:text-emerald-800"
+                    >
+                      {isZh ? "查看证据" : "View Evidence"}
+                    </button>
                   )}
                   {status === "awaiting_decision" ? (
                     <ActionDecisionButtons
@@ -2730,9 +2841,15 @@ function OptimizationDecisionRail({
                         onReject(row);
                       }}
                       compact
+                      acceptLabel={isZh ? "接受推荐" : "Accept Recommendation"}
                     />
                   ) : (
-                    <RecommendationStatusBadge status={status} locale={locale} />
+                    <div className="text-right">
+                      <RecommendationStatusBadge status={status} locale={locale} />
+                      {status === "accepted" ? (
+                        <p className="mt-1 text-[11px] font-semibold text-slate-500">{isZh ? "正在跟踪影响" : "Tracking impact over time"}</p>
+                      ) : null}
+                    </div>
                   )}
                 </div>
               </div>
@@ -5463,7 +5580,7 @@ function ActionDecisionButtons({
   const isZh = locale === "zh";
 
   return (
-    <div className={cn("flex gap-2", compact ? "min-w-[132px]" : "mt-3 w-full")}>
+    <div className={cn("flex gap-2", compact ? "min-w-[220px]" : "mt-3 w-full")}>
       <button
         type="button"
         onClick={(event) => onReject(event)}

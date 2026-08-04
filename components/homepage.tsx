@@ -894,7 +894,7 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
               <p className="text-xs font-medium text-emerald-700 sm:text-sm">{copy.eyebrow}</p>
             ) : null}
             {copy.title ? (
-              <h2 className="mt-2 max-w-4xl text-2xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-3xl">
+              <h2 className="mt-2 max-w-none text-2xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-3xl xl:whitespace-nowrap">
                 {copy.title}
               </h2>
             ) : null}

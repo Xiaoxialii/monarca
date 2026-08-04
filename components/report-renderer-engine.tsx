@@ -171,6 +171,27 @@ function safeNumber(value: unknown, fallback = 0) {
   return numberOrNull(value) ?? fallback;
 }
 
+function currentAdSpendFromOptimizationSummary(summary: unknown) {
+  const record = objectRecord(summary);
+  const directValue =
+    numberOrNull(record.current_ad_spend) ??
+    numberOrNull(record.current_ads_spend) ??
+    numberOrNull(record.total_ad_spend) ??
+    numberOrNull(record.total_ads_spend) ??
+    numberOrNull(record.total_ads_budget);
+
+  if (directValue !== null) return directValue;
+
+  for (const constraint of safeStringArray(record.constraints_applied)) {
+    const match = constraint.match(/^total_ads_budget=([-+]?\d+(?:\.\d+)?)/);
+    if (!match) continue;
+    const parsed = numberOrNull(match[1]);
+    if (parsed !== null) return parsed;
+  }
+
+  return 0;
+}
+
 function safeChannelDetails(value: unknown): SkuReportRow["channel_details"] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -1577,13 +1598,9 @@ function SkuPortfolioOptimizationPanel({
     decisionRowsExpectedProfitGain;
   const expectedProfitLiftRate = currentPortfolioProfit > 0 ? expectedProfitGain / currentPortfolioProfit : liftRate;
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
-  const displayedCurrentSkuCount = shouldBlankOptimizationSummary
-    ? 0
-    : optimizationStarted
-      ? pendingDecisionRows.length
-      : currentSkuCount;
+  const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
-  const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : safeNumber(summary.ads_budget_used);
+  const displayedCurrentAdSpend = shouldBlankOptimizationSummary ? 0 : currentAdSpendFromOptimizationSummary(summary);
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
   const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : expectedProfitGain;
   const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
@@ -1945,8 +1962,8 @@ function SkuPortfolioOptimizationPanel({
 	          </div>
 	          {headerAction ?? <span className="text-xs font-medium text-slate-500">{isZh ? "实时更新" : "Live update"}</span>}
 	        </div>
-	        <div className="grid gap-0 xl:grid-cols-2">
-	          <div className="min-w-0 px-5 py-3 xl:order-2">
+	        <div className={cn("grid gap-0", isSkuOperationsOpen ? "xl:grid-cols-1" : "xl:grid-cols-2")}>
+	          <div className={cn("min-w-0 px-5 py-3", !isSkuOperationsOpen && "xl:order-2")}>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {!isSkuOperationsOpen
                 ? (isZh ? "已接受优化影响" : "Accepted Optimization Impact")
@@ -1984,12 +2001,13 @@ function SkuPortfolioOptimizationPanel({
                 </>
               ) : (
                 <>
-                  <span>{isZh ? "当前预计利润" : "Estimated Profit"}: {currencyDecimal.format(displayedCurrentProfit)}</span>
-                  <span>{isZh ? "广告预算" : "Ad Spend"}: {currencyDecimal.format(displayedAdsBudget)}</span>
+                  <span>{isZh ? "当前组合利润" : "Current Portfolio Profit"}: {currencyDecimal.format(displayedCurrentProfit)}</span>
+                  <span>{isZh ? "当前广告花费" : "Current Ad Spend"}: {currencyDecimal.format(displayedCurrentAdSpend)}</span>
                 </>
               )}
             </div>
           </div>
+	          {!isSkuOperationsOpen ? (
 	          <div className="min-w-0 px-5 py-3 xl:order-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "优化机会" : "Optimization Opportunities"}</p>
             <p className="mt-3 break-words text-[42px] font-bold leading-none text-emerald-950">{displayedPendingOptimizationCountLabel} SKUs</p>
@@ -2001,6 +2019,7 @@ function SkuPortfolioOptimizationPanel({
               </span>
             </div>
           </div>
+	          ) : null}
         </div>
 	      </div>
 		      ) : null}

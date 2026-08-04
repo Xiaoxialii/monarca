@@ -483,12 +483,20 @@ test("optimization page passes optimization run metadata into renderer report", 
   assert.match(dashboard, /report=\{optimizationDecisionReport\}/);
 });
 
-test("optimization portfolio controls stay visible and current portfolio uses action queue count", () => {
+test("optimization portfolio controls stay visible and current portfolio uses portfolio totals", () => {
   const renderer = read("components/report-renderer-engine.tsx");
   const displaySnippet = renderer.match(/const displayedCurrentSkuCount = shouldBlankOptimizationSummary[\s\S]*?const displayedCurrentProfit/);
+  const adSpendHelper = renderer.match(/function currentAdSpendFromOptimizationSummary\([\s\S]*?\n\}/);
 
   assert.ok(displaySnippet, "current portfolio display count should be defined");
-  assert.match(displaySnippet[0], /optimizationStarted\s*\?\s*pendingDecisionRows\.length\s*:\s*currentSkuCount/);
+  assert.match(displaySnippet[0], /shouldBlankOptimizationSummary \? 0 : currentSkuCount/);
+  assert.doesNotMatch(displaySnippet[0], /pendingDecisionRows\.length/);
+  assert.ok(adSpendHelper, "current ad spend should be derived separately from added ad budget");
+  assert.match(adSpendHelper[0], /total_ads_budget/);
+  assert.match(renderer, /displayedCurrentAdSpend/);
+  assert.match(renderer, /Current Portfolio Profit/);
+  assert.match(renderer, /Current Ad Spend/);
+  assert.match(renderer, /!\s*isSkuOperationsOpen \? \(/);
   assert.match(renderer, /SKU operating data/);
   assert.match(renderer, /SKU optimization decision/);
   assert.match(renderer, /flex min-h-0 min-w-0 flex-col gap-3/);

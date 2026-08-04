@@ -483,14 +483,19 @@ test("optimization page passes optimization run metadata into renderer report", 
   assert.match(dashboard, /report=\{optimizationDecisionReport\}/);
 });
 
-test("current portfolio SKU count uses analyzed portfolio rows, not action queue rows", () => {
+test("optimization portfolio controls stay visible and current portfolio uses action queue count", () => {
   const renderer = read("components/report-renderer-engine.tsx");
   const displaySnippet = renderer.match(/const displayedCurrentSkuCount = shouldBlankOptimizationSummary[\s\S]*?const displayedCurrentProfit/);
 
   assert.ok(displaySnippet, "current portfolio display count should be defined");
-  assert.match(renderer, /const currentSkuCount = safeNumber\(summary\.input_sku_count\) \|\| selectedRows\.length \|\| sourceRows\.length \|\| sourceSkuIds\.length/);
-  assert.match(displaySnippet[0], /const displayedCurrentSkuCount = shouldBlankOptimizationSummary\s*\?\s*0\s*:\s*currentSkuCount/);
-  assert.doesNotMatch(displaySnippet[0], /pendingDecisionRows\.length/);
+  assert.match(displaySnippet[0], /optimizationStarted\s*\?\s*pendingDecisionRows\.length\s*:\s*currentSkuCount/);
+  assert.match(renderer, /SKU operating data/);
+  assert.match(renderer, /SKU optimization decision/);
+  assert.match(renderer, /sticky top-0 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
+  assert.match(renderer, /sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b/);
+  assert.match(renderer, /sticky top-0 z-20 bg-emerald-50\/95 p-2 pb-1 backdrop-blur/);
+  assert.match(renderer, /xl:overflow-visible/);
+  assert.match(renderer, /All channels/);
 });
 
 test("action APIs return auth errors as JSON responses", () => {

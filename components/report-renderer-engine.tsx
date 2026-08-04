@@ -1076,8 +1076,8 @@ function SkuBreakdownTable({
   }, [expandedSku, visibleRows]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
+    <div className="flex min-h-0 min-w-0 flex-col overflow-visible bg-white xl:h-full">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b bg-white/95 px-4 py-2 backdrop-blur">
         <div className="flex flex-wrap gap-2">
           {channelTags.map((channel) => (
             <button
@@ -1523,7 +1523,7 @@ function SkuPortfolioOptimizationPanel({
     ? sourceRows.map((row) => row.sku)
     : Array.from(new Set(optimizationSimulations.map((row) => String(objectRecord(row).sku ?? ""))).values()).filter(Boolean);
   const currentPortfolioProfit = safeNumber(summary.current_portfolio_profit);
-  const currentSkuCount = safeNumber(summary.input_sku_count) || selectedRows.length || sourceRows.length || sourceSkuIds.length;
+  const currentSkuCount = safeNumber(summary.input_sku_count) || sourceRows.length || sourceSkuIds.length;
   const totalExpectedProfitGain = safeNumber(optimization.total_expected_profit_gain);
   const liftRate = currentPortfolioProfit > 0 ? totalExpectedProfitGain / currentPortfolioProfit : 0;
   const simulationHorizonDays = safeNumber(summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days, 30);
@@ -1579,7 +1579,9 @@ function SkuPortfolioOptimizationPanel({
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary
     ? 0
-    : currentSkuCount;
+    : optimizationStarted
+      ? pendingDecisionRows.length
+      : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
   const displayedAdsBudget = shouldBlankOptimizationSummary ? 0 : safeNumber(summary.ads_budget_used);
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
@@ -2010,9 +2012,9 @@ function SkuPortfolioOptimizationPanel({
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
 				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
-			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-hidden xl:p-5">
+			        <div className="min-w-0 space-y-3 p-4 xl:order-3 xl:h-full xl:overflow-visible xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
-	          <div className="flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100 p-1">
+	          <div className="sticky top-0 z-20 flex w-full flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
             <button
               type="button"
               onClick={() => {
@@ -2045,7 +2047,7 @@ function SkuPortfolioOptimizationPanel({
             <EmptySkuProfitPortfolioTable locale={locale} isLoadingData />
           </div>
         ) : isSkuOperationsOpen ? (
-          <div className={cn("min-w-0 overflow-hidden", showSkuTableEmptyState ? "" : "rounded-lg border bg-white")}>
+          <div className={cn("min-w-0 overflow-visible", showSkuTableEmptyState ? "" : "rounded-lg border bg-white")}>
             {showSkuTableEmptyState ? (
               <EmptySkuProfitPortfolioTable locale={locale} />
             ) : (
@@ -2581,75 +2583,77 @@ function OptimizationDecisionRail({
 
   return (
     <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-0 xl:h-full xl:max-h-full">
-      <div className="rounded-lg bg-emerald-950 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
-          <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 text-xs font-bold text-emerald-50 ring-1 ring-emerald-200/25">
-            {queueCountLabel}
-          </span>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {optimizationGoalFilters.map((filter) => {
-            const isSelected = selectedGoal === filter.goal;
-            return (
-            <button
-              key={filter.goal}
-              type="button"
-              onClick={() => {
-                hasManuallySelectedGoalRef.current = true;
-                if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
-                setSelectedGoal(filter.goal);
-              }}
-              className={cn(
-                "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
-                isSelected
-                  ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                  : "bg-emerald-300/10 text-emerald-50 ring-emerald-200/20 hover:bg-emerald-300/20"
-              )}
-              aria-pressed={isSelected}
-            >
-              {filter.label}
-            </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className={cn(
-        "mt-2 flex min-h-[38px] flex-wrap content-start gap-2 px-1",
-        !selectedGoal && "invisible"
-      )}>
-        {selectedGoal
-          ? optimizationActionFilters[selectedGoal].map((action) => {
-            const isSelected = selectedGoalAction === action;
-            const count = actionCounts[action] ?? 0;
-            return (
+      <div className="sticky top-0 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
+        <div className="rounded-lg bg-emerald-950 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
+            <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 text-xs font-bold text-emerald-50 ring-1 ring-emerald-200/25">
+              {queueCountLabel}
+            </span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {optimizationGoalFilters.map((filter) => {
+              const isSelected = selectedGoal === filter.goal;
+              return (
               <button
-                key={action}
+                key={filter.goal}
                 type="button"
-	                onClick={() => {
-	                  const nextAction = selectedGoalAction === action ? null : action;
-	                  setSelectedGoalAction(nextAction);
-	                }}
+                onClick={() => {
+                  hasManuallySelectedGoalRef.current = true;
+                  if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
+                  setSelectedGoal(filter.goal);
+                }}
                 className={cn(
-                  "rounded-full px-3 py-1.5 text-xs font-bold transition ring-1",
+                  "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
                   isSelected
                     ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                    : "bg-white text-emerald-900 ring-emerald-200 hover:bg-emerald-50"
+                    : "bg-emerald-300/10 text-emerald-50 ring-emerald-200/20 hover:bg-emerald-300/20"
                 )}
                 aria-pressed={isSelected}
               >
-                {actionFilterDisplayLabel(action)}
-                <span className={cn(
-                  "ml-1 text-[10px]",
-                  isSelected ? "text-white/80" : "text-emerald-700/70"
-                )}>
-                  {numberFormat.format(count)}
-                </span>
+                {filter.label}
               </button>
-            );
-          })
-          : null}
+              );
+            })}
+          </div>
+        </div>
+
+        <div className={cn(
+          "mt-2 flex min-h-[38px] flex-wrap content-start gap-2 px-1",
+          !selectedGoal && "invisible"
+        )}>
+          {selectedGoal
+            ? optimizationActionFilters[selectedGoal].map((action) => {
+              const isSelected = selectedGoalAction === action;
+              const count = actionCounts[action] ?? 0;
+              return (
+                <button
+                  key={action}
+                  type="button"
+	                  onClick={() => {
+	                    const nextAction = selectedGoalAction === action ? null : action;
+	                    setSelectedGoalAction(nextAction);
+	                  }}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-xs font-bold transition ring-1",
+                    isSelected
+                      ? "bg-[#5747e8] text-white ring-[#5747e8]"
+                      : "bg-white text-emerald-900 ring-emerald-200 hover:bg-emerald-50"
+                  )}
+                  aria-pressed={isSelected}
+                >
+                  {actionFilterDisplayLabel(action)}
+                  <span className={cn(
+                    "ml-1 text-[10px]",
+                    isSelected ? "text-white/80" : "text-emerald-700/70"
+                  )}>
+                    {numberFormat.format(count)}
+                  </span>
+                </button>
+              );
+            })
+            : null}
+        </div>
       </div>
       <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-scroll overscroll-contain px-1 pb-1 pr-4 [scrollbar-color:rgba(100,116,139,0.75)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500/75">
         {displayedRows.length ? displayedRows.map((row) => {

@@ -1,5 +1,6 @@
 import { allocateAdSpendToSkus } from "./sku-ad-allocation-engine";
 import { revenueChannelOrNull } from "@/lib/channels/revenue-channel";
+import { calculateSalesVelocity, type VelocityConfidence } from "@/lib/inventory/sales-velocity-engine";
 import { calculateSkuProfitability, canonicalAdAllocationMethod, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type SkuProfitInputRow = {
@@ -87,6 +88,10 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
   stock_level: number | null;
   available_stock: number | null;
   sales_velocity: number;
+  velocity_window_days: number;
+  velocity_confidence: VelocityConfidence;
+  data_period_days: number;
+  inventory_risk_status: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   days_of_inventory: number | null;
   stockout_risk: "high" | "medium" | "low" | "unknown";
   overstock_risk: "high" | "medium" | "low" | "unknown";
@@ -120,6 +125,7 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
 export function calculateSkuProfitAndAllocation(input: {
   rows: SkuProfitInputRow[];
   orderItems: Array<Record<string, unknown>>;
+  orders?: Array<Record<string, unknown>>;
   ads: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
 }) {
@@ -135,7 +141,7 @@ export function calculateSkuProfitAndAllocation(input: {
   );
   const channelBreakdowns = buildChannelBreakdowns(input.orderItems);
   const inventoryBySku = buildInventoryBySku(input.inventory ?? []);
-  const activeDaysBySku = buildActiveDaysBySku(input.orderItems);
+  const velocityBySku = buildSalesVelocityBySku(input.orderItems, input.orders ?? []);
 
   const allocated = rows.map((row) => {
     const adAllocation = adAllocations.get(row.sku);
@@ -167,9 +173,11 @@ export function calculateSkuProfitAndAllocation(input: {
     const margin = profitability.margin;
     const inventory = inventoryBySku.get(row.sku);
     const inventoryConfidence = inventory ? 1 : 0;
-    const salesVelocity = roundRatio(row.quantity / Math.max(1, activeDaysBySku.get(row.sku) ?? 1));
+    const velocity = velocityBySku.get(row.sku) ?? calculateSalesVelocity({ totalUnitsSold: row.quantity, orderDates: [] });
+    const salesVelocity = velocity.sales_velocity;
     const daysOfInventory = inventory && salesVelocity > 0 ? roundRatio(inventory.available_stock / salesVelocity) : null;
-    const stockoutRisk = stockoutRiskLevel(daysOfInventory, inventory);
+    const inventoryRiskStatus = inventoryRiskStatusFromRunway(daysOfInventory, velocity.velocity_confidence);
+    const stockoutRisk = stockoutRiskLevel(daysOfInventory, inventory, velocity.velocity_confidence);
     const overstockRisk = overstockRiskLevel(daysOfInventory, salesVelocity, inventory);
     const refundRate = safeRatio(row.refund_cost, row.revenue);
     const refundRisk = refundRiskLevel(refundRate, row.estimated_components.includes("refund_cost"));
@@ -277,6 +285,10 @@ export function calculateSkuProfitAndAllocation(input: {
       stock_level: inventory?.stock_level ?? null,
       available_stock: inventory?.available_stock ?? null,
       sales_velocity: salesVelocity,
+      velocity_window_days: velocity.velocity_window_days,
+      velocity_confidence: velocity.velocity_confidence,
+      data_period_days: velocity.data_period_days,
+      inventory_risk_status: inventoryRiskStatus,
       days_of_inventory: daysOfInventory,
       stockout_risk: stockoutRisk,
       overstock_risk: overstockRisk,
@@ -370,18 +382,35 @@ function buildInventoryBySku(rows: Array<Record<string, unknown>>) {
   return bySku;
 }
 
-function buildActiveDaysBySku(orderItems: Array<Record<string, unknown>>) {
-  const datesBySku = new Map<string, Set<string>>();
+function buildSalesVelocityBySku(orderItems: Array<Record<string, unknown>>, orders: Array<Record<string, unknown>>) {
+  const orderDateById = new Map<string, string>();
+  for (const order of orders) {
+    const orderId = stringValue(order.order_id);
+    const date = firstDateString(order.order_date, order.date, order.created_at, order.createdAt);
+    if (orderId && date) orderDateById.set(orderId, date);
+  }
+
+  const datesBySku = new Map<string, string[]>();
+  const quantityBySku = new Map<string, number>();
   for (const item of orderItems) {
     const sku = stringValue(item.sku);
     if (!sku) continue;
-    const date = firstDateString(item.order_date, item.date, item.created_at, item.createdAt);
+    const orderId = stringValue(item.order_id);
+    const date = firstDateString(item.order_date, item.date, item.created_at, item.createdAt) ?? orderDateById.get(orderId);
+    quantityBySku.set(sku, roundRatio((quantityBySku.get(sku) ?? 0) + numberValue(item.quantity, 1)));
     if (!date) continue;
-    const dates = datesBySku.get(sku) ?? new Set<string>();
-    dates.add(date);
+    const dates = datesBySku.get(sku) ?? [];
+    dates.push(date);
     datesBySku.set(sku, dates);
   }
-  return new Map(Array.from(datesBySku.entries()).map(([sku, dates]) => [sku, Math.max(1, dates.size)]));
+
+  return new Map(Array.from(quantityBySku.entries()).map(([sku, quantity]) => [
+    sku,
+    calculateSalesVelocity({
+      totalUnitsSold: quantity,
+      orderDates: datesBySku.get(sku) ?? []
+    })
+  ]));
 }
 
 function skuProfitConfidence(input: {
@@ -416,11 +445,22 @@ function skuRiskScore(input: {
   return roundRatio(Math.min(1, marginRisk + refundRisk + stockRisk + velocityRisk + estimationRisk + concentrationRisk + attributionRisk));
 }
 
-function stockoutRiskLevel(daysOfInventory: number | null, inventory?: { stock_level: number; available_stock: number }): SkuProfitAllocationRow["stockout_risk"] {
+function stockoutRiskLevel(daysOfInventory: number | null, inventory: { stock_level: number; available_stock: number } | undefined, velocityConfidence: VelocityConfidence): SkuProfitAllocationRow["stockout_risk"] {
   if (!inventory || daysOfInventory === null) return "unknown";
+  if (velocityConfidence === "LOW") return "unknown";
   if (daysOfInventory < 7) return "high";
   if (daysOfInventory <= 21) return "medium";
   return "low";
+}
+
+function inventoryRiskStatusFromRunway(
+  daysOfInventory: number | null,
+  velocityConfidence: VelocityConfidence
+): SkuProfitAllocationRow["inventory_risk_status"] {
+  if (daysOfInventory !== null && daysOfInventory < 14) {
+    return velocityConfidence === "LOW" ? "LOW_CONFIDENCE_STOCK_RISK" : "STOCKOUT_RISK";
+  }
+  return velocityConfidence === "LOW" ? "INSUFFICIENT_DATA" : "OK";
 }
 
 function overstockRiskLevel(daysOfInventory: number | null, salesVelocity: number, inventory?: { stock_level: number; available_stock: number }): SkuProfitAllocationRow["overstock_risk"] {

@@ -11,6 +11,7 @@ export type SkuOptimizationInputRow = {
   ads_spend: number;
   inventory: number;
   sales_velocity: number;
+  sales_velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
   margin: number;
 };
 
@@ -166,7 +167,7 @@ function buildActions(input: {
   if (input.row.revenue > 0 && (input.row.margin < 0.15 || input.contributionProfit < 0)) {
     actions.add("raise_price");
   }
-  if (input.row.sales_velocity > 0 && input.inventoryCoverageDays != null && input.inventoryCoverageDays < 14) {
+  if (input.row.sales_velocity > 0 && (input.row.sales_velocity_confidence ?? "LOW") !== "LOW" && input.inventoryCoverageDays != null && input.inventoryCoverageDays < 14) {
     actions.add("replenish_inventory");
   }
   if (!actions.size) actions.add("hold");

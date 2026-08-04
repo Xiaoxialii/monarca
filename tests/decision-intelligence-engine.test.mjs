@@ -65,7 +65,8 @@ test("decision intelligence report v1 converts metric output into report section
   assert.equal(report.customer_breakdown.customer_count, 1);
   assert.equal(report.customer_breakdown.median_ltv, 300);
   assert.equal(report.customer_breakdown.revenue_per_customer_segment[0].segment, "Top 1%");
-  assert.equal(report.customer_breakdown.cohort_by_first_purchase_month[0].cohort_month, "2026-06");
+  assert.equal(report.customer_breakdown.cohort_by_first_purchase_month.length, 0);
+  assert.equal(report.customer_breakdown.cohort_confidence, "LOW");
   assert.ok(Array.isArray(report.profit_control_insights));
   assert.ok(report.profit_control_insights.length > 0);
   assert.equal(typeof report.profit_control_insights[0].insight_id, "string");
@@ -144,7 +145,7 @@ test("SKU optimization algorithm ranks SKU actions and allocates constrained bud
       { sku: "SCALE", revenue: 1000, quantity: 100, price: 10, cogs: 400, ads_spend: 100, inventory: 500, sales_velocity: 10, margin: 0.5 },
       { sku: "STOP", revenue: 400, quantity: 40, price: 10, cogs: 300, ads_spend: 180, inventory: 200, sales_velocity: 4, margin: -0.2 },
       { sku: "PRICE", revenue: 500, quantity: 50, price: 10, cogs: 460, ads_spend: 20, inventory: 120, sales_velocity: 6, margin: 0.04 },
-      { sku: "RESTOCK", revenue: 800, quantity: 80, price: 10, cogs: 360, ads_spend: 80, inventory: 20, sales_velocity: 8, margin: 0.45 }
+      { sku: "RESTOCK", revenue: 800, quantity: 80, price: 10, cogs: 360, ads_spend: 80, inventory: 20, sales_velocity: 8, sales_velocity_confidence: "HIGH", margin: 0.45 }
     ]
   });
 
@@ -157,4 +158,16 @@ test("SKU optimization algorithm ranks SKU actions and allocates constrained bud
   assert.ok(result.budget_allocation.length > 0);
   assert.ok(result.budget_allocation.reduce((sum, row) => sum + row.allocated_budget, 0) <= 300);
   assert.ok(result.expected_portfolio_profit > 0);
+});
+
+test("SKU optimization algorithm blocks restock when velocity confidence is low", () => {
+  const result = buildSkuOptimizationAlgorithm({
+    total_ad_budget: 100,
+    rows: [
+      { sku: "LOW_CONF_RESTOCK", revenue: 800, quantity: 80, price: 10, cogs: 360, ads_spend: 80, inventory: 20, sales_velocity: 8, sales_velocity_confidence: "LOW", margin: 0.45 }
+    ]
+  });
+
+  assert.equal(result.replenish_inventory_skus.length, 0);
+  assert.equal(result.ranked_skus[0].actions.includes("replenish_inventory"), false);
 });

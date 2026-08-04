@@ -21,6 +21,10 @@ export type PortfolioSkuInput = {
   net_profit: number;
   inventory: number;
   sales_velocity: number;
+  sales_velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  velocity_window_days?: number;
+  data_period_days?: number;
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   refund_rate: number;
   customer_ltv: number;
   conversion_rate: number;

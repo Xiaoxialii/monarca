@@ -112,6 +112,10 @@ export type SkuUnitEconomicsMetric = {
   stock_level?: number | null;
   available_stock?: number | null;
   sales_velocity?: number;
+  velocity_window_days?: number;
+  velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  data_period_days?: number;
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   days_of_inventory?: number | null;
   stockout_risk?: "high" | "medium" | "low" | "unknown";
   overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -248,10 +252,27 @@ export type CanonicalEcommerceMetricOutput = {
       ltv_cac_ratio: number;
       cac_by_cohort: Array<{ cohort_month: string; cac: number }>;
       payback_period_days: number | null;
+      customer_lifecycles: Array<{
+        customer_id: string;
+        first_order_date: string;
+        last_order_date: string;
+        lifetime_days: number;
+      }>;
+      median_customer_lifetime_days: number;
+      ltv_confidence: "HIGH" | "MEDIUM" | "LOW";
+      cac_confidence: "HIGH" | "MEDIUM" | "LOW";
+      cohort_confidence: "HIGH" | "MEDIUM" | "LOW";
+      customer_metric_confidence: "HIGH" | "MEDIUM" | "LOW";
+      cac: number | null;
+      cac_status: "OK" | "INSUFFICIENT_CUSTOMER_HISTORY";
+      warnings: string[];
     };
     ads: {
       roas: number;
       cac: number | null;
+      cac_confidence: "HIGH" | "MEDIUM" | "LOW";
+      cac_status: "OK" | "INSUFFICIENT_CUSTOMER_HISTORY";
+      warnings: string[];
       cpa: number;
       mer: number;
       ad_spend: number;
@@ -634,6 +655,25 @@ function buildCustomerMetrics(input: {
   const orderIdsByCustomer = new Map<string, Set<string>>();
   const revenueByCustomer = new Map<string, number>();
   const orderDatesByCustomer = new Map<string, string[]>();
+  const profileOrderCountByCustomer = new Map<string, number>();
+  const profileRevenueByCustomer = new Map<string, number>();
+
+  for (const customer of customers) {
+    const customerId = stringValue(customer.customer_id);
+    if (!customerId) continue;
+    const firstOrderDate = dayKey(firstString(customer.first_order_date, customer.first_order_at, customer.customer_first_order_date));
+    const lastOrderDate = dayKey(firstString(customer.last_order_date, customer.last_order_at, customer.customer_last_order_date));
+    const dates = [firstOrderDate, lastOrderDate].filter(Boolean);
+    if (dates.length) {
+      const current = orderDatesByCustomer.get(customerId) ?? [];
+      current.push(...dates);
+      orderDatesByCustomer.set(customerId, current);
+    }
+    const profileOrderCount = firstFiniteNumber(customer.total_orders, customer.order_count, customer.orders_count);
+    if (profileOrderCount !== null) profileOrderCountByCustomer.set(customerId, Math.max(0, profileOrderCount));
+    const profileRevenue = firstFiniteNumber(customer.total_spent, customer.lifetime_value, customer.ltv);
+    if (profileRevenue !== null) profileRevenueByCustomer.set(customerId, roundCurrency(profileRevenue));
+  }
 
   for (const order of orders) {
     const customerId = explicitCustomerIdFromOrder(order);
@@ -644,12 +684,16 @@ function buildCustomerMetrics(input: {
     if (orderId) orderIds.add(orderId);
     orderIdsByCustomer.set(customerId, orderIds);
     revenueByCustomer.set(customerId, roundCurrency((revenueByCustomer.get(customerId) ?? 0) + orderRevenue(order)));
-    const date = dayKey(firstString(order.order_date, order.created_at, order.date, order.createdAt));
+    const date = customerLifecycleOrderDate(order);
     if (date) {
       const dates = orderDatesByCustomer.get(customerId) ?? [];
       dates.push(date);
       orderDatesByCustomer.set(customerId, dates);
     }
+  }
+
+  for (const [customerId, profileRevenue] of profileRevenueByCustomer.entries()) {
+    if (!revenueByCustomer.has(customerId)) revenueByCustomer.set(customerId, profileRevenue);
   }
 
   const customerIds = new Set<string>([
@@ -684,13 +728,24 @@ function buildCustomerMetrics(input: {
   const eventLevelCustomerRevenue = sum(Array.from(revenueByCustomer.values()));
   const customerLifetimeValue = customerCount ? eventLevelCustomerRevenue / customerCount : 0;
 
-  const returningCustomers = Array.from(orderIdsByCustomer.values()).filter((orderIds) => orderIds.size > 1).length;
+  const returningCustomers = Array.from(customerIds).filter((customerId) => {
+    const observedOrders = orderIdsByCustomer.get(customerId)?.size ?? 0;
+    const profileOrders = profileOrderCountByCustomer.get(customerId) ?? 0;
+    return Math.max(observedOrders, profileOrders) > 1;
+  }).length;
   const newCustomers = newCustomerCount(orders, customers);
   const ltvValues = Array.from(customerIds).map((customerId) => revenueByCustomer.get(customerId) ?? firstNumber(customers.find((row) => stringValue(row.customer_id) === customerId)?.total_spent));
-  const activeCustomerCount = Array.from(orderIdsByCustomer.values()).filter((orderIds) => orderIds.size > 0).length;
+  const activeCustomerCount = Array.from(customerIds).filter((customerId) =>
+    (orderIdsByCustomer.get(customerId)?.size ?? 0) > 0 ||
+    (profileOrderCountByCustomer.get(customerId) ?? 0) > 0
+  ).length;
   const inactiveCustomers = Math.max(0, customerCount - activeCustomerCount);
   const lifecycle = customerLifecycleCounts({ customerIds, orderDatesByCustomer });
-  const cohort = buildCustomerCohorts({ customerIds, revenueByCustomer, orderDatesByCustomer, adSpend });
+  const confidence = customerMetricConfidence({ orderDatesByCustomer, orderIdsByCustomer });
+  const canBuildCohorts = confidence.cohort_confidence !== "LOW";
+  const cohort = canBuildCohorts
+    ? buildCustomerCohorts({ customerIds, revenueByCustomer, orderDatesByCustomer, adSpend })
+    : emptyCustomerCohorts();
   const segmentRows = customerValueSegments({
     customerIds,
     revenueByCustomer,
@@ -698,17 +753,32 @@ function buildCustomerMetrics(input: {
     totalProfit: netProfit,
     totalAdSpend: adSpend
   });
-  const avgOrderValue = safeRatio(eventLevelCustomerRevenue, orderCount);
-  const purchaseFrequency = safeRatio(orderCount, activeCustomerCount || customerCount);
+  const profileOrderCount = sum(Array.from(profileOrderCountByCustomer.values()));
+  const customerOrderCount = profileOrderCount > 0 ? profileOrderCount : orderCount;
+  const avgOrderValue = safeRatio(eventLevelCustomerRevenue, customerOrderCount || orderCount);
+  const purchaseFrequency = safeRatio(customerOrderCount, activeCustomerCount || customerCount);
   const customerRevenueLtv = roundCurrency(avgOrderValue * purchaseFrequency);
   const grossMargin = safeRatio(netProfit + adSpend, eventLevelCustomerRevenue);
   const customerProfitLtv = roundCurrency(customerRevenueLtv * grossMargin);
-  const cac = acquisitionReliable ? safeRatio(adSpend, newCustomers) : null;
+  const reliableNewCustomerCount = acquisitionReliable && confidence.cac_confidence !== "LOW" && newCustomers > 0;
+  const cac = reliableNewCustomerCount ? safeRatio(adSpend, newCustomers) : null;
   const ltvCacRatio = cac === null ? 0 : safeRatio(customerLifetimeValue, cac);
   const customerContributionLtv = cac === null ? 0 : roundCurrency(customerRevenueLtv - cac);
   const paybackPeriodDays = customerLifetimeValue > 0 && cac !== null
     ? roundRatio((cac / customerLifetimeValue) * Math.max(1, lifecycle.avgCustomerLifetimeDays))
     : null;
+  const repeatCustomersWithZeroLifetime = lifecycle.customerLifecycles.filter((row) => {
+    const observedOrders = orderIdsByCustomer.get(row.customer_id)?.size ?? 0;
+    const profileOrders = profileOrderCountByCustomer.get(row.customer_id) ?? 0;
+    return Math.max(observedOrders, profileOrders) > 1 && row.lifetime_days === 0;
+  });
+  const warnings = [
+    ...(confidence.ltv_confidence === "LOW" ? ["Limited customer history"] : []),
+    ...(confidence.ltv_confidence !== "HIGH" ? ["Limited historical window"] : []),
+    ...(cac === null && adSpend > 0 ? ["New customer attribution requires multiple order periods"] : []),
+    ...(confidence.cohort_confidence === "LOW" ? ["Insufficient cohort history"] : []),
+    ...(repeatCustomersWithZeroLifetime.length ? ["Repeat customers require distinct canonical order dates to calculate lifetime days"] : [])
+  ];
 
   return {
     ltv: roundCurrency(customerLifetimeValue),
@@ -728,8 +798,8 @@ function buildCustomerMetrics(input: {
     top_1_percent_revenue_share: topRevenueShare(ltvValues, 0.01),
     active_customers: activeCustomerCount,
     inactive_customers: inactiveCustomers,
-    avg_orders_per_customer: safeRatio(orderCount, customerCount),
-    purchase_frequency: safeRatio(orderCount, activeCustomerCount || customerCount),
+    avg_orders_per_customer: safeRatio(customerOrderCount, customerCount),
+    purchase_frequency: safeRatio(customerOrderCount, activeCustomerCount || customerCount),
     new_customers: newCustomers,
     dormant_customers: lifecycle.dormantCustomers,
     churned_customers: lifecycle.churnedCustomers,
@@ -743,8 +813,28 @@ function buildCustomerMetrics(input: {
     ads_cost_per_customer_segment: segmentRows.adCost,
     ltv_cac_ratio: ltvCacRatio,
     cac_by_cohort: cohort.cacByCohort,
-    payback_period_days: paybackPeriodDays
+    payback_period_days: paybackPeriodDays,
+    customer_lifecycles: lifecycle.customerLifecycles,
+    median_customer_lifetime_days: lifecycle.medianCustomerLifetimeDays,
+    ltv_confidence: confidence.ltv_confidence,
+    cac_confidence: confidence.cac_confidence,
+    cohort_confidence: confidence.cohort_confidence,
+    customer_metric_confidence: confidence.customer_metric_confidence,
+    cac,
+    cac_status: cac === null && adSpend > 0 ? "INSUFFICIENT_CUSTOMER_HISTORY" as const : "OK" as const,
+    warnings
   };
+}
+
+function customerLifecycleOrderDate(order: Record<string, unknown>) {
+  return dayKey(firstString(
+    order.created_at,
+    order.created_at_source,
+    order.processed_at_source,
+    order.order_date,
+    order.date,
+    order.createdAt
+  ));
 }
 
 function buildAdsMetrics(input: {
@@ -777,7 +867,10 @@ function buildAdsMetrics(input: {
 
   return {
     roas: safeRatio(revenue, adSpend),
-    cac: newCustomerReliable ? safeRatio(adSpend, newCustomers) : null,
+    cac: newCustomerReliable && newCustomers > 0 ? safeRatio(adSpend, newCustomers) : null,
+    cac_confidence: newCustomerReliable && newCustomers > 0 ? "MEDIUM" as const : "LOW" as const,
+    cac_status: newCustomerReliable && newCustomers > 0 ? "OK" as const : "INSUFFICIENT_CUSTOMER_HISTORY" as const,
+    warnings: newCustomerReliable && newCustomers > 0 ? [] : ["New customer attribution requires multiple order periods"],
     cpa: safeRatio(adSpend, orderCount),
     mer: safeRatio(revenue, adSpend),
     ad_spend: adSpend
@@ -794,6 +887,8 @@ function customerLifecycleCounts(input: {
   let churnedCustomers = 0;
   let lifetimeTotal = 0;
   let lifetimeCount = 0;
+  const customerLifecycles: Array<{ customer_id: string; first_order_date: string; last_order_date: string; lifetime_days: number }> = [];
+  const lifetimeValues: number[] = [];
 
   for (const customerId of input.customerIds) {
     const dates = [...(input.orderDatesByCustomer.get(customerId) ?? [])].sort();
@@ -801,9 +896,16 @@ function customerLifecycleCounts(input: {
 
     const first = new Date(`${dates[0]}T00:00:00.000Z`);
     const last = new Date(`${dates[dates.length - 1]}T00:00:00.000Z`);
-    const lifetimeDays = Math.max(1, daysBetween(first, last) + 1);
+    const lifetimeDays = Math.max(0, daysBetween(first, last));
     lifetimeTotal += lifetimeDays;
+    lifetimeValues.push(lifetimeDays);
     lifetimeCount += 1;
+    customerLifecycles.push({
+      customer_id: customerId,
+      first_order_date: dates[0],
+      last_order_date: dates[dates.length - 1],
+      lifetime_days: lifetimeDays
+    });
 
     if (latestDate) {
       const daysSinceLastOrder = daysBetween(last, latestDate);
@@ -815,7 +917,52 @@ function customerLifecycleCounts(input: {
   return {
     dormantCustomers,
     churnedCustomers,
-    avgCustomerLifetimeDays: lifetimeCount ? roundRatio(lifetimeTotal / lifetimeCount) : 0
+    avgCustomerLifetimeDays: lifetimeCount ? roundRatio(lifetimeTotal / lifetimeCount) : 0,
+    medianCustomerLifetimeDays: roundRatio(percentile(lifetimeValues, 0.5)),
+    customerLifecycles
+  };
+}
+
+function customerMetricConfidence(input: {
+  orderDatesByCustomer: Map<string, string[]>;
+  orderIdsByCustomer: Map<string, Set<string>>;
+}) {
+  const allDates = Array.from(input.orderDatesByCustomer.values()).flat().sort();
+  const uniqueDates = new Set(allDates);
+  const dataPeriodDays = allDates.length >= 2
+    ? daysBetween(new Date(`${allDates[0]}T00:00:00.000Z`), new Date(`${allDates[allDates.length - 1]}T00:00:00.000Z`))
+    : 0;
+  const hasMultipleOrderPeriods = uniqueDates.size >= 2 && dataPeriodDays > 0;
+  const hasMultipleCustomerOrders = Array.from(input.orderIdsByCustomer.values()).some((orderIds) => orderIds.size > 1);
+  const customer_metric_confidence = hasMultipleOrderPeriods && dataPeriodDays >= 30
+    ? "HIGH" as const
+    : hasMultipleOrderPeriods || hasMultipleCustomerOrders
+      ? "MEDIUM" as const
+      : "LOW" as const;
+  const ltv_confidence = dataPeriodDays >= 30
+    ? "HIGH" as const
+    : hasMultipleOrderPeriods || hasMultipleCustomerOrders
+      ? "MEDIUM" as const
+      : "LOW" as const;
+  const cac_confidence = dataPeriodDays >= 14 && hasMultipleOrderPeriods ? (dataPeriodDays >= 30 ? "HIGH" as const : "MEDIUM" as const) : "LOW" as const;
+  const cohort_confidence = dataPeriodDays >= 14 && hasMultipleOrderPeriods ? (dataPeriodDays >= 30 ? "HIGH" as const : "MEDIUM" as const) : "LOW" as const;
+
+  return {
+    customer_metric_confidence,
+    ltv_confidence,
+    cac_confidence,
+    cohort_confidence,
+    data_period_days: dataPeriodDays
+  };
+}
+
+function emptyCustomerCohorts() {
+  return {
+    cohorts: [],
+    retention7d: 0,
+    retention30d: 0,
+    ltvCurve: [],
+    cacByCohort: []
   };
 }
 
@@ -1119,18 +1266,30 @@ function customerAcquisitionReliability(orders: Array<Record<string, unknown>>, 
   const customerCoverage = safeRatio(orderCustomerRows, orders.length);
   const customerProfileCoverage = safeRatio(explicitNewCustomerRows + customerOrderRows, customers.length);
   const newCustomers = newCustomerCount(orders, customers);
+  const dataPeriodDays = orderDataPeriodDays(orders);
+  const hasMultipleOrderPeriods = dataPeriodDays >= 14;
   const reliable = newCustomers > 0 && (
     explicitNewCustomerRows > 0 ||
     customerProfileCoverage >= 0.8 ||
     (orders.length > 0 && customerCoverage >= 0.8)
-  );
+  ) && hasMultipleOrderPeriods;
 
   return {
     reliable,
     customerCoverage,
     customerProfileCoverage,
-    newCustomers
+    newCustomers,
+    dataPeriodDays
   };
+}
+
+function orderDataPeriodDays(orders: Array<Record<string, unknown>>) {
+  const dates = orders
+    .map((order) => dayKey(firstString(order.order_date, order.created_at, order.date, order.createdAt)))
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  if (dates.length < 2) return 0;
+  return daysBetween(new Date(`${dates[0]}T00:00:00.000Z`), new Date(`${dates[dates.length - 1]}T00:00:00.000Z`));
 }
 
 function explicitCustomerIdFromOrder(order: Record<string, unknown>) {

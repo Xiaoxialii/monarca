@@ -743,6 +743,7 @@ test("RESTOCK_AND_SCALE eligibility requires low inventory coverage and positive
     net_profit: 1800,
     inventory: 12,
     sales_velocity: 4,
+    sales_velocity_confidence: "HIGH",
     prediction_confidence: 0.78
   });
 
@@ -770,6 +771,73 @@ test("RESTOCK_AND_SCALE eligibility requires low inventory coverage and positive
   });
   assert.equal(noVelocity.allowed, false);
   assert.ok(noVelocity.rejectedReasons.some((reason) => /Sales velocity does not support/i.test(reason)));
+
+  const lowVelocityConfidence = evaluateActionEligibility({
+    sku: { ...sku, sales_velocity_confidence: "LOW" },
+    action: "RESTOCK_AND_SCALE",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 3
+  });
+  assert.equal(lowVelocityConfidence.allowed, false);
+  assert.ok(lowVelocityConfidence.rejectedReasons.some((reason) => /confidence too low/i.test(reason)));
+});
+
+test("REDUCE_INVENTORY eligibility requires reliable sales velocity confidence", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_CLEAR_CONFIDENCE",
+    margin: 0.18,
+    net_profit: 400,
+    inventory: 900,
+    sales_velocity: 2,
+    sales_velocity_confidence: "LOW",
+    prediction_confidence: 0.72
+  });
+
+  const lowVelocityConfidence = evaluateActionEligibility({
+    sku,
+    action: "REDUCE_INVENTORY",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 450,
+    clearInventoryEligible: true
+  });
+  assert.equal(lowVelocityConfidence.allowed, false);
+  assert.ok(lowVelocityConfidence.rejectedReasons.some((reason) => /confidence too low for inventory reduction/i.test(reason)));
+
+  const highVelocityConfidence = evaluateActionEligibility({
+    sku: { ...sku, sales_velocity_confidence: "HIGH" },
+    action: "REDUCE_INVENTORY",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 450,
+    clearInventoryEligible: true
+  });
+  assert.equal(highVelocityConfidence.allowed, true);
+});
+
+test("inventory action generator suppresses restock and reduction when velocity confidence is low", () => {
+  const restockSku = adsSimulationSku({
+    sku: "SKU_LOW_CONF_RESTOCK",
+    inventory: 4,
+    sales_velocity: 4,
+    sales_velocity_confidence: "LOW",
+    margin: 0.45,
+    net_profit: 1200
+  });
+  const reduceSku = adsSimulationSku({
+    sku: "SKU_LOW_CONF_REDUCE",
+    inventory: 1200,
+    sales_velocity: 2,
+    sales_velocity_confidence: "LOW",
+    margin: 0.16,
+    net_profit: 300
+  });
+
+  const actions = generateOptimizationActions({
+    skus: [restockSku, reduceSku],
+    opportunities: [unitOpportunity(restockSku, "INVENTORY"), unitOpportunity(reduceSku, "INVENTORY")]
+  });
+
+  assert.equal(actions.some((action) => action.portfolio_action === "RESTOCK_AND_SCALE"), false);
+  assert.equal(actions.some((action) => action.portfolio_action === "REDUCE_INVENTORY"), false);
 });
 
 test("ad scale simulation uses canonical v2 SKU net profit as current profit baseline", () => {
@@ -1414,6 +1482,7 @@ test("low velocity high inventory SKU qualifies for clear excess inventory", () 
     sku: "SKU_LOW_VELOCITY_HIGH_INVENTORY",
     inventory: 900,
     sales_velocity: 3,
+    sales_velocity_confidence: "HIGH",
     revenue_growth: -0.08,
     order_growth: -0.06,
     conversion_trend: -0.02,

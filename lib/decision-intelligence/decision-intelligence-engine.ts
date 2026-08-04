@@ -185,6 +185,10 @@ export type DecisionIntelligenceReportV1 = {
       stock_level?: number | null;
       available_stock?: number | null;
       sales_velocity?: number;
+      velocity_window_days?: number;
+      velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+      data_period_days?: number;
+      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
       days_of_inventory?: number | null;
       stockout_risk?: "high" | "medium" | "low" | "unknown";
       overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -262,6 +266,20 @@ export type DecisionIntelligenceReportV1 = {
     ltv_cac_ratio: number;
     cac_by_cohort: Array<{ cohort_month: string; cac: number }>;
     payback_period_days: number | null;
+    customer_lifecycles?: Array<{
+      customer_id: string;
+      first_order_date: string;
+      last_order_date: string;
+      lifetime_days: number;
+    }>;
+    median_customer_lifetime_days?: number;
+    ltv_confidence?: "HIGH" | "MEDIUM" | "LOW";
+    cac_confidence?: "HIGH" | "MEDIUM" | "LOW";
+    cohort_confidence?: "HIGH" | "MEDIUM" | "LOW";
+    customer_metric_confidence?: "HIGH" | "MEDIUM" | "LOW";
+    cac?: number | null;
+    cac_status?: "OK" | "INSUFFICIENT_CUSTOMER_HISTORY";
+    warnings?: string[];
   };
   growth_overview: {
     revenue_growth_rate: number;
@@ -352,6 +370,10 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     stock_level: row.stock_level,
     available_stock: row.available_stock,
     sales_velocity: row.sales_velocity,
+    velocity_window_days: row.velocity_window_days,
+    velocity_confidence: row.velocity_confidence,
+    data_period_days: row.data_period_days,
+    inventory_risk_status: row.inventory_risk_status,
     days_of_inventory: row.days_of_inventory,
     stockout_risk: row.stockout_risk,
     overstock_risk: row.overstock_risk,
@@ -416,6 +438,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
         ads_spend: row.ad_cost_allocated ?? 0,
         inventory: row.available_stock ?? row.stock_level ?? 0,
         sales_velocity: row.sales_velocity ?? 0,
+        sales_velocity_confidence: row.velocity_confidence,
         margin: row.margin
       })),
     total_ad_budget: metrics.ads.ad_spend
@@ -535,7 +558,16 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
       ads_cost_per_customer_segment: metrics.customer.ads_cost_per_customer_segment,
       ltv_cac_ratio: metrics.customer.ltv_cac_ratio,
       cac_by_cohort: metrics.customer.cac_by_cohort,
-      payback_period_days: metrics.customer.payback_period_days
+      payback_period_days: metrics.customer.payback_period_days,
+      customer_lifecycles: metrics.customer.customer_lifecycles,
+      median_customer_lifetime_days: metrics.customer.median_customer_lifetime_days,
+      ltv_confidence: metrics.customer.ltv_confidence,
+      cac_confidence: metrics.customer.cac_confidence,
+      cohort_confidence: metrics.customer.cohort_confidence,
+      customer_metric_confidence: metrics.customer.customer_metric_confidence,
+      cac: metrics.customer.cac,
+      cac_status: metrics.customer.cac_status,
+      warnings: metrics.customer.warnings
     },
     growth_overview: {
       revenue_growth_rate: metrics.growth.revenue_growth_rate,
@@ -970,6 +1002,10 @@ function buildPortfolioOptimizationSkuInputs(input: {
       attribution_confidence: row.attribution_confidence ?? row.ad_allocation_confidence,
       inventory: row.available_stock ?? row.stock_level ?? 0,
       sales_velocity: row.sales_velocity ?? 0,
+      sales_velocity_confidence: row.velocity_confidence,
+      velocity_window_days: row.velocity_window_days,
+      data_period_days: row.data_period_days,
+      inventory_risk_status: row.inventory_risk_status,
       refund_rate: row.refund_rate ?? 0,
       customer_ltv: input.metrics.customer.ltv,
       conversion_rate: input.metrics.core.orders > 0 ? roundRatio(row.quantity / Math.max(1, input.metrics.core.orders)) : 0.02,
@@ -1020,6 +1056,10 @@ function buildPortfolioOptimizationSkuInputs(input: {
         attribution_confidence: profitability.attribution_confidence,
         inventory: Math.max(quantity * 2, 120 + ((index * 37) % 900)),
         sales_velocity: roundRatio(quantity / 30),
+        sales_velocity_confidence: "LOW",
+        velocity_window_days: 30,
+        data_period_days: 0,
+        inventory_risk_status: "INSUFFICIENT_DATA",
         refund_rate: 0.04 + ((index % 5) * 0.006),
         customer_ltv: input.metrics.customer.ltv || 140,
         conversion_rate: 0.018 + ((index % 6) * 0.004),

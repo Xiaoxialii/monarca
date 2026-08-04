@@ -68,6 +68,10 @@ export type CostSkuUnit = {
   stock_level?: number | null;
   available_stock?: number | null;
   sales_velocity?: number;
+  velocity_window_days?: number;
+  velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  data_period_days?: number;
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   days_of_inventory?: number | null;
   stockout_risk?: "high" | "medium" | "low" | "unknown";
   overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -406,6 +410,7 @@ export function calculateCostIntelligence(input: {
   const skuUnitEconomics = allocateSkuEconomics({
     rows: Array.from(skuRows.values()),
     orderItems,
+    orders,
     ads,
     revenue,
     adSpend,
@@ -661,6 +666,7 @@ function aggregateOrderCost(input: {
 function allocateSkuEconomics(input: {
   rows: CostSkuUnit[];
   orderItems: CostInputRow[];
+  orders: CostInputRow[];
   ads: CostInputRow[];
   revenue: number;
   adSpend: number;
@@ -737,6 +743,7 @@ function allocateSkuEconomics(input: {
   return calculateSkuProfitAndAllocation({
     rows: allocatedNonAdCosts,
     orderItems: input.orderItems,
+    orders: input.orders,
     ads: input.ads,
     inventory: input.inventory
   });

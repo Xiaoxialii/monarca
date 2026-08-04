@@ -80,6 +80,10 @@ type SkuReportRow = {
   stock_level: number | null;
   available_stock: number | null;
   sales_velocity: number;
+  velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  velocity_window_days?: number;
+  data_period_days?: number;
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   days_of_inventory: number | null;
   stockout_risk: string;
   overstock_risk: string;
@@ -127,6 +131,10 @@ type InventoryBreakdownRow = {
   stock: number;
   sold: number;
   salesVelocity: number;
+  velocityConfidence?: "HIGH" | "MEDIUM" | "LOW";
+  velocityWindowDays?: number;
+  dataPeriodDays?: number;
+  inventoryRiskStatus?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
   runwayDays: number | null;
   sellThroughRate: number | null;
 };
@@ -135,6 +143,7 @@ type InventorySummary = {
   totalStock: number;
   totalSold: number;
   salesVelocity: number;
+  velocityConfidence: "HIGH" | "MEDIUM" | "LOW";
   averageRunwayDays: number | null;
 };
 
@@ -509,7 +518,8 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   const performance = report.performance_overview;
   const summary = report.executive_summary;
   const hasTimeHistory = report.growth_overview.daily.length >= 2;
-  const cacValue = typeof performance.cac === "number" && Number.isFinite(performance.cac) ? performance.cac : null;
+  const cacConfidence = report.customer_breakdown.cac_confidence ?? "LOW";
+  const cacValue = cacConfidence !== "LOW" && typeof performance.cac === "number" && Number.isFinite(performance.cac) ? performance.cac : null;
 
   return (
     <div className="flex w-full flex-col gap-5">
@@ -540,8 +550,9 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
         <KpiCard
           icon={Users}
           label="CAC"
-          value={cacValue === null ? "N/A" : formatKpiCurrency(cacValue)}
+          value={cacValue === null ? "Unavailable" : formatKpiCurrency(cacValue)}
           fullValue={cacValue === null ? undefined : currencyDecimal.format(cacValue)}
+          description={cacValue === null ? "CAC attribution confidence insufficient." : undefined}
         />
       </section>
 
@@ -623,10 +634,11 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
             <CardDescription>Inventory levels, sell-through, and stock coverage across SKUs.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <SmallMetric label="Total Stock" value={numberFormat.format(inventorySummary.totalStock)} />
               <SmallMetric label="Total Sold" value={numberFormat.format(inventorySummary.totalSold)} />
-              <SmallMetric label="Sales Velocity" value={`${formatOneDecimal(inventorySummary.salesVelocity)} / day`} />
+              <SmallMetric label="Estimated Sales Velocity" value={`${formatOneDecimal(inventorySummary.salesVelocity)} / day`} />
+              <SmallMetric label="Velocity Confidence" value={inventorySummary.velocityConfidence} />
               <SmallMetric label="Avg Runway Days" value={inventorySummary.averageRunwayDays === null ? "N/A" : formatOneDecimal(inventorySummary.averageRunwayDays)} />
             </div>
             <InventoryChart rows={visibleInventoryRows} />
@@ -651,14 +663,17 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
               <Megaphone className="size-4 text-emerald-700" />
               Ads Breakdown
             </CardTitle>
-            <CardDescription>Campaign spend, revenue, and ROAS.</CardDescription>
+            <CardDescription>Blended portfolio ROAS and campaign-attributed ROAS from available attribution fields.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid grid-cols-3 gap-3">
               <SmallMetric label="Spend" value={currency.format(report.ads_breakdown.ad_spend)} />
-              <SmallMetric label="ROAS" value={ratioFormat.format(report.ads_breakdown.roas)} />
+              <SmallMetric label="Blended ROAS" value={ratioFormat.format(report.ads_breakdown.roas)} />
               <SmallMetric label="MER" value={ratioFormat.format(report.ads_breakdown.mer)} />
             </div>
+            <p className="text-xs font-semibold leading-relaxed text-slate-500">
+              Campaign attribution unavailable when orders cannot be directly matched to campaigns.
+            </p>
             <CampaignChart rows={report.ads_breakdown.campaign_performance} />
             <CampaignTable rows={report.ads_breakdown.campaign_performance} />
           </CardContent>
@@ -679,7 +694,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
               <SmallMetric label="Customers" value={numberFormat.format(report.customer_breakdown.customer_count)} />
               <SmallMetric label="Avg LTV" value={currencyDecimal.format(report.customer_breakdown.ltv)} />
               <SmallMetric label="Median LTV" value={currencyDecimal.format(report.customer_breakdown.median_ltv)} />
-              <SmallMetric label="LTV / CAC" value={ratioFormat.format(report.customer_breakdown.ltv_cac_ratio)} />
+              <SmallMetric label="LTV / CAC" value={cacConfidence === "LOW" ? "Unavailable" : ratioFormat.format(report.customer_breakdown.ltv_cac_ratio)} />
               <SmallMetric label="Active Customers" value={numberFormat.format(report.customer_breakdown.active_customers)} />
               <SmallMetric label="Dormant Customers" value={numberFormat.format(report.customer_breakdown.dormant_customers)} />
               <SmallMetric label="Repeat Rate" value={percent.format(report.customer_breakdown.repeat_purchase_rate)} />
@@ -732,12 +747,14 @@ function KpiCard({
   label,
   value,
   fullValue,
+  description,
   tone = "neutral"
 }: {
   icon: typeof TrendingUp;
   label: string;
   value: string;
   fullValue?: string;
+  description?: string;
   tone?: "neutral" | "positive" | "warning" | "negative";
 }) {
   return (
@@ -756,6 +773,7 @@ function KpiCard({
           </span>
         </div>
         <AutoFitKpiValue value={value} fullValue={fullValue} />
+        {description ? <p className="mt-2 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
       </CardContent>
     </Card>
   );
@@ -852,6 +870,10 @@ function buildInventoryRows(rows: SkuReportRow[]): InventoryBreakdownRow[] {
       stock,
       sold,
       salesVelocity,
+      velocityConfidence: row.velocity_confidence,
+      velocityWindowDays: row.velocity_window_days,
+      dataPeriodDays: row.data_period_days,
+      inventoryRiskStatus: inventoryRiskStatusFromRow(runwayDays, row.velocity_confidence, row.inventory_risk_status),
       runwayDays,
       sellThroughRate: sellThroughBase > 0 ? sold / sellThroughBase : null
     };
@@ -862,12 +884,29 @@ function summarizeInventoryRows(rows: InventoryBreakdownRow[]): InventorySummary
   const totalStock = rows.reduce((total, row) => total + row.stock, 0);
   const totalSold = rows.reduce((total, row) => total + row.sold, 0);
   const salesVelocity = rows.reduce((total, row) => total + row.salesVelocity, 0);
+  const velocityConfidence = rows.some((row) => (row.velocityConfidence ?? "LOW") === "LOW")
+    ? "LOW"
+    : rows.some((row) => row.velocityConfidence === "MEDIUM")
+      ? "MEDIUM"
+      : "HIGH";
   const runwayRows = rows.filter((row) => row.runwayDays !== null);
   const averageRunwayDays = runwayRows.length
     ? runwayRows.reduce((total, row) => total + (row.runwayDays ?? 0), 0) / runwayRows.length
     : null;
 
-  return { totalStock, totalSold, salesVelocity, averageRunwayDays };
+  return { totalStock, totalSold, salesVelocity, velocityConfidence, averageRunwayDays };
+}
+
+function inventoryRiskStatusFromRow(
+  runwayDays: number | null,
+  velocityConfidence: "HIGH" | "MEDIUM" | "LOW" | undefined,
+  sourceStatus: InventoryBreakdownRow["inventoryRiskStatus"]
+): InventoryBreakdownRow["inventoryRiskStatus"] {
+  const confidence = velocityConfidence ?? "LOW";
+  if (runwayDays !== null && runwayDays < 14) {
+    return confidence === "LOW" ? "LOW_CONFIDENCE_STOCK_RISK" : "STOCKOUT_RISK";
+  }
+  return confidence === "LOW" ? "INSUFFICIENT_DATA" : sourceStatus ?? "OK";
 }
 
 function primaryInventoryChannel(row: SkuReportRow) {
@@ -1190,20 +1229,21 @@ function CampaignTable({ rows }: { rows: DecisionIntelligenceReportV1["ads_break
           <tr>
             <th className="px-3 py-3">Campaign</th>
             <th className="px-3 py-3">Spend</th>
-            <th className="px-3 py-3">Revenue</th>
-            <th className="px-3 py-3">ROAS</th>
+            <th className="px-3 py-3">Attributed Revenue</th>
+            <th className="px-3 py-3">Attributed ROAS</th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {rows.slice(0, 8).map((row) => {
             const roasValue = typeof row.roas === "number" && Number.isFinite(row.roas) ? row.roas : null;
+            const attributionUnavailable = row.attribution_status === "missing" || roasValue === null;
             return (
-              <tr key={row.campaign_id} className={roasValue !== null && roasValue < 1 ? "bg-amber-50/60" : undefined}>
+              <tr key={row.campaign_id} className={!attributionUnavailable && roasValue < 1 ? "bg-amber-50/60" : undefined}>
                 <td className="max-w-[180px] truncate px-3 py-3 font-semibold text-slate-900">{row.campaign_id}</td>
                 <td className="px-3 py-3">{currency.format(row.ad_spend)}</td>
-                <td className="px-3 py-3">{currency.format(row.revenue)}</td>
-                <td className={cn("px-3 py-3", roasValue === null ? "text-slate-500" : roasValue < 1 ? "font-semibold text-amber-800" : "text-emerald-800")}>
-                  {roasValue !== null ? ratioFormat.format(roasValue) : "Missing attribution"}
+                <td className="px-3 py-3">{attributionUnavailable ? "Attribution unavailable" : currency.format(row.revenue)}</td>
+                <td className={cn("px-3 py-3", attributionUnavailable ? "text-slate-500" : roasValue < 1 ? "font-semibold text-amber-800" : "text-emerald-800")}>
+                  {attributionUnavailable ? "Attribution unavailable" : ratioFormat.format(roasValue)}
                 </td>
               </tr>
             );
@@ -5942,7 +5982,7 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
         "[&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
       )}
     >
-      <table className="min-w-[880px] w-full text-left text-sm">
+      <table className="min-w-[1040px] w-full text-left text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
           <tr>
             <th className="px-3 py-3">SKU</th>
@@ -5950,8 +5990,10 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
             <th className="px-3 py-3">Channel</th>
             <th className="px-3 py-3">Stock</th>
             <th className="px-3 py-3">Sold</th>
-            <th className="px-3 py-3">Sales Velocity</th>
+            <th className="px-3 py-3">Estimated Sales Velocity</th>
+            <th className="px-3 py-3">Confidence</th>
             <th className="px-3 py-3">Runway Days</th>
+            <th className="px-3 py-3">Risk Status</th>
             <th className="px-3 py-3">Sell-through Rate</th>
           </tr>
         </thead>
@@ -5964,7 +6006,9 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
               <td className="px-3 py-3">{numberFormat.format(row.stock)}</td>
               <td className="px-3 py-3">{numberFormat.format(row.sold)}</td>
               <td className="px-3 py-3">{formatOneDecimal(row.salesVelocity)} / day</td>
+              <td className="px-3 py-3"><InventoryConfidenceBadge confidence={row.velocityConfidence ?? "LOW"} /></td>
               <td className="px-3 py-3">{row.runwayDays === null ? "N/A" : formatOneDecimal(row.runwayDays)}</td>
+              <td className="px-3 py-3">{inventoryRiskStatusLabel(row.inventoryRiskStatus)}</td>
               <td className="px-3 py-3">{row.sellThroughRate === null ? "N/A" : percent.format(row.sellThroughRate)}</td>
             </tr>
           ))}
@@ -5974,7 +6018,21 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
   );
 }
 
+function InventoryConfidenceBadge({ confidence }: { confidence: "HIGH" | "MEDIUM" | "LOW" }) {
+  const tone = confidence === "HIGH" ? "success" : confidence === "MEDIUM" ? "warning" : "neutral";
+  return <Badge tone={tone}>{confidence}</Badge>;
+}
+
+function inventoryRiskStatusLabel(status: InventoryBreakdownRow["inventoryRiskStatus"]) {
+  if (status === "LOW_CONFIDENCE_STOCK_RISK") return "Low-confidence stock risk";
+  if (status === "STOCKOUT_RISK") return "Stockout risk";
+  if (status === "INSUFFICIENT_DATA") return "Insufficient data";
+  return "OK";
+}
+
 function CustomerValueDistribution({ customer }: { customer: DecisionIntelligenceReportV1["customer_breakdown"] }) {
+  const ltvReason = ltvConfidenceReason(customer);
+
   return (
     <div className="rounded-lg border bg-white p-4">
       <p className="text-sm font-semibold text-slate-900">LTV Distribution</p>
@@ -5982,6 +6040,7 @@ function CustomerValueDistribution({ customer }: { customer: DecisionIntelligenc
         <SmallMetric label="P90 LTV" value={currencyDecimal.format(customer.p90_ltv)} />
         <SmallMetric label="P95 LTV" value={currencyDecimal.format(customer.p95_ltv)} />
         <SmallMetric label="P99 LTV" value={currencyDecimal.format(customer.p99_ltv)} />
+        <SmallMetric label="LTV Confidence" value={customer.ltv_confidence ?? "LOW"} description={ltvReason} />
         <SmallMetric label="Top 10% Revenue" value={percent.format(customer.top_10_percent_revenue_share)} />
         <SmallMetric label="Top 1% Revenue" value={percent.format(customer.top_1_percent_revenue_share)} />
         <SmallMetric label="Avg Orders / Customer" value={ratioFormat.format(customer.avg_orders_per_customer)} />
@@ -5991,6 +6050,12 @@ function CustomerValueDistribution({ customer }: { customer: DecisionIntelligenc
 }
 
 function CustomerLifecyclePanel({ customer }: { customer: DecisionIntelligenceReportV1["customer_breakdown"] }) {
+  const lifetimeUnavailable =
+    customer.avg_orders_per_customer > 1 &&
+    customer.avg_customer_lifetime_days === 0 &&
+    (customer.customer_metric_confidence ?? "LOW") === "LOW";
+  const cohortUnavailable = (customer.cohort_confidence ?? "LOW") === "LOW";
+
   return (
     <div className="rounded-lg border bg-white p-4">
       <p className="text-sm font-semibold text-slate-900">Lifecycle Structure</p>
@@ -5999,15 +6064,20 @@ function CustomerLifecyclePanel({ customer }: { customer: DecisionIntelligenceRe
         <SmallMetric label="Inactive Customers" value={numberFormat.format(customer.inactive_customers)} />
         <SmallMetric label="Churned Customers" value={numberFormat.format(customer.churned_customers)} />
         <SmallMetric label="Purchase Frequency" value={ratioFormat.format(customer.purchase_frequency)} />
-        <SmallMetric label="Avg Lifetime Days" value={formatOneDecimal(customer.avg_customer_lifetime_days)} />
-        <SmallMetric label="30D Retention" value={percent.format(customer.cohort_retention_30d)} />
+        <SmallMetric label="Avg Lifetime Days" value={lifetimeUnavailable ? "Unavailable" : formatOneDecimal(customer.avg_customer_lifetime_days)} />
+        <SmallMetric label="CAC Confidence" value={customer.cac_confidence ?? "LOW"} />
+        <SmallMetric
+          label="30D Retention"
+          value={cohortUnavailable ? "Unavailable" : percent.format(customer.cohort_retention_30d)}
+          description={cohortUnavailable ? "Requires multiple customer cohorts" : undefined}
+        />
       </div>
     </div>
   );
 }
 
 function CustomerCohortTable({ rows }: { rows: DecisionIntelligenceReportV1["customer_breakdown"]["cohort_by_first_purchase_month"] }) {
-  if (!rows.length) return <EmptyBlock label="No customer cohort rows available." />;
+  if (!rows.length) return <EmptyBlock label="Cohort analysis requires multiple customer cohorts." />;
 
   return (
     <div className="overflow-auto rounded-lg border">
@@ -6037,6 +6107,15 @@ function CustomerCohortTable({ rows }: { rows: DecisionIntelligenceReportV1["cus
       </table>
     </div>
   );
+}
+
+function ltvConfidenceReason(customer: DecisionIntelligenceReportV1["customer_breakdown"]) {
+  const confidence = customer.ltv_confidence ?? "LOW";
+  if (confidence === "HIGH") return undefined;
+  const reasons = [];
+  reasons.push("Limited historical window");
+  if ((customer.cohort_confidence ?? "LOW") !== "HIGH") reasons.push("insufficient cohort history");
+  return reasons.join("; ");
 }
 
 function CustomerSegmentTable({
@@ -6094,11 +6173,12 @@ function GrowthRow({ label, value, isAvailable = true }: { label: string; value:
   );
 }
 
-function SmallMetric({ label, value }: { label: string; value: string }) {
+function SmallMetric({ label, value, description }: { label: string; value: string; description?: string }) {
   return (
     <div className="rounded-lg bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase leading-5 tracking-wide text-slate-500">{label}</p>
       <p className="mt-2 text-lg font-semibold text-slate-950">{value || "No Data"}</p>
+      {description ? <p className="mt-1 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
     </div>
   );
 }

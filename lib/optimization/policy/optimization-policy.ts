@@ -128,12 +128,19 @@ export function evaluateActionEligibility(input: {
   } else if (action === "RESTOCK_AND_SCALE") {
     const threshold = policy.thresholds.inventory;
     thresholds.stockoutRiskDays = threshold.stockoutRiskDays;
+    metrics.salesVelocityConfidence = sku.sales_velocity_confidence ?? "LOW";
+    metrics.inventoryRiskStatus = sku.inventory_risk_status ?? null;
     requireRule(coverageDays < threshold.stockoutRiskDays, "Inventory coverage is below stockout threshold.", "Inventory coverage does not indicate stockout risk.");
     requireRule(sku.sales_velocity > 0, "Sales velocity supports restock.", "Sales velocity does not support restock.");
+    requireRule((sku.sales_velocity_confidence ?? "LOW") !== "LOW", "Sales velocity confidence supports restock.", "Sales velocity confidence too low for restock.");
+    requireRule(sku.optimization_allowed !== false, "Profit validation allows restock.", "Profit validation blocks restock.");
   } else if (action === "REDUCE_INVENTORY") {
     const threshold = policy.thresholds.inventory;
     thresholds.excessInventoryDays = threshold.excessInventoryDays;
+    metrics.salesVelocityConfidence = sku.sales_velocity_confidence ?? "LOW";
+    metrics.inventoryRiskStatus = sku.inventory_risk_status ?? null;
     requireRule(coverageDays > threshold.excessInventoryDays, "Inventory coverage exceeds excess threshold.", "Inventory coverage below clearance threshold.");
+    requireRule((sku.sales_velocity_confidence ?? "LOW") !== "LOW", "Sales velocity confidence supports inventory reduction.", "Sales velocity confidence too low for inventory reduction.");
     requireRule(input.clearInventoryEligible === true, "Clearance quality threshold passed.", "Clearance quality threshold not met.");
   } else if (action === "STOP") {
     const threshold = policy.thresholds.advertising.stopAds;

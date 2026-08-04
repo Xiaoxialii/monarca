@@ -18,7 +18,7 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 const jiti = jitiFactory(process.cwd() + "/");
 const { computeCanonicalEcommerceMetrics } = jiti("./lib/metrics/canonical-ecommerce-metric-engine.ts");
 
-function canonicalDataset({ platform = "shopify", orders = [], items = [], products = [], customers = [], refunds = [], ads = [] }) {
+function canonicalDataset({ platform = "shopify", orders = [], items = [], products = [], customers = [], refunds = [], ads = [], inventory = [] }) {
   return {
     schema_version: "ecommerce_canonical_v1",
     tables: {
@@ -27,14 +27,15 @@ function canonicalDataset({ platform = "shopify", orders = [], items = [], produ
       ecommerce_products: products,
       ecommerce_customers: customers,
       ecommerce_refunds: refunds,
-      ecommerce_ads: ads
+      ecommerce_ads: ads,
+      ecommerce_inventory: inventory
     },
     metadata: {
       source_platforms: [platform],
       normalized_at: "2026-06-29T00:00:00.000Z",
       unknown_fields: [],
       validation: {
-        accepted_rows: orders.length + items.length + products.length + customers.length + refunds.length + ads.length,
+        accepted_rows: orders.length + items.length + products.length + customers.length + refunds.length + ads.length + inventory.length,
         rejected_rows: 0,
         warnings: [],
         rejected: []
@@ -140,7 +141,9 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.customer.repeat_purchase_rate, 0.5);
   assert.equal(result.metrics.customer.customer_count, 2);
   assert.equal(result.metrics.customer.new_vs_returning_ratio, 0.5);
-  assert.equal(result.metrics.customer.acquisition_cost, 150);
+  assert.equal(result.metrics.customer.acquisition_cost, null);
+  assert.equal(result.metrics.customer.cac_status, "INSUFFICIENT_CUSTOMER_HISTORY");
+  assert.equal(result.metrics.customer.cac_confidence, "LOW");
   assert.equal(result.metrics.customer.median_ltv, 300);
   assert.equal(result.metrics.customer.p90_ltv, 300);
   assert.equal(result.metrics.customer.top_10_percent_revenue_share, 0.5);
@@ -152,18 +155,216 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.customer.new_customers, 1);
   assert.equal(result.metrics.customer.dormant_customers, 0);
   assert.equal(result.metrics.customer.churned_customers, 0);
-  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 1.5);
-  assert.equal(result.metrics.customer.cohort_by_first_purchase_month[0].cohort_month, "2026-06");
-  assert.equal(result.metrics.customer.cohort_by_first_purchase_month[0].retention_7d, 0.5);
-  assert.equal(result.metrics.customer.cohort_retention_30d, 0.5);
+  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 0.5);
+  assert.equal(result.metrics.customer.customer_lifecycles.find((row) => row.customer_id === "C-1").lifetime_days, 1);
+  assert.equal(result.metrics.customer.cohort_by_first_purchase_month.length, 0);
+  assert.equal(result.metrics.customer.cohort_retention_30d, 0);
   assert.equal(result.metrics.customer.revenue_per_customer_segment[0].segment, "Top 1%");
-  assert.equal(result.metrics.customer.ltv_cac_ratio, 2);
-  assert.equal(result.metrics.customer.payback_period_days, 0.75);
+  assert.equal(result.metrics.customer.ltv_cac_ratio, 0);
+  assert.equal(result.metrics.customer.payback_period_days, null);
   assert.equal(result.metrics.ads.roas, 4);
-  assert.equal(result.metrics.ads.cac, 150);
+  assert.equal(result.metrics.ads.cac, null);
+  assert.equal(result.metrics.ads.cac_status, "INSUFFICIENT_CUSTOMER_HISTORY");
   assert.equal(result.metrics.ads.cpa, 50);
   assert.equal(result.metrics.ads.mer, 4);
   assert.equal(result.metadata.audit.canonical_input_only, true);
+});
+
+test("inventory sales velocity uses observation window and marks single-day data low confidence", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 1000, order_date: "2026-06-01", customer_id: "C-1" }
+    ],
+    items: [
+      { order_id: "O-1", sku: "SKU-SINGLE-DAY", quantity: 100, price: 10, unit_cost: 3 }
+    ],
+    inventory: [
+      { sku: "SKU-SINGLE-DAY", stock_level: 500, available_stock: 500 }
+    ]
+  }));
+
+  const sku = result.metrics.business.sku_unit_economics.find((row) => row.sku === "SKU-SINGLE-DAY");
+  assert.equal(sku.sales_velocity, 3.3333);
+  assert.equal(sku.velocity_window_days, 30);
+  assert.equal(sku.data_period_days, 0);
+  assert.equal(sku.velocity_confidence, "LOW");
+  assert.equal(sku.inventory_risk_status, "INSUFFICIENT_DATA");
+  assert.equal(sku.stockout_risk, "unknown");
+  assert.notEqual(sku.recommended_action, "RESTOCK_FIRST");
+});
+
+test("inventory risk status flags low runway even when velocity confidence is low", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 1000, order_date: "2026-06-01", customer_id: "C-1" }
+    ],
+    items: [
+      { order_id: "O-1", sku: "SKU-LOW-RUNWAY", quantity: 100, price: 10, unit_cost: 3 }
+    ],
+    inventory: [
+      { sku: "SKU-LOW-RUNWAY", stock_level: 1, available_stock: 1 }
+    ]
+  }));
+
+  const sku = result.metrics.business.sku_unit_economics.find((row) => row.sku === "SKU-LOW-RUNWAY");
+  assert.equal(sku.velocity_confidence, "LOW");
+  assert.equal(sku.days_of_inventory, 0.3);
+  assert.equal(sku.inventory_risk_status, "LOW_CONFIDENCE_STOCK_RISK");
+  assert.equal(sku.stockout_risk, "unknown");
+});
+
+test("inventory risk status flags stockout risk for reliable low runway", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 1000, order_date: "2026-01-01", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 2000, order_date: "2026-01-31", customer_id: "C-2" }
+    ],
+    items: [
+      { order_id: "O-1", sku: "SKU-STOCKOUT", quantity: 50, price: 10, unit_cost: 3 },
+      { order_id: "O-2", sku: "SKU-STOCKOUT", quantity: 50, price: 10, unit_cost: 3 }
+    ],
+    inventory: [
+      { sku: "SKU-STOCKOUT", stock_level: 20, available_stock: 20 }
+    ]
+  }));
+
+  const sku = result.metrics.business.sku_unit_economics.find((row) => row.sku === "SKU-STOCKOUT");
+  assert.equal(sku.velocity_confidence, "HIGH");
+  assert.ok(Math.abs(sku.days_of_inventory - 6) < 0.001);
+  assert.equal(sku.inventory_risk_status, "STOCKOUT_RISK");
+  assert.equal(sku.stockout_risk, "high");
+});
+
+test("inventory sales velocity uses 30-day observation history", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 1000, order_date: "2026-01-01", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 2000, order_date: "2026-01-31", customer_id: "C-2" }
+    ],
+    items: [
+      { order_id: "O-1", sku: "SKU-30D", quantity: 100, price: 10, unit_cost: 3 },
+      { order_id: "O-2", sku: "SKU-30D", quantity: 200, price: 10, unit_cost: 3 }
+    ],
+    inventory: [
+      { sku: "SKU-30D", stock_level: 500, available_stock: 500 }
+    ]
+  }));
+
+  const sku = result.metrics.business.sku_unit_economics.find((row) => row.sku === "SKU-30D");
+  assert.equal(sku.sales_velocity, 10);
+  assert.equal(sku.velocity_window_days, 30);
+  assert.equal(sku.data_period_days, 30);
+  assert.equal(sku.velocity_confidence, "HIGH");
+  assert.equal(sku.days_of_inventory, 50);
+});
+
+test("customer lifecycle derives first and last order dates", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 100, order_date: "2026-01-01", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 200, order_date: "2026-01-31", customer_id: "C-1" }
+    ],
+    customers: [{ customer_id: "C-1", total_orders: 2, total_spent: 300 }]
+  }));
+
+  assert.deepEqual(result.metrics.customer.customer_lifecycles[0], {
+    customer_id: "C-1",
+    first_order_date: "2026-01-01",
+    last_order_date: "2026-01-31",
+    lifetime_days: 30
+  });
+  assert.ok(result.metrics.customer.avg_orders_per_customer > 1);
+  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 30);
+  assert.equal(result.metrics.customer.median_customer_lifetime_days, 30);
+});
+
+test("customer lifecycle derives repeat lifetime from canonical created_at fields", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 100, order_date: "2026-01-31", created_at_source: "2026-01-01T10:00:00.000Z", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 200, order_date: "2026-01-31", created_at_source: "2026-01-31T10:00:00.000Z", customer_id: "C-1" }
+    ],
+    customers: [{ customer_id: "C-1", total_orders: 2, total_spent: 300 }]
+  }));
+
+  assert.equal(result.metrics.customer.avg_orders_per_customer, 2);
+  assert.equal(result.metrics.customer.repeat_purchase_rate, 1);
+  assert.deepEqual(result.metrics.customer.customer_lifecycles[0], {
+    customer_id: "C-1",
+    first_order_date: "2026-01-01",
+    last_order_date: "2026-01-31",
+    lifetime_days: 30
+  });
+  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 30);
+});
+
+test("customer lifecycle uses customer profile first and last order dates when order events are incomplete", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    customers: [
+      {
+        customer_id: "C-PROFILE",
+        total_orders: 4,
+        total_spent: 400,
+        first_order_date: "2026-01-01",
+        last_order_date: "2026-02-15"
+      }
+    ]
+  }));
+
+  assert.equal(result.metrics.customer.avg_orders_per_customer, 4);
+  assert.equal(result.metrics.customer.repeat_purchase_rate, 1);
+  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 45);
+  assert.deepEqual(result.metrics.customer.customer_lifecycles[0], {
+    customer_id: "C-PROFILE",
+    first_order_date: "2026-01-01",
+    last_order_date: "2026-02-15",
+    lifetime_days: 45
+  });
+});
+
+test("repeat customers with same-day order dates expose lifecycle date warning", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 100, order_date: "2026-01-01", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 200, order_date: "2026-01-01", customer_id: "C-1" }
+    ],
+    customers: [{ customer_id: "C-1", total_orders: 2, total_spent: 300 }]
+  }));
+
+  assert.equal(result.metrics.customer.avg_orders_per_customer, 2);
+  assert.equal(result.metrics.customer.repeat_purchase_rate, 1);
+  assert.equal(result.metrics.customer.avg_customer_lifetime_days, 0);
+  assert.ok(result.metrics.customer.warnings.some((warning) => /Repeat customers require distinct canonical order dates/i.test(warning)));
+});
+
+test("customer profile total spent does not double count order revenue", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 100, order_date: "2026-01-01", customer_id: "C-1" },
+      { order_id: "O-2", revenue: 200, order_date: "2026-01-31", customer_id: "C-1" }
+    ],
+    customers: [{ customer_id: "C-1", total_orders: 2, total_spent: 300, first_order_date: "2026-01-01", last_order_date: "2026-01-31" }]
+  }));
+
+  assert.equal(result.metrics.customer.ltv, 300);
+});
+
+test("single-period customer data returns low CAC and LTV confidence", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 100, order_date: "2026-01-01", customer_id: "C-1" }
+    ],
+    customers: [{ customer_id: "C-1", is_new_customer: true, total_orders: 1 }],
+    ads: [{ ad_id: "A-1", campaign_id: "CMP-1", spend: 100 }]
+  }));
+
+  assert.equal(result.metrics.ads.cac, null);
+  assert.equal(result.metrics.ads.cac_confidence, "LOW");
+  assert.equal(result.metrics.customer.cac_status, "INSUFFICIENT_CUSTOMER_HISTORY");
+  assert.equal(result.metrics.customer.ltv_confidence, "LOW");
+  assert.ok(result.metrics.customer.warnings.some((warning) => /Limited customer history/i.test(warning)));
+  assert.ok(result.metrics.customer.warnings.some((warning) => /Limited historical window/i.test(warning)));
+  assert.ok(result.metrics.customer.warnings.some((warning) => /Insufficient cohort history/i.test(warning)));
 });
 
 test("metric engine validation fixture is mathematically correct and deterministic", () => {
@@ -361,6 +562,8 @@ test("attribution layer does not report order-level coverage from aggregate ads 
   assert.equal(result.metrics.attribution.attribution_model, "none");
   assert.equal(result.metrics.attribution.order_attribution_coverage, 0);
   assert.equal(result.metrics.attribution.sku_attribution_coverage, 0);
+  assert.equal(result.metrics.attribution.campaign_performance[0].roas, null);
+  assert.equal(result.metrics.attribution.campaign_performance[0].attribution_status, "missing");
   assert.equal(result.metrics.ads.roas, 6);
   assert.equal(result.metrics.ads.cac, null);
   assert.equal(result.metrics.ads.mer, 6);

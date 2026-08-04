@@ -179,6 +179,10 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /attemptCount:\s*\{\s*increment:\s*1/);
   assert.match(worker, /startHeartbeat/);
   assert.match(worker, /currentStep:\s*"Building canonical model"/);
+  assert.match(worker, /new InMemorySemanticMemoryStore\(\)/);
+  assert.match(worker, /persistInferredMappings:\s*false/);
+  assert.match(worker, /semanticMemoryMode:\s*"ephemeral"/);
+  assert.doesNotMatch(worker, /new PrismaSemanticMemoryStore\(client/);
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
   assert.match(worker, /export function inferBusinessSource/);
   assert.match(worker, /sourceProvider:\s*businessSource/);
@@ -204,6 +208,28 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(retryRoute, /processIngestionJob\(jobId\)/);
   assert.match(recoveryRoute, /recoverStaleIngestionJobs/);
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
+});
+
+test("upload ingestion skips persistent semantic learning for serverless workers", () => {
+  const engine = read("lib/ingestion/unified-ingestion-engine.ts");
+  const runtime = read("lib/semantic/runtime.ts");
+
+  assert.match(engine, /persistInferredMappings\?: boolean/);
+  assert.match(engine, /persistInferredMappings:\s*input\.persistInferredMappings/);
+  assert.match(runtime, /persistInferredMappings\?: boolean/);
+  assert.match(runtime, /const persistInferredMappings = input\.persistInferredMappings !== false/);
+  assert.match(runtime, /persistInferredMappings\s*\n\s*\}\)/);
+  assert.match(runtime, /if \(input\.persistInferredMappings === false\)/);
+  assert.match(runtime, /fast-ingestion-no-persistent-memory/);
+  assert.match(runtime, /runtime_updated:\s*false/);
+});
+
+test("local upload storage uses tmpdir on Vercel instead of the read-only app directory", () => {
+  const storage = read("lib/local-upload-storage.ts");
+
+  assert.match(storage, /import os from "node:os"/);
+  assert.match(storage, /const uploadRoot = process\.env\.VERCEL \? os\.tmpdir\(\) : process\.cwd\(\)/);
+  assert.doesNotMatch(storage, /path\.join\(\s*process\.cwd\(\),\s*"\.data-source-uploads"/);
 });
 
 test("upload and rescan routes use a serverless-safe semantic sample size", () => {

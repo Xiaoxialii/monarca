@@ -7,6 +7,7 @@ export type SelfLearningRuntimeInput = {
   rawData: unknown;
   platform?: string;
   memory?: SemanticMemoryStore;
+  persistInferredMappings?: boolean;
 };
 
 export type LearningUpdateInput = {
@@ -14,6 +15,7 @@ export type LearningUpdateInput = {
   memory: SemanticMemoryStore;
   platform?: string;
   feedbackEvents?: SemanticFeedbackEvent[];
+  persistInferredMappings?: boolean;
 };
 
 export class SelfLearningSemanticRuntime {
@@ -27,16 +29,23 @@ export class SelfLearningSemanticRuntime {
     this.mapper = new RuntimeSemanticMapper({ engine: this.engine, memory: this.memory });
   }
 
-  async run(input: { rawData: unknown; platform?: string; feedbackEvents?: SemanticFeedbackEvent[] }) {
+  async run(input: {
+    rawData: unknown;
+    platform?: string;
+    feedbackEvents?: SemanticFeedbackEvent[];
+    persistInferredMappings?: boolean;
+  }) {
+    const persistInferredMappings = input.persistInferredMappings !== false;
     const result = await this.mapper.map(input.rawData, {
       platform: input.platform,
-      persistInferredMappings: true
+      persistInferredMappings
     });
     const learning = await runLearningUpdate({
       result,
       memory: this.memory,
       platform: input.platform,
-      feedbackEvents: input.feedbackEvents
+      feedbackEvents: input.feedbackEvents,
+      persistInferredMappings
     });
 
     return {
@@ -52,7 +61,11 @@ export class SelfLearningSemanticRuntime {
 export async function runSelfLearningPipeline(input: SelfLearningRuntimeInput) {
   const runtime = new SelfLearningSemanticRuntime({ memory: input.memory });
 
-  return runtime.run({ rawData: input.rawData, platform: input.platform });
+  return runtime.run({
+    rawData: input.rawData,
+    platform: input.platform,
+    persistInferredMappings: input.persistInferredMappings
+  });
 }
 
 export async function runLearningUpdate(input: LearningUpdateInput) {
@@ -61,6 +74,19 @@ export async function runLearningUpdate(input: LearningUpdateInput) {
   for (const event of input.feedbackEvents ?? []) {
     await input.memory.applyFeedback({ ...event, platform: event.platform ?? input.platform });
     feedback_updates += 1;
+  }
+
+  if (input.persistInferredMappings === false) {
+    return {
+      feedback_updates,
+      memory_size: 0,
+      average_memory_confidence: 0,
+      model_update: {
+        strategy: "fast-ingestion-no-persistent-memory",
+        embedding_similarity_weight: 0,
+        runtime_updated: false
+      }
+    };
   }
 
   const learnedRecords = await input.memory.all();

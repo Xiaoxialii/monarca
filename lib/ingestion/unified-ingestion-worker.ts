@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
-import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
+import { InMemorySemanticMemoryStore } from "@/lib/semantic/memory";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
@@ -543,9 +543,11 @@ export async function processIngestionJob(
         businessSource,
         sampledRows: sampledRows.length,
         totalParsedRows: uploadRows.length,
-        samplingStrategy: "first_n_rows"
+        samplingStrategy: "first_n_rows",
+        semanticMemoryMode: "ephemeral"
       },
-      memory: new PrismaSemanticMemoryStore(client, { workspaceId })
+      memory: new InMemorySemanticMemoryStore(),
+      persistInferredMappings: false
     });
     const unifiedIngestion = canonicalSummary({
       source: businessSource,

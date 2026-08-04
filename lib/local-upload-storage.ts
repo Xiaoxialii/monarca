@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 function safePathPart(value: string) {
@@ -10,8 +11,10 @@ export function localUploadPathForDataSource(params: {
   dataSourceId: string;
   fileName: string;
 }) {
+  const uploadRoot = process.env.VERCEL ? os.tmpdir() : process.cwd();
+
   return path.join(
-    process.cwd(),
+    uploadRoot,
     ".data-source-uploads",
     safePathPart(params.workspaceId),
     safePathPart(params.dataSourceId),

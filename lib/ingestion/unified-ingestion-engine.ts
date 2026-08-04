@@ -23,6 +23,7 @@ export type UnifiedIngestionInput = {
   metadata?: Record<string, unknown>;
   memory?: SemanticMemoryStore;
   feedbackEvents?: SemanticFeedbackEvent[];
+  persistInferredMappings?: boolean;
 };
 
 export type UnifiedIngestionOutput = {
@@ -89,7 +90,8 @@ export async function runUnifiedIngestionPipeline(input: UnifiedIngestionInput):
   const semanticResult = await runtime.run({
     rawData: input.payload,
     platform: input.source,
-    feedbackEvents: input.feedbackEvents
+    feedbackEvents: input.feedbackEvents,
+    persistInferredMappings: input.persistInferredMappings
   });
   const dataModel = buildEcommerceStarSchemaModel(semanticResult.canonical_schema);
   const metrics = computeCanonicalEcommerceMetrics(semanticResult.canonical_schema);

@@ -5,12 +5,13 @@ import { getRequestHtmlLang } from "@/lib/server-locale";
 import "./globals.css";
 
 const siteDescription =
-  "Monarca AI is an AI decision system that helps ecommerce teams maximize profit by optimizing SKU portfolios, advertising spend, and inventory decisions.";
+  "Monarca AI is an AI decision system that helps ecommerce businesses optimize SKU profitability, advertising spend, and inventory decisions to maximize profit.";
+const siteTitle = "Monarca AI | AI Profit Optimization for Ecommerce";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.monarcadata.com"),
   title: {
-    default: "Monarca AI",
+    default: siteTitle,
     template: "%s | Monarca AI"
   },
   description: siteDescription,
@@ -31,7 +32,7 @@ export const metadata: Metadata = {
     type: "website",
     url: "https://www.monarcadata.com",
     siteName: "Monarca AI",
-    title: "Monarca AI",
+    title: siteTitle,
     description: siteDescription,
     images: [
       {
@@ -44,7 +45,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary",
-    title: "Monarca AI",
+    title: siteTitle,
     description: siteDescription,
     images: ["/brand-mark.png"]
   },

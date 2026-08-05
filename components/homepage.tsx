@@ -138,8 +138,8 @@ const homepageCopy = {
     },
     hero: {
       eyebrow: "AI Profit Optimization System",
-      headline: "AI Profit Optimization System",
-      subheadline: "Connect data. Generate optimal profit decisions",
+      headline: "AI decision system that helps ecommerce teams maximize profit.",
+      subheadline: "Simulate thousands of scenarios across products, advertising, and inventory to find the most profitable actions.",
       teamLabel: "Three-layer profit control that turns data changes into operating actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },

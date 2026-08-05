@@ -219,6 +219,30 @@ export async function upsertOptimizationReportCache(
   if (!cache) return null;
 
   const split = splitOptimizationReportContent(input.content);
+  const existing = await cache.findUnique({
+    where: {
+      workspaceId_mode: {
+        workspaceId: input.workspaceId,
+        mode: input.mode
+      }
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      mode: true,
+      state: true,
+      updatedAt: true
+    }
+  });
+  if (existing?.state === "ready" && split.state === "unavailable") {
+    console.warn("[optimization-report-cache] skipped unavailable overwrite of ready cache", {
+      workspace_id: input.workspaceId,
+      mode: input.mode,
+      existing_cache_id: existing.id
+    });
+    return existing;
+  }
+
   const data = {
     state: split.state,
     hasConnectedDataSource: split.hasConnectedDataSource,
@@ -277,12 +301,14 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
   const allocationRecommendation = cache.allocationRecommendationJson ?? null;
   const riskAlerts = asArray(cache.riskAlertsJson);
   const executionPlan = asArray(cache.executionPlanJson);
+  const queueRows = asArray(cache.queueRowsJson);
+  const portfolioRows = asArray(cache.portfolioRowsJson);
   const reportShell = asRecord(cache.reportShellJson);
   const optimizationRun = asRecord(reportShell.optimizationRun);
   const portfolioOptimization = {
     ...asRecord(cache.portfolioOptimizationJson),
-    skuDecisions: asArray(cache.queueRowsJson),
-    recommended_portfolio: asArray(cache.portfolioRowsJson),
+    skuDecisions: queueRows,
+    recommended_portfolio: portfolioRows,
     simulations: asArray(asRecord(cache.portfolioOptimizationJson).simulations),
     portfolioSummary,
     allocationRecommendation,
@@ -292,7 +318,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
   const decisionReport = {
     ...reportShell,
     sku_portfolio_optimization: portfolioOptimization,
-    skuDecisions: [],
+    skuDecisions: queueRows,
     portfolioSummary,
     allocationRecommendation,
     riskAlerts,
@@ -307,7 +333,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     decision_report: decisionReport,
     portfolioSummary,
     allocationRecommendation,
-    skuDecisions: [],
+    skuDecisions: queueRows,
     riskAlerts,
     executionPlan,
     generated_at: cache.generatedAt instanceof Date ? cache.generatedAt.toISOString() : null,

@@ -192,14 +192,14 @@ export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }
     >
       <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex items-center justify-between gap-4">
-          <Link href="/dashboard/optimization" className="flex items-center gap-3">
+          <Link href="/optimization" className="flex items-center gap-3">
             <BrandLogo label={copy.brand} className="h-11" />
             <span>
               <span className="block text-xs text-muted-foreground">{copy.badge}</span>
             </span>
           </Link>
           <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/optimization">
+            <Link href="/optimization">
               <ArrowLeft className="size-4" />
               {copy.back}
             </Link>

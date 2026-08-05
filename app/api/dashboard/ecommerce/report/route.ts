@@ -6,6 +6,7 @@ import {
 } from "@/lib/dashboard/optimization-report-cache";
 import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
 import { prisma } from "@/lib/prisma";
+import { dateRangeFromSearchParams } from "@/lib/report-date-range";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,8 @@ function withOperatingReportFallbackFields(report: unknown, generatedAt: unknown
 }
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const dateRange = dateRangeFromSearchParams(url.searchParams);
   const session = await getCurrentWorkspaceContext(request).catch((error) => {
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;
@@ -67,7 +70,8 @@ export async function GET(request: Request) {
 
   const loaded = await loadEcommerceSalesDashboardData({
     workspaceId: session.workspace.id,
-    decisionMode: "full"
+    decisionMode: "full",
+    dateRange
   }).catch((error) => ({
     state: "unavailable" as const,
     message: error instanceof Error ? error.message : "Ecommerce report data is unavailable.",
@@ -109,6 +113,8 @@ export async function GET(request: Request) {
     message: loaded.message,
     decision_report: loaded.data?.decision_report ?? null,
     generated_at: loaded.data?.metadata.computed_at ?? null,
+    date_range: loaded.data?.metadata.date_range ?? null,
+    analytics_validation: loaded.data?.analytics_validation ?? null,
     source_platforms: loaded.data?.metadata.source_platforms ?? [],
     lineage: loaded.lineage
       ? {

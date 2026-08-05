@@ -5,6 +5,8 @@ import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "./profit/canonical-profi
 
 export { CANONICAL_PROFITABILITY_ENGINE_VERSION };
 
+export const ANALYTICS_METRIC_ENGINE_VERSION = "analytics_metric_v2026_08_05_period_reconciliation";
+export const CUSTOMER_ENGINE_VERSION = "customer_lifecycle_v2026_08_05_period_scoped";
 export const cachedReportDateRangePresets = ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"] as const;
 
 export type ReportMetricCachePayload = Record<string, unknown> & {
@@ -25,6 +27,8 @@ export type ReportMetricCachePayload = Record<string, unknown> & {
     staleAt?: string | null;
   };
   profitabilityEngineVersion?: string;
+  metricEngineVersion?: string;
+  customerEngineVersion?: string;
 };
 
 type CacheIdentityInput = {
@@ -40,6 +44,8 @@ type CacheIdentityInput = {
   semanticSchemaHash?: string | null;
   queryHash?: string | null;
   profitabilityEngineVersion?: string | null;
+  metricEngineVersion?: string | null;
+  customerEngineVersion?: string | null;
 };
 
 export function stableHash(value: unknown) {
@@ -76,6 +82,8 @@ export function reportMetricCacheKey(input: CacheIdentityInput) {
   return stableHash({
     workspaceId: input.workspaceId,
     profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION,
+    metricEngineVersion: input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION,
+    customerEngineVersion: input.customerEngineVersion ?? CUSTOMER_ENGINE_VERSION,
     metricIds: [...(input.metricIds ?? [])].sort(),
     dataSourceIds: [...(input.dataSourceIds ?? [])].sort(),
     dateField: input.dateField ?? null,
@@ -97,6 +105,18 @@ function payloadProfitabilityEngineVersion(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
   return typeof record.profitabilityEngineVersion === "string" ? record.profitabilityEngineVersion : null;
+}
+
+function payloadMetricEngineVersion(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record.metricEngineVersion === "string" ? record.metricEngineVersion : null;
+}
+
+function payloadCustomerEngineVersion(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record.customerEngineVersion === "string" ? record.customerEngineVersion : null;
 }
 
 export function isCacheableReportRange(range: Pick<ReportDateRangeInput, "preset">) {
@@ -183,7 +203,13 @@ export async function getReportMetricCache(
   }
 
   const expectedProfitabilityEngineVersion = input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION;
-  if (payloadProfitabilityEngineVersion(cache.payloadJson) !== expectedProfitabilityEngineVersion) {
+  const expectedMetricEngineVersion = input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION;
+  const expectedCustomerEngineVersion = input.customerEngineVersion ?? CUSTOMER_ENGINE_VERSION;
+  if (
+    payloadProfitabilityEngineVersion(cache.payloadJson) !== expectedProfitabilityEngineVersion ||
+    payloadMetricEngineVersion(cache.payloadJson) !== expectedMetricEngineVersion ||
+    payloadCustomerEngineVersion(cache.payloadJson) !== expectedCustomerEngineVersion
+  ) {
     await prisma.reportMetricCache.update({
       where: { id: cache.id },
       data: {
@@ -220,7 +246,9 @@ export async function upsertReportMetricCache(
   const cacheKey = reportMetricCacheKey(input);
   const payload = {
     ...input.payload,
-    profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION
+    profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION,
+    metricEngineVersion: input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION,
+    customerEngineVersion: input.customerEngineVersion ?? CUSTOMER_ENGINE_VERSION
   };
   const data = {
     workspaceId: input.workspaceId,

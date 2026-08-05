@@ -44,6 +44,7 @@ export type OptimizationPolicy = {
         minimumInventoryCoverageDays: number;
         maximumBudgetIncreasePct: number;
         minimumCustomerQuality: number;
+        roasAnomalyThreshold?: number;
       };
       reduceAds: {
         roasThreshold: number;

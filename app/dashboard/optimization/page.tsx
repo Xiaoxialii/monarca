@@ -1,6 +1,5 @@
-import { Dashboard } from "@/components/dashboard";
-import { getRequestLocale } from "@/lib/server-locale";
+import { redirect } from "next/navigation";
 
-export default async function OptimizationPage() {
-  return <Dashboard view="reports" defaultLocale={await getRequestLocale("en")} />;
+export default function OptimizationPage() {
+  redirect("/optimization");
 }

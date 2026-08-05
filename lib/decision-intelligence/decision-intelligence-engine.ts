@@ -1,4 +1,5 @@
 import type { CanonicalEcommerceMetricOutput } from "@/lib/metrics/canonical-ecommerce-metric-engine";
+import type { AnalyticsValidationResult } from "@/lib/analytics/analytics-validation-engine";
 import { buildDecisionIntelligenceV2, type DecisionIntelligenceV2 } from "@/lib/insight/counterfactual-engine";
 import { buildAutonomousCommerceRuntime, type AutonomousCommerceRuntime } from "@/lib/runtime/autonomous-commerce-runtime";
 import { generatePortfolioOptimizationReport, type PortfolioOptimizationBusinessReport } from "@/lib/optimization/optimization-report-generator";
@@ -185,10 +186,13 @@ export type DecisionIntelligenceReportV1 = {
       stock_level?: number | null;
       available_stock?: number | null;
       sales_velocity?: number;
+      normalized_daily_sales_velocity?: number;
       velocity_window_days?: number;
+      calculation_window_days?: number;
+      velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
       velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
       data_period_days?: number;
-      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
+      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
       days_of_inventory?: number | null;
       stockout_risk?: "high" | "medium" | "low" | "unknown";
       overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -257,13 +261,13 @@ export type DecisionIntelligenceReportV1 = {
       retention_7d: number;
       retention_30d: number;
     }>;
-    cohort_retention_7d: number;
-    cohort_retention_30d: number;
+    cohort_retention_7d: number | null;
+    cohort_retention_30d: number | null;
     cohort_ltv_curve: Array<{ cohort_month: string; day_0: number; day_7: number; day_30: number; total_ltv: number }>;
     revenue_per_customer_segment: Array<{ segment: string; customers: number; revenue: number; share: number }>;
     profit_per_customer_segment: Array<{ segment: string; customers: number; profit: number; share: number }>;
     ads_cost_per_customer_segment: Array<{ segment: string; customers: number; ad_cost: number; share: number }>;
-    ltv_cac_ratio: number;
+    ltv_cac_ratio: number | null;
     cac_by_cohort: Array<{ cohort_month: string; cac: number }>;
     payback_period_days: number | null;
     customer_lifecycles?: Array<{
@@ -296,7 +300,9 @@ export type DecisionIntelligenceReportV1 = {
     missing_fields: string[];
     estimated_metrics: string[];
     data_quality_components: CanonicalEcommerceMetricOutput["metadata"]["data_quality_components"];
+    analytics_validation?: AnalyticsValidationResult;
   };
+  analytics_validation?: AnalyticsValidationResult;
   decision_intelligence_v2: DecisionIntelligenceV2;
   autonomous_commerce_runtime: AutonomousCommerceRuntime;
   sku_optimization_algorithm: SkuOptimizationAlgorithmOutput;
@@ -698,7 +704,9 @@ function buildDeferredPortfolioOptimization(input: {
       launch: 0,
       growth: 0,
       mature: 0,
-      declining: 0
+      declining: 0,
+      unknown: 0,
+      insufficientHistory: 0
     },
     lifecycleClassifications: [],
     allocationRecommendation: {
@@ -1008,6 +1016,8 @@ function buildPortfolioOptimizationSkuInputs(input: {
       inventory_risk_status: row.inventory_risk_status,
       refund_rate: row.refund_rate ?? 0,
       customer_ltv: input.metrics.customer.ltv,
+      cac_confidence: input.metrics.customer.cac_confidence,
+      customer_metric_confidence: input.metrics.customer.cac_confidence,
       conversion_rate: input.metrics.core.orders > 0 ? roundRatio(row.quantity / Math.max(1, input.metrics.core.orders)) : 0.02,
       prediction_confidence: row.profit_confidence ?? input.confidence
     }));
@@ -1062,6 +1072,8 @@ function buildPortfolioOptimizationSkuInputs(input: {
         inventory_risk_status: "INSUFFICIENT_DATA",
         refund_rate: 0.04 + ((index % 5) * 0.006),
         customer_ltv: input.metrics.customer.ltv || 140,
+        cac_confidence: input.metrics.customer.cac_confidence,
+        customer_metric_confidence: input.metrics.customer.cac_confidence,
         conversion_rate: 0.018 + ((index % 6) * 0.004),
         prediction_confidence: clamp(input.confidence || 0.72, 0.58, 0.9)
       };

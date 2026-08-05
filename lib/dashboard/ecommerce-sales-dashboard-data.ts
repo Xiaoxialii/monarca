@@ -1,7 +1,10 @@
 import type { CanonicalDataset } from "@/lib/semantic/types";
+import { filterCanonicalDatasetForDateRange } from "@/lib/analytics/analysis-period-engine";
+import { validateAnalyticsMetrics, type AnalyticsValidationResult } from "@/lib/analytics/analytics-validation-engine";
 import { computeCanonicalEcommerceMetrics, type CanonicalEcommerceMetricOutput } from "@/lib/metrics/canonical-ecommerce-metric-engine";
 import { enrichOrderItemsWithCanonicalSku, normalizeProductSkuRows } from "@/lib/sku/sku-intelligence-engine";
 import { buildDecisionIntelligenceReportV1, type DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
+import type { ReportDateRangeInput } from "@/lib/report-date-range";
 
 export type EcommerceDashboardDecisionMode = "full" | "sku";
 
@@ -49,10 +52,17 @@ export type EcommerceSalesDashboardData = {
     product_concentration: number | null;
   };
   decision_report: DecisionIntelligenceReportV1;
+  analytics_validation: AnalyticsValidationResult;
   metadata: {
     schema_version: "ecommerce_canonical_v1";
     source_platforms: string[];
     computed_at: string;
+    date_range?: {
+      preset: string;
+      startDate?: string | null;
+      endDate?: string | null;
+    };
+    filtered_row_counts?: Record<string, number>;
   };
 };
 
@@ -66,9 +76,10 @@ type CanonicalRow = Record<string, unknown>;
 
 export function buildEcommerceSalesDashboardData(
   dataset: CanonicalDataset,
-  options: { decisionMode?: EcommerceDashboardDecisionMode } = {}
+  options: { decisionMode?: EcommerceDashboardDecisionMode; dateRange?: Partial<ReportDateRangeInput> | null } = {}
 ): EcommerceSalesDashboardData {
-  const metricDataset = adaptCanonicalDatasetForMetrics(dataset);
+  const filtered = filterCanonicalDatasetForDateRange(dataset, options.dateRange);
+  const metricDataset = adaptCanonicalDatasetForMetrics(filtered.dataset);
   const metricResult = computeCanonicalEcommerceMetrics(metricDataset);
   const orders = metricDataset.tables.ecommerce_orders;
   const items = metricDataset.tables.ecommerce_order_items;
@@ -92,6 +103,18 @@ export function buildEcommerceSalesDashboardData(
     ...metricResult.metrics,
     total_sku_count: totalSkuCount
   };
+  const analyticsValidation = validateAnalyticsMetrics({
+    dataset: metricDataset,
+    metrics: metricResult.metrics
+  });
+  const decisionReport = {
+    ...buildDecisionIntelligenceReportV1({
+      ...metricResult,
+      metrics,
+      decisionMode: options.decisionMode ?? "full"
+    }),
+    analytics_validation: analyticsValidation
+  } as DecisionIntelligenceReportV1;
 
   return {
     metrics,
@@ -145,15 +168,18 @@ export function buildEcommerceSalesDashboardData(
       price_distribution: priceDistribution(products, items),
       product_concentration: topProductShare
     },
-    decision_report: buildDecisionIntelligenceReportV1({
-      ...metricResult,
-      metrics,
-      decisionMode: options.decisionMode ?? "full"
-    }),
+    decision_report: decisionReport,
+    analytics_validation: analyticsValidation,
     metadata: {
       schema_version: metricResult.metadata.schema_version,
       source_platforms: metricResult.metadata.source_platforms,
-      computed_at: metricResult.metadata.computed_at
+      computed_at: metricResult.metadata.computed_at,
+      date_range: {
+        preset: filtered.dateRange.preset,
+        startDate: filtered.dateRange.startDate ?? null,
+        endDate: filtered.dateRange.endDate ?? null
+      },
+      filtered_row_counts: filtered.filteredRowCounts
     }
   };
 }

@@ -84,6 +84,49 @@ test("metric engine computes Shopify canonical ecommerce metrics", () => {
   assert.equal(result.metadata.audit.canonical_input_only, true);
 });
 
+test("metric engine uses order line revenue and validates order/SKU reconciliation", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { order_id: "O-1", revenue: 999, order_date: "2026-06-01" },
+      { order_id: "O-2", revenue: 999, order_date: "2026-06-02" }
+    ],
+    items: [
+      { order_id: "O-1", sku: "SKU-A", quantity: 2, price: 50, unit_cost: 10 },
+      { order_id: "O-2", sku: "SKU-B", quantity: 1, price: 75, unit_cost: 20 }
+    ],
+    products: [
+      { product_id: "P-1", sku: "SKU-A" },
+      { product_id: "P-2", sku: "SKU-B" }
+    ]
+  }));
+
+  assert.equal(result.metrics.revenue, 175);
+  assert.equal(result.metrics.core.revenue, 175);
+  assert.equal(result.metrics.orders, 2);
+  assert.equal(result.metrics.aov, 87.5);
+  assert.equal(result.metrics.core.aov_confidence, "HIGH");
+  assert.equal(result.metadata.validation.status, "VALID");
+  assert.equal(result.metadata.validation.revenue_reconciliation.revenue_from_orders, 1998);
+  assert.equal(result.metadata.validation.revenue_reconciliation.revenue_from_order_items, 175);
+  assert.equal(result.metadata.validation.revenue_reconciliation.revenue_from_sku_rollup, 175);
+});
+
+test("metric engine reports low AOV confidence when order ids are incomplete", () => {
+  const result = computeCanonicalEcommerceMetrics(canonicalDataset({
+    orders: [
+      { canonical_key: "row-1", revenue: 50, order_date: "2026-06-01" },
+      { canonical_key: "row-2", revenue: 75, order_date: "2026-06-02" }
+    ],
+    items: [
+      { canonical_key: "item-1", sku: "SKU-A", quantity: 1, price: 50, unit_cost: 10 },
+      { canonical_key: "item-2", sku: "SKU-B", quantity: 1, price: 75, unit_cost: 20 }
+    ]
+  }));
+
+  assert.equal(result.metrics.orders, 0);
+  assert.equal(result.metrics.core.aov_confidence, "LOW");
+});
+
 test("growth os metric layers compute profit customer growth and ads metrics", () => {
   const result = computeCanonicalEcommerceMetrics(canonicalDataset({
     platform: "canonical-growth",
@@ -120,8 +163,8 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.business.net_profit, 124.6);
   assert.equal(result.metrics.business.margin, 0.2077);
   assert.equal(result.metrics.business.refund_amount, 30);
-  assert.equal(result.metrics.business.platform_fee, 18);
-  assert.equal(result.metrics.business.payment_fee, 17.4);
+  assert.equal(result.metrics.business.platform_fee, 65.4);
+  assert.equal(result.metrics.business.payment_fee, 0);
   assert.equal(result.metrics.business.sku_unit_economics.length, 3);
   assert.equal(result.metrics.business.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.net_profit) * 100) / 100, 0), 124.6);
   assert.ok(result.metrics.business.profit_confidence < 1);
@@ -158,9 +201,9 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.customer.avg_customer_lifetime_days, 0.5);
   assert.equal(result.metrics.customer.customer_lifecycles.find((row) => row.customer_id === "C-1").lifetime_days, 1);
   assert.equal(result.metrics.customer.cohort_by_first_purchase_month.length, 0);
-  assert.equal(result.metrics.customer.cohort_retention_30d, 0);
+  assert.equal(result.metrics.customer.cohort_retention_30d, null);
   assert.equal(result.metrics.customer.revenue_per_customer_segment[0].segment, "Top 1%");
-  assert.equal(result.metrics.customer.ltv_cac_ratio, 0);
+  assert.equal(result.metrics.customer.ltv_cac_ratio, null);
   assert.equal(result.metrics.customer.payback_period_days, null);
   assert.equal(result.metrics.ads.roas, 4);
   assert.equal(result.metrics.ads.cac, null);
@@ -185,10 +228,14 @@ test("inventory sales velocity uses observation window and marks single-day data
 
   const sku = result.metrics.business.sku_unit_economics.find((row) => row.sku === "SKU-SINGLE-DAY");
   assert.equal(sku.sales_velocity, 3.3333);
+  assert.equal(sku.normalized_daily_sales_velocity, 3.3333);
   assert.equal(sku.velocity_window_days, 30);
+  assert.equal(sku.calculation_window_days, 30);
+  assert.equal(sku.velocity_calculation_basis, "30-day normalized estimate");
   assert.equal(sku.data_period_days, 0);
   assert.equal(sku.velocity_confidence, "LOW");
-  assert.equal(sku.inventory_risk_status, "INSUFFICIENT_DATA");
+  assert.equal(sku.inventory_risk_status, "EXCESS_INVENTORY");
+  assert.equal(sku.overstock_risk, "high");
   assert.equal(sku.stockout_risk, "unknown");
   assert.notEqual(sku.recommended_action, "RESTOCK_FIRST");
 });

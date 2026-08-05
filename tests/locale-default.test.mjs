@@ -30,11 +30,10 @@ test("public and dashboard pages pass request locale into client components", ()
     ["app/sign-up/page.tsx", /<SignUpPanel defaultLocale=\{defaultLocale\}/],
     ["app/checkout/professional/page.tsx", /<PaymentPage plan="professional" defaultLocale=\{await getRequestLocale\("en"\)\}/],
     ["app/support/page.tsx", /<SupportPage defaultLocale=\{await getRequestLocale\("en"\)\}/],
-    ["app/dashboard/page.tsx", /<Dashboard view="reports" defaultLocale=\{await getRequestLocale\("en"\)\}/]
+    ["app/optimization/page.tsx", /<Dashboard view="reports" defaultLocale=\{await getRequestLocale\("en"\)\}/]
   ];
 
   for (const [file, pattern] of expected) {
     assert.match(read(file), pattern, `${file} should pass request locale to the client component`);
   }
 });
-

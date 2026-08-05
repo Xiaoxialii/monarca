@@ -95,7 +95,7 @@ const dashboardCopy = {
   en: {
     navItems: [
       { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "Profit Optimization", href: "/dashboard/optimization", target: "#reports", icon: BrainCircuit },
+      { label: "Profit Optimization", href: "/optimization", target: "#reports", icon: BrainCircuit },
       { label: "Optimization Tracker", href: "/dashboard/action-tracker", target: "#action-tracker", icon: Activity },
       { label: "Launch Simulator", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
       { label: "Operating Reports", href: "/dashboard/report", target: "#report", icon: FileText },
@@ -803,7 +803,7 @@ const dashboardCopy = {
   zh: {
     navItems: [
       { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "利润优化", href: "/dashboard/optimization", target: "#reports", icon: BrainCircuit },
+      { label: "利润优化", href: "/optimization", target: "#reports", icon: BrainCircuit },
       { label: "Optimization Tracker", href: "/dashboard/action-tracker", target: "#action-tracker", icon: Activity },
       { label: "产品发布", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
       { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
@@ -2134,7 +2134,7 @@ function SetupHero({ copy }: { copy: DashboardCopy }) {
     { href: "/dashboard/import-data", icon: Database },
     { href: "/dashboard/schema", icon: Table2 },
     { href: "/dashboard/metrics", icon: LineChart },
-    { href: "/dashboard/optimization", icon: FileText }
+    { href: "/optimization", icon: FileText }
   ];
 
   return (

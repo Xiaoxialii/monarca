@@ -112,10 +112,13 @@ export type SkuUnitEconomicsMetric = {
   stock_level?: number | null;
   available_stock?: number | null;
   sales_velocity?: number;
+  normalized_daily_sales_velocity?: number;
   velocity_window_days?: number;
+  calculation_window_days?: number;
+  velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
   days_of_inventory?: number | null;
   stockout_risk?: "high" | "medium" | "low" | "unknown";
   overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -154,6 +157,7 @@ export type CanonicalEcommerceMetricOutput = {
       revenue: number;
       orders: number;
       aov: number;
+      aov_confidence: "HIGH" | "MEDIUM" | "LOW";
       refund_rate: number;
       sku_revenue: SkuRevenueMetric[];
       product_performance: ProductPerformanceMetric[];
@@ -243,13 +247,13 @@ export type CanonicalEcommerceMetricOutput = {
         retention_7d: number;
         retention_30d: number;
       }>;
-      cohort_retention_7d: number;
-      cohort_retention_30d: number;
+      cohort_retention_7d: number | null;
+      cohort_retention_30d: number | null;
       cohort_ltv_curve: Array<{ cohort_month: string; day_0: number; day_7: number; day_30: number; total_ltv: number }>;
       revenue_per_customer_segment: Array<{ segment: string; customers: number; revenue: number; share: number }>;
       profit_per_customer_segment: Array<{ segment: string; customers: number; profit: number; share: number }>;
       ads_cost_per_customer_segment: Array<{ segment: string; customers: number; ad_cost: number; share: number }>;
-      ltv_cac_ratio: number;
+      ltv_cac_ratio: number | null;
       cac_by_cohort: Array<{ cohort_month: string; cac: number }>;
       payback_period_days: number | null;
       customer_lifecycles: Array<{
@@ -306,6 +310,22 @@ export type CanonicalEcommerceMetricOutput = {
       deterministic: true;
       canonical_input_only: true;
     };
+    validation: {
+      status: "VALID" | "INVALID";
+      revenue_reconciliation: {
+        revenue_from_orders: number;
+        revenue_from_order_items: number;
+        revenue_from_sku_rollup: number;
+        displayed_revenue: number;
+        difference: number;
+      };
+      order_reconciliation: {
+        unique_order_ids: number;
+        displayed_orders: number;
+        difference: number;
+      };
+      warnings: string[];
+    };
   };
 };
 
@@ -347,12 +367,23 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
   if (ads.length) trackCompleteness(quality, "ecommerce_ads", ads, ["spend"]);
   if (inventory.length) trackCompleteness(quality, "ecommerce_inventory", inventory, ["sku", "stock_level"]);
 
-  const revenue = roundCurrency(sum(orders.map(orderRevenue)));
   const orderCount = new Set(orders.map((row) => stringValue(row.order_id)).filter(Boolean)).size;
   const actualRefundAmount = roundCurrency(sum(refunds.map((row) => firstNumber(row.amount, row.refund_amount))));
-  const effectiveRefundAmount = refunds.length ? actualRefundAmount : roundCurrency(revenue * COST_BENCHMARKS.refundRate);
   const skuRevenue = buildSkuRevenue(orderItems, quality);
+  const revenueFromOrders = roundCurrency(sum(orders.map(orderRevenue)));
+  const revenueFromOrderItems = roundCurrency(sum(orderItems.map((row) => lineItemRevenue(row))));
+  const revenueFromSkuRollup = roundCurrency(sum(skuRevenue.map((row) => row.revenue)));
+  const revenue = revenueFromOrderItems > 0 ? revenueFromOrderItems : revenueFromOrders;
+  const effectiveRefundAmount = refunds.length ? actualRefundAmount : roundCurrency(revenue * COST_BENCHMARKS.refundRate);
   const productPerformance = buildProductPerformance(orderItems, products, quality);
+  const metricValidation = metricValidationSummary({
+    revenueFromOrders,
+    revenueFromOrderItems,
+    revenueFromSkuRollup,
+    displayedRevenue: revenue,
+    uniqueOrderIds: orderCount,
+    displayedOrders: orderCount
+  });
   const business = buildBusinessMetrics({ revenue, refundAmount: effectiveRefundAmount, refunds, orderItems, products, orders, ads, inventory, quality });
   const growth = buildGrowthMetrics({ orders, orderItems, quality });
   const attribution = buildAttributionMetrics({ orders, orderItems, ads, skuUnitEconomics: business.sku_unit_economics, revenue, quality });
@@ -387,6 +418,7 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
         revenue,
         orders: orderCount,
         aov: orderCount ? roundCurrency(revenue / orderCount) : 0,
+        aov_confidence: aovConfidence({ orders, orderCount }),
         refund_rate: revenue > 0 ? roundRatio(effectiveRefundAmount / revenue) : 0,
         sku_revenue: skuRevenue,
         product_performance: productPerformance
@@ -438,7 +470,8 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
         input: "canonical_schema_only",
         deterministic: true,
         canonical_input_only: true
-      }
+      },
+      validation: metricValidation
     }
   };
 }
@@ -762,7 +795,7 @@ function buildCustomerMetrics(input: {
   const customerProfitLtv = roundCurrency(customerRevenueLtv * grossMargin);
   const reliableNewCustomerCount = acquisitionReliable && confidence.cac_confidence !== "LOW" && newCustomers > 0;
   const cac = reliableNewCustomerCount ? safeRatio(adSpend, newCustomers) : null;
-  const ltvCacRatio = cac === null ? 0 : safeRatio(customerLifetimeValue, cac);
+  const ltvCacRatio = cac === null ? null : safeRatio(customerLifetimeValue, cac);
   const customerContributionLtv = cac === null ? 0 : roundCurrency(customerRevenueLtv - cac);
   const paybackPeriodDays = customerLifetimeValue > 0 && cac !== null
     ? roundRatio((cac / customerLifetimeValue) * Math.max(1, lifecycle.avgCustomerLifetimeDays))
@@ -805,8 +838,8 @@ function buildCustomerMetrics(input: {
     churned_customers: lifecycle.churnedCustomers,
     avg_customer_lifetime_days: lifecycle.avgCustomerLifetimeDays,
     cohort_by_first_purchase_month: cohort.cohorts,
-    cohort_retention_7d: cohort.retention7d,
-    cohort_retention_30d: cohort.retention30d,
+    cohort_retention_7d: confidence.cohort_confidence === "LOW" ? null : cohort.retention7d,
+    cohort_retention_30d: confidence.cohort_confidence === "LOW" ? null : cohort.retention30d,
     cohort_ltv_curve: cohort.ltvCurve,
     revenue_per_customer_segment: segmentRows.revenue,
     profit_per_customer_segment: segmentRows.profit,
@@ -1312,6 +1345,60 @@ function timeSeriesQuality(rows: TimeSeriesMetric[]) {
   if (rows.length === 1) return 0.35;
   if (rows.length < 7) return 0.65;
   return 1;
+}
+
+function aovConfidence(input: { orders: Array<Record<string, unknown>>; orderCount: number }): "HIGH" | "MEDIUM" | "LOW" {
+  if (!input.orders.length || !input.orderCount) return "LOW";
+  const orderIdRows = input.orders.filter((row) => stringValue(row.order_id)).length;
+  const orderCompleteness = safeRatio(orderIdRows, input.orders.length);
+  const duplicateRatio = input.orders.length > 0 ? 1 - safeRatio(input.orderCount, input.orders.length) : 1;
+
+  if (orderCompleteness >= 0.98 && duplicateRatio <= 0.01) return "HIGH";
+  if (orderCompleteness >= 0.8 && duplicateRatio <= 0.1) return "MEDIUM";
+  return "LOW";
+}
+
+function metricValidationSummary(input: {
+  revenueFromOrders: number;
+  revenueFromOrderItems: number;
+  revenueFromSkuRollup: number;
+  displayedRevenue: number;
+  uniqueOrderIds: number;
+  displayedOrders: number;
+}) {
+  const revenueBaseline = input.revenueFromOrderItems > 0 ? input.revenueFromOrderItems : input.revenueFromOrders;
+  const difference = roundCurrency(input.displayedRevenue - revenueBaseline);
+  const warnings: string[] = [];
+  const tolerance = 0.01;
+
+  if (Math.abs(difference) > tolerance) {
+    warnings.push(`displayed revenue differs from canonical revenue by ${difference}`);
+  }
+  const skuDifference = roundCurrency(input.displayedRevenue - input.revenueFromSkuRollup);
+  if (input.revenueFromSkuRollup > 0 && Math.abs(skuDifference) > tolerance) {
+    warnings.push(`displayed revenue differs from SKU rollup by ${skuDifference}`);
+  }
+  const orderDifference = input.displayedOrders - input.uniqueOrderIds;
+  if (orderDifference !== 0) {
+    warnings.push(`displayed orders differ from distinct order ids by ${orderDifference}`);
+  }
+
+  return {
+    status: warnings.length ? "INVALID" as const : "VALID" as const,
+    revenue_reconciliation: {
+      revenue_from_orders: input.revenueFromOrders,
+      revenue_from_order_items: input.revenueFromOrderItems,
+      revenue_from_sku_rollup: input.revenueFromSkuRollup,
+      displayed_revenue: input.displayedRevenue,
+      difference
+    },
+    order_reconciliation: {
+      unique_order_ids: input.uniqueOrderIds,
+      displayed_orders: input.displayedOrders,
+      difference: orderDifference
+    },
+    warnings
+  };
 }
 
 function buildSkuVelocity(rows: Array<Record<string, unknown>>) {

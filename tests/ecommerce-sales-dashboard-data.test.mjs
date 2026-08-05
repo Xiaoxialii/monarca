@@ -82,6 +82,57 @@ test("ecommerce sales dashboard builds KPI, trend, SKU, refund, and catalog sect
   assert.equal(result.catalog_health.sku_density, 1);
 });
 
+test("ecommerce sales dashboard scopes metrics to selected date range before calculation", () => {
+  const result = buildEcommerceSalesDashboardData(dataset(), {
+    dateRange: {
+      preset: "CUSTOM",
+      startDate: "2026-06-02",
+      endDate: "2026-06-02"
+    }
+  });
+
+  assert.equal(result.metrics.revenue, 200);
+  assert.equal(result.metrics.orders, 1);
+  assert.equal(result.metrics.aov, 200);
+  assert.equal(result.metrics.sku_revenue.length, 1);
+  assert.equal(result.metrics.sku_revenue[0].sku, "B");
+  assert.equal(result.analytics_validation.status, "VALID");
+  assert.equal(result.analytics_validation.reconciliation.unique_order_ids, 1);
+  assert.deepEqual(result.metadata.date_range, {
+    preset: "CUSTOM",
+    startDate: "2026-06-02",
+    endDate: "2026-06-02"
+  });
+});
+
+test("period-scoped customer metrics do not reuse all-time customer profile aggregates", () => {
+  const scoped = buildEcommerceSalesDashboardData({
+    ...dataset(),
+    tables: {
+      ...dataset().tables,
+      ecommerce_orders: [
+        { order_id: "1", customer_id: "C-1", revenue: 100, order_date: "2026-06-01" },
+        { order_id: "2", customer_id: "C-1", revenue: 200, order_date: "2026-06-02" },
+        { order_id: "3", customer_id: "C-2", revenue: 50, order_date: "2026-07-10" }
+      ],
+      ecommerce_customers: [
+        { customer_id: "C-1", total_orders: 99, total_spent: 99999 },
+        { customer_id: "C-2", total_orders: 42, total_spent: 4242 }
+      ]
+    }
+  }, {
+    dateRange: {
+      preset: "CUSTOM",
+      startDate: "2026-07-10",
+      endDate: "2026-07-10"
+    }
+  });
+
+  assert.equal(scoped.metrics.customer.customer_count, 1);
+  assert.equal(scoped.metrics.customer.avg_orders_per_customer, 1);
+  assert.equal(scoped.metrics.customer.repeat_purchase_rate, 0);
+});
+
 test("ecommerce sales dashboard preserves inventory into SKU operating P&L", () => {
   const result = buildEcommerceSalesDashboardData(dataset());
   const skuA = result.decision_report.sku_breakdown.top_profit_skus.find((row) => row.sku === "A");

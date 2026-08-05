@@ -95,7 +95,7 @@ export function applyOptimizationOutcomeHistory(profile: DynamicThresholdProfile
 
 export function lifecycleThresholdMultiplier(profile: DynamicThresholdProfile, stage?: SkuLifecycleStage) {
   if (!stage) return { scale_ads_multiplier: 1, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1 };
-  return profile.lifecycle_adjustments[stage];
+  return profile.lifecycle_adjustments[stage] ?? { scale_ads_multiplier: 1.5, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1.25 };
 }
 
 function actionHistory(history: OptimizationOutcomeHistoryRow[], pattern: RegExp) {

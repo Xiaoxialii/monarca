@@ -59,10 +59,10 @@ test("cost intelligence aggregates real SKU fulfillment platform payment and ref
 
   assert.equal(result.totals.cogs, 120);
   assert.equal(result.totals.shipping_cost, 20);
-  assert.equal(result.totals.fulfillment_cost, 7);
-  assert.equal(result.totals.platform_fee, 9);
-  assert.equal(result.totals.payment_fee, 8.7);
-  assert.equal(result.totals.refund_cost, 25);
+  assert.equal(result.totals.fulfillment_cost, 0);
+  assert.equal(result.totals.platform_fee, 49.7);
+  assert.equal(result.totals.payment_fee, 0);
+  assert.equal(result.totals.refund_cost, 0);
   assert.equal(result.totals.total_cost, 189.7);
   assert.equal(result.totals.net_profit, 80.3);
   assert.equal(result.totals.margin, 0.2677);
@@ -82,6 +82,8 @@ test("cost intelligence aggregates real SKU fulfillment platform payment and ref
   assert.ok(result.sku_unit_economics[0].attribution_confidence <= 0.5);
   assert.deepEqual(result.sku_unit_economics[0].estimated_components, ["ad_allocation"]);
   assert.equal(result.sku_unit_economics[0].cost_breakdown.ads, 20);
+  assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "PASSED");
+  assert.equal(result.data_quality.portfolio_reconciliation.portfolio_net_profit, result.data_quality.portfolio_reconciliation.sku_net_profit);
 });
 
 test("cost intelligence carries product name category and variant attributes to SKU rows", () => {
@@ -149,10 +151,11 @@ test("portfolio profitability reconciles to SKU unit economics when order and it
   assert.equal(result.totals.refund_cost, skuRefundCost);
   assert.equal(skuRevenue, 150);
   assert.equal(skuShipping, 8);
-  assert.equal(skuPlatformFee, 3);
-  assert.equal(skuPaymentFee, 2.9);
-  assert.equal(skuRefundCost, 4);
+  assert.equal(skuPlatformFee, 9.9);
+  assert.equal(skuPaymentFee, 0);
+  assert.equal(skuRefundCost, 0);
   assert.equal(result.data_quality.portfolio_reconciliation.source, "sku_unit_economics");
+  assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "FAILED");
   assert.equal(result.data_quality.portfolio_reconciliation.order_revenue, 100);
   assert.equal(result.data_quality.portfolio_reconciliation.sku_revenue, 150);
   assert.equal(result.data_quality.portfolio_reconciliation.revenue_difference, -50);
@@ -172,9 +175,9 @@ test("cost intelligence safely degrades when cost fields are missing", () => {
 
   assert.equal(result.totals.cogs, 45);
   assert.equal(result.totals.shipping_cost, 8);
-  assert.equal(result.totals.platform_fee, 3);
-  assert.equal(result.totals.payment_fee, 2.9);
-  assert.equal(result.totals.refund_cost, 4);
+  assert.equal(result.totals.platform_fee, 9.9);
+  assert.equal(result.totals.payment_fee, 0);
+  assert.equal(result.totals.refund_cost, 0);
   assert.equal(result.totals.net_profit, 37.1);
   assert.ok(result.data_quality.cost_confidence < 0.1);
   assert.ok(result.data_quality.missing_cost_fields.includes("ecommerce_order_items.cogs"));
@@ -450,22 +453,35 @@ test("low stock profitable SKU recommends restock before scaling ads", () => {
     revenue: 1000,
     refundAmount: 0,
     refunds: [],
-    orderItems: [{ order_id: "O-1", sku: "SKU-FAST", quantity: 10, price: 100, unit_cost: 25, campaign_id: "CAMP-1", order_date: "2024-02-01" }],
+    orderItems: [
+      { order_id: "O-0", sku: "SKU-FAST", quantity: 1, price: 100, unit_cost: 25, campaign_id: "CAMP-1", order_date: "2024-01-02" },
+      { order_id: "O-1", sku: "SKU-FAST", quantity: 9, price: 100, unit_cost: 25, campaign_id: "CAMP-1", order_date: "2024-02-01" }
+    ],
     products: [],
     orders: [
       {
         order_id: "O-1",
-        revenue: 1000,
+        revenue: 900,
         order_date: "2024-02-01",
         shipping_cost: 20,
         handling_cost: 10,
         warehouse_cost: 5,
         platform_fee: 30,
         payment_fee: 29
+      },
+      {
+        order_id: "O-0",
+        revenue: 100,
+        order_date: "2024-01-02",
+        shipping_cost: 0,
+        handling_cost: 0,
+        warehouse_cost: 0,
+        platform_fee: 0,
+        payment_fee: 0
       }
     ],
     ads: [{ ad_id: "AD-1", campaign_id: "CAMP-1", spend: 100, campaign_start_date: "2024-01-01" }],
-    inventory: [{ sku: "SKU-FAST", stock_level: 3 }]
+    inventory: [{ sku: "SKU-FAST", stock_level: 1 }]
   });
 
   assert.equal(result.sku_unit_economics[0].stockout_risk, "high");
@@ -484,10 +500,10 @@ test("SKU profitability uses direct channel source costs without duplicated allo
         platform: "amazon",
         quantity: 40,
         revenue: 7600,
-        cogs: 2780.47,
-        shipping_cost: 6.25,
-        platform_fee: 180,
-        payment_fee: 120
+        cogs: 4200,
+        shipping_cost: 16.25,
+        platform_fee: 300,
+        payment_fee: 0
       },
       {
         order_id: "META-00479",
@@ -495,10 +511,10 @@ test("SKU profitability uses direct channel source costs without duplicated allo
         platform: "meta",
         quantity: 48,
         revenue: 8290,
-        cogs: 3000,
-        shipping_cost: 5.95,
-        platform_fee: 186.91,
-        payment_fee: 139.1
+        cogs: 4400,
+        shipping_cost: 15.95,
+        platform_fee: 320,
+        payment_fee: 0
       },
       {
         order_id: "SHOP-00479",
@@ -506,17 +522,17 @@ test("SKU profitability uses direct channel source costs without duplicated allo
         platform: "shopify",
         quantity: 43,
         revenue: 7328,
-        cogs: 2700,
-        shipping_cost: 6.75,
-        platform_fee: 200,
-        payment_fee: 140
+        cogs: 4135.67,
+        shipping_cost: 17.04,
+        platform_fee: 296.86,
+        payment_fee: 0
       }
     ],
     products: [],
     orders: [
-      { order_id: "AMZ-00479", revenue: 7600 },
-      { order_id: "META-00479", revenue: 8290 },
-      { order_id: "SHOP-00479", revenue: 7328 }
+      { order_id: "AMZ-00479", revenue: 7600, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "META-00479", revenue: 8290, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "SHOP-00479", revenue: 7328, shipping_cost: 0, handling_cost: 0, warehouse_cost: 0, platform_fee: 0, payment_fee: 0 }
     ],
     ads: [
       { ad_id: "AD-AMZ-00479", sku: "SKU_00479", platform: "amazon", spend: 183 },
@@ -529,15 +545,18 @@ test("SKU profitability uses direct channel source costs without duplicated allo
   const row = result.sku_unit_economics.find((item) => item.sku === "SKU_00479");
   assert.equal(row?.quantity, 131);
   assert.equal(row?.revenue, 23218);
-  assert.equal(row?.cogs, 8480.47);
+  assert.equal(row?.cogs, 12735.67);
   assert.equal(row?.ad_cost_allocated, 806);
-  assert.equal(row?.shipping_cost, 18.95);
-  assert.equal(row?.platform_fee, 566.91);
-  assert.equal(row?.payment_fee, 399.1);
+  assert.equal(row?.shipping_cost, 49.24);
+  assert.equal(row?.platform_fee, 916.86);
+  assert.equal(row?.payment_fee, 0);
   assert.equal(row?.cost_breakdown.fulfillment, 0);
-  assert.equal(row?.net_profit, 12946.57);
-  assert.equal(row?.margin, 0.5576);
+  assert.equal(row?.net_profit, 8710.23);
+  assert.equal(row?.net_profit, row.revenue - row.cogs - row.ad_cost_allocated - row.shipping_cost - row.platform_fee);
+  assert.equal(row?.margin, 0.3751);
   assert.equal(row?.ad_allocation_method, "direct");
+  assert.equal(result.totals.net_profit, result.sku_unit_economics.reduce((sum, item) => Math.round((sum + item.net_profit) * 100) / 100, 0));
+  assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "PASSED");
 });
 
 test("SKU direct ads keep multiple same-campaign source rows instead of collapsing spend", () => {

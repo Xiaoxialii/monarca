@@ -138,8 +138,8 @@ const homepageCopy = {
     },
     hero: {
       eyebrow: "AI Profit Optimization System",
-      headline: "AI decision system that helps ecommerce teams maximize profit.",
-      subheadline: "Simulate thousands of scenarios across products, advertising, and inventory to find the most profitable actions.",
+      headline: "AI Profit Optimization System",
+      subheadline: "Connect data. Execute optimal profit decisions",
       teamLabel: "Three-layer profit control that turns data changes into operating actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },
@@ -709,18 +709,18 @@ function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?:
   return (
     <article
       className={cn(
-        "group w-full rounded-2xl bg-white p-3.5 shadow-[0_22px_72px_rgba(15,23,42,0.10)] ring-1 ring-slate-900/[0.06] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_84px_rgba(15,23,42,0.14)]",
-        compact ? "mt-5" : "mx-auto max-w-[500px]"
+        "group w-full min-w-0 overflow-hidden rounded-2xl bg-white p-3.5 shadow-[0_22px_72px_rgba(15,23,42,0.10)] ring-1 ring-slate-900/[0.06] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_84px_rgba(15,23,42,0.14)]",
+        compact ? "mt-5 max-w-[calc(100vw-2rem)]" : "mx-auto max-w-[500px]"
       )}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-[13rem]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{labels.case}</p>
-          <h3 className="mt-1.5 whitespace-nowrap text-lg font-semibold leading-tight tracking-normal text-slate-950 sm:text-[1.18rem]">
+          <h3 className="mt-1.5 text-lg font-semibold leading-tight tracking-normal text-slate-950 sm:whitespace-nowrap sm:text-[1.18rem]">
             {labels.title}
           </h3>
         </div>
-        <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)] sm:mr-10">
+        <span className="max-w-full shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)] sm:mr-10">
           {labels.live}
         </span>
       </div>
@@ -772,9 +772,9 @@ function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?:
       </section>
 
       <section className="mt-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.actions}</p>
-          <p className="text-xs font-semibold text-emerald-700">{labels.confidence}</p>
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.actions}</p>
+          <p className="min-w-0 text-right text-xs font-semibold text-emerald-700">{labels.confidence}</p>
         </div>
         <div className="mt-2 space-y-1.5">
           {businessCaseRecommendations.map((action) => (
@@ -1483,25 +1483,33 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
         onClose={() => setIsMobileNavOpen(false)}
       />
 
-      <section className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[0.86fr_1.14fr] lg:items-center lg:gap-12 lg:px-8 lg:pb-14 lg:pt-18">
+      <section className="relative mx-auto grid max-w-7xl gap-10 overflow-hidden px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[0.86fr_1.14fr] lg:items-center lg:gap-12 lg:overflow-visible lg:px-8 lg:pb-14 lg:pt-18">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
-        <div className="relative z-10 lg:pl-10 xl:pl-14">
+        <div className="relative z-10 w-full max-w-[calc(100vw-2rem)] overflow-hidden lg:max-w-none lg:overflow-visible lg:pl-10 xl:pl-14">
           <div className="mb-7 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-7 lg:text-xs">
             <Zap className="size-3.5 sm:size-4" />
             {copy.hero.eyebrow}
           </div>
           <h1
-            className="max-w-2xl text-[2.45rem] font-black leading-[1.02] tracking-normal text-slate-950 sm:text-[3.4rem] lg:text-[3.18rem] lg:leading-[1.02]"
+            className="w-full max-w-2xl break-words text-[2.45rem] font-black leading-[1.02] tracking-normal text-slate-950 [overflow-wrap:anywhere] sm:text-[3.4rem] sm:[overflow-wrap:normal] lg:text-[3.18rem] lg:leading-[1.02]"
           >
-            <span className="hero-title-shimmer">{copy.hero.headline}</span>
+            {isZh ? (
+              <span className="hero-title-shimmer whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{copy.hero.headline}</span>
+            ) : (
+              <span className="block">
+                <span className="block">AI Profit</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Optimization</span>
+                <span className="block">System</span>
+              </span>
+            )}
           </h1>
           {copy.hero.subheadline ? (
-            <p className="mt-6 max-w-xl text-base leading-[1.7] text-slate-600 lg:mt-6 lg:text-[1.02rem] lg:leading-8">
+            <p className="mt-6 max-w-[calc(100vw-2rem)] break-words text-base leading-[1.7] text-slate-600 [overflow-wrap:anywhere] sm:max-w-xl sm:[overflow-wrap:normal] lg:mt-6 lg:text-[1.02rem] lg:leading-8">
               <span className="lg:hidden">{copy.hero.subheadline}</span>
               <span className="hidden lg:inline">{copy.hero.subheadline}</span>
             </p>
           ) : null}
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row lg:mt-9">
+          <div className="mt-9 flex max-w-[calc(100vw-2rem)] flex-col gap-3 sm:flex-row lg:mt-9 lg:max-w-none">
             <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
               <Link href="/consulting">
                 {copy.hero.primaryCta}

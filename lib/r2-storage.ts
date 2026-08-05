@@ -34,7 +34,7 @@ function r2Config() {
   const endpoint = accountId ? canonicalR2Endpoint(accountId) : process.env.R2_ENDPOINT || null;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucket = process.env.R2_BUCKET_NAME;
+  const bucket = process.env.R2_BUCKET_NAME || process.env.R2_BUCKET;
 
   if (!endpoint || !accessKeyId || !secretAccessKey || !bucket) {
     return null;
@@ -84,6 +84,7 @@ function r2Client(config: NonNullable<ReturnType<typeof r2Config>>) {
   return new S3Client({
     region: "auto",
     endpoint: config.endpoint,
+    forcePathStyle: true,
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey

@@ -20,7 +20,8 @@ export const DEFAULT_OPTIMIZATION_POLICY: OptimizationPolicy = {
         minimumConfidence: 0.7,
         minimumInventoryCoverageDays: 30,
         maximumBudgetIncreasePct: 0.3,
-        minimumCustomerQuality: 0.45
+        minimumCustomerQuality: 0.45,
+        roasAnomalyThreshold: 20
       },
       reduceAds: {
         roasThreshold: 1.5,
@@ -96,6 +97,16 @@ export const DEFAULT_OPTIMIZATION_POLICY: OptimizationPolicy = {
       allowedActions: ["HOLD", "REDUCE_ADS", "PRICE_DOWN_10", "PROMOTION_TEST", "REDUCE_INVENTORY", "STOP"],
       blockedActions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE"],
       objectiveWeights: { profitGrowth: 0.16, cashEfficiency: 0.66, learningValue: 0.18 }
+    },
+    UNKNOWN: {
+      allowedActions: ["HOLD", "TEST_AD_SPEND"],
+      blockedActions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE", "REDUCE_INVENTORY", "STOP"],
+      objectiveWeights: { profitGrowth: 0.12, cashEfficiency: 0.28, learningValue: 0.6 }
+    },
+    INSUFFICIENT_HISTORY: {
+      allowedActions: ["HOLD", "TEST_AD_SPEND"],
+      blockedActions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE", "REDUCE_INVENTORY", "STOP"],
+      objectiveWeights: { profitGrowth: 0.1, cashEfficiency: 0.25, learningValue: 0.65 }
     }
   },
   actionGovernance: {

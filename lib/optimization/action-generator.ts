@@ -68,6 +68,7 @@ export function generateOptimizationActions(input: {
 
 function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile, policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY): GeneratedAction[] {
   const actions: GeneratedAction[] = [];
+  const reliableLifecycle = reliableLifecycleSignal(lifecycle);
   const addAction = (
     action: GeneratedActionType,
     portfolioAction: PortfolioAction,
@@ -84,7 +85,7 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
       clearInventoryEligible: options.clearInventoryEligible
     });
     if (!eligibility.allowed) return;
-    actions.push(buildAction(sku, opportunity, action, portfolioAction, budgetDelta, priceDelta, inventoryDelta, lifecycle, policy, policyTraceFromEligibility(policy, eligibility)));
+    actions.push(buildAction(sku, opportunity, action, portfolioAction, budgetDelta, priceDelta, inventoryDelta, reliableLifecycle, policy, policyTraceFromEligibility(policy, eligibility)));
   };
   const suggestedBudgetIncrease = Math.max(10, sku.revenue * 0.006);
   const maxBudgetIncrease = sku.ads_spend > 0
@@ -103,16 +104,16 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
   const clearInventoryQuality = clearInventoryQualityScore(sku, thresholdProfile);
   addAction("HOLD", "HOLD", 0, 0, 0);
 
-  if (lifecycle?.lifecycle_stage === "LAUNCH") {
+  if (reliableLifecycle?.lifecycle_stage === "LAUNCH") {
     addAction("TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(500, Math.max(50, baseScaleBudget)), 0, 0);
     addAction("SHIFT_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.35), 0, 0);
     addAction("COLLECT_DATA", "HOLD", 0, 0, 0);
     addAction("TEST_PRICE", "PROMOTION_TEST", 0, -0.05, 0);
     addAction("MONITOR_CONVERSION", "HOLD", 0, 0, 0);
-    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
+    return filterLifecycleActions(uniqueActions(actions), reliableLifecycle, policy);
   }
 
-  if (lifecycle?.lifecycle_stage === "MATURE") {
+  if (reliableLifecycle?.lifecycle_stage === "MATURE") {
     if (canIncreasePrice) {
       addAction("OPTIMIZE_MARGIN", priceStep >= 0.1 ? "PRICE_UP_10" : "PRICE_UP_5", 0, priceStep, 0);
       addAction("RAISE_PRICE", "PRICE_UP_10", 0, 0.1, 0);
@@ -129,17 +130,17 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
     }
     addAction("SCALE_CHANNEL", "SHIFT_CHANNEL", Math.max(10, baseScaleBudget * 0.25), 0, 0);
     addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.22), 0, 0);
-    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
+    return filterLifecycleActions(uniqueActions(actions), reliableLifecycle, policy);
   }
 
-  if (lifecycle?.lifecycle_stage === "DECLINING") {
+  if (reliableLifecycle?.lifecycle_stage === "DECLINING") {
     addAction("REDUCE_AD_SPEND", "REDUCE_ADS", -roundCurrency(sku.ads_spend * 0.5), 0, 0);
     if (clearInventoryQuality.eligible) {
       addAction("CLEAR_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.2), { clearInventoryEligible: clearInventoryQuality.eligible });
     }
     addAction("DISCOUNT_TEST", "PRICE_DOWN_10", 0, -0.1, 0);
     addAction("STOP_SKU", "STOP", -sku.ads_spend, 0, -sku.inventory);
-    return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
+    return filterLifecycleActions(uniqueActions(actions), reliableLifecycle, policy);
   }
 
   if (opportunityTypes.has("GROWTH")) {
@@ -187,7 +188,11 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
     addAction("REDUCE_INVENTORY", "REDUCE_INVENTORY", 0, 0, -Math.ceil(sku.inventory * 0.15), { clearInventoryEligible: clearInventoryQuality.eligible });
   }
 
-  return filterLifecycleActions(uniqueActions(actions), lifecycle, policy);
+  if (!reliableLifecycle && shouldCreateUncertaintyAdTest(sku, coverageDays, thresholdProfile, policy)) {
+    addAction("TEST_AD_SPEND", "TEST_AD_SPEND", Math.min(50, baseScaleBudget), 0, 0);
+  }
+
+  return filterLifecycleActions(uniqueActions(actions), reliableLifecycle, policy);
 }
 
 function buildAction(
@@ -231,6 +236,13 @@ function filterLifecycleActions(actions: GeneratedAction[], lifecycle?: SkuLifec
   return actions.filter((action) => isActionAllowedForLifecycle(action.portfolio_action, lifecycle, policy));
 }
 
+function reliableLifecycleSignal(lifecycle?: SkuLifecycleClassification) {
+  if (!lifecycle) return undefined;
+  if (lifecycle.lifecycle_confidence === "LOW") return undefined;
+  if (lifecycle.lifecycle_stage === "UNKNOWN" || lifecycle.lifecycle_stage === "INSUFFICIENT_HISTORY") return undefined;
+  return lifecycle;
+}
+
 function isPriceIncreaseEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicThresholdProfile, coverageDays = 0) {
   const marketPrice = marketReasonablePrice(sku);
   if (!marketPrice) return false;
@@ -258,23 +270,57 @@ function isScaleAdsEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicTh
   if (sku.ads_spend <= 0) return false;
   if (sku.optimization_allowed === false) return false;
   if (sku.cogs_status === "MISSING") return false;
-  if ((sku.attribution_confidence ?? sku.prediction_confidence ?? 0) < 0.65) return false;
+  const attributionConfidence = sku.attribution_confidence ?? sku.prediction_confidence ?? 0;
+  if (attributionConfidence < 0.65) return false;
+  if ((sku.cac_confidence ?? sku.customer_metric_confidence ?? "LOW") === "LOW") return false;
 
   const confidenceThreshold = thresholdProfile?.scale_ads_threshold.confidence ?? 0.6;
   const coverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 30;
   const marginThreshold = thresholdProfile?.scale_ads_threshold.margin ?? 0.3;
   const marginalRoasThreshold = thresholdProfile?.scale_ads_threshold.marginal_roas ?? 2.2;
-  const estimatedRoas = sku.revenue / Math.max(1, sku.ads_spend);
-  const stableDemand = (sku.revenue_growth ?? 0) >= -0.04 &&
+  const estimatedRoas = normalizedRoasForActionGenerator(sku.revenue / Math.max(1, sku.ads_spend), sku.ads_spend, attributionConfidence, sku.roas_confidence);
+  if (estimatedRoas === null) return false;
+  const hasTrendHistory = (sku.order_period_count ?? ((sku.data_period_days ?? 0) > 0 ? 2 : 1)) >= 2;
+  const stableDemand = !hasTrendHistory || ((sku.revenue_growth ?? 0) >= -0.04 &&
     (sku.order_growth ?? sku.revenue_growth ?? 0) >= -0.04 &&
-    (sku.conversion_trend ?? 0) >= -0.04;
+    (sku.conversion_trend ?? 0) >= -0.04);
 
   return sku.margin >= marginThreshold &&
     sku.net_profit > 0 &&
     coverageDays >= coverageThreshold &&
     (sku.prediction_confidence ?? 0.55) >= confidenceThreshold &&
     estimatedRoas >= marginalRoasThreshold &&
+    (sku.roas_confidence ?? "MEDIUM") !== "LOW" &&
     stableDemand;
+}
+
+function normalizedRoasForActionGenerator(rawRoas: number, spend: number, attributionConfidence: number, roasConfidence?: "HIGH" | "MEDIUM" | "LOW") {
+  if (!Number.isFinite(rawRoas) || rawRoas <= 0) return null;
+  if (roasConfidence === "LOW") return null;
+  if (spend < 25) return null;
+  if (attributionConfidence < 0.55) return null;
+  if (rawRoas > 20) return null;
+  return rawRoas;
+}
+
+function shouldCreateUncertaintyAdTest(
+  sku: PortfolioSkuInput,
+  coverageDays: number,
+  thresholdProfile?: DynamicThresholdProfile,
+  policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY
+) {
+  const marginThreshold = Math.max(0.18, (thresholdProfile?.scale_ads_threshold.margin ?? policy.thresholds.advertising.scaleAds.minimumMargin) - 0.08);
+  const confidenceThreshold = Math.max(0.28, (thresholdProfile?.scale_ads_threshold.confidence ?? policy.thresholds.portfolioHealth.minimumConfidence) - 0.2);
+  const coverageThreshold = Math.max(14, (thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? policy.thresholds.advertising.scaleAds.minimumInventoryCoverageDays) * 0.5);
+  return sku.revenue > 0 &&
+    sku.net_profit > 0 &&
+    sku.margin >= marginThreshold &&
+    sku.inventory > 0 &&
+    sku.sales_velocity > 0 &&
+    coverageDays >= coverageThreshold &&
+    (sku.prediction_confidence ?? 0.55) >= confidenceThreshold &&
+    sku.optimization_allowed !== false &&
+    sku.cogs_status !== "MISSING";
 }
 
 function marketReasonablePrice(sku: PortfolioSkuInput) {

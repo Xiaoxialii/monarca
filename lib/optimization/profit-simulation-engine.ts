@@ -7,6 +7,9 @@ import { lifecycleThresholdMultiplier, type BusinessObjective, type DynamicThres
 import type { PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
 import type { DecisionContractValidationMetadata } from "@/lib/optimization/decision-contract-validator";
 import type { CogsStatus } from "@/lib/profit/canonical-profitability-engine";
+import type { DecisionConfidenceResult } from "@/lib/optimization/decision-confidence-engine";
+import type { DecisionQuality } from "@/lib/optimization/decision-governance-engine";
+import type { DecisionReadiness } from "@/lib/optimization/decision-readiness-engine";
 
 export type PortfolioSkuInput = {
   sku: string;
@@ -21,10 +24,13 @@ export type PortfolioSkuInput = {
   net_profit: number;
   inventory: number;
   sales_velocity: number;
+  normalized_daily_sales_velocity?: number;
   sales_velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
   velocity_window_days?: number;
+  calculation_window_days?: number;
+  velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
   refund_rate: number;
   customer_ltv: number;
   conversion_rate: number;
@@ -36,11 +42,16 @@ export type PortfolioSkuInput = {
   cogs_confidence?: number;
   ad_allocation_method?: string;
   attribution_confidence?: number;
+  roas_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  roas_confidence_reason?: string;
+  cac_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  customer_metric_confidence?: "HIGH" | "MEDIUM" | "LOW";
   shipping_cost?: number;
   fees?: number;
   fulfillment_cost?: number;
   revenue_growth?: number;
   order_count?: number;
+  order_period_count?: number;
   customer_count?: number;
   repeat_rate?: number;
   product_age_days?: number;
@@ -257,6 +268,9 @@ export type ProfitSimulationResult = {
   evidence_tags: string[];
   policy_trace?: PolicyTrace;
   validation?: DecisionContractValidationMetadata;
+  decision_confidence?: DecisionConfidenceResult;
+  decision_quality?: DecisionQuality;
+  decision_readiness?: DecisionReadiness;
   before_state: {
     revenue: number;
     profit: number;
@@ -864,6 +878,7 @@ function strategicValueScore(sku: PortfolioSkuInput, action: PortfolioAction, li
 }
 
 function lifecycleFitScore(action: PortfolioAction, lifecycle?: SkuLifecycleClassification, thresholdProfile?: DynamicThresholdProfile) {
+  if (isLowConfidenceLifecycle(lifecycle)) return 1;
   const stage = lifecycle?.lifecycle_stage;
   const adjustment = lifecycleThresholdMultiplier(thresholdProfile ?? defaultThresholdProfile(), stage);
   const base = 1 + lifecycleStrategicFit(action, lifecycle);
@@ -955,7 +970,9 @@ function defaultThresholdProfile(): DynamicThresholdProfile {
       LAUNCH: { scale_ads_multiplier: 1.35, price_multiplier: 1.15, cash_recovery_multiplier: 0.9, learning_value_multiplier: 1.35 },
       GROWTH: { scale_ads_multiplier: 0.9, price_multiplier: 1.05, cash_recovery_multiplier: 1, learning_value_multiplier: 1.05 },
       MATURE: { scale_ads_multiplier: 1.1, price_multiplier: 0.9, cash_recovery_multiplier: 0.85, learning_value_multiplier: 0.95 },
-      DECLINING: { scale_ads_multiplier: 1.35, price_multiplier: 0.95, cash_recovery_multiplier: 0.72, learning_value_multiplier: 0.9 }
+      DECLINING: { scale_ads_multiplier: 1.35, price_multiplier: 0.95, cash_recovery_multiplier: 0.72, learning_value_multiplier: 0.9 },
+      UNKNOWN: { scale_ads_multiplier: 1.5, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1.25 },
+      INSUFFICIENT_HISTORY: { scale_ads_multiplier: 1.5, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1.35 }
     }
   };
 }
@@ -1000,6 +1017,7 @@ function unifiedActionForAction(action: PortfolioAction, requiredInventory = 0, 
 
 function lifecycleStrategicFit(action: PortfolioAction, lifecycle?: SkuLifecycleClassification) {
   if (!lifecycle) return 0;
+  if (isLowConfidenceLifecycle(lifecycle)) return 0;
   if (lifecycle.lifecycle_stage === "LAUNCH") {
     if (action === "TEST_AD_SPEND" || action === "PROMOTION_TEST" || action === "PRICE_DOWN_10") return 0.18;
     if (action === "SCALE_ADS" || action === "SCALE_ADS_PRICE_UP_5" || action === "RESTOCK_AND_SCALE") return -0.35;
@@ -1022,10 +1040,18 @@ function lifecycleStrategicFit(action: PortfolioAction, lifecycle?: SkuLifecycle
 
 function lifecycleObjectiveWeights(lifecycle?: SkuLifecycleClassification) {
   if (!lifecycle) return undefined;
+  if (isLowConfidenceLifecycle(lifecycle)) return undefined;
   if (lifecycle.lifecycle_stage === "LAUNCH") return { profit_growth: 0.18, cash_efficiency: 0.22, learning_value: 0.6 };
   if (lifecycle.lifecycle_stage === "GROWTH") return { profit_growth: 0.68, cash_efficiency: 0.17, learning_value: 0.15 };
   if (lifecycle.lifecycle_stage === "MATURE") return { profit_growth: 0.36, cash_efficiency: 0.44, learning_value: 0.2 };
   return { profit_growth: 0.16, cash_efficiency: 0.66, learning_value: 0.18 };
+}
+
+function isLowConfidenceLifecycle(lifecycle?: SkuLifecycleClassification) {
+  return !lifecycle ||
+    lifecycle.lifecycle_confidence === "LOW" ||
+    lifecycle.lifecycle_stage === "UNKNOWN" ||
+    lifecycle.lifecycle_stage === "INSUFFICIENT_HISTORY";
 }
 
 function buildConfidenceBreakdown(input: {

@@ -59,6 +59,28 @@ export const LIFECYCLE_STAGE_STRATEGIES: Record<SkuLifecycleStage, LifecycleStra
       cash_efficiency: 0.66,
       learning_value: 0.18
     }
+  },
+  UNKNOWN: {
+    stage: "UNKNOWN",
+    goal: "VALIDATE_DEMAND",
+    allowed_actions: ["HOLD", "TEST_AD_SPEND"],
+    blocked_actions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE", "REDUCE_INVENTORY", "STOP"],
+    objective_weights: {
+      profit_growth: 0.12,
+      cash_efficiency: 0.28,
+      learning_value: 0.6
+    }
+  },
+  INSUFFICIENT_HISTORY: {
+    stage: "INSUFFICIENT_HISTORY",
+    goal: "VALIDATE_DEMAND",
+    allowed_actions: ["HOLD", "TEST_AD_SPEND"],
+    blocked_actions: ["SCALE_ADS", "SCALE_ADS_PRICE_UP_5", "RESTOCK_AND_SCALE", "REDUCE_INVENTORY", "STOP"],
+    objective_weights: {
+      profit_growth: 0.1,
+      cash_efficiency: 0.25,
+      learning_value: 0.65
+    }
   }
 };
 
@@ -66,5 +88,7 @@ export function lifecycleStageLabel(stage: SkuLifecycleStage) {
   if (stage === "LAUNCH") return "Launch";
   if (stage === "GROWTH") return "Growth";
   if (stage === "MATURE") return "Mature";
-  return "Declining";
+  if (stage === "DECLINING") return "Declining";
+  if (stage === "INSUFFICIENT_HISTORY") return "Insufficient History";
+  return "Unknown";
 }

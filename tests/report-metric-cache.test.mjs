@@ -4,7 +4,9 @@ import jitiFactory from "jiti";
 
 const jiti = jitiFactory(process.cwd() + "/");
 const {
+  ANALYTICS_METRIC_ENGINE_VERSION,
   CANONICAL_PROFITABILITY_ENGINE_VERSION,
+  CUSTOMER_ENGINE_VERSION,
   cachedReportDateRangePresets,
   isCacheableReportRange,
   reportMetricCacheKey,
@@ -51,6 +53,28 @@ test("cache key is bound to canonical profitability engine version", () => {
   assert.notEqual(
     reportMetricCacheKey(base),
     reportMetricCacheKey({ ...base, profitabilityEngineVersion: "v1" })
+  );
+});
+
+test("cache key is bound to analytics metric and customer engine versions", () => {
+  const base = {
+    workspaceId: "workspace-a",
+    metricIds: ["orders", "gmv"],
+    dataSourceIds: ["source-a"],
+    dateField: "order_date",
+    dateRange: { preset: "30D", startDate: "2026-05-09", endDate: "2026-06-07" },
+    filters: { channel: "app" }
+  };
+
+  assert.match(ANALYTICS_METRIC_ENGINE_VERSION, /^analytics_metric_/);
+  assert.match(CUSTOMER_ENGINE_VERSION, /^customer_lifecycle_/);
+  assert.notEqual(
+    reportMetricCacheKey(base),
+    reportMetricCacheKey({ ...base, metricEngineVersion: "analytics_metric_old" })
+  );
+  assert.notEqual(
+    reportMetricCacheKey(base),
+    reportMetricCacheKey({ ...base, customerEngineVersion: "customer_engine_old" })
   );
 });
 

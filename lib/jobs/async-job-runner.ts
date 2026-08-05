@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { METRIC_SNAPSHOT_VERSION } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { processIngestionJob, retryableIngestionJobWhere } from "@/lib/ingestion/unified-ingestion-worker";
@@ -833,6 +834,18 @@ async function processSkuOptimizationAsyncJob(
 
   await input.setJobState({
     progress: 35,
+    currentStep: "Checking canonical artifact availability"
+  });
+
+  const artifact = await canonicalArtifactAvailability(client, {
+    workspaceId: input.workspaceId
+  });
+  if (!artifact.available) {
+    throw new Error(`Canonical artifact unavailable: ${artifact.reason}. ${artifact.message}`);
+  }
+
+  await input.setJobState({
+    progress: 40,
     currentStep: "Generating decision snapshot"
   });
 

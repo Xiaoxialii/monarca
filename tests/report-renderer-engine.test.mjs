@@ -204,14 +204,20 @@ test("decision report API reuses dashboard data loader and returns decision_repo
 test("report renderer separates blended and attributed ROAS and avoids low-confidence inventory OK state", () => {
   const source = fs.readFileSync(join(process.cwd(), "components/report-renderer-engine.tsx"), "utf8");
 
-  assert.match(source, /Blended ROAS/);
+  assert.match(source, /Blended MER/);
   assert.match(source, /Attributed ROAS/);
   assert.match(source, /Attribution unavailable/);
-  assert.match(source, /Estimated Sales Velocity/);
+  assert.match(source, /ROAS unavailable: no campaign-level attribution data exists/);
+  assert.match(source, /No campaign-level attribution data exists/);
+  assert.match(source, /Normalized Daily Velocity/);
+  assert.match(source, /30-day normalized estimate/);
   assert.match(source, /InventoryConfidenceBadge/);
   assert.match(source, /inventoryRiskStatusFromRow/);
+  assert.match(source, /Inventory observation/);
+  assert.match(source, /AI can decide/);
   assert.match(source, /LOW_CONFIDENCE_STOCK_RISK/);
   assert.match(source, /Stockout risk/);
+  assert.match(source, /Potential excess inventory/);
   assert.match(source, /CAC attribution confidence insufficient/);
   assert.match(source, /Unavailable/);
   assert.match(source, /Campaign attribution unavailable when orders cannot be directly matched to campaigns/);

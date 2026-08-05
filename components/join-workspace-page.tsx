@@ -44,7 +44,7 @@ export function JoinWorkspacePage({ token }: { token: string }) {
 
         setStatus("accepted");
         setMessage(payload.workspace?.name ? `已加入 ${payload.workspace.name}` : "已加入工作区");
-        window.setTimeout(() => router.replace("/dashboard/optimization"), 900);
+        window.setTimeout(() => router.replace("/optimization"), 900);
       })
       .catch((error) => {
         setStatus("error");

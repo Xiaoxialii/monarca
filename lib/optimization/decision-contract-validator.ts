@@ -203,10 +203,21 @@ function validateAdvertisingEvidence(
   const coverage = inventoryCoverageDays(decision);
 
   if (currentAdsSpend === null) errors.push({ field: "ads_spend", message: "Missing ads_spend for advertising action." });
-  if (estimatedRoas === null) errors.push({ field: "estimated_roas", message: "Missing estimated_roas for advertising action." });
   if (margin === null) errors.push({ field: "margin", message: "Missing margin for advertising action." });
   if (confidence === null) errors.push({ field: "prediction_confidence", message: "Missing prediction_confidence for advertising action." });
   if (coverage === null) errors.push({ field: "inventory_coverage_days", message: "Missing inventory_coverage_days for advertising action." });
+
+  if (action === "TEST_AD_SPEND") {
+    if (margin !== null && margin <= 0) {
+      errors.push({ field: "margin", message: "TEST_AD_SPEND requires positive margin evidence." });
+    }
+    if (confidence !== null && confidence < Math.max(0.28, policy.thresholds.portfolioHealth.minimumConfidence - 0.2)) {
+      errors.push({ field: "prediction_confidence", message: "Prediction confidence is too low for controlled ad testing." });
+    }
+    return;
+  }
+
+  if (estimatedRoas === null) errors.push({ field: "estimated_roas", message: "Missing estimated_roas for advertising action." });
 
   if (isScaleAdsAction(action) && estimatedRoas !== null && estimatedRoas < policy.thresholds.advertising.scaleAds.minimumMarginalRoas) {
     errors.push({ field: "estimated_roas", message: `ROAS ${estimatedRoas} is below scale ads threshold ${policy.thresholds.advertising.scaleAds.minimumMarginalRoas}.` });
@@ -293,7 +304,7 @@ function validateSimulationConsistency(
 }
 
 function normalizedAction(decision: DecisionContractCandidate) {
-  return String(decision.canonical_action ?? decision.unified_action ?? decision.action ?? "").trim().toUpperCase();
+  return String(decision.action ?? decision.canonical_action ?? decision.unified_action ?? "").trim().toUpperCase();
 }
 
 function isRestockAction(action: string) {

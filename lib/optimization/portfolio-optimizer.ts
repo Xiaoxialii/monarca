@@ -33,6 +33,12 @@ import { roundCurrency, roundRatio } from "@/lib/optimization/objective";
 import { dynamicThresholdProfileFromPolicy } from "@/lib/optimization/policy/optimization-policy";
 import { getOptimizationPolicyForInput } from "@/lib/optimization/policy/policy-loader";
 import type { OptimizationPolicy, PolicyTrace } from "@/lib/optimization/policy/optimization-policy-types";
+import {
+  decisionConfidenceEvaluator,
+  type DecisionConfidenceResult
+} from "@/lib/optimization/decision-confidence-engine";
+import { governDecision, type DecisionQuality } from "@/lib/optimization/decision-governance-engine";
+import { evaluateDecisionReadiness, type DecisionReadiness } from "@/lib/optimization/decision-readiness-engine";
 
 export type OptimizationActionTiming = {
   action_start_at: string;
@@ -100,6 +106,11 @@ export type PortfolioRecommendation = {
   timing: OptimizationActionTiming;
   prediction_type: "rule_based" | "statistical" | "ml_model";
   confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
+  decision_confidence?: DecisionConfidenceResult;
+  decision_quality?: DecisionQuality;
+  decision_readiness?: DecisionReadiness;
+  signal_quality?: DecisionConfidenceResult["signal_quality"];
+  blocked_signals?: string[];
   required_cash: number;
   strategic_fit: number;
   policy_trace?: PolicyTrace;
@@ -218,6 +229,11 @@ export type SKUDecision = {
   simulation_estimate?: ProfitSimulationResult["simulation_estimate"];
   timing: OptimizationActionTiming;
   confidence_breakdown: ProfitSimulationResult["confidence_breakdown"];
+  decision_confidence?: DecisionConfidenceResult;
+  decision_quality?: DecisionQuality;
+  decision_readiness?: DecisionReadiness;
+  signal_quality?: DecisionConfidenceResult["signal_quality"];
+  blocked_signals?: string[];
   constraints_passed: string[];
   ai_evidence: AIEvidenceCard[];
   scenarios: AIScenario[];
@@ -273,6 +289,11 @@ export type SKUDecisionObject = {
   scenarios: AIScenario[];
   selected_scenario: AIScenario;
   confidence: number;
+  decision_confidence?: DecisionConfidenceResult;
+  decision_quality?: DecisionQuality;
+  decision_readiness?: DecisionReadiness;
+  signal_quality?: DecisionConfidenceResult["signal_quality"];
+  blocked_signals?: string[];
   tracking_status: "RECOMMENDED" | "ACCEPTED" | "RUNNING" | "COMPLETED" | "LEARNED";
   feedback: {
     prediction_error: number | null;
@@ -376,6 +397,8 @@ export type LifecycleSummary = {
   growth: number;
   mature: number;
   declining: number;
+  unknown: number;
+  insufficientHistory: number;
 };
 
 const MAX_OPTIMIZATION_SKU_CANDIDATES = 320;
@@ -398,14 +421,14 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
     thresholdProfile,
     policy: optimizationPolicy
   });
-  const simulatedActions = simulateGeneratedActions({
+  const simulatedActions = applyDecisionConfidenceGate(simulateGeneratedActions({
     skus: optimizationInput.skus,
     ads: optimizationInput.ads ?? [],
     actions: generatedActions,
     simulationHorizonDays: optimizationInput.constraints.simulation_horizon_days ?? 30,
     lifecycleBySku,
     thresholdProfile
-  });
+  }), optimizationInput, optimizationPolicy);
   const contractValidation = validatePortfolioSimulationContracts(simulatedActions, {
     policy: optimizationPolicy,
     constraints: optimizationInput.constraints,
@@ -522,6 +545,70 @@ function limitOptimizationInput(input: PortfolioOptimizationInput): PortfolioOpt
   };
 }
 
+function applyDecisionConfidenceGate(
+  rows: ProfitSimulationResult[],
+  input: PortfolioOptimizationInput,
+  policy: OptimizationPolicy
+): ProfitSimulationResult[] {
+  const skuById = new Map(input.skus.map((sku) => [sku.sku, sku]));
+
+  return rows.map((row) => {
+    const sku = skuById.get(row.sku);
+    if (!sku) return row;
+    const decisionConfidence = decisionConfidenceEvaluator({ sku, simulation: row, policy });
+    const governance = governDecision({
+      action: row.action,
+      unifiedAction: row.unified_action,
+      simulation: row,
+      confidence: decisionConfidence
+    });
+    const readiness = evaluateDecisionReadiness({
+      sku,
+      action: row.action,
+      unifiedAction: row.unified_action,
+      confidence: decisionConfidence,
+      governance
+    });
+    if (governance.allowed) {
+      return {
+        ...row,
+        decision_confidence: decisionConfidence,
+        decision_quality: governance.decision_quality,
+        decision_readiness: readiness,
+        confidence: Math.min(row.confidence, Math.max(0.35, decisionConfidence.overall_confidence_score))
+      };
+    }
+
+    const blockedEvidence = [
+      ...row.evidence,
+      `decision_confidence=${decisionConfidence.confidence_level}`,
+      ...governance.decision_quality.blocked_signals.map((reason) => `blocked=${reason}`)
+    ];
+
+    return {
+      ...row,
+      selected: false,
+      decision_confidence: decisionConfidence,
+      decision_quality: governance.decision_quality,
+      decision_readiness: readiness,
+      confidence: Math.min(row.confidence, decisionConfidence.overall_confidence_score),
+      action_score: 0,
+      opportunity_score: 0,
+      risk: Math.max(row.risk, 0.72),
+      risk_level: "High",
+      evidence: Array.from(new Set(blockedEvidence)),
+      evidence_tags: Array.from(new Set([...row.evidence_tags, "decision_confidence_blocked"])),
+      policy_trace: row.policy_trace ? {
+        ...row.policy_trace,
+        failedRules: Array.from(new Set([
+          ...(row.policy_trace.failedRules ?? []),
+          ...governance.decision_quality.blocked_signals
+        ]))
+      } : row.policy_trace
+    };
+  });
+}
+
 function optimizationSkuScore(sku: PortfolioOptimizationInput["skus"][number]) {
   const confidence = sku.prediction_confidence ?? 0.55;
   const marginScore = Math.max(0, sku.margin) * 2000;
@@ -603,6 +690,11 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     timing,
     prediction_type: row.prediction_type,
     confidence_breakdown: row.confidence_breakdown,
+    decision_confidence: row.decision_confidence,
+    decision_quality: row.decision_quality,
+    decision_readiness: row.decision_readiness,
+    signal_quality: row.decision_confidence?.signal_quality,
+    blocked_signals: row.decision_quality?.blocked_signals ?? row.decision_confidence?.blocked_signals,
     required_cash: row.required_cash,
     strategic_fit: row.strategic_fit,
     policy_trace: row.policy_trace,
@@ -695,7 +787,9 @@ function buildLifecycleSummary(classifications: SkuLifecycleClassification[], fa
     launch: classifications.filter((row) => row.lifecycle_stage === "LAUNCH").length,
     growth: classifications.filter((row) => row.lifecycle_stage === "GROWTH").length,
     mature: classifications.filter((row) => row.lifecycle_stage === "MATURE").length,
-    declining: classifications.filter((row) => row.lifecycle_stage === "DECLINING").length
+    declining: classifications.filter((row) => row.lifecycle_stage === "DECLINING").length,
+    unknown: classifications.filter((row) => row.lifecycle_stage === "UNKNOWN").length,
+    insufficientHistory: classifications.filter((row) => row.lifecycle_stage === "INSUFFICIENT_HISTORY").length
   };
 }
 
@@ -884,6 +978,11 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
       simulation_estimate: row.simulation_estimate,
       timing: buildActionTiming(row),
       confidence_breakdown: row.confidence_breakdown,
+      decision_confidence: row.decision_confidence,
+      decision_quality: row.decision_quality,
+      decision_readiness: row.decision_readiness,
+      signal_quality: row.decision_confidence?.signal_quality,
+      blocked_signals: row.decision_quality?.blocked_signals ?? row.decision_confidence?.blocked_signals,
       constraints_passed: buildConstraintsPassed(row),
       ai_evidence: aiEvidence,
       scenarios: skuScenarios.scenarios,
@@ -952,6 +1051,11 @@ function buildSkuDecisionObject(
     scenarios: scenarioComparison.scenarios,
     selected_scenario: scenarioComparison.selected_scenario,
     confidence: row.confidence,
+    decision_confidence: row.decision_confidence,
+    decision_quality: row.decision_quality,
+    decision_readiness: row.decision_readiness,
+    signal_quality: row.decision_confidence?.signal_quality,
+    blocked_signals: row.decision_quality?.blocked_signals ?? row.decision_confidence?.blocked_signals,
     tracking_status: "RECOMMENDED",
     feedback: {
       prediction_error: null,

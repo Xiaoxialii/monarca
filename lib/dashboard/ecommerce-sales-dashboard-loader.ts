@@ -13,6 +13,7 @@ import {
   type EcommerceDashboardDecisionMode,
   type EcommerceSalesDashboardData
 } from "@/lib/dashboard/ecommerce-sales-dashboard-data";
+import type { ReportDateRangeInput } from "@/lib/report-date-range";
 
 export type LoadDashboardResult = {
   data: EcommerceSalesDashboardData;
@@ -41,6 +42,7 @@ export async function loadEcommerceSalesDashboardData(input: {
   workspaceId: string;
   dataSourceId?: string | null;
   decisionMode?: EcommerceDashboardDecisionMode;
+  dateRange?: Partial<ReportDateRangeInput> | null;
 }): Promise<LoadDashboardResult> {
   let snapshots: Awaited<ReturnType<typeof findLatestEcommerceCanonicalSnapshots>>;
 
@@ -61,7 +63,10 @@ export async function loadEcommerceSalesDashboardData(input: {
 
   if (!snapshots.length) {
     return {
-      data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(), { decisionMode: input.decisionMode }),
+        data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(), {
+          decisionMode: input.decisionMode,
+          dateRange: input.dateRange
+        }),
       state: "empty",
       message: "No ecommerce canonical snapshot is available yet."
     };
@@ -123,7 +128,10 @@ export async function loadEcommerceSalesDashboardData(input: {
     }
 
     return {
-      data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(objectValue(snapshots[0]?.schemaJson))), { decisionMode: input.decisionMode }),
+      data: buildEcommerceSalesDashboardData(emptyEcommerceCanonicalDataset(sourcePlatforms(objectValue(snapshots[0]?.schemaJson))), {
+        decisionMode: input.decisionMode,
+        dateRange: input.dateRange
+      }),
       state: "unavailable",
       message: unavailableSnapshots.length
         ? "Canonical ecommerce artifacts are unavailable. Refresh the connected data source to regenerate canonical data."
@@ -136,7 +144,10 @@ export async function loadEcommerceSalesDashboardData(input: {
   const adapted = adaptCanonicalDatasetForMetrics(dataset);
   const hasRows = Object.values(adapted.tables).some((rows) => rows.length > 0);
 
-  const data = buildEcommerceSalesDashboardData(adapted, { decisionMode: input.decisionMode });
+  const data = buildEcommerceSalesDashboardData(adapted, {
+    decisionMode: input.decisionMode,
+    dateRange: input.dateRange
+  });
 
   return {
     data,

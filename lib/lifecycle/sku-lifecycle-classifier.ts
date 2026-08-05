@@ -10,6 +10,8 @@ export type SkuLifecycleClassification = {
   lifecycle_stage: SkuLifecycleStage;
   lifecycle_score: SkuLifecycleScore;
   confidence: number;
+  lifecycle_confidence: "HIGH" | "MEDIUM" | "LOW";
+  reason?: string;
   signals: string[];
   optimization_goal: (typeof LIFECYCLE_STAGE_STRATEGIES)[SkuLifecycleStage]["goal"];
   policy_version?: string;
@@ -31,6 +33,32 @@ export function classifySkuLifecycle(input: {
   const roas = skuAds.length
     ? roundRatio(skuAds.reduce((sum, row) => sum + (row.roas ?? 0) * row.spend, 0) / Math.max(1, skuAds.reduce((sum, row) => sum + row.spend, 0)))
     : null;
+  const orderPeriodCount = orderPeriodCountForSku(input.sku);
+  if (orderPeriodCount < 2) {
+    const stage: SkuLifecycleStage = "UNKNOWN";
+    const score: SkuLifecycleScore = {
+      launch_score: 0.08,
+      growth_score: 0,
+      mature_score: 0.08,
+      decline_score: 0
+    };
+    return {
+      sku: input.sku.sku,
+      lifecycle_stage: stage,
+      lifecycle_score: score,
+      confidence: 0.35,
+      lifecycle_confidence: "LOW",
+      reason: "Insufficient historical periods",
+      signals: Array.from(new Set([
+        "single_order_period",
+        "insufficient_history_for_trend",
+        ...(input.sku.net_profit > 0 ? ["positive_profit"] : []),
+        "stage_unknown"
+      ])),
+      policy_version: policy.version,
+      optimization_goal: LIFECYCLE_STAGE_STRATEGIES[stage].goal
+    };
+  }
   const score = calculateLifecycleScore({
     ...input.sku,
     roas,
@@ -38,12 +66,14 @@ export function classifySkuLifecycle(input: {
     inventory_runway_days: inventoryRunwayDays(input.sku)
   }, policy);
   const stage = dominantLifecycleStage(score);
+  const confidence = lifecycleConfidence(score);
 
   return {
     sku: input.sku.sku,
     lifecycle_stage: stage,
     lifecycle_score: score,
-    confidence: lifecycleConfidence(score),
+    confidence,
+    lifecycle_confidence: periodAwareConfidenceLabel(orderPeriodCount, confidence, policy),
     signals: lifecycleSignals(input.sku, stage, roas, policy),
     policy_version: policy.version,
     optimization_goal: LIFECYCLE_STAGE_STRATEGIES[stage].goal
@@ -69,8 +99,8 @@ function lifecycleSignals(sku: PortfolioSkuInput, stage: SkuLifecycleStage, roas
   if (age !== undefined && age < lifecycle.newProductDays) signals.push("product_age_under_30_days");
   if (sku.quantity < lifecycle.insufficientOrders) signals.push("sales_history_insufficient");
   if (confidence < lifecycle.lowConfidence) signals.push("low_prediction_confidence");
-  if (growth > lifecycle.growthRevenueThreshold) signals.push("revenue_growth_positive");
-  if (growth < lifecycle.declineRevenueThreshold) signals.push("revenue_declining");
+  if (orderPeriodCountForSku(sku) >= 2 && growth > lifecycle.growthRevenueThreshold) signals.push("revenue_growth_positive");
+  if (orderPeriodCountForSku(sku) >= 2 && growth < lifecycle.declineRevenueThreshold) signals.push("revenue_declining");
   if (sku.net_profit > 0) signals.push("positive_profit");
   if (sku.net_profit < 0) signals.push("negative_profit");
   if (roas !== null && roas >= lifecycle.highRoas) signals.push("high_roas");
@@ -80,4 +110,24 @@ function lifecycleSignals(sku: PortfolioSkuInput, stage: SkuLifecycleStage, roas
 
   signals.push(`stage_${stage.toLowerCase()}`);
   return Array.from(new Set(signals));
+}
+
+function orderPeriodCountForSku(sku: PortfolioSkuInput) {
+  if (typeof sku.order_period_count === "number" && Number.isFinite(sku.order_period_count)) {
+    return Math.max(0, Math.floor(sku.order_period_count));
+  }
+  if ((sku.data_period_days ?? 0) > 0) return 2;
+  return 1;
+}
+
+function confidenceLabel(value: number, policy: OptimizationPolicy): "HIGH" | "MEDIUM" | "LOW" {
+  if (value >= policy.lifecycle.highConfidence) return "HIGH";
+  if (value >= policy.lifecycle.lowConfidence) return "MEDIUM";
+  return "LOW";
+}
+
+function periodAwareConfidenceLabel(orderPeriodCount: number, value: number, policy: OptimizationPolicy): "HIGH" | "MEDIUM" | "LOW" {
+  if (orderPeriodCount < 2) return "LOW";
+  if (orderPeriodCount < 4) return "MEDIUM";
+  return confidenceLabel(Math.max(value, policy.lifecycle.highConfidence), policy);
 }

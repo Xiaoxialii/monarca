@@ -1,5 +1,5 @@
 import { resolveCogsSemantic, type CogsSemanticType } from "../semantic/cost/cogs-semantic-resolver";
-import { calculateSkuProfitAndAllocation, type SkuAttributionMethod, type SkuRoasStatus } from "../sku/sku-profit-allocation-engine";
+import { calculateSkuProfitAndAllocation, type InventoryRiskStatus, type SkuAttributionMethod, type SkuRoasConfidence, type SkuRoasStatus } from "../sku/sku-profit-allocation-engine";
 import { calculateSkuProfitability, CANONICAL_PROFITABILITY_ENGINE_VERSION, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type CostInputRow = Record<string, unknown>;
@@ -36,6 +36,8 @@ export type CostSkuUnit = {
   roas_value?: number | null;
   roas_display?: string;
   roas_status?: SkuRoasStatus;
+  roas_confidence?: SkuRoasConfidence;
+  roas_confidence_reason?: string;
   attribution_method?: SkuAttributionMethod;
   attribution_confidence?: number;
   contribution: number;
@@ -68,10 +70,13 @@ export type CostSkuUnit = {
   stock_level?: number | null;
   available_stock?: number | null;
   sales_velocity?: number;
+  normalized_daily_sales_velocity?: number;
   velocity_window_days?: number;
+  calculation_window_days?: number;
+  velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
+  inventory_risk_status?: InventoryRiskStatus;
   days_of_inventory?: number | null;
   stockout_risk?: "high" | "medium" | "low" | "unknown";
   overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -146,8 +151,16 @@ export type CostIntelligenceOutput = {
     cogs_semantic_warnings: string[];
     portfolio_reconciliation: {
       source: "sku_unit_economics" | "portfolio_totals";
+      validation_status: "PASSED" | "FAILED";
       order_revenue: number;
       sku_revenue: number;
+      portfolio_revenue: number;
+      portfolio_cogs: number;
+      portfolio_ads: number;
+      portfolio_operating_cost: number;
+      portfolio_net_profit: number;
+      sku_operating_cost: number;
+      sku_net_profit: number;
       revenue_difference: number;
       cogs_difference: number;
       ads_difference: number;
@@ -378,7 +391,8 @@ export function calculateCostIntelligence(input: {
     estimatedComponents.add("refund_cost");
   }
 
-  const totalCost = roundCurrency(cogs + shippingTotal + fulfillmentCost + platformFeeTotal + paymentFeeTotal + refundCost);
+  const totalFeeCost = roundCurrency(platformFeeTotal + paymentFeeTotal + fulfillmentCost + refundCost);
+  const totalCost = roundCurrency(cogs + shippingTotal + totalFeeCost);
   const estimatedCost = roundCurrency(
     estimatedCogs +
       estimatedFulfillmentCost +
@@ -486,8 +500,8 @@ export function calculateCostIntelligence(input: {
       net_profit: reconciledProfitability.net_profit,
       margin: reconciledProfitability.margin,
       profitability_confidence: reconciledProfitability.profitability_confidence,
-      validation_status: reconciledProfitability.validation.validation_status,
-      optimization_allowed: reconciledProfitability.validation.optimization_allowed,
+      validation_status: reconciliation.validation_status === "FAILED" ? "FAILED" : reconciledProfitability.validation.validation_status,
+      optimization_allowed: reconciliation.validation_status !== "FAILED" && reconciledProfitability.validation.optimization_allowed,
       warnings: Array.from(new Set([...reconciledProfitability.validation.warnings, ...reconciliation.warnings])),
       engine_version: reconciledProfitability.engine_version
     },
@@ -604,25 +618,55 @@ function buildPortfolioReconciliation(input: {
   const netProfitDifference = roundCurrency(input.portfolioTotals.net_profit - input.skuTotals.net_profit);
   const unallocatedCosts = roundCurrency(Math.max(0, input.portfolioTotals.total_cost - input.skuTotals.total_cost));
   const duplicatedCosts = roundCurrency(Math.max(0, input.skuTotals.total_cost - input.portfolioTotals.total_cost));
+  const skuFormulaNetProfit = roundCurrency(
+    input.skuTotals.revenue -
+      input.skuTotals.cogs -
+      input.skuTotals.ad_spend -
+      input.skuTotals.shipping_cost -
+      input.skuTotals.platform_fee
+  );
+  const skuFormulaDifference = roundCurrency(input.skuTotals.net_profit - skuFormulaNetProfit);
   const warnings: string[] = [];
+  const tolerance = 0.01;
 
-  if (Math.abs(revenueDifference) > 0.01) {
+  if (Math.abs(revenueDifference) > tolerance) {
     warnings.push(`order revenue and SKU revenue differ by ${revenueDifference}`);
   }
-  if (Math.abs(cogsDifference) > 0.01 || Math.abs(adsDifference) > 0.01 || Math.abs(operatingCostDifference) > 0.01) {
+  if (Math.abs(cogsDifference) > tolerance || Math.abs(adsDifference) > tolerance || Math.abs(operatingCostDifference) > tolerance) {
     warnings.push("portfolio profitability reconciled from SKU unit economics");
   }
-  if (unallocatedCosts > 0.01) {
+  if (Math.abs(skuFormulaDifference) > tolerance) {
+    warnings.push(`SKU net profit formula mismatch ${skuFormulaDifference}`);
+  }
+  if (unallocatedCosts > tolerance) {
     warnings.push(`unallocated portfolio costs ${unallocatedCosts}`);
   }
-  if (duplicatedCosts > 0.01) {
+  if (duplicatedCosts > tolerance) {
     warnings.push(`duplicated SKU costs ${duplicatedCosts}`);
   }
+  const validationStatus: "PASSED" | "FAILED" = [
+    revenueDifference,
+    cogsDifference,
+    adsDifference,
+    operatingCostDifference,
+    netProfitDifference,
+    skuFormulaDifference,
+    unallocatedCosts,
+    duplicatedCosts
+  ].some((value) => Math.abs(value) > tolerance) ? "FAILED" : "PASSED";
 
   return {
     source: input.source,
+    validation_status: validationStatus,
     order_revenue: roundCurrency(input.orderRevenue),
     sku_revenue: input.skuTotals.revenue,
+    portfolio_revenue: roundCurrency(input.portfolioTotals.revenue),
+    portfolio_cogs: roundCurrency(input.portfolioTotals.cogs),
+    portfolio_ads: roundCurrency(input.portfolioTotals.ad_spend),
+    portfolio_operating_cost: portfolioOperatingCost,
+    portfolio_net_profit: roundCurrency(input.portfolioTotals.net_profit),
+    sku_operating_cost: skuOperatingCost,
+    sku_net_profit: input.skuTotals.net_profit,
     revenue_difference: revenueDifference,
     cogs_difference: cogsDifference,
     ads_difference: adsDifference,
@@ -700,18 +744,19 @@ function allocateSkuEconomics(input: {
       const allocatedPaymentFee = roundCurrency(row.payment_fee + allocatablePaymentFee * share);
       const allocatedFulfillmentCost = roundCurrency(row.fulfillment_cost + allocatableFulfillmentCost * share);
       const allocatedRefundCost = roundCurrency(row.refund_cost + allocatableRefundCost * share);
+      const visibleFeeCost = roundCurrency(allocatedPlatformFee + allocatedPaymentFee + allocatedFulfillmentCost + allocatedRefundCost);
       const skuEstimatedComponents = skuEstimatedComponentsForRow(row, estimatedComponents);
 
       return {
         ...row,
         ad_cost_allocated: 0,
         shipping_cost: allocatedShippingCost,
-        platform_fee: allocatedPlatformFee,
-        payment_fee: allocatedPaymentFee,
-        fulfillment_cost: allocatedFulfillmentCost,
-        refund_cost: allocatedRefundCost,
+        platform_fee: visibleFeeCost,
+        payment_fee: 0,
+        fulfillment_cost: 0,
+        refund_cost: 0,
         refund_amount: allocatedRefundCost,
-        total_cost: roundCurrency(row.cogs + allocatedShippingCost + allocatedFulfillmentCost + allocatedPlatformFee + allocatedPaymentFee + allocatedRefundCost),
+        total_cost: roundCurrency(row.cogs + allocatedShippingCost + visibleFeeCost),
         net_profit: 0,
         margin: 0,
         sku_roas: 0,
@@ -727,10 +772,10 @@ function allocateSkuEconomics(input: {
           cogs: row.cogs,
           shipping: allocatedShippingCost,
           ads: 0,
-          platform_fee: allocatedPlatformFee,
-          payment_fee: allocatedPaymentFee,
-          fulfillment: allocatedFulfillmentCost,
-          refund: allocatedRefundCost
+          platform_fee: visibleFeeCost,
+          payment_fee: 0,
+          fulfillment: 0,
+          refund: 0
         },
         channel_breakdown: {},
         ad_allocation_method: "none" as const,

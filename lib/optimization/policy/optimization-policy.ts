@@ -50,7 +50,9 @@ export function dynamicThresholdProfileFromPolicy(policy: OptimizationPolicy): D
       LAUNCH: { scale_ads_multiplier: 1.35, price_multiplier: 1.15, cash_recovery_multiplier: 0.9, learning_value_multiplier: 1.35 },
       GROWTH: { scale_ads_multiplier: 0.9, price_multiplier: 1.05, cash_recovery_multiplier: 1, learning_value_multiplier: 1.05 },
       MATURE: { scale_ads_multiplier: 1.1, price_multiplier: 0.9, cash_recovery_multiplier: 0.85, learning_value_multiplier: 0.95 },
-      DECLINING: { scale_ads_multiplier: 1.35, price_multiplier: 0.95, cash_recovery_multiplier: 0.72, learning_value_multiplier: 0.9 }
+      DECLINING: { scale_ads_multiplier: 1.35, price_multiplier: 0.95, cash_recovery_multiplier: 0.72, learning_value_multiplier: 0.9 },
+      UNKNOWN: { scale_ads_multiplier: 1.5, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1.25 },
+      INSUFFICIENT_HISTORY: { scale_ads_multiplier: 1.5, price_multiplier: 1, cash_recovery_multiplier: 1, learning_value_multiplier: 1.35 }
     }
   };
 }
@@ -71,7 +73,17 @@ export function evaluateActionEligibility(input: {
   const coverageDays = input.coverageDays ?? inventoryCoverageDays(sku);
   const confidence = input.confidence ?? sku.prediction_confidence ?? 0.55;
   const attributionConfidence = sku.attribution_confidence ?? sku.prediction_confidence ?? 0;
-  const marginalRoas = input.marginalRoas ?? (sku.ads_spend > 0 ? sku.revenue / Math.max(1, sku.ads_spend) : 0);
+  const roasAnomalyThreshold = policy.thresholds.advertising.scaleAds.roasAnomalyThreshold ?? 20;
+  const rawRoas = input.marginalRoas ?? (sku.ads_spend > 0 ? sku.revenue / Math.max(1, sku.ads_spend) : 0);
+  const normalizedRoas = normalizedRoasForPolicy({
+    rawRoas,
+    spend: sku.ads_spend,
+    attributionConfidence,
+    skuRoasConfidence: sku.roas_confidence,
+    anomalyThreshold: roasAnomalyThreshold
+  });
+  const marginalRoas = normalizedRoas.value ?? 0;
+  const roasConfidence = normalizedRoas.confidence;
   const reasons: string[] = [];
   const rejectedReasons: string[] = [];
   const thresholds: Record<string, number | string | boolean> = {};
@@ -79,6 +91,9 @@ export function evaluateActionEligibility(input: {
     margin: roundRatio(sku.margin),
     confidence: roundRatio(confidence),
     marginalRoas: roundRatio(marginalRoas),
+    rawRoas: roundRatio(rawRoas),
+    normalizedRoas: normalizedRoas.value === null ? null : roundRatio(normalizedRoas.value),
+    roasConfidence,
     inventoryCoverageDays: roundRatio(coverageDays),
     salesVelocity: roundRatio(sku.sales_velocity),
     conversionRate: roundRatio(sku.conversion_rate),
@@ -100,7 +115,9 @@ export function evaluateActionEligibility(input: {
     thresholds.minimumMargin = threshold.minimumMargin;
     thresholds.minimumConfidence = threshold.minimumConfidence;
     thresholds.minimumInventoryCoverageDays = threshold.minimumInventoryCoverageDays;
+    thresholds.roasAnomalyThreshold = roasAnomalyThreshold;
     requireRule(marginalRoas >= threshold.minimumMarginalRoas, "ROAS exceeds threshold.", "ROAS below scale ads threshold.");
+    requireRule(normalizedRoas.value !== null && roasConfidence !== "LOW", "ROAS sanity check passed.", normalizedRoas.reason ?? "ROAS anomaly requires attribution validation.");
     requireRule(sku.margin >= threshold.minimumMargin, "Margin sufficient.", "Margin below scale ads threshold.");
     requireRule(confidence >= threshold.minimumConfidence, "Confidence sufficient.", "Confidence below scale ads threshold.");
     requireRule(attributionConfidence >= 0.65, "Ad attribution confidence sufficient.", "Ad attribution confidence below scale ads threshold.");
@@ -115,7 +132,7 @@ export function evaluateActionEligibility(input: {
     const threshold = policy.thresholds.advertising.reduceAds;
     thresholds.roasThreshold = threshold.roasThreshold;
     requireRule(sku.ads_spend > 0, "Paid spend exists.", "No paid spend to reduce.");
-    requireRule(marginalRoas < threshold.roasThreshold || sku.margin < policy.thresholds.pricing.minimumMarginHeadroom || sku.net_profit < 0, "Efficiency or margin pressure exists.", "No low-efficiency ads evidence.");
+    requireRule(normalizedRoas.value !== null && (marginalRoas < threshold.roasThreshold || sku.margin < policy.thresholds.pricing.minimumMarginHeadroom || sku.net_profit < 0), "Efficiency or margin pressure exists.", normalizedRoas.reason ?? "No low-efficiency ads evidence.");
   } else if (action === "PRICE_UP_5" || action === "PRICE_UP_10" || action === "PRICE_DOWN_10" || action === "PROMOTION_TEST") {
     const threshold = policy.thresholds.pricing;
     thresholds.minimumElasticityConfidence = threshold.minimumElasticityConfidence;
@@ -146,7 +163,7 @@ export function evaluateActionEligibility(input: {
     const threshold = policy.thresholds.advertising.stopAds;
     thresholds.lossThreshold = threshold.lossThreshold;
     thresholds.roasThreshold = threshold.roasThreshold;
-    requireRule(sku.net_profit < threshold.lossThreshold || marginalRoas < threshold.roasThreshold, "Loss or very low ROAS supports stop action.", "Stop action lacks loss evidence.");
+    requireRule(sku.net_profit < threshold.lossThreshold || (normalizedRoas.value !== null && marginalRoas < threshold.roasThreshold), "Loss or very low ROAS supports stop action.", normalizedRoas.reason ?? "Stop action lacks loss evidence.");
   } else if (action === "SHIFT_CHANNEL" || action === "CREATE_BUNDLE") {
     const threshold = policy.thresholds.channel;
     thresholds.minimumMargin = threshold.minimumMargin;
@@ -162,6 +179,25 @@ export function evaluateActionEligibility(input: {
     rejectedReasons,
     thresholds,
     metrics
+  };
+}
+
+function normalizedRoasForPolicy(input: {
+  rawRoas: number;
+  spend: number;
+  attributionConfidence: number;
+  skuRoasConfidence?: "HIGH" | "MEDIUM" | "LOW";
+  anomalyThreshold: number;
+}) {
+  if (!Number.isFinite(input.rawRoas) || input.rawRoas <= 0) return { value: null, confidence: "LOW" as const, reason: "Missing ROAS attribution." };
+  if (input.skuRoasConfidence === "LOW") return { value: null, confidence: "LOW" as const, reason: "ROAS marked low confidence upstream." };
+  if (input.spend < 25) return { value: null, confidence: "LOW" as const, reason: "Low spend attribution." };
+  if (input.rawRoas > input.anomalyThreshold) return { value: null, confidence: "LOW" as const, reason: "ROAS anomaly requires attribution validation." };
+  if (input.attributionConfidence < 0.55) return { value: null, confidence: "LOW" as const, reason: "Ad attribution confidence below threshold." };
+  return {
+    value: input.rawRoas,
+    confidence: input.attributionConfidence >= 0.8 ? "HIGH" as const : "MEDIUM" as const,
+    reason: null
   };
 }
 

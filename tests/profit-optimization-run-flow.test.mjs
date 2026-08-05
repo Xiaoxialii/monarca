@@ -31,22 +31,25 @@ test("frontend polls the shared async job status endpoint until completion", () 
   assert.match(dashboard, /"FAILED"/);
   assert.match(dashboard, /"CANCELLED"/);
   assert.match(dashboard, /Optimization completed/);
-  assert.match(route, /job\.type === "SKU_OPTIMIZATION" && job\.status === "QUEUED"/);
+  assert.match(route, /prisma\.asyncJob\.findFirst/);
+  assert.match(route, /resultReference:\s*true/);
+  assert.match(route, /return NextResponse\.json\(\{\s*ok:\s*true,\s*job\s*\}\)/);
   assert.match(route, /export const maxDuration = 60/);
-  assert.match(route, /await processJob\(job\.id\)/);
-  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.doesNotMatch(route, /await processJob\(job\.id\)/);
 });
 
 test("manual optimization endpoint uses the async job runner and prevents duplicate jobs", () => {
   const route = read("app/api/dashboard/ecommerce/optimize/route.ts");
   const runner = read("lib/jobs/async-job-runner.ts");
 
+  assert.match(route, /canonicalArtifactAvailability\(prisma/);
+  assert.match(route, /refreshSkippedReason:\s*"canonical_artifact_unavailable"/);
+  assert.match(route, /status:\s*409/);
   assert.match(route, /enqueueSkuOptimizationJob\(prisma/);
   assert.match(route, /reason:\s*"manual_optimization_refresh"/);
   assert.match(route, /decisionMode:\s*"full"/);
   assert.match(route, /export const maxDuration = 60/);
-  assert.match(route, /const result = await processJob\(job\.id\)/);
-  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
   assert.doesNotMatch(route, /generateEcommerceDecisionSnapshots\(/);
 
   assert.match(runner, /export async function enqueueSkuOptimizationJob/);
@@ -68,12 +71,17 @@ test("optimization jobs use short heartbeat stale recovery", () => {
   assert.match(runner, /if \(item\.type === "SKU_OPTIMIZATION" && item\.status === "FAILED"\) return false/);
 });
 
-test("decision report route refreshes non-ready optimization caches when canonical data is ready", () => {
+test("decision report route refreshes optimization caches only when canonical artifacts are readable", () => {
   const route = read("app/api/dashboard/ecommerce/decision-report/route.ts");
+  const artifactAvailability = read("lib/dashboard/canonical-artifact-availability.ts");
+  const cache = read("lib/dashboard/optimization-report-cache.ts");
 
   assert.match(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
   assert.match(route, /hasReadyCanonicalSources/);
+  assert.match(route, /canonicalArtifactAvailability/);
+  assert.match(route, /optimizationRefreshAvailability/);
+  assert.match(route, /refreshSkippedReason:\s*"canonical_artifact_unavailable"/);
   assert.match(route, /latestOptimizationJob/);
   assert.match(route, /non_ready_decision_report_cache/);
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
@@ -88,7 +96,12 @@ test("decision report route refreshes non-ready optimization caches when canonic
   assert.match(route, /freshOptimizationCacheResponse/);
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
-  assert.doesNotMatch(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
+  assert.match(artifactAvailability, /readR2ObjectText\(checkedArtifactKey\)/);
+  assert.match(artifactAvailability, /LOCAL_ARTIFACT_NOT_FOUND/);
+  assert.match(artifactAvailability, /R2_CONFIGURATION_MISSING/);
+  assert.match(cache, /skipped unavailable overwrite of ready cache/);
+  assert.match(cache, /existing\?\.state === "ready" && split\.state === "unavailable"/);
 });
 
 test("completed optimization jobs generate decision snapshots from internal data and refresh cache", () => {
@@ -96,6 +109,8 @@ test("completed optimization jobs generate decision snapshots from internal data
   const generator = read("lib/dashboard/decision-snapshot-generator.ts");
 
   assert.match(runner, /processSkuOptimizationAsyncJob/);
+  assert.match(runner, /canonicalArtifactAvailability\(client/);
+  assert.match(runner, /Canonical artifact unavailable:/);
   assert.match(runner, /generateEcommerceDecisionSnapshots\(client/);
   assert.match(runner, /dataSourceId:\s*null/);
   assert.match(generator, /loadEcommerceSalesDashboardData\(/);
@@ -122,7 +137,7 @@ test("new decision snapshots include optimization run metadata", () => {
 
   assert.match(generator, /optimization_run_id/);
   assert.match(generator, /recommendation_id/);
-  assert.match(generator, /recommendationFingerprint/);
+  assert.match(identity, /recommendationFingerprint/);
   assert.match(generator, /recommendationIdentityForDecision/);
   assert.match(generator, /started_at/);
   assert.match(generator, /completed_at/);
@@ -310,6 +325,8 @@ test("optimization report cache preserves optimization run metadata", () => {
   assert.match(cache, /optimizationRun:\s*content\.optimizationRun/);
   assert.match(cache, /const optimizationRun = asRecord\(reportShell\.optimizationRun\)/);
   assert.match(cache, /optimizationRun:\s*Object\.keys\(optimizationRun\)\.length \? optimizationRun : null/);
+  assert.match(cache, /const queueRows = asArray\(cache\.queueRowsJson\)/);
+  assert.match(cache, /skuDecisions:\s*queueRows/);
 });
 
 test("optimization accept and reject tolerate compact recommendations without simulation payload", () => {
@@ -393,8 +410,8 @@ test("optimization accepted actions are persisted by decision instance", () => {
   assert.match(hydrationFunction[0], /persistedRecommendationId === recommendationIdForDecision\(row, report\)/);
   assert.match(hydrationFunction[0], /legacyActionMatchesDecisionRecommendation\(action, row\)/);
   assert.match(renderer, /function legacyActionMatchesDecisionRecommendation/);
-  assert.match(renderer, /persistedDecisionId !== currentDecisionId && !persistedInstanceKey\.endsWith/);
-  assert.match(renderer, /Math\.abs\(persistedProfitDelta - currentProfitDelta\) > 1/);
+  assert.match(renderer, /persistedDecisionId !== currentDecisionId &&[\s\S]*?!persistedInstanceKey\.endsWith/);
+  assert.match(renderer, /Math\.abs\(persistedAdDelta - currentAdDelta\) > 0\.01/);
   assert.doesNotMatch(renderer, /function persistedActionMatchesDecisionRow/);
   assert.doesNotMatch(hydrationFunction[0], /persistedActionMatchesDecisionRow/);
   assert.match(store, /const hasDecisionInstanceKey = typeof input\.action_payload\?\.decision_instance_key === "string"/);

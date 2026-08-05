@@ -25,7 +25,7 @@ const {
   isInventoryRestockRequired,
   normalizeDecision
 } = jiti("./lib/optimization/action-taxonomy.ts");
-const { simulateGeneratedActions, simulatePortfolioActions } = jiti("./lib/optimization/profit-simulation-engine.ts");
+const { simulateGeneratedActions, simulatePortfolioActions, simulateSkuAction } = jiti("./lib/optimization/profit-simulation-engine.ts");
 const { generateOptimizationActions } = jiti("./lib/optimization/action-generator.ts");
 const { buildDynamicThresholdProfile } = jiti("./lib/optimization/dynamic-threshold-engine.ts");
 const { solveGlobalPortfolio } = jiti("./lib/optimization/portfolio-solver.ts");
@@ -38,6 +38,10 @@ const { generatePortfolioOptimizationReport } = jiti("./lib/optimization/optimiz
 const { predictRevenue } = jiti("./lib/optimization/prediction/revenue-prediction-model.ts");
 const { recordOptimizationFeedback } = jiti("./lib/optimization/feedback-learning-engine.ts");
 const { classifySkuLifecycles } = jiti("./lib/lifecycle/sku-lifecycle-classifier.ts");
+const { calculateAcceptedActionImpact } = jiti("./lib/optimization/accepted-action-impact.ts");
+const { actionAllowedByDecisionConfidence, decisionConfidenceEvaluator } = jiti("./lib/optimization/decision-confidence-engine.ts");
+const { governDecision } = jiti("./lib/optimization/decision-governance-engine.ts");
+const { evaluateDecisionReadiness } = jiti("./lib/optimization/decision-readiness-engine.ts");
 
 function input() {
   return {
@@ -55,10 +59,13 @@ function input() {
         net_profit: 1500,
         inventory: 300,
         sales_velocity: 8,
+        order_period_count: 2,
         refund_rate: 0.04,
         customer_ltv: 180,
         conversion_rate: 0.04,
-        prediction_confidence: 0.86
+        prediction_confidence: 0.86,
+        cac_confidence: "MEDIUM",
+        customer_metric_confidence: "MEDIUM"
       },
       {
         sku: "SKU_B",
@@ -73,10 +80,13 @@ function input() {
         net_profit: 1260,
         inventory: 240,
         sales_velocity: 7,
+        order_period_count: 2,
         refund_rate: 0.05,
         customer_ltv: 150,
         conversion_rate: 0.035,
-        prediction_confidence: 0.82
+        prediction_confidence: 0.82,
+        cac_confidence: "MEDIUM",
+        customer_metric_confidence: "MEDIUM"
       },
       {
         sku: "SKU_LOW_CONF",
@@ -91,10 +101,13 @@ function input() {
         net_profit: 400,
         inventory: 900,
         sales_velocity: 20,
+        order_period_count: 2,
         refund_rate: 0.02,
         customer_ltv: 220,
         conversion_rate: 0.06,
-        prediction_confidence: 0.28
+        prediction_confidence: 0.28,
+        cac_confidence: "LOW",
+        customer_metric_confidence: "LOW"
       },
       {
         sku: "SKU_STOCK_LIMITED",
@@ -109,10 +122,13 @@ function input() {
         net_profit: 980,
         inventory: 5,
         sales_velocity: 12,
+        order_period_count: 2,
         refund_rate: 0.03,
         customer_ltv: 130,
         conversion_rate: 0.045,
-        prediction_confidence: 0.8
+        prediction_confidence: 0.8,
+        cac_confidence: "MEDIUM",
+        customer_metric_confidence: "MEDIUM"
       },
       {
         sku: "SKU_NEGATIVE",
@@ -127,10 +143,13 @@ function input() {
         net_profit: -500,
         inventory: 500,
         sales_velocity: 3,
+        order_period_count: 2,
         refund_rate: 0.12,
         customer_ltv: 60,
         conversion_rate: 0.01,
-        prediction_confidence: 0.72
+        prediction_confidence: 0.72,
+        cac_confidence: "LOW",
+        customer_metric_confidence: "LOW"
       }
     ],
     ads: [
@@ -167,6 +186,244 @@ test("RESTOCK_AND_SCALE without inventory risk is classified as growth scale ads
     goal: "GROWTH",
     actionLabel: "Scale Ads"
   });
+});
+
+test("single period lifecycle is UNKNOWN and low confidence", () => {
+  const [classification] = classifySkuLifecycles({
+    skus: [{
+      ...input().skus[0],
+      sku: "SKU_SINGLE_PERIOD",
+      order_period_count: 1,
+      data_period_days: 0,
+      revenue_growth: 0.5
+    }],
+    ads: []
+  });
+
+  assert.equal(classification.lifecycle_stage, "UNKNOWN");
+  assert.notEqual(classification.lifecycle_stage, "GROWTH");
+  assert.notEqual(classification.lifecycle_stage, "MATURE");
+  assert.notEqual(classification.lifecycle_stage, "DECLINING");
+  assert.equal(classification.lifecycle_confidence, "LOW");
+  assert.match(classification.reason, /Insufficient historical periods/);
+});
+
+test("ROAS anomaly with low spend cannot trigger SCALE_ADS", () => {
+  const base = input();
+  const sku = {
+    ...base.skus[0],
+    sku: "SKU_ROAS_ANOMALY",
+    revenue: 15000,
+    ads_spend: 100,
+    margin: 0.55,
+    net_profit: 6500,
+    inventory: 1000,
+    sales_velocity: 8,
+    order_period_count: 2,
+    sales_velocity_confidence: "HIGH",
+    attribution_confidence: 0.95,
+    prediction_confidence: 0.9
+  };
+  const simulation = simulateSkuAction(sku, "SCALE_ADS", [{
+    campaign_id: "CMP_ANOMALY",
+    sku: "SKU_ROAS_ANOMALY",
+    spend: 100,
+    impressions: 1000,
+    clicks: 200,
+    conversions: 100,
+    roas: 150,
+    attribution_confidence: 0.95,
+    attribution_status: "attributed",
+    attribution_source: "campaign_attribution"
+  }]);
+  const confidence = decisionConfidenceEvaluator({ sku, simulation });
+
+  assert.equal(confidence.roas_validation.confidence, "LOW");
+  assert.match(confidence.roas_validation.reason, /ROAS anomaly/);
+  assert.equal(actionAllowedByDecisionConfidence({ action: "SCALE_ADS", unifiedAction: "SCALE_ADS", confidence }), false);
+});
+
+test("low CAC confidence blocks acquisition budget increase", () => {
+  const base = input();
+  const sku = {
+    ...base.skus[0],
+    sku: "SKU_LOW_CAC_CONF",
+    revenue: 5000,
+    ads_spend: 800,
+    margin: 0.5,
+    net_profit: 1800,
+    inventory: 2000,
+    sales_velocity: 8,
+    sales_velocity_confidence: "HIGH",
+    order_period_count: 3,
+    attribution_confidence: 0.92,
+    prediction_confidence: 0.9,
+    cac_confidence: "LOW",
+    customer_metric_confidence: "LOW"
+  };
+  const simulation = simulateSkuAction(sku, "SCALE_ADS", [{
+    campaign_id: "CMP_LOW_CAC",
+    sku: "SKU_LOW_CAC_CONF",
+    spend: 800,
+    impressions: 10000,
+    clicks: 700,
+    conversions: 140,
+    roas: 6.25,
+    attribution_confidence: 0.92,
+    attribution_status: "attributed",
+    attribution_source: "campaign_attribution"
+  }]);
+  const confidence = decisionConfidenceEvaluator({ sku, simulation });
+
+  assert.equal(confidence.signal_confidence.customer, "LOW");
+  assert.equal(confidence.signal_quality.customer, "LOW");
+  assert.equal(actionAllowedByDecisionConfidence({ action: "SCALE_ADS", unifiedAction: "SCALE_ADS", confidence }), false);
+  assert.ok(confidence.blocked_signals.some((reason) => /CAC confidence LOW/.test(reason)));
+  const governance = governDecision({ action: "SCALE_ADS", unifiedAction: "SCALE_ADS", simulation, confidence });
+  const readiness = evaluateDecisionReadiness({ sku, action: "SCALE_ADS", unifiedAction: "SCALE_ADS", confidence, governance });
+  assert.equal(governance.allowed, false);
+  assert.ok(readiness.blocked_actions.includes("ACQUISITION_SCALING"));
+  assert.ok(readiness.blocked_actions.includes("SCALE_ADS"));
+  assert.equal(readiness.blocked_actions.includes("PRICE_CHANGE"), false);
+  assert.equal(readiness.signal_readiness.customer.data_confidence, "LOW");
+  assert.equal(readiness.signal_readiness.customer.signal_confidence, "LOW");
+  assert.equal(typeof readiness.score, "number");
+  assert.deepEqual(readiness.limitations, readiness.data_limitations);
+  assert.deepEqual(readiness.allowed_actions, ["MONITOR"]);
+});
+
+test("missing CAC confidence prevents creating SCALE_ADS action", () => {
+  const { cac_confidence, customer_metric_confidence, ...sku } = adsSimulationSku({
+    sku: "SKU_MISSING_CAC_CONF",
+    revenue: 5000,
+    ads_spend: 800,
+    margin: 0.5,
+    net_profit: 1800,
+    inventory: 2000,
+    sales_velocity: 8,
+    sales_velocity_confidence: "HIGH",
+    order_period_count: 3,
+    attribution_confidence: 0.92,
+    prediction_confidence: 0.9
+  });
+  const actions = generateOptimizationActions({
+    skus: [sku],
+    opportunities: [unitOpportunity(sku, "GROWTH")]
+  });
+
+  assert.equal(cac_confidence, "MEDIUM");
+  assert.equal(customer_metric_confidence, "MEDIUM");
+  assert.equal(actions.some((action) => action.portfolio_action === "SCALE_ADS"), false);
+  assert.ok(actions.some((action) => action.portfolio_action === "TEST_AD_SPEND" || action.portfolio_action === "HOLD"));
+});
+
+test("low inventory confidence blocks REDUCE_INVENTORY", () => {
+  const base = input();
+  const sku = {
+    ...base.skus[0],
+    sku: "SKU_LOW_INV_CONF",
+    revenue: 8000,
+    quantity: 40,
+    ads_spend: 200,
+    margin: 0.42,
+    net_profit: 2500,
+    inventory: 1200,
+    sales_velocity: 1,
+    normalized_daily_sales_velocity: 1,
+    sales_velocity_confidence: "LOW",
+    inventory_risk_status: "EXCESS_INVENTORY",
+    order_period_count: 2,
+    attribution_confidence: 0.8,
+    prediction_confidence: 0.82
+  };
+  const simulation = simulateSkuAction(sku, "REDUCE_INVENTORY", []);
+  const confidence = decisionConfidenceEvaluator({ sku, simulation });
+
+  assert.equal(confidence.signal_confidence.inventory, "LOW");
+  assert.equal(actionAllowedByDecisionConfidence({ action: "REDUCE_INVENTORY", unifiedAction: "REDUCE_INVENTORY", confidence }), false);
+  const governance = governDecision({ action: "REDUCE_INVENTORY", unifiedAction: "REDUCE_INVENTORY", simulation, confidence });
+  const readiness = evaluateDecisionReadiness({ sku, action: "REDUCE_INVENTORY", unifiedAction: "REDUCE_INVENTORY", confidence, governance });
+  assert.ok(readiness.blocked_actions.includes("REDUCE_INVENTORY"));
+  assert.ok(readiness.blocked_actions.includes("RESTOCK"));
+  assert.equal(readiness.blocked_actions.includes("PRICE_CHANGE"), false);
+  assert.equal(readiness.signal_readiness.inventory.data_confidence, "LOW");
+  assert.equal(readiness.signal_readiness.inventory.signal_confidence, "LOW");
+  assert.ok(readiness.allowed_actions.includes("MONITOR"));
+});
+
+test("accepted SKU impact compares actual against expected profit lift", () => {
+  const impact = calculateAcceptedActionImpact({
+    baseline_metrics: {
+      revenue: 1000,
+      profit: 250,
+      margin: 0.25,
+      ad_spend: 100,
+      inventory: 50
+    },
+    predicted_metrics: {
+      revenue: 1200,
+      profit: 330,
+      profit_delta: 80,
+      margin: 0.275,
+      ad_spend: 140,
+      inventory: 45
+    },
+    actual_metrics: {
+      revenue: 1230,
+      profit: 370,
+      margin: 0.28,
+      ad_spend: 138,
+      inventory: 43
+    }
+  });
+
+  assert.equal(impact.expected_profit_delta, 80);
+  assert.equal(impact.actual_profit_delta, 120);
+  assert.equal(impact.performance_status, "OUTPERFORMED");
+  assert.equal(impact.ads_change, 38);
+  assert.equal(impact.inventory_change, -7);
+});
+
+test("high confidence SKU can still generate SCALE_ADS", () => {
+  const base = input();
+  const sku = {
+    ...base.skus[0],
+    sku: "SKU_HIGH_CONF_SCALE",
+    revenue: 5000,
+    ads_spend: 800,
+    margin: 0.5,
+    net_profit: 1800,
+    inventory: 2000,
+    sales_velocity: 8,
+    sales_velocity_confidence: "HIGH",
+    order_period_count: 3,
+    attribution_confidence: 0.92,
+    prediction_confidence: 0.9
+  };
+  const simulation = simulateSkuAction(sku, "SCALE_ADS", [{
+    campaign_id: "CMP_SCALE",
+    sku: "SKU_HIGH_CONF_SCALE",
+    spend: 800,
+    impressions: 10000,
+    clicks: 700,
+    conversions: 140,
+    roas: 6.25,
+    attribution_confidence: 0.92,
+    attribution_status: "attributed",
+    attribution_source: "campaign_attribution"
+  }], undefined, undefined, 30, [sku], {
+    sku: sku.sku,
+    lifecycle_stage: "GROWTH",
+    lifecycle_confidence: "HIGH",
+    confidence: 0.9,
+    reason: "Multiple order periods with profitable growth",
+    signals: ["growth_trend"],
+    scores: {}
+  });
+  const confidence = decisionConfidenceEvaluator({ sku, simulation });
+
+  assert.notEqual(confidence.confidence_level, "LOW");
+  assert.equal(actionAllowedByDecisionConfidence({ action: "SCALE_ADS", unifiedAction: "SCALE_ADS", confidence }), true);
 });
 
 test("decision contract validator accepts valid restock evidence", () => {
@@ -461,6 +718,14 @@ test("portfolio optimization result beats single SKU ranking baseline", () => {
   assert.ok(["ACQUISITION", "PROFIT", "GROWTH", "DRAIN"].includes(result.skuDecisions[0].skuRole));
   assert.ok(result.skuDecisions[0].recommendedActions.length >= 1);
   assert.equal(typeof result.skuDecisions[0].expectedProfitImpact, "number");
+  assert.ok(result.skuDecisions[0].decision_quality);
+  assert.ok(Array.isArray(result.skuDecisions[0].decision_quality.decision_allowed));
+  assert.ok(result.skuDecisions[0].decision_readiness);
+  assert.equal(typeof result.skuDecisions[0].decision_readiness.decision_readiness_score, "number");
+  assert.ok(Array.isArray(result.skuDecisions[0].decision_readiness.blocked_actions));
+  assert.ok(result.recommended_portfolio[0].decision_quality);
+  assert.ok(result.recommended_portfolio[0].sku_decision_object.decision_quality);
+  assert.ok(result.recommended_portfolio[0].sku_decision_object.decision_readiness);
   assert.equal(result.skuDecisions[0].simulation_horizon.days, 30);
   assert.equal(result.skuDecisions[0].timing.simulation_window_days, 30);
   assert.equal(result.skuDecisions[0].timing.timing_source, "report_generated_at");
@@ -622,6 +887,7 @@ test("policy eligibility rejects scale ads below expert thresholds", () => {
     margin: 0.25,
     inventory: 300,
     sales_velocity: 8,
+    order_period_count: 2,
     prediction_confidence: 0.62
   });
   const eligibility = evaluateActionEligibility({
@@ -734,6 +1000,36 @@ test("SCALE_ADS eligibility requires margin ROAS confidence inventory coverage a
   });
   assert.equal(lowCoverage.allowed, false);
   assert.ok(lowCoverage.rejectedReasons.some((reason) => /Inventory coverage below/i.test(reason)));
+});
+
+test("ROAS anomaly blocks SCALE_ADS eligibility", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_ROAS_ANOMALY",
+    revenue: 13000,
+    ads_spend: 100,
+    margin: 0.45,
+    net_profit: 5000,
+    inventory: 900,
+    sales_velocity: 8,
+    prediction_confidence: 0.84,
+    attribution_confidence: 0.9,
+    profitability_confidence: 0.9,
+    cogs_status: "AVAILABLE",
+    optimization_allowed: true
+  });
+
+  const eligibility = evaluateActionEligibility({
+    sku,
+    action: "SCALE_ADS",
+    policy: DEFAULT_OPTIMIZATION_POLICY,
+    coverageDays: 90,
+    marginalRoas: 130,
+    confidence: 0.84
+  });
+
+  assert.equal(eligibility.allowed, false);
+  assert.equal(eligibility.metrics.roasConfidence, "LOW");
+  assert.ok(eligibility.rejectedReasons.includes("ROAS anomaly requires attribution validation."));
 });
 
 test("RESTOCK_AND_SCALE eligibility requires low inventory coverage and positive sales velocity", () => {
@@ -959,6 +1255,8 @@ function adsSimulationSku(overrides = {}) {
     customer_ltv: 180,
     conversion_rate: 0.04,
     prediction_confidence: 0.86,
+    cac_confidence: "MEDIUM",
+    customer_metric_confidence: "MEDIUM",
     shipping_cost: 2,
     fulfillment_cost: 1,
     fees: 350,
@@ -1153,6 +1451,7 @@ function lifecycleInput() {
     skus: [
       adsSimulationSku({
         sku: "SKU_LAUNCH",
+        order_period_count: 2,
         product_age_days: 12,
         quantity: 12,
         order_count: 12,
@@ -1164,6 +1463,7 @@ function lifecycleInput() {
       }),
       adsSimulationSku({
         sku: "SKU_GROWTH",
+        order_period_count: 2,
         product_age_days: 80,
         revenue_growth: 0.26,
         ads_spend: 700,
@@ -1174,6 +1474,7 @@ function lifecycleInput() {
       }),
       adsSimulationSku({
         sku: "SKU_MATURE",
+        order_period_count: 2,
         product_age_days: 260,
         revenue_growth: 0.01,
         ads_spend: 420,
@@ -1185,6 +1486,7 @@ function lifecycleInput() {
       }),
       adsSimulationSku({
         sku: "SKU_DECLINING",
+        order_period_count: 2,
         product_age_days: 220,
         revenue_growth: -0.24,
         ads_spend: 650,
@@ -1222,6 +1524,102 @@ test("SKU lifecycle classifier assigns every SKU a lifecycle stage", () => {
   assert.equal(classifications.find((row) => row.sku === "SKU_GROWTH")?.lifecycle_stage, "GROWTH");
   assert.equal(classifications.find((row) => row.sku === "SKU_MATURE")?.lifecycle_stage, "MATURE");
   assert.equal(classifications.find((row) => row.sku === "SKU_DECLINING")?.lifecycle_stage, "DECLINING");
+});
+
+test("single-period dataset cannot generate growth or declining lifecycle", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_SINGLE_PERIOD",
+    order_period_count: 1,
+    product_age_days: 120,
+    revenue_growth: 0.42,
+    order_growth: 0.3,
+    ads_spend: 300,
+    net_profit: 500,
+    margin: 0.32,
+    quantity: 18,
+    prediction_confidence: 0.5
+  });
+  const [classification] = classifySkuLifecycles({
+    skus: [sku],
+    ads: [{ campaign_id: "CMP_SINGLE", sku: sku.sku, spend: 300, impressions: 5000, clicks: 300, conversions: 30, roas: 4.5 }]
+  });
+
+  assert.notEqual(classification.lifecycle_stage, "GROWTH");
+  assert.notEqual(classification.lifecycle_stage, "DECLINING");
+  assert.equal(classification.lifecycle_stage, "UNKNOWN");
+  assert.equal(classification.lifecycle_confidence, "LOW");
+  assert.equal(classification.reason, "Insufficient historical periods");
+});
+
+test("low confidence lifecycle does not drive optimizer actions", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_LOW_LIFECYCLE_SIGNAL",
+    revenue: 5000,
+    ads_spend: 600,
+    margin: 0.46,
+    net_profit: 1600,
+    inventory: 500,
+    sales_velocity: 6,
+    sales_velocity_confidence: "HIGH",
+    prediction_confidence: 0.82,
+    attribution_confidence: 0.88
+  });
+  const lifecycleBySku = new Map([[sku.sku, {
+    sku: sku.sku,
+    lifecycle_stage: "DECLINING",
+    lifecycle_confidence: "LOW",
+    confidence: 0.35,
+    reason: "Insufficient historical periods",
+    signals: ["insufficient_history"],
+    scores: {}
+  }]]);
+  const actions = generateOptimizationActions({
+    skus: [sku],
+    opportunities: [unitOpportunity(sku, "GROWTH")],
+    lifecycleBySku
+  });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.equal(actionSet.includes("REDUCE_ADS"), false);
+  assert.equal(actionSet.includes("STOP"), false);
+  assert.equal(actions.some((action) => action.lifecycle_stage === "DECLINING"), false);
+});
+
+test("unknown lifecycle can still create controlled experimental opportunities", () => {
+  const sku = adsSimulationSku({
+    sku: "SKU_UNKNOWN_LIFECYCLE_TEST",
+    order_period_count: 1,
+    revenue: 7200,
+    ads_spend: 120,
+    margin: 0.44,
+    net_profit: 2200,
+    inventory: 900,
+    sales_velocity: 6,
+    sales_velocity_confidence: "LOW",
+    prediction_confidence: 0.58,
+    attribution_confidence: 0.42,
+    cac_confidence: "LOW",
+    customer_metric_confidence: "LOW"
+  });
+  const lifecycleBySku = new Map([[sku.sku, {
+    sku: sku.sku,
+    lifecycle_stage: "UNKNOWN",
+    lifecycle_confidence: "LOW",
+    confidence: 0.35,
+    reason: "Insufficient historical periods",
+    signals: ["single_order_period", "insufficient_history_for_trend"],
+    scores: {}
+  }]]);
+  const actions = generateOptimizationActions({
+    skus: [sku],
+    opportunities: [unitOpportunity(sku, "PORTFOLIO")],
+    lifecycleBySku
+  });
+  const actionSet = actions.map((action) => action.portfolio_action);
+
+  assert.ok(actionSet.includes("TEST_AD_SPEND"));
+  assert.equal(actionSet.includes("SCALE_ADS"), false);
+  assert.equal(actions.some((action) => action.lifecycle_stage === "UNKNOWN"), false);
 });
 
 test("lifecycle action spaces route launch, growth, mature, and declining SKUs differently", () => {

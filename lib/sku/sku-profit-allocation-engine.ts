@@ -3,6 +3,8 @@ import { revenueChannelOrNull } from "@/lib/channels/revenue-channel";
 import { calculateSalesVelocity, type VelocityConfidence } from "@/lib/inventory/sales-velocity-engine";
 import { calculateSkuProfitability, canonicalAdAllocationMethod, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
+const DEFAULT_ROAS_ANOMALY_THRESHOLD = 20;
+
 export type SkuProfitInputRow = {
   sku: string;
   product_name?: string;
@@ -29,6 +31,8 @@ export type SkuProfitInputRow = {
 };
 
 export type SkuRoasStatus = "not_advertised" | "spent_no_revenue" | "attributed" | "estimated" | "attribution_missing";
+export type SkuRoasConfidence = "HIGH" | "MEDIUM" | "LOW";
+export type InventoryRiskStatus = "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
 export type SkuAttributionMethod =
   | "direct"
   | "campaign_window"
@@ -56,6 +60,8 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
   roas_value: number | null;
   roas_display: string;
   roas_status: SkuRoasStatus;
+  roas_confidence: SkuRoasConfidence;
+  roas_confidence_reason?: string;
   attribution_method: SkuAttributionMethod;
   attribution_confidence: number;
   contribution: number;
@@ -88,10 +94,13 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
   stock_level: number | null;
   available_stock: number | null;
   sales_velocity: number;
+  normalized_daily_sales_velocity: number;
   velocity_window_days: number;
+  calculation_window_days: number;
+  velocity_calculation_basis: "30-day normalized estimate" | "observed order window";
   velocity_confidence: VelocityConfidence;
   data_period_days: number;
-  inventory_risk_status: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK";
+  inventory_risk_status: InventoryRiskStatus;
   days_of_inventory: number | null;
   stockout_risk: "high" | "medium" | "low" | "unknown";
   overstock_risk: "high" | "medium" | "low" | "unknown";
@@ -174,7 +183,7 @@ export function calculateSkuProfitAndAllocation(input: {
     const inventory = inventoryBySku.get(row.sku);
     const inventoryConfidence = inventory ? 1 : 0;
     const velocity = velocityBySku.get(row.sku) ?? calculateSalesVelocity({ totalUnitsSold: row.quantity, orderDates: [] });
-    const salesVelocity = velocity.sales_velocity;
+    const salesVelocity = velocity.normalized_daily_sales_velocity;
     const daysOfInventory = inventory && salesVelocity > 0 ? roundRatio(inventory.available_stock / salesVelocity) : null;
     const inventoryRiskStatus = inventoryRiskStatusFromRunway(daysOfInventory, velocity.velocity_confidence);
     const stockoutRisk = stockoutRiskLevel(daysOfInventory, inventory, velocity.velocity_confidence);
@@ -228,6 +237,7 @@ export function calculateSkuProfitAndAllocation(input: {
       profitConfidence,
       inventoryAvailable: Boolean(inventory),
       attributionConfidence: roasState.attribution_confidence,
+      roasConfidence: roasState.roas_confidence,
       adAllocationMethod
     });
     const expectedImpact = expectedSkuImpact({
@@ -259,6 +269,8 @@ export function calculateSkuProfitAndAllocation(input: {
       roas_value: roasState.roas_value,
       roas_display: roasState.roas_display,
       roas_status: roasState.roas_status,
+      roas_confidence: roasState.roas_confidence,
+      roas_confidence_reason: roasState.roas_confidence_reason,
       attribution_method: roasState.attribution_method,
       attribution_confidence: roasState.attribution_confidence,
       contribution: 0,
@@ -285,7 +297,10 @@ export function calculateSkuProfitAndAllocation(input: {
       stock_level: inventory?.stock_level ?? null,
       available_stock: inventory?.available_stock ?? null,
       sales_velocity: salesVelocity,
+      normalized_daily_sales_velocity: velocity.normalized_daily_sales_velocity,
       velocity_window_days: velocity.velocity_window_days,
+      calculation_window_days: velocity.calculation_window_days,
+      velocity_calculation_basis: velocity.calculation_basis,
       velocity_confidence: velocity.velocity_confidence,
       data_period_days: velocity.data_period_days,
       inventory_risk_status: inventoryRiskStatus,
@@ -460,12 +475,15 @@ function inventoryRiskStatusFromRunway(
   if (daysOfInventory !== null && daysOfInventory < 14) {
     return velocityConfidence === "LOW" ? "LOW_CONFIDENCE_STOCK_RISK" : "STOCKOUT_RISK";
   }
+  if (daysOfInventory !== null && daysOfInventory > 90) {
+    return "EXCESS_INVENTORY";
+  }
   return velocityConfidence === "LOW" ? "INSUFFICIENT_DATA" : "OK";
 }
 
 function overstockRiskLevel(daysOfInventory: number | null, salesVelocity: number, inventory?: { stock_level: number; available_stock: number }): SkuProfitAllocationRow["overstock_risk"] {
   if (!inventory || daysOfInventory === null) return "unknown";
-  if (daysOfInventory > 90 && salesVelocity < 1) return "high";
+  if (daysOfInventory > 90) return "high";
   if (daysOfInventory > 60) return "medium";
   return "low";
 }
@@ -482,6 +500,7 @@ function recommendSkuAction(input: {
   quantity: number;
   roasStatus: SkuRoasStatus;
   roasValue: number | null;
+  roasConfidence: SkuRoasConfidence;
   attributionConfidence: number;
   adAllocationMethod: SkuProfitAllocationRow["ad_allocation_method"];
   stockoutRisk: "high" | "medium" | "low" | "unknown";
@@ -501,6 +520,9 @@ function recommendSkuAction(input: {
     return { action: "REDUCE_AD_SPEND" as const, reason: "This SKU has ad spend but no attributed revenue; check campaign efficiency." };
   }
   if (input.profitConfidence < 0.3) return { action: "NEED_MORE_DATA" as const, reason: "Cost or attribution confidence is too low." };
+  if (input.roasValue !== null && input.roasConfidence === "LOW" && input.roasValue > DEFAULT_ROAS_ANOMALY_THRESHOLD) {
+    return { action: "NEED_MORE_DATA" as const, reason: "ROAS anomaly requires attribution validation before scaling." };
+  }
   if (input.netProfit < 0 && input.quantity < 5) return { action: "STOP_SKU" as const, reason: "Negative profit with weak sales velocity." };
   if (input.overstockRisk === "high" && input.salesVelocity < 1) return { action: "CLEAR_INVENTORY" as const, reason: "Inventory days are high while sales velocity is low." };
   if (input.margin < 0.12 && input.quantity >= 10) return { action: "RAISE_PRICE" as const, reason: "Sales velocity is healthy but SKU margin is low." };
@@ -649,6 +671,20 @@ function buildSkuRoasState(input: {
   const hasCampaign = input.campaignIds.length > 0;
   const isFallback = attributionMethod.includes("fallback") || ["conversion_share", "revenue_share", "equal_distribution"].includes(input.allocationMethod);
   const confidence = isFallback ? Math.min(input.allocationConfidence, 0.5) : input.allocationConfidence;
+  const roasQuality = (value: number): { roas_confidence: SkuRoasConfidence; roas_confidence_reason?: string } => {
+    if (value > DEFAULT_ROAS_ANOMALY_THRESHOLD) {
+      return {
+        roas_confidence: "LOW",
+        roas_confidence_reason: "ROAS anomaly requires attribution validation"
+      };
+    }
+    if (confidence >= 0.8 && attributionMethod === "direct") return { roas_confidence: "HIGH" };
+    if (confidence >= 0.65 && !isFallback) return { roas_confidence: "MEDIUM" };
+    return {
+      roas_confidence: "LOW",
+      roas_confidence_reason: isFallback ? "ROAS uses fallback ad allocation" : "Ad attribution confidence is low"
+    };
+  };
 
   if (!hasSpend && !hasCampaign && attributionMethod !== "unavailable") {
     return {
@@ -656,7 +692,9 @@ function buildSkuRoasState(input: {
       roas_display: "No Ads",
       roas_status: "not_advertised" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: confidence
+      attribution_confidence: confidence,
+      roas_confidence: "LOW" as const,
+      roas_confidence_reason: "No advertising spend is available"
     };
   }
 
@@ -666,40 +704,47 @@ function buildSkuRoasState(input: {
       roas_display: "0.00",
       roas_status: "spent_no_revenue" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: confidence
+      attribution_confidence: confidence,
+      roas_confidence: "MEDIUM" as const
     };
   }
 
   if (hasSpend && attributionMethod === "direct") {
     const value = safeRatio(input.revenue, input.adSpendAllocated);
+    const quality = roasQuality(value);
     return {
       roas_value: value,
       roas_display: formatRoas(value),
       roas_status: "attributed" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: confidence
+      attribution_confidence: confidence,
+      ...quality
     };
   }
 
   if (isFallback && hasSpend) {
     const value = safeRatio(input.revenue, input.adSpendAllocated);
+    const quality = roasQuality(value);
     return {
       roas_value: value,
       roas_display: `Estimated ${formatRoas(value)}`,
       roas_status: "estimated" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: confidence
+      attribution_confidence: confidence,
+      ...quality
     };
   }
 
   if (hasSpend) {
     const value = safeRatio(input.revenue, input.adSpendAllocated);
+    const quality = roasQuality(value);
     return {
       roas_value: value,
       roas_display: formatRoas(value),
       roas_status: "attributed" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: confidence
+      attribution_confidence: confidence,
+      ...quality
     };
   }
 
@@ -709,7 +754,9 @@ function buildSkuRoasState(input: {
       roas_display: "Attribution missing",
       roas_status: "attribution_missing" as const,
       attribution_method: attributionMethod,
-      attribution_confidence: Math.min(confidence, 0.3)
+      attribution_confidence: Math.min(confidence, 0.3),
+      roas_confidence: "LOW" as const,
+      roas_confidence_reason: "Advertising attribution is missing"
     };
   }
 
@@ -718,7 +765,9 @@ function buildSkuRoasState(input: {
     roas_display: "No Ads",
     roas_status: "not_advertised" as const,
     attribution_method: attributionMethod,
-    attribution_confidence: confidence
+    attribution_confidence: confidence,
+    roas_confidence: "LOW" as const,
+    roas_confidence_reason: "No advertising spend is available"
   };
 }
 

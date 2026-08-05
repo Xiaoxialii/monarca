@@ -3,7 +3,7 @@ import type { PortfolioSkuInput } from "@/lib/optimization/profit-simulation-eng
 import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
 import type { OptimizationPolicy } from "@/lib/optimization/policy/optimization-policy-types";
 
-export type SkuLifecycleStage = "LAUNCH" | "GROWTH" | "MATURE" | "DECLINING";
+export type SkuLifecycleStage = "LAUNCH" | "GROWTH" | "MATURE" | "DECLINING" | "UNKNOWN" | "INSUFFICIENT_HISTORY";
 
 export type SkuLifecycleScore = {
   launch_score: number;
@@ -34,6 +34,7 @@ export type SkuLifecycleInput = Pick<
   customer_count?: number;
   repeat_rate?: number;
   product_age_days?: number;
+  order_period_count?: number;
 };
 
 export function calculateLifecycleScore(input: SkuLifecycleInput, policy: OptimizationPolicy = DEFAULT_OPTIMIZATION_POLICY): SkuLifecycleScore {
@@ -95,7 +96,7 @@ export function inventoryRunwayDays(input: Pick<SkuLifecycleInput, "inventory" |
 }
 
 export function dominantLifecycleStage(score: SkuLifecycleScore): SkuLifecycleStage {
-  const entries: Array<[SkuLifecycleStage, number]> = [
+  const entries: Array<[Exclude<SkuLifecycleStage, "UNKNOWN" | "INSUFFICIENT_HISTORY">, number]> = [
     ["LAUNCH", score.launch_score],
     ["GROWTH", score.growth_score],
     ["MATURE", score.mature_score],

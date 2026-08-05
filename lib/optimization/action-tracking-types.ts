@@ -12,10 +12,12 @@ export type ActionMetricsSnapshot = {
   revenue?: number;
   profit?: number;
   profit_delta?: number;
+  margin?: number;
   orders?: number;
   roas?: number;
   sold_units?: number;
   stock?: number;
+  inventory?: number;
   ad_spend?: number;
 };
 
@@ -39,6 +41,17 @@ export type ActionEvaluationResult = {
   attribution?: DecisionAttributionSnapshot;
   learning_feedback: string;
   evaluated_at: string;
+};
+
+export type AcceptedActionImpact = {
+  revenue_change: number;
+  profit_change: number;
+  margin_change: number;
+  ads_change: number;
+  inventory_change: number;
+  expected_profit_delta: number;
+  actual_profit_delta: number;
+  performance_status: "OUTPERFORMED" | "MATCHED" | "UNDERPERFORMED";
 };
 
 export type ActionTrackingRecord = {

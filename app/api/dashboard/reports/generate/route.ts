@@ -306,8 +306,8 @@ function normalizeReportLocale(value: unknown): ReportLocale | null {
 }
 
 function defaultDateRangeForReportMode(reportMode: ReportMode): ReportDateRangeInput {
-  if (reportMode === "daily_brief") return { preset: "ALL" };
-  if (reportMode === "weekly_report") return { preset: "ALL" };
+  if (reportMode === "daily_brief") return { preset: "DAILY" };
+  if (reportMode === "weekly_report") return { preset: "WEEKLY" };
   return { preset: "ALL" };
 }
 

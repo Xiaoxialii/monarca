@@ -37,6 +37,7 @@ export function evaluateActionConstraints(
   if (typeof constraints.available_cash === "number" && result.required_cash > constraints.available_cash) violations.push("available_cash");
   if (!isStop && result.current_profit < 0 && result.action.includes("SCALE")) violations.push("negative_margin_scaling");
   if (!isStop && result.lifecycle && !isActionAllowedForLifecycle(result.action, result.lifecycle)) violations.push("lifecycle_action_not_allowed");
+  if (!isStop && result.decision_confidence?.blocking_reasons?.length) violations.push("decision_confidence_gate");
 
   return {
     valid: violations.length === 0,

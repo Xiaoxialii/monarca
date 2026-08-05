@@ -8,9 +8,12 @@ export type SalesVelocityInput = {
 
 export type SalesVelocityOutput = {
   sales_velocity: number;
+  normalized_daily_sales_velocity: number;
   velocity_window_days: number;
+  calculation_window_days: number;
   velocity_confidence: VelocityConfidence;
   data_period_days: number;
+  calculation_basis: "30-day normalized estimate" | "observed order window";
 };
 
 const DEFAULT_MINIMUM_WINDOW_DAYS = 30;
@@ -26,11 +29,16 @@ export function calculateSalesVelocity(input: SalesVelocityInput): SalesVelocity
   const observationDays = dates.length ? Math.max(dataPeriodDays, minimumWindowDays) : minimumWindowDays;
   const confidence = velocityConfidence(dataPeriodDays);
 
+  const normalizedDailyVelocity = roundRatio(Math.max(0, input.totalUnitsSold) / observationDays);
+
   return {
-    sales_velocity: roundRatio(Math.max(0, input.totalUnitsSold) / observationDays),
+    sales_velocity: normalizedDailyVelocity,
+    normalized_daily_sales_velocity: normalizedDailyVelocity,
     velocity_window_days: observationDays,
+    calculation_window_days: observationDays,
     velocity_confidence: confidence,
-    data_period_days: dataPeriodDays
+    data_period_days: dataPeriodDays,
+    calculation_basis: dataPeriodDays < minimumWindowDays ? "30-day normalized estimate" : "observed order window"
   };
 }
 

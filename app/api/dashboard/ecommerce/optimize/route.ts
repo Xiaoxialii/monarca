@@ -1,6 +1,7 @@
 import { WorkspaceRole } from "@prisma/client";
 import { after, NextResponse } from "next/server";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -17,6 +18,22 @@ export async function POST(request: Request) {
     const versions = await currentDecisionSnapshotVersions(prisma, {
       workspaceId: session.workspace.id
     });
+    const artifact = await canonicalArtifactAvailability(prisma, {
+      workspaceId: session.workspace.id
+    });
+
+    if (!artifact.available) {
+      return NextResponse.json({
+        ok: false,
+        status: "UNAVAILABLE",
+        message: artifact.message,
+        refreshSkippedReason: "canonical_artifact_unavailable",
+        artifactAvailability: artifact,
+        jobId: null,
+        versions
+      }, { status: 409 });
+    }
+
     const job = await enqueueSkuOptimizationJob(prisma, {
       workspaceId: session.workspace.id,
       reason: "manual_optimization_refresh",

@@ -7,6 +7,7 @@ const localeCookieKey = "butterfly-locale";
 
 const isProtectedRoute = createRouteMatcher([
   "/dashboard(.*)",
+  "/optimization(.*)",
   "/api/me(.*)",
   "/api/dashboard(.*)",
   "/api/data-sources(.*)",

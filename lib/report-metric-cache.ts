@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ReportDateRangeInput, ResolvedReportDateRange } from "@/lib/report-date-range";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "./profit/canonical-profitability-engine";
+import { attachSnapshotIdentity } from "./dashboard/snapshot-freshness";
 
 export { CANONICAL_PROFITABILITY_ENGINE_VERSION };
 
-export const ANALYTICS_METRIC_ENGINE_VERSION = "analytics_metric_v2026_08_05_period_reconciliation";
+export const ANALYTICS_METRIC_ENGINE_VERSION = "analytics_metric_v2026_08_06_cache_freshness";
 export const CUSTOMER_ENGINE_VERSION = "customer_lifecycle_v2026_08_05_period_scoped";
 export const cachedReportDateRangePresets = ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"] as const;
 
@@ -29,6 +30,8 @@ export type ReportMetricCachePayload = Record<string, unknown> & {
   profitabilityEngineVersion?: string;
   metricEngineVersion?: string;
   customerEngineVersion?: string;
+  canonicalDataVersion?: string | null;
+  dataFingerprint?: string | null;
 };
 
 type CacheIdentityInput = {
@@ -244,12 +247,25 @@ export async function upsertReportMetricCache(
   now = new Date()
 ) {
   const cacheKey = reportMetricCacheKey(input);
-  const payload = {
+  const payload = attachSnapshotIdentity({
     ...input.payload,
     profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION,
     metricEngineVersion: input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION,
     customerEngineVersion: input.customerEngineVersion ?? CUSTOMER_ENGINE_VERSION
-  };
+  }, {
+    canonicalDataVersion: input.sourceSnapshotVersion != null ? String(input.sourceSnapshotVersion) : input.semanticSnapshotVersion ?? null,
+    canonicalSnapshotVersion: input.sourceSnapshotVersion != null ? String(input.sourceSnapshotVersion) : input.semanticSnapshotVersion ?? null,
+    dataFingerprint: input.queryHash ?? input.semanticSchemaHash ?? stableHash({
+      metricIds: input.metricIds,
+      dataSourceIds: input.dataSourceIds,
+      dateRange: input.dateRange,
+      filters: input.filters,
+      sourceSnapshotVersion: input.sourceSnapshotVersion ?? null
+    }),
+    inputHash: input.queryHash ?? input.semanticSchemaHash ?? null,
+    metricEngineVersion: input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION,
+    profitabilityEngineVersion: input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION
+  });
   const data = {
     workspaceId: input.workspaceId,
     dataSourceIds: [...(input.dataSourceIds ?? [])].sort(),

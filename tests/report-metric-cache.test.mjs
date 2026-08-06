@@ -49,7 +49,7 @@ test("cache key is bound to canonical profitability engine version", () => {
     filters: { channel: "app" }
   };
 
-  assert.equal(CANONICAL_PROFITABILITY_ENGINE_VERSION, "v2");
+  assert.equal(CANONICAL_PROFITABILITY_ENGINE_VERSION, "v2.1-profitability-reconciliation");
   assert.notEqual(
     reportMetricCacheKey(base),
     reportMetricCacheKey({ ...base, profitabilityEngineVersion: "v1" })

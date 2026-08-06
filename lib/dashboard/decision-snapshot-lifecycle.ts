@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
 
 export const DECISION_ALGORITHM_VERSION = "decision-intelligence-v2.1";
-export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.4-policy-v1";
+export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.5-cache-freshness-policy-v1";
 export const SIMULATION_VERSION = "sku-portfolio-simulation-v2";
 export const METRIC_SNAPSHOT_VERSION = "metrics-from-canonical-v1";
 

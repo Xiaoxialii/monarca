@@ -19,6 +19,7 @@ import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-a
 import { calculateSkuProfitability, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
 import { isRevenueChannel, normalizeRevenueChannel } from "@/lib/channels/revenue-channel";
+import type { DemandTrend, InventoryDecision } from "@/lib/inventory/inventory-decision-engine";
 
 type MetricOutput = CanonicalEcommerceMetricOutput & {
   metrics: CanonicalEcommerceMetricOutput["metrics"] & {
@@ -192,7 +193,7 @@ export type DecisionIntelligenceReportV1 = {
       velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
       velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
       data_period_days?: number;
-      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
+      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
       days_of_inventory?: number | null;
       stockout_risk?: "high" | "medium" | "low" | "unknown";
       overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -203,6 +204,16 @@ export type DecisionIntelligenceReportV1 = {
       attribution_risk?: boolean;
       overall_risk_score?: number;
       inventory_confidence?: number;
+      lifecycle_stage?: string;
+      lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+      demand_trend?: DemandTrend;
+      inventory_decision?: InventoryDecision;
+      inventory_risk_score?: number;
+      inventory_recommended_action?: InventoryDecision["recommended_action"];
+      inventory_risk_reason?: string;
+      inventory_value?: number;
+      paid_dependency_score?: number;
+      organic_sales_ratio?: number;
       estimated_components: string[];
       estimated: boolean;
     }>;
@@ -362,9 +373,18 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     roas_status: row.roas_status,
     attribution_method: row.attribution_method,
     attribution_confidence: row.attribution_confidence,
+    gross_profit: row.gross_profit,
+    operating_cost: row.operating_cost,
+    contribution_profit: row.contribution_profit,
     total_cost: row.total_cost,
     ad_cost_allocated: row.ad_cost_allocated,
     profit_confidence: row.profit_confidence,
+    profitability_confidence: row.profitability_confidence,
+    validation_status: row.validation_status,
+    optimization_allowed: row.optimization_allowed,
+    warnings: row.warnings,
+    cogs_status: row.cogs_status,
+    cogs_confidence: row.cogs_confidence,
     channel_breakdown: row.channel_breakdown,
     channel_details: row.channel_details,
     ad_allocation_method: row.ad_allocation_method,
@@ -390,6 +410,16 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     attribution_risk: row.attribution_risk,
     overall_risk_score: row.overall_risk_score,
     inventory_confidence: row.inventory_confidence,
+    lifecycle_stage: row.lifecycle_stage,
+    lifecycle_confidence: row.lifecycle_confidence,
+    demand_trend: row.demand_trend,
+    inventory_decision: row.inventory_decision,
+    inventory_risk_score: row.inventory_risk_score,
+    inventory_recommended_action: row.inventory_recommended_action,
+    inventory_risk_reason: row.inventory_risk_reason,
+    inventory_value: row.inventory_value,
+    paid_dependency_score: row.paid_dependency_score,
+    organic_sales_ratio: row.organic_sales_ratio,
     estimated_components: row.estimated_components,
     estimated: row.estimated
   }));
@@ -439,7 +469,7 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
         quantity: row.quantity,
         price: row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0,
         cogs: row.cost_breakdown.cogs,
-        operating_cost: row.total_cost - row.cost_breakdown.cogs,
+        operating_cost: row.operating_cost ?? Math.max(0, row.total_cost - row.cost_breakdown.cogs - (row.ad_cost_allocated ?? 0)),
         net_profit: row.net_profit,
         ads_spend: row.ad_cost_allocated ?? 0,
         inventory: row.available_stock ?? row.stock_level ?? 0,

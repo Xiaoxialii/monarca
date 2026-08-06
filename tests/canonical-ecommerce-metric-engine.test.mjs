@@ -163,8 +163,8 @@ test("growth os metric layers compute profit customer growth and ads metrics", (
   assert.equal(result.metrics.business.net_profit, 124.6);
   assert.equal(result.metrics.business.margin, 0.2077);
   assert.equal(result.metrics.business.refund_amount, 30);
-  assert.equal(result.metrics.business.platform_fee, 65.4);
-  assert.equal(result.metrics.business.payment_fee, 0);
+  assert.equal(result.metrics.business.platform_fee, 18);
+  assert.equal(result.metrics.business.payment_fee, 17.4);
   assert.equal(result.metrics.business.sku_unit_economics.length, 3);
   assert.equal(result.metrics.business.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.net_profit) * 100) / 100, 0), 124.6);
   assert.ok(result.metrics.business.profit_confidence < 1);

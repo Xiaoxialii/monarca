@@ -1,5 +1,6 @@
 import { allocateAdSpendToSkus } from "./sku-ad-allocation-engine";
 import { revenueChannelOrNull } from "@/lib/channels/revenue-channel";
+import { evaluateInventoryDecision, inferDemandTrendFromOrderDates, type DemandTrend, type InventoryDecision } from "@/lib/inventory/inventory-decision-engine";
 import { calculateSalesVelocity, type VelocityConfidence } from "@/lib/inventory/sales-velocity-engine";
 import { calculateSkuProfitability, canonicalAdAllocationMethod, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
@@ -32,7 +33,7 @@ export type SkuProfitInputRow = {
 
 export type SkuRoasStatus = "not_advertised" | "spent_no_revenue" | "attributed" | "estimated" | "attribution_missing";
 export type SkuRoasConfidence = "HIGH" | "MEDIUM" | "LOW";
-export type InventoryRiskStatus = "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
+export type InventoryRiskStatus = "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
 export type SkuAttributionMethod =
   | "direct"
   | "campaign_window"
@@ -120,6 +121,16 @@ export type SkuProfitAllocationRow = SkuProfitInputRow & {
     estimated: true;
   };
   inventory_confidence: number;
+  lifecycle_stage?: string;
+  lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  demand_trend?: DemandTrend;
+  inventory_decision?: InventoryDecision;
+  inventory_risk_score?: number;
+  inventory_recommended_action?: InventoryDecision["recommended_action"];
+  inventory_risk_reason?: string;
+  inventory_value?: number;
+  paid_dependency_score?: number;
+  organic_sales_ratio?: number;
   cost_breakdown: {
     cogs: number;
     shipping: number;
@@ -137,7 +148,7 @@ export function calculateSkuProfitAndAllocation(input: {
   orders?: Array<Record<string, unknown>>;
   ads: Array<Record<string, unknown>>;
   inventory?: Array<Record<string, unknown>>;
-}) {
+}): SkuProfitAllocationRow[] {
   const rows = input.rows.filter((row) => row.sku);
   if (!rows.length) return [];
 
@@ -151,6 +162,7 @@ export function calculateSkuProfitAndAllocation(input: {
   const channelBreakdowns = buildChannelBreakdowns(input.orderItems);
   const inventoryBySku = buildInventoryBySku(input.inventory ?? []);
   const velocityBySku = buildSalesVelocityBySku(input.orderItems, input.orders ?? []);
+  const demandTrendBySku = buildDemandTrendBySku(input.orderItems, input.orders ?? []);
 
   const allocated = rows.map((row) => {
     const adAllocation = adAllocations.get(row.sku);
@@ -248,6 +260,34 @@ export function calculateSkuProfitAndAllocation(input: {
       adCostAllocated: adSpendForProfit,
       totalCost
     });
+    const lifecycleStage = lifecycleStageFromSignals({
+      margin,
+      netProfit,
+      salesVelocity,
+      daysOfInventory,
+      dataPeriodDays: velocity.data_period_days
+    });
+    const lifecycleConfidence: "HIGH" | "MEDIUM" | "LOW" = velocity.data_period_days >= 30 ? "HIGH" : velocity.data_period_days >= 14 ? "MEDIUM" : "LOW";
+    const inventoryDecision = evaluateInventoryDecision({
+      sku: row.sku,
+      lifecycle_stage: lifecycleStage,
+      lifecycle_confidence: lifecycleConfidence,
+      stock: inventory?.available_stock ?? 0,
+      sold: row.quantity,
+      revenue: row.revenue,
+      cogs: row.cogs,
+      margin,
+      net_profit: netProfit,
+      contribution_profit: profitability.contribution_profit,
+      sales_velocity: salesVelocity,
+      velocity_confidence: velocity.velocity_confidence,
+      data_period_days: velocity.data_period_days,
+      runway_days: daysOfInventory,
+      channel_details: buildChannelDetails({ channelRecord, totalRevenue: row.revenue, netProfit, quantity: row.quantity }),
+      ad_spend: adSpendForProfit,
+      roas_confidence: roasState.roas_confidence,
+      demandTrend: demandTrendBySku.get(row.sku) ?? null
+    });
 
     return {
       ...row,
@@ -317,6 +357,16 @@ export function calculateSkuProfitAndAllocation(input: {
       decision_reason: decision.reason,
       expected_impact: expectedImpact,
       inventory_confidence: inventoryConfidence,
+      lifecycle_stage: lifecycleStage,
+      lifecycle_confidence: lifecycleConfidence,
+      demand_trend: inventoryDecision.demandTrend,
+      inventory_decision: inventoryDecision,
+      inventory_risk_score: inventoryDecision.inventoryRiskScore,
+      inventory_recommended_action: inventoryDecision.recommended_action,
+      inventory_risk_reason: inventoryDecision.reasons[0] ?? "Inventory decision uses profitability, demand, coverage, and capital signals.",
+      inventory_value: inventoryDecision.inventory_value,
+      paid_dependency_score: inventoryDecision.paid_dependency_score,
+      organic_sales_ratio: inventoryDecision.organic_sales_ratio,
       cost_breakdown: {
         cogs: row.cogs,
         shipping: row.shipping_cost,
@@ -338,6 +388,37 @@ export function calculateSkuProfitAndAllocation(input: {
       contribution: safeRatio(row.net_profit, totalSkuProfit)
     }))
     .sort((left, right) => right.net_profit - left.net_profit || left.sku.localeCompare(right.sku));
+}
+
+function buildDemandTrendBySku(orderItems: Array<Record<string, unknown>>, orders: Array<Record<string, unknown>>) {
+  const orderDateById = new Map<string, string>();
+  for (const order of orders) {
+    const orderId = stringValue(order.order_id);
+    const date = firstDateString(order.order_date, order.date, order.created_at, order.createdAt);
+    if (orderId && date) orderDateById.set(orderId, date);
+  }
+
+  const datesBySku = new Map<string, string[]>();
+  const quantityBySku = new Map<string, number>();
+  for (const item of orderItems) {
+    const sku = stringValue(item.sku);
+    if (!sku) continue;
+    const orderId = stringValue(item.order_id);
+    const date = firstDateString(item.order_date, item.date, item.created_at, item.createdAt) ?? orderDateById.get(orderId);
+    quantityBySku.set(sku, roundRatio((quantityBySku.get(sku) ?? 0) + numberValue(item.quantity, 1)));
+    if (!date) continue;
+    const dates = datesBySku.get(sku) ?? [];
+    dates.push(date);
+    datesBySku.set(sku, dates);
+  }
+
+  return new Map(Array.from(quantityBySku.entries()).map(([sku, quantity]) => [
+    sku,
+    inferDemandTrendFromOrderDates({
+      totalUnitsSold: quantity,
+      orderDates: datesBySku.get(sku) ?? []
+    })
+  ]));
 }
 
 function buildChannelBreakdowns(orderItems: Array<Record<string, unknown>>) {
@@ -481,6 +562,20 @@ function inventoryRiskStatusFromRunway(
   return velocityConfidence === "LOW" ? "INSUFFICIENT_DATA" : "OK";
 }
 
+function lifecycleStageFromSignals(input: {
+  margin: number;
+  netProfit: number;
+  salesVelocity: number;
+  daysOfInventory: number | null;
+  dataPeriodDays: number;
+}) {
+  if (input.dataPeriodDays < 14) return "UNKNOWN";
+  if (input.netProfit > 0 && input.margin >= 0.25 && input.salesVelocity >= 3 && (input.daysOfInventory ?? 0) < 90) return "GROWTH";
+  if (input.netProfit > 0 && input.margin >= 0.18) return "MATURE";
+  if (input.netProfit <= 0 || (input.daysOfInventory ?? 0) > 120) return "DECLINING";
+  return "MATURE";
+}
+
 function overstockRiskLevel(daysOfInventory: number | null, salesVelocity: number, inventory?: { stock_level: number; available_stock: number }): SkuProfitAllocationRow["overstock_risk"] {
   if (!inventory || daysOfInventory === null) return "unknown";
   if (daysOfInventory > 90) return "high";
@@ -555,12 +650,12 @@ function expectedSkuImpact(input: {
 }) {
   if (input.action === "SCALE_ADS") {
     const revenueDelta = roundCurrency(input.revenue * 0.1);
-    const costRate = safeRatio(input.totalCost, input.revenue);
+    const nonAdCostRate = safeRatio(Math.max(0, input.totalCost - input.adCostAllocated), input.revenue);
     return {
-      profit_delta_estimate: roundCurrency(revenueDelta * (1 - costRate) - input.adCostAllocated * 0.1),
+      profit_delta_estimate: roundCurrency(revenueDelta * (1 - nonAdCostRate) - input.adCostAllocated * 0.1),
       revenue_delta_estimate: revenueDelta,
       risk_delta: "higher ad exposure",
-      explanation: "Assumes ad spend and revenue both rise 10% with current cost rate.",
+      explanation: "Assumes ad spend and revenue both rise 10% with current non-ad cost rate.",
       estimated: true as const
     };
   }

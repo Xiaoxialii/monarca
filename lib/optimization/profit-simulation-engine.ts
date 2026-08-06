@@ -30,7 +30,7 @@ export type PortfolioSkuInput = {
   calculation_window_days?: number;
   velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
   refund_rate: number;
   customer_ltv: number;
   conversion_rate: number;

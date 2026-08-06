@@ -1,5 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
+import {
+  attachSnapshotIdentity,
+  currentDashboardSnapshotIdentity,
+  isSnapshotFresh,
+  type SnapshotIdentity
+} from "./snapshot-freshness";
 
 type SnapshotClient = PrismaClient;
 type SnapshotPrismaClient = SnapshotClient & {
@@ -34,6 +40,48 @@ export function isCurrentProfitabilitySnapshot(value: unknown) {
   return payloadProfitabilityEngineVersion(value) === CANONICAL_PROFITABILITY_ENGINE_VERSION;
 }
 
+function snapshotIdentityFromInput(input: {
+  sourceSnapshotVersion?: number | null;
+  sourceSnapshotId?: string | null;
+  cacheKey?: string | null;
+  content?: Record<string, unknown>;
+}): SnapshotIdentity {
+  const versions = asRecord(input.content?.decisionSnapshotVersions);
+  return {
+    canonicalDataVersion: typeof versions.canonicalDataVersion === "string"
+      ? versions.canonicalDataVersion
+      : typeof versions.canonicalSnapshotVersion === "string"
+        ? versions.canonicalSnapshotVersion
+        : input.sourceSnapshotVersion != null
+          ? String(input.sourceSnapshotVersion)
+          : null,
+    canonicalSnapshotVersion: typeof versions.canonicalSnapshotVersion === "string"
+      ? versions.canonicalSnapshotVersion
+      : input.sourceSnapshotVersion != null
+        ? String(input.sourceSnapshotVersion)
+        : null,
+    dataFingerprint: typeof versions.inputHash === "string"
+      ? versions.inputHash
+      : typeof versions.dataFingerprint === "string"
+        ? versions.dataFingerprint
+        : input.cacheKey ?? input.sourceSnapshotId ?? null,
+    inputHash: typeof versions.inputHash === "string" ? versions.inputHash : null,
+    metricEngineVersion: typeof versions.metricEngineVersion === "string"
+      ? versions.metricEngineVersion
+      : typeof versions.metricSnapshotVersion === "string"
+        ? versions.metricSnapshotVersion
+        : null,
+    algorithmVersion: typeof versions.algorithmVersion === "string" ? versions.algorithmVersion : null,
+    optimizationVersion: typeof versions.optimizationVersion === "string" ? versions.optimizationVersion : null,
+    optimizationEngineVersion: typeof versions.optimizationEngineVersion === "string"
+      ? versions.optimizationEngineVersion
+      : typeof versions.optimizationVersion === "string"
+        ? versions.optimizationVersion
+        : null,
+    simulationVersion: typeof versions.simulationVersion === "string" ? versions.simulationVersion : null
+  };
+}
+
 function dateOrNull(value?: string | null) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -62,6 +110,7 @@ export async function findLatestReportSnapshot(
     periodStart?: string | null;
     periodEnd?: string | null;
     cacheKey?: string | null;
+    sourceSnapshotVersion?: number | string | null;
   }
 ) {
   const reportSnapshot = (prisma as SnapshotPrismaClient).reportSnapshot;
@@ -71,6 +120,17 @@ export async function findLatestReportSnapshot(
   const cacheKey = input.cacheKey ?? null;
   const periodStart = dateOrNull(input.periodStart);
   const periodEnd = dateOrNull(input.periodEnd);
+
+  const expectedIdentity = {
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
+    canonicalDataVersion: input.sourceSnapshotVersion != null
+      ? String(input.sourceSnapshotVersion)
+      : input.periodStart ?? null,
+    canonicalSnapshotVersion: input.sourceSnapshotVersion != null
+      ? String(input.sourceSnapshotVersion)
+      : input.periodStart ?? null,
+    dataFingerprint: input.cacheKey ?? null
+  };
 
   if (cacheKey) {
     const exact = await reportSnapshot.findFirst({
@@ -84,7 +144,10 @@ export async function findLatestReportSnapshot(
       }
     });
 
-    if (exact && isCurrentProfitabilitySnapshot(exact.contentJson)) return exact;
+    if (exact && isSnapshotFresh(exact.contentJson, expectedIdentity, {
+      requireFullIdentity: true,
+      checkOptimizationVersions: false
+    }).isFresh) return exact;
   }
 
   const snapshots = await reportSnapshot.findMany({
@@ -104,7 +167,10 @@ export async function findLatestReportSnapshot(
     take: 10
   });
 
-  return snapshots.find((snapshot) => isCurrentProfitabilitySnapshot(snapshot?.contentJson)) ?? null;
+  return snapshots.find((snapshot) => isSnapshotFresh(snapshot?.contentJson, expectedIdentity, {
+    requireFullIdentity: Boolean(input.cacheKey),
+    checkOptimizationVersions: false
+  }).isFresh) ?? null;
 }
 
 export async function findLatestReportSnapshotLegacy(
@@ -176,10 +242,7 @@ export async function upsertReportSnapshot(
   if (!reportSnapshot) return null;
 
   const cacheKey = input.cacheKey ?? `${input.reportType}:${Date.now()}`;
-  const content = {
-    ...input.content,
-    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
-  };
+  const content = attachSnapshotIdentity(input.content, snapshotIdentityFromInput(input));
   const data = {
     reportType: input.reportType,
     periodStart: dateOrNull(input.periodStart),
@@ -240,14 +303,22 @@ export async function findLatestDecisionSnapshot(
       metricSnapshotVersion: true,
       simulationVersion: true,
       inputHash: true,
-      generatedAt: true
+      generatedAt: true,
+      recommendationsJson: true
     },
     orderBy: {
       createdAt: "desc"
     },
     take: 10
   });
-  const latest = snapshots.find((snapshot) => !isFallbackDecisionSnapshot(snapshot));
+  const expected = await currentDashboardSnapshotIdentity(prisma, { workspaceId: input.workspaceId });
+  const latest = snapshots.find((snapshot) => {
+    if (isFallbackDecisionSnapshot(snapshot)) return false;
+    return isSnapshotFresh({
+      ...snapshot,
+      ...asRecord(snapshot.recommendationsJson)
+    }, expected).isFresh;
+  });
 
   if (!latest?.id) return null;
 
@@ -295,6 +366,18 @@ export async function upsertDecisionSnapshot(
 
   const report = asRecord(input.content.decision_report);
   const portfolioSummary = asRecord(report.portfolioSummary);
+  const content = attachSnapshotIdentity(input.content, {
+    canonicalDataVersion: input.canonicalSnapshotVersion ?? null,
+    canonicalSnapshotVersion: input.canonicalSnapshotVersion ?? null,
+    metricEngineVersion: input.metricSnapshotVersion ?? null,
+    algorithmVersion: input.algorithmVersion ?? null,
+    optimizationVersion: input.optimizationVersion ?? null,
+    optimizationEngineVersion: input.optimizationVersion ?? null,
+    simulationVersion: input.simulationVersion ?? null,
+    inputHash: input.inputHash ?? null,
+    dataFingerprint: input.inputHash ?? null,
+    generatedAt: input.generatedAt ?? new Date()
+  });
 
   return decisionSnapshot.create({
     data: {
@@ -312,7 +395,7 @@ export async function upsertDecisionSnapshot(
       generatedAt: input.generatedAt ?? new Date(),
       optimizationGoal: typeof report.optimizationGoal === "string" ? report.optimizationGoal : null,
       assumptions: (input.assumptions ?? null) as Prisma.InputJsonValue,
-      recommendationsJson: input.content as Prisma.InputJsonValue,
+      recommendationsJson: content as Prisma.InputJsonValue,
       expectedProfitImpact: input.expectedProfitImpact ??
         (typeof portfolioSummary.expectedProfitImpact === "number" ? portfolioSummary.expectedProfitImpact : null),
       baselineMetrics: {},

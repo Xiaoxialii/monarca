@@ -3,6 +3,7 @@ import { calculateCostIntelligence, type CostSkuUnit } from "@/lib/cost/cost-int
 import { enrichOrderItemsWithCanonicalSku, normalizeProductSkuRows } from "@/lib/sku/sku-intelligence-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import type { CogsStatus, ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
+import type { DemandTrend, InventoryDecision } from "@/lib/inventory/inventory-decision-engine";
 
 const SUPPORTED_SCHEMA_VERSION = "ecommerce_canonical_v1" as const;
 
@@ -106,6 +107,7 @@ export type SkuUnitEconomicsMetric = {
   ads_validation_warnings?: string[];
   ads_lineage?: CostSkuUnit["ads_lineage"];
   cogs_status?: CogsStatus;
+  cogs_confidence?: number;
   campaign_ids?: string[];
   attribution_window_start?: string | null;
   attribution_window_end?: string | null;
@@ -118,7 +120,7 @@ export type SkuUnitEconomicsMetric = {
   velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
   days_of_inventory?: number | null;
   stockout_risk?: "high" | "medium" | "low" | "unknown";
   overstock_risk?: "high" | "medium" | "low" | "unknown";
@@ -138,6 +140,16 @@ export type SkuUnitEconomicsMetric = {
     estimated: true;
   };
   inventory_confidence?: number;
+  lifecycle_stage?: string;
+  lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  demand_trend?: DemandTrend;
+  inventory_decision?: InventoryDecision;
+  inventory_risk_score?: number;
+  inventory_recommended_action?: InventoryDecision["recommended_action"];
+  inventory_risk_reason?: string;
+  inventory_value?: number;
+  paid_dependency_score?: number;
+  organic_sales_ratio?: number;
   cost_breakdown: {
     cogs: number;
     shipping: number;
@@ -336,10 +348,6 @@ type QualityAccumulator = {
   estimatedMetrics: Set<string>;
 };
 
-const COST_BENCHMARKS = {
-  refundRate: 0.04
-} as const;
-
 export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): CanonicalEcommerceMetricOutput {
   assertSupportedSchema(dataset);
 
@@ -374,7 +382,7 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
   const revenueFromOrderItems = roundCurrency(sum(orderItems.map((row) => lineItemRevenue(row))));
   const revenueFromSkuRollup = roundCurrency(sum(skuRevenue.map((row) => row.revenue)));
   const revenue = revenueFromOrderItems > 0 ? revenueFromOrderItems : revenueFromOrders;
-  const effectiveRefundAmount = refunds.length ? actualRefundAmount : roundCurrency(revenue * COST_BENCHMARKS.refundRate);
+  const effectiveRefundAmount = refunds.length ? actualRefundAmount : 0;
   const productPerformance = buildProductPerformance(orderItems, products, quality);
   const metricValidation = metricValidationSummary({
     revenueFromOrders,

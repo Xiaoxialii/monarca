@@ -2,6 +2,7 @@ import { WorkspaceRole } from "@prisma/client";
 import { after, NextResponse } from "next/server";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
+import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -34,6 +35,11 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
+    const staleSummary = await markDashboardCachesStale(prisma, {
+      workspaceId: session.workspace.id,
+      reason: "manual_optimization_refresh"
+    });
+
     const job = await enqueueSkuOptimizationJob(prisma, {
       workspaceId: session.workspace.id,
       reason: "manual_optimization_refresh",
@@ -53,7 +59,11 @@ export async function POST(request: Request) {
       status: job.status,
       currentStep: job.currentStep,
       error: null,
-      versions
+      versions,
+      cacheLifecycle: {
+        state: "STALE",
+        staleSummary
+      }
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);

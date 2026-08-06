@@ -763,31 +763,6 @@ export async function GET(request: Request) {
     const requestedReportMode = normalizeReportMode(url.searchParams.get("reportMode"));
     const locale = session.user.locale === "zh" ? "zh" : "en";
     const reportType = `dashboard:${requestedReportMode}`;
-    const snapshot = await findLatestReportSnapshot(prisma, {
-      workspaceId: session.workspace.id,
-      reportType,
-      periodStart: resolvedDateRange.startDate,
-      periodEnd: resolvedDateRange.endDate
-    });
-
-    if (snapshot) {
-      return NextResponse.json({
-        ...(snapshot.contentJson as Record<string, unknown>),
-        snapshot: {
-          id: snapshot.id,
-          type: "ReportSnapshot",
-          createdAt: snapshot.createdAt.toISOString(),
-          warning: snapshot.warning
-        },
-        performance: snapshotPerformance(startedAt, "snapshot")
-      });
-    }
-
-    console.warn("ReportSnapshot miss; falling back to legacy report loader", {
-      workspaceId: session.workspace.id,
-      reportType,
-      dateRange: resolvedDateRange
-    });
     const activeDataSources = await prisma.dataSourceConnection.findMany({
       where: {
         workspaceId: session.workspace.id,
@@ -896,6 +871,35 @@ export async function GET(request: Request) {
         }
       })
     });
+    const snapshot = await findLatestReportSnapshot(prisma, {
+      workspaceId: session.workspace.id,
+      reportType,
+      periodStart: effectiveRequestDateRange.startDate,
+      periodEnd: effectiveRequestDateRange.endDate,
+      cacheKey: cacheResult.cacheKey,
+      sourceSnapshotVersion
+    });
+
+    if (snapshot) {
+      return NextResponse.json({
+        ...(snapshot.contentJson as Record<string, unknown>),
+        snapshot: {
+          id: snapshot.id,
+          type: "ReportSnapshot",
+          createdAt: snapshot.createdAt.toISOString(),
+          warning: snapshot.warning
+        },
+        performance: snapshotPerformance(startedAt, "snapshot")
+      });
+    }
+
+    console.warn("ReportSnapshot miss; falling back to legacy report loader", {
+      workspaceId: session.workspace.id,
+      reportType,
+      dateRange: effectiveRequestDateRange,
+      cacheKey: cacheResult.cacheKey,
+      sourceSnapshotVersion
+    });
     const reusableCachePayload = shouldBypassReportCache(cacheResult.payload, requestedReportMode) || !reportMetricPayloadHasReusableReport(cacheResult.payload, requestedReportMode)
       ? null
       : cacheResult.payload;
@@ -990,6 +994,9 @@ export async function GET(request: Request) {
         kpiAssetLibrary,
         availableDateRange,
         warning: "SNAPSHOT_MISS_FALLBACK_LEGACY_REPORT",
+        decisionSnapshotVersions: asRecord(rangedPayload.decisionSnapshotVersions),
+        calculationIdentity: asRecord(rangedPayload.calculationIdentity),
+        snapshotIdentity: asRecord(rangedPayload.snapshotIdentity),
         performance: snapshotPerformance(startedAt, "fallback")
       };
       void upsertReportSnapshot(prisma, {
@@ -1052,6 +1059,9 @@ export async function GET(request: Request) {
         kpiAssetLibrary: await kpiAssetLibraryFromActiveSource(activeSource) ?? kpiAssetLibraryFromSnapshot(latestSnapshot),
         availableDateRange,
         warning: "SNAPSHOT_MISS_CACHE_MISS_NO_LIVE_CALCULATION",
+        decisionSnapshotVersions: asRecord(missPayload.decisionSnapshotVersions),
+        calculationIdentity: asRecord(missPayload.calculationIdentity),
+        snapshotIdentity: asRecord(missPayload.snapshotIdentity),
         performance: snapshotPerformance(startedAt, "fallback")
       };
       void upsertReportSnapshot(prisma, {

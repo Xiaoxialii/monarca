@@ -86,7 +86,7 @@ type SkuReportRow = {
   calculation_window_days?: number;
   velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
   data_period_days?: number;
-  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY";
+  inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
   days_of_inventory: number | null;
   stockout_risk: string;
   overstock_risk: string;
@@ -97,6 +97,20 @@ type SkuReportRow = {
   attribution_risk: boolean;
   overall_risk_score: number;
   inventory_confidence: number | null;
+  lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  demand_trend?: { direction: "UP" | "DOWN" | "STABLE" | "UNKNOWN"; growth_rate: number; confidence: "HIGH" | "MEDIUM" | "LOW" };
+  inventory_decision?: {
+    inventoryRiskScore: number;
+    risk_status: "STOCKOUT_RISK" | "OVERSTOCK_RISK" | "EXCESS_INVENTORY" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    recommended_action: "RESTOCK" | "REDUCE_PURCHASE" | "SHIFT_CHANNEL" | "INCREASE_DEMAND" | "LIQUIDATE" | "MAINTAIN" | "MONITOR";
+    reasons: string[];
+    inventory_value: number;
+  };
+  inventory_risk_score?: number;
+  inventory_recommended_action?: string;
+  inventory_risk_reason?: string;
+  inventory_value?: number;
   estimated_components: string[];
   estimated: boolean;
   lifecycle_stage?: string;
@@ -139,7 +153,13 @@ type InventoryBreakdownRow = {
   calculationWindowDays?: number;
   velocityCalculationBasis?: "30-day normalized estimate" | "observed order window";
   dataPeriodDays?: number;
-  inventoryRiskStatus?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "INVENTORY_OBSERVATION";
+  lifecycle: string;
+  demandTrend: "UP" | "DOWN" | "STABLE" | "UNKNOWN";
+  margin: number | null;
+  inventoryValue: number;
+  inventoryRiskStatus?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION" | "INVENTORY_OBSERVATION";
+  recommendedAction: string;
+  riskReason: string;
   runwayDays: number | null;
   sellThroughRate: number | null;
 };
@@ -561,7 +581,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   return (
     <div className="flex w-full flex-col gap-5">
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <section className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <KpiCard
           icon={TrendingUp}
           label="Revenue"
@@ -813,6 +833,9 @@ function KpiCard({
   description?: string;
   tone?: "neutral" | "positive" | "warning" | "negative";
 }) {
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const metricInfo = kpiMetricInfo(label);
+
   return (
     <Card
       className={cn(
@@ -824,15 +847,90 @@ function KpiCard({
       <CardContent className="flex min-h-[108px] min-w-0 flex-col justify-between p-4">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
           <p className="min-w-0 text-sm font-semibold leading-5 text-slate-600">{label}</p>
-          <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", tone === "neutral" ? "bg-slate-50" : "bg-emerald-50")}>
+          <button
+            type="button"
+            onClick={() => setIsInfoOpen((current) => !current)}
+            aria-expanded={isInfoOpen}
+            aria-label={`Show ${label} definition and formula`}
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-full transition hover:ring-2 hover:ring-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-200",
+              tone === "neutral" ? "bg-slate-50" : "bg-emerald-50"
+            )}
+          >
             <Icon className={cn("size-3.5", toneClass(tone))} />
-          </span>
+          </button>
         </div>
         <AutoFitKpiValue value={value} fullValue={fullValue} />
         {description ? <p className="mt-2 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
+        {isInfoOpen ? (
+          <div className="mt-3 w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">{label}</p>
+            <p className="mt-2 break-words text-xs font-semibold leading-snug text-slate-600">{metricInfo.definition}</p>
+            <div className="mt-3 rounded-md bg-slate-50 p-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Formula</p>
+              <p className="mt-1 break-words text-xs font-semibold leading-snug text-slate-800">{metricInfo.formula}</p>
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
+}
+
+function kpiMetricInfo(label: string) {
+  const normalized = label.trim().toLowerCase();
+  if (normalized === "revenue") {
+    return {
+      definition: "Total sales generated by canonical order line items in the selected analysis period.",
+      formula: "SUM(order item revenue) - refunds"
+    };
+  }
+  if (normalized === "orders") {
+    return {
+      definition: "Number of unique customer orders in the selected analysis period.",
+      formula: "COUNT(DISTINCT order_id)"
+    };
+  }
+  if (normalized === "aov") {
+    return {
+      definition: "Average order value across unique orders.",
+      formula: "Revenue / DISTINCT orders"
+    };
+  }
+  if (normalized === "profit") {
+    return {
+      definition: "Net profit after product cost, operating costs, and advertising spend.",
+      formula: "Revenue - COGS - shipping - fulfillment - platform fees - payment fees - refunds - ads"
+    };
+  }
+  if (normalized === "margin") {
+    return {
+      definition: "Net profit as a percentage of revenue.",
+      formula: "Net Profit / Revenue"
+    };
+  }
+  if (normalized === "blended mer") {
+    return {
+      definition: "Blended marketing efficiency ratio across all marketing spend. Used when campaign attribution is unavailable.",
+      formula: "Revenue / Total Marketing Spend"
+    };
+  }
+  if (normalized === "roas") {
+    return {
+      definition: "Attributed return on ad spend for campaign-matched revenue.",
+      formula: "Campaign attributed revenue / campaign spend"
+    };
+  }
+  if (normalized === "cac") {
+    return {
+      definition: "Customer acquisition cost when reliable new-customer attribution exists.",
+      formula: "Ad Spend / New Customers"
+    };
+  }
+  return {
+    definition: "Canonical metric calculated from the selected analysis period.",
+    formula: "Filtered canonical data -> metric calculation"
+  };
 }
 
 function AutoFitKpiValue({ value, fullValue }: { value: string; fullValue?: string }) {
@@ -931,7 +1029,13 @@ function buildInventoryRows(rows: SkuReportRow[]): InventoryBreakdownRow[] {
       calculationWindowDays: row.calculation_window_days,
       velocityCalculationBasis: row.velocity_calculation_basis,
       dataPeriodDays: row.data_period_days,
-      inventoryRiskStatus: inventoryRiskStatusFromRow(runwayDays, row.velocity_confidence, row.inventory_risk_status),
+      lifecycle: row.lifecycle_stage ?? "UNKNOWN",
+      demandTrend: row.demand_trend?.direction ?? "UNKNOWN",
+      margin: row.margin,
+      inventoryValue: row.inventory_decision?.inventory_value ?? row.inventory_value ?? 0,
+      inventoryRiskStatus: row.inventory_decision?.risk_status ?? inventoryRiskStatusFromRow(runwayDays, row.velocity_confidence, row.inventory_risk_status),
+      recommendedAction: row.inventory_decision?.recommended_action ?? row.inventory_recommended_action ?? "MONITOR",
+      riskReason: row.inventory_decision?.reasons?.[0] ?? row.inventory_risk_reason ?? "Inventory decision uses profitability, coverage, demand, and capital signals.",
       runwayDays,
       sellThroughRate: sellThroughBase > 0 ? sold / sellThroughBase : null
     };
@@ -961,12 +1065,12 @@ function inventoryRiskStatusFromRow(
   sourceStatus: InventoryBreakdownRow["inventoryRiskStatus"]
 ): InventoryBreakdownRow["inventoryRiskStatus"] {
   const confidence = velocityConfidence ?? "LOW";
-  if (confidence === "LOW") return "INVENTORY_OBSERVATION";
+  if (sourceStatus && sourceStatus !== "INSUFFICIENT_DATA" && sourceStatus !== "OK") return sourceStatus;
   if (runwayDays !== null && runwayDays < 14) {
-    return "STOCKOUT_RISK";
+    return confidence === "LOW" ? "LOW_CONFIDENCE_STOCK_RISK" : "STOCKOUT_RISK";
   }
   if (runwayDays !== null && runwayDays > 90) return "EXCESS_INVENTORY";
-  return sourceStatus ?? "OK";
+  return confidence === "LOW" ? "INVENTORY_OBSERVATION" : sourceStatus ?? "OK";
 }
 
 function primaryInventoryChannel(row: SkuReportRow) {
@@ -1101,6 +1205,71 @@ function SkuBreakdownTable({
       (row.product_name ?? "").toLowerCase().includes(normalizedSkuSearch)
     );
   }, [rows, normalizedSkuSearch]);
+  const totalRow = useMemo(() => {
+    const displayRows = visibleRows.map((row) => selectedChannel === "all" ? row : skuRowForSelectedChannel(row, selectedChannel));
+    const totals = displayRows.reduce(
+      (acc, row) => {
+        const costBreakdown = safeCostBreakdown(row.cost_breakdown);
+        const fees = costBreakdown ? costBreakdown.platform_fee + costBreakdown.payment_fee : null;
+        const shipping = costBreakdown ? costBreakdown.shipping + costBreakdown.fulfillment : null;
+        acc.revenue += row.revenue;
+        acc.quantity += row.quantity;
+        if (row.stock_level !== null) {
+          acc.stock += row.stock_level;
+          acc.hasStock = true;
+        }
+        if (costBreakdown) {
+          acc.cogs += costBreakdown.cogs;
+          acc.hasCogs = true;
+        }
+        if (row.ad_cost_allocated !== null) {
+          acc.ads += row.ad_cost_allocated;
+          acc.hasAds = true;
+        }
+        if (shipping !== null) {
+          acc.shipping += shipping;
+          acc.hasShipping = true;
+        }
+        if (fees !== null) {
+          acc.fees += fees;
+          acc.hasFees = true;
+        }
+        if (row.total_cost !== null) {
+          acc.totalCost += row.total_cost;
+          acc.hasTotalCost = true;
+        }
+        if (row.profit !== null) {
+          acc.profit += row.profit;
+          acc.hasProfit = true;
+        }
+        return acc;
+      },
+      {
+        revenue: 0,
+        quantity: 0,
+        stock: 0,
+        cogs: 0,
+        ads: 0,
+        shipping: 0,
+        fees: 0,
+        totalCost: 0,
+        profit: 0,
+        hasStock: false,
+        hasCogs: false,
+        hasAds: false,
+        hasShipping: false,
+        hasFees: false,
+        hasTotalCost: false,
+        hasProfit: false
+      }
+    );
+    return {
+      ...totals,
+      skuCount: visibleRows.length,
+      margin: totals.hasProfit && totals.revenue > 0 ? totals.profit / totals.revenue : null,
+      roas: totals.hasAds && totals.ads > 0 ? totals.revenue / totals.ads : null
+    };
+  }, [selectedChannel, visibleRows]);
 
   const startTableDrag = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -1216,6 +1385,27 @@ function SkuBreakdownTable({
             </tr>
           </thead>
           <tbody className="divide-y">
+            <tr className="bg-slate-100 text-sm font-bold text-slate-950 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
+              <td className="sticky left-0 z-20 bg-slate-100 px-5 py-3 shadow-[1px_0_0_0_rgba(226,232,240,1)]">
+                Total SKUs: {numberFormat.format(totalRow.skuCount)}
+              </td>
+              <td className="px-3 py-3">{currency.format(totalRow.revenue)}</td>
+              <td className="px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {selectedChannel === "all" ? "All channels" : selectedChannel}
+              </td>
+              <td className="px-3 py-3">{numberFormat.format(totalRow.quantity)}</td>
+              <td className="px-3 py-3">{totalRow.hasStock ? numberFormat.format(totalRow.stock) : "No Data"}</td>
+              <td className="px-3 py-3">{totalRow.hasCogs ? currency.format(totalRow.cogs) : "No Data"}</td>
+              <td className="px-3 py-3">{totalRow.hasAds ? currency.format(totalRow.ads) : "No Data"}</td>
+              <td className="px-3 py-3">{totalRow.hasShipping ? currency.format(totalRow.shipping) : "No Data"}</td>
+              <td className="px-3 py-3">{totalRow.hasFees ? currency.format(totalRow.fees) : "No Data"}</td>
+              <td className="px-3 py-3">{totalRow.hasTotalCost ? currency.format(totalRow.totalCost) : "No Data"}</td>
+              <td className={cn("px-3 py-3", totalRow.hasProfit && totalRow.profit < 0 && "text-rose-700")}>
+                {totalRow.hasProfit ? currency.format(totalRow.profit) : "No Data"}
+              </td>
+              <td className="px-3 py-3">{totalRow.margin === null ? "No Data" : percent.format(totalRow.margin)}</td>
+              <td className="px-3 py-3">{totalRow.roas === null ? "No Data" : ratioFormat.format(totalRow.roas)}</td>
+            </tr>
             {visibleRows.map((row, index) => {
               const displayRow = selectedChannel === "all" ? row : skuRowForSelectedChannel(row, selectedChannel);
               const lowMargin = displayRow.margin !== null && displayRow.margin < 0.1;
@@ -6070,18 +6260,22 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
         "[&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
       )}
     >
-      <table className="min-w-[1040px] w-full text-left text-sm">
+      <table className="min-w-[1480px] w-full text-left text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
           <tr>
             <th className="px-3 py-3">SKU</th>
-            <th className="px-3 py-3">Product Name</th>
-            <th className="px-3 py-3">Channel</th>
+            <th className="px-3 py-3">Lifecycle</th>
+            <th className="px-3 py-3">Demand Trend</th>
             <th className="px-3 py-3">Stock</th>
-            <th className="px-3 py-3">Sold</th>
-            <th className="px-3 py-3">Normalized Daily Velocity</th>
-            <th className="px-3 py-3">Confidence</th>
             <th className="px-3 py-3">Runway Days</th>
-            <th className="px-3 py-3">Risk Status</th>
+            <th className="px-3 py-3">Margin</th>
+            <th className="px-3 py-3">Inventory Value</th>
+            <th className="px-3 py-3">Risk</th>
+            <th className="px-3 py-3">Action</th>
+            <th className="px-3 py-3">Reason</th>
+            <th className="px-3 py-3">Sold</th>
+            <th className="px-3 py-3">Velocity</th>
+            <th className="px-3 py-3">Confidence</th>
             <th className="px-3 py-3">Sell-through Rate</th>
           </tr>
         </thead>
@@ -6089,9 +6283,15 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
           {rows.map((row) => (
             <tr key={row.sku}>
               <td className="px-3 py-3 font-semibold text-slate-900">{row.sku}</td>
-              <td className="max-w-[220px] truncate px-3 py-3">{row.productName}</td>
-              <td className="px-3 py-3">{row.channel}</td>
+              <td className="px-3 py-3">{inventoryLifecycleLabel(row.lifecycle)}</td>
+              <td className="px-3 py-3">{demandTrendLabel(row.demandTrend)}</td>
               <td className="px-3 py-3">{numberFormat.format(row.stock)}</td>
+              <td className="px-3 py-3">{row.runwayDays === null ? "N/A" : formatOneDecimal(row.runwayDays)}</td>
+              <td className="px-3 py-3">{row.margin === null ? "N/A" : percent.format(row.margin)}</td>
+              <td className="px-3 py-3">{currencyDecimal.format(row.inventoryValue)}</td>
+              <td className="px-3 py-3">{inventoryRiskStatusLabel(row.inventoryRiskStatus)}</td>
+              <td className="px-3 py-3 font-semibold text-slate-900">{inventoryActionLabel(row.recommendedAction)}</td>
+              <td className="max-w-[300px] px-3 py-3 text-slate-600">{row.riskReason}</td>
               <td className="px-3 py-3">{numberFormat.format(row.sold)}</td>
               <td className="px-3 py-3">
                 <div>{formatOneDecimal(row.salesVelocity)} / day</div>
@@ -6100,8 +6300,6 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
                 ) : null}
               </td>
               <td className="px-3 py-3"><InventoryConfidenceBadge confidence={row.velocityConfidence ?? "LOW"} /></td>
-              <td className="px-3 py-3">{row.runwayDays === null ? "N/A" : formatOneDecimal(row.runwayDays)}</td>
-              <td className="px-3 py-3">{inventoryRiskStatusLabel(row.inventoryRiskStatus)}</td>
               <td className="px-3 py-3">{row.sellThroughRate === null ? "N/A" : percent.format(row.sellThroughRate)}</td>
             </tr>
           ))}
@@ -6118,11 +6316,40 @@ function InventoryConfidenceBadge({ confidence }: { confidence: "HIGH" | "MEDIUM
 
 function inventoryRiskStatusLabel(status: InventoryBreakdownRow["inventoryRiskStatus"]) {
   if (status === "INVENTORY_OBSERVATION") return "Inventory observation";
+  if (status === "OBSERVATION") return "Inventory observation";
   if (status === "LOW_CONFIDENCE_STOCK_RISK") return "Low-confidence stock risk";
   if (status === "STOCKOUT_RISK") return "Stockout risk";
-  if (status === "EXCESS_INVENTORY") return "Potential excess inventory";
+  if (status === "OVERSTOCK_RISK") return "Overstock risk";
+  if (status === "LIQUIDATION_RISK") return "Liquidation risk";
+  if (status === "EXCESS_INVENTORY") return "Excess inventory";
+  if (status === "HEALTHY") return "Healthy";
   if (status === "INSUFFICIENT_DATA") return "Insufficient data";
   return "OK";
+}
+
+function inventoryLifecycleLabel(value: string) {
+  const normalized = value.toUpperCase();
+  if (normalized === "GROWTH") return "Growth";
+  if (normalized === "MATURE") return "Mature";
+  if (normalized === "DECLINING") return "Declining";
+  return "Unknown";
+}
+
+function demandTrendLabel(value: InventoryBreakdownRow["demandTrend"]) {
+  if (value === "UP") return "Up";
+  if (value === "DOWN") return "Down";
+  if (value === "STABLE") return "Stable";
+  return "Unknown";
+}
+
+function inventoryActionLabel(value: string) {
+  if (value === "REDUCE_PURCHASE") return "Reduce purchase";
+  if (value === "SHIFT_CHANNEL") return "Shift channel";
+  if (value === "INCREASE_DEMAND") return "Increase demand";
+  if (value === "LIQUIDATE") return "Liquidate";
+  if (value === "RESTOCK") return "Restock";
+  if (value === "MAINTAIN") return "Maintain";
+  return "Monitor";
 }
 
 function CustomerValueDistribution({ customer }: { customer: DecisionIntelligenceReportV1["customer_breakdown"] }) {
@@ -6269,13 +6496,115 @@ function GrowthRow({ label, value, isAvailable = true }: { label: string; value:
 }
 
 function SmallMetric({ label, value, description }: { label: string; value: string; description?: string }) {
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const Icon = smallMetricIcon(label);
+  const metricInfo = metricInfoForLabel(label);
+
   return (
-    <div className="rounded-lg bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase leading-5 tracking-wide text-slate-500">{label}</p>
+    <div className="overflow-hidden rounded-lg bg-slate-50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 text-xs font-semibold uppercase leading-5 tracking-wide text-slate-500">{label}</p>
+        <button
+          type="button"
+          onClick={() => setIsInfoOpen((current) => !current)}
+          aria-expanded={isInfoOpen}
+          aria-label={`Show ${label} definition and formula`}
+          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm transition hover:text-emerald-700 hover:ring-2 hover:ring-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+        >
+          <Icon className="size-3.5" />
+        </button>
+      </div>
       <p className="mt-2 text-lg font-semibold text-slate-950">{value || "No Data"}</p>
       {description ? <p className="mt-1 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
+      {isInfoOpen ? (
+        <div className="mt-3 w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">{label}</p>
+          <p className="mt-2 break-words text-xs font-semibold leading-snug text-slate-600">{metricInfo.definition}</p>
+          <div className="mt-3 rounded-md bg-slate-50 p-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Formula</p>
+            <p className="mt-1 break-words text-xs font-semibold leading-snug text-slate-800">{metricInfo.formula}</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function smallMetricIcon(label: string) {
+  const normalized = label.trim().toLowerCase();
+  if (/stock|inventory|runway/.test(normalized)) return PackageSearch;
+  if (/sold|orders|customers/.test(normalized)) return ShoppingCart;
+  if (/velocity|growth|repeat|frequency/.test(normalized)) return TrendingUp;
+  if (/confidence|risk|payback|period/.test(normalized)) return AlertTriangle;
+  if (/spend|mer|roas|cac|ltv|profit|revenue|fee|cost/.test(normalized)) return BadgeDollarSign;
+  return BarChart3;
+}
+
+function metricInfoForLabel(label: string) {
+  const normalized = label.trim().toLowerCase();
+  const baseInfo = kpiMetricInfo(label);
+  if (baseInfo.formula !== "Filtered canonical data -> metric calculation") return baseInfo;
+  if (normalized === "total stock") {
+    return {
+      definition: "Total available inventory units across the displayed SKU set.",
+      formula: "SUM(SKU available stock)"
+    };
+  }
+  if (normalized === "total sold") {
+    return {
+      definition: "Total units sold across the selected analysis period.",
+      formula: "SUM(order item quantity)"
+    };
+  }
+  if (normalized === "normalized daily velocity") {
+    return {
+      definition: "Estimated daily unit sales normalized from the available selling window.",
+      formula: "Units sold / calculation window days"
+    };
+  }
+  if (normalized === "velocity confidence") {
+    return {
+      definition: "Confidence level for the sales velocity estimate based on available order history.",
+      formula: "LOW < 14 days, MEDIUM 14-60 days, HIGH > 60 days of selling history"
+    };
+  }
+  if (normalized === "avg runway days") {
+    return {
+      definition: "Average estimated days of inventory coverage across SKUs.",
+      formula: "AVG(available stock / normalized daily velocity)"
+    };
+  }
+  if (normalized === "ad spend" || normalized === "spend") {
+    return {
+      definition: "Total marketing spend in the selected analysis period.",
+      formula: "SUM(ad spend)"
+    };
+  }
+  if (normalized === "gross profit") {
+    return {
+      definition: "Profit before advertising and operating costs.",
+      formula: "Revenue - COGS"
+    };
+  }
+  if (normalized === "avg ltv") {
+    return {
+      definition: "Average customer lifetime value.",
+      formula: "Average Order Value * Purchase Frequency"
+    };
+  }
+  if (normalized === "repeat rate") {
+    return {
+      definition: "Share of customers with more than one order.",
+      formula: "Repeat customers / total customers"
+    };
+  }
+  if (normalized === "avg lifetime days") {
+    return {
+      definition: "Average time between each customer's first and latest order.",
+      formula: "AVG(last_order_date - first_order_date)"
+    };
+  }
+  return baseInfo;
 }
 
 function SkuDetailPanel({ row }: { row: SkuReportRow }) {

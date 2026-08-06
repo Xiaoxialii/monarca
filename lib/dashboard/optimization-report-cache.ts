@@ -1,5 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
+import {
+  attachSnapshotIdentity,
+  currentDashboardSnapshotIdentity,
+  isSnapshotFresh,
+  shouldRejectSnapshotOverwrite,
+  type SnapshotIdentity
+} from "./snapshot-freshness";
 
 export type OptimizationReportMode = "sku" | "full";
 
@@ -66,16 +73,49 @@ function dateOrNull(value: unknown) {
   return null;
 }
 
+function optimizationRowsPresent(cache: Pick<OptimizationReportCacheRecord, "queueRowsJson" | "portfolioRowsJson"> | {
+  queueRowsJson?: unknown;
+  portfolioRowsJson?: unknown;
+}) {
+  return asArray(cache.queueRowsJson).length > 0 || asArray(cache.portfolioRowsJson).length > 0;
+}
+
 function splitOptimizationReportContent(content: Record<string, unknown>) {
   const report = asRecord(content.decision_report);
   const optimization = asRecord(report.sku_portfolio_optimization);
   const versions = asRecord(content.decisionSnapshotVersions);
   const rawPortfolioSummary = asRecord(report.portfolioSummary ?? optimization.portfolioSummary ?? content.portfolioSummary ?? null);
+  const identity: SnapshotIdentity = {
+    canonicalDataVersion: typeof versions.canonicalDataVersion === "string"
+      ? versions.canonicalDataVersion
+      : typeof versions.canonicalSnapshotVersion === "string"
+        ? versions.canonicalSnapshotVersion
+        : null,
+    canonicalSnapshotVersion: typeof versions.canonicalSnapshotVersion === "string" ? versions.canonicalSnapshotVersion : null,
+    metricEngineVersion: typeof versions.metricEngineVersion === "string"
+      ? versions.metricEngineVersion
+      : typeof versions.metricSnapshotVersion === "string"
+        ? versions.metricSnapshotVersion
+        : null,
+    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
+    algorithmVersion: typeof versions.algorithmVersion === "string" ? versions.algorithmVersion : null,
+    optimizationEngineVersion: typeof versions.optimizationEngineVersion === "string"
+      ? versions.optimizationEngineVersion
+      : typeof versions.optimizationVersion === "string"
+        ? versions.optimizationVersion
+        : null,
+    optimizationVersion: typeof versions.optimizationVersion === "string" ? versions.optimizationVersion : null,
+    simulationVersion: typeof versions.simulationVersion === "string" ? versions.simulationVersion : null,
+    inputHash: typeof versions.inputHash === "string" ? versions.inputHash : null,
+    dataFingerprint: typeof versions.dataFingerprint === "string"
+      ? versions.dataFingerprint
+      : typeof versions.inputHash === "string"
+        ? versions.inputHash
+        : null,
+    generatedAt: typeof content.generated_at === "string" ? content.generated_at : new Date().toISOString()
+  };
   const portfolioSummary = Object.keys(rawPortfolioSummary).length
-    ? {
-      ...rawPortfolioSummary,
-      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
-    }
+    ? attachSnapshotIdentity(rawPortfolioSummary, identity)
     : null;
   const allocationRecommendation = report.allocationRecommendation ?? optimization.allocationRecommendation ?? content.allocationRecommendation ?? null;
   const riskAlerts = report.riskAlerts ?? optimization.riskAlerts ?? content.riskAlerts ?? [];
@@ -93,7 +133,7 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
   delete portfolioOptimizationBase.inventory_plan;
   delete portfolioOptimizationBase.simulations;
 
-  const reportShell = {
+  const reportShell = attachSnapshotIdentity({
     ...reportShellBase,
     optimizationRun: content.optimizationRun ?? reportShellBase.optimizationRun ?? null,
     skuDecisions: [],
@@ -101,14 +141,9 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
     allocationRecommendation,
     riskAlerts,
     executionPlan
-  };
-  const portfolioOptimization = {
+  }, identity);
+  const portfolioOptimization = attachSnapshotIdentity({
     ...portfolioOptimizationBase,
-    profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
-    decisionSnapshotVersions: {
-      ...versions,
-      profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
-    },
     skuDecisions: [],
     recommended_portfolio: [],
     lifecycleClassifications: [],
@@ -120,7 +155,7 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
     allocationRecommendation,
     riskAlerts,
     executionPlan
-  };
+  }, identity);
 
   return {
     state: typeof content.state === "string" ? content.state : "empty",
@@ -142,12 +177,12 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
     allocationRecommendationJson: allocationRecommendation,
     riskAlertsJson: asArray(riskAlerts),
     executionPlanJson: asArray(executionPlan),
-    algorithmVersion: typeof versions.algorithmVersion === "string" ? versions.algorithmVersion : null,
-    optimizationVersion: typeof versions.optimizationVersion === "string" ? versions.optimizationVersion : null,
-    canonicalSnapshotVersion: typeof versions.canonicalSnapshotVersion === "string" ? versions.canonicalSnapshotVersion : null,
-    metricSnapshotVersion: typeof versions.metricSnapshotVersion === "string" ? versions.metricSnapshotVersion : null,
-    simulationVersion: typeof versions.simulationVersion === "string" ? versions.simulationVersion : null,
-    inputHash: typeof versions.inputHash === "string" ? versions.inputHash : null
+    algorithmVersion: identity.algorithmVersion,
+    optimizationVersion: identity.optimizationVersion ?? identity.optimizationEngineVersion ?? null,
+    canonicalSnapshotVersion: identity.canonicalSnapshotVersion ?? identity.canonicalDataVersion ?? null,
+    metricSnapshotVersion: identity.metricEngineVersion ?? null,
+    simulationVersion: identity.simulationVersion ?? null,
+    inputHash: identity.inputHash ?? identity.dataFingerprint ?? null
   };
 }
 
@@ -161,7 +196,7 @@ export async function findOptimizationReportCache(
   const cache = (prisma as OptimizationReportCacheClient).optimizationReportCache;
   if (!cache) return null;
 
-  return cache.findUnique({
+  const record = await cache.findUnique({
     where: {
       workspaceId_mode: {
         workspaceId: input.workspaceId,
@@ -203,6 +238,26 @@ export async function findOptimizationReportCache(
       updatedAt: true
     }
   });
+
+  if (!record) return null;
+
+  const expected = await currentDashboardSnapshotIdentity(prisma, { workspaceId: input.workspaceId });
+  const freshness = isSnapshotFresh({
+    ...record,
+    ...asRecord(record.portfolioOptimizationJson),
+    ...asRecord(record.portfolioSummaryJson)
+  }, expected);
+  if (!freshness.isFresh) {
+    console.warn("[optimization-report-cache] stale cache skipped", {
+      workspace_id: input.workspaceId,
+      mode: input.mode,
+      cache_id: record.id,
+      reasons: freshness.reasons
+    });
+    return null;
+  }
+
+  return record;
 }
 
 export async function upsertOptimizationReportCache(
@@ -231,14 +286,28 @@ export async function upsertOptimizationReportCache(
       workspaceId: true,
       mode: true,
       state: true,
+      queueRowsJson: true,
+      portfolioRowsJson: true,
       updatedAt: true
     }
   });
-  if (existing?.state === "ready" && split.state === "unavailable") {
-    console.warn("[optimization-report-cache] skipped unavailable overwrite of ready cache", {
+
+  const rejectOverwrite = shouldRejectSnapshotOverwrite({
+    existingState: existing?.state,
+    newState: split.state,
+    existingHasRows: existing ? optimizationRowsPresent(existing) : false,
+    newHasRows: optimizationRowsPresent(split)
+  });
+
+  if (existing?.id && rejectOverwrite) {
+    console.warn("[optimization-report-cache] skipped unsafe overwrite of ready cache", {
       workspace_id: input.workspaceId,
       mode: input.mode,
-      existing_cache_id: existing.id
+      existing_cache_id: existing.id,
+      existing_state: existing.state,
+      new_state: split.state,
+      existing_has_rows: optimizationRowsPresent(existing),
+      new_has_rows: optimizationRowsPresent(split)
     });
     return existing;
   }
@@ -344,10 +413,15 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
       algorithmVersion: cache.algorithmVersion,
       optimizationVersion: cache.optimizationVersion,
       profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
+      optimizationEngineVersion: cache.optimizationVersion,
+      canonicalDataVersion: cache.canonicalSnapshotVersion,
       canonicalSnapshotVersion: cache.canonicalSnapshotVersion,
+      metricEngineVersion: cache.metricSnapshotVersion,
       metricSnapshotVersion: cache.metricSnapshotVersion,
       simulationVersion: cache.simulationVersion,
-      inputHash: cache.inputHash
+      inputHash: cache.inputHash,
+      dataFingerprint: cache.inputHash,
+      generatedAt: cache.generatedAt instanceof Date ? cache.generatedAt.toISOString() : null
     },
     profitDataCoverage: cache.profitDataCoverage,
     optimizationLevel: cache.optimizationLevel,

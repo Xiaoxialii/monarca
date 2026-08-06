@@ -1,4 +1,4 @@
-export const CANONICAL_PROFITABILITY_ENGINE_VERSION = "v2" as const;
+export const CANONICAL_PROFITABILITY_ENGINE_VERSION = "v2.1-profitability-reconciliation" as const;
 
 export type CogsStatus = "AVAILABLE" | "ESTIMATED" | "MISSING";
 export type CanonicalAdAllocationMethod = "DIRECT_SKU" | "CAMPAIGN" | "REVENUE_SHARE" | "UNKNOWN";
@@ -67,6 +67,7 @@ export function calculateSkuProfitability(input: CanonicalProfitabilityInput): C
   const refundCost = money(input.refundCost ?? 0);
   const adSpend = money(input.adSpend ?? 0);
   const operatingCost = money(shippingCost + fulfillmentCost + platformFee + paymentFee + refundCost);
+  const totalCost = money(cogs + operatingCost + adSpend);
   const grossProfit = money(revenue - cogs);
   const contributionProfit = money(revenue - cogs - operatingCost);
   const netProfit = money(contributionProfit - adSpend);
@@ -102,7 +103,7 @@ export function calculateSkuProfitability(input: CanonicalProfitabilityInput): C
     operating_cost: operatingCost,
     contribution_profit: contributionProfit,
     ad_spend: adSpend,
-    total_cost: money(cogs + operatingCost),
+    total_cost: totalCost,
     net_profit: netProfit,
     margin,
     cogs_status: cogsStatus,

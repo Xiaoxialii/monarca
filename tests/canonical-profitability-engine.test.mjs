@@ -19,8 +19,9 @@ const jiti = jitiFactory(process.cwd() + "/");
 const { calculateSkuProfitability, CANONICAL_PROFITABILITY_ENGINE_VERSION } = jiti("./lib/profit/canonical-profitability-engine.ts");
 const { evaluateActionEligibility } = jiti("./lib/optimization/policy/optimization-policy.ts");
 const { DEFAULT_OPTIMIZATION_POLICY } = jiti("./lib/optimization/policy/default-policies.ts");
+const { verifyProfitabilityConsistency } = jiti("./scripts/verify-profitability-consistency.ts");
 
-test("canonical profitability v2 keeps ads separate from total cost", () => {
+test("canonical profitability v2 uses one reconciled total cost including ads", () => {
   const result = calculateSkuProfitability({
     revenue: 1000,
     cogs: 400,
@@ -40,9 +41,10 @@ test("canonical profitability v2 keeps ads separate from total cost", () => {
   assert.equal(result.gross_profit, 600);
   assert.equal(result.operating_cost, 130);
   assert.equal(result.contribution_profit, 470);
-  assert.equal(result.total_cost, 530);
+  assert.equal(result.total_cost, 630);
   assert.equal(result.ad_spend, 100);
   assert.equal(result.net_profit, 370);
+  assert.equal(result.net_profit, result.revenue - result.total_cost);
   assert.equal(result.margin, 0.37);
   assert.equal(result.validation.validation_status, "PASSED");
 });
@@ -62,6 +64,40 @@ test("missing COGS blocks optimization instead of creating fake profit", () => {
   assert.equal(result.validation.optimization_allowed, false);
   assert.ok(result.validation.warnings.some((warning) => /COGS is missing/i.test(warning)));
   assert.ok(result.profitability_confidence < 0.5);
+});
+
+test("profitability consistency verifier detects component mismatches", () => {
+  const passed = verifyProfitabilityConsistency([
+    {
+      sku: "SKU-PASS",
+      revenue: 23218,
+      cogs: 8480.47,
+      ad_cost_allocated: 806,
+      shipping_cost: 18.95,
+      platform_fee: 600,
+      payment_fee: 366.01,
+      total_cost: 10271.43,
+      net_profit: 12946.57,
+      margin: 0.5576
+    }
+  ]);
+  assert.equal(passed.status, "PASSED");
+
+  const failed = verifyProfitabilityConsistency([
+    {
+      sku: "SKU-FAIL",
+      revenue: 23218,
+      cogs: 12735.67,
+      ad_cost_allocated: 806,
+      shipping_cost: 49.24,
+      platform_fee: 2075.92,
+      total_cost: 14860.83,
+      net_profit: 7551.17,
+      margin: 0.3252
+    }
+  ]);
+  assert.equal(failed.status, "FAILED");
+  assert.ok(failed.issues.some((issue) => issue.sku === "SKU-FAIL" && issue.field === "total_cost"));
 });
 
 test("low attribution confidence blocks aggressive scale ads action", () => {

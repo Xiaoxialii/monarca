@@ -9,6 +9,7 @@ import {
   findOptimizationReportCache,
   optimizationReportCachePayload
 } from "@/lib/dashboard/optimization-report-cache";
+import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
 import {
   enqueueSkuOptimizationJob,
@@ -47,8 +48,15 @@ function cacheNeedsOptimizationRefresh(payload: unknown) {
   const state = typeof record.state === "string" ? record.state : null;
   const report = asRecord(record.decision_report);
   const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
 
-  return state !== "ready" || !Object.keys(report).length || !Object.keys(optimization).length;
+  return (
+    state !== "ready" ||
+    !Object.keys(report).length ||
+    !Object.keys(optimization).length ||
+    (decisionRows.length === 0 && portfolioRows.length === 0)
+  );
 }
 
 async function hasReadyCanonicalSources(workspaceId: string) {
@@ -227,6 +235,59 @@ async function freshOptimizationCacheResponse(input: {
   });
 }
 
+async function liveDecisionReportResponse(input: {
+  workspaceId: string;
+  mode: "full" | "sku";
+  startedAt: number;
+  message?: string;
+}) {
+  const loaded = await loadEcommerceSalesDashboardData({
+    workspaceId: input.workspaceId,
+    decisionMode: input.mode
+  }).catch((error) => ({
+    state: "unavailable" as const,
+    message: error instanceof Error ? error.message : "Ecommerce decision report data is unavailable.",
+    data: null,
+    lineage: null
+  }));
+
+  const decisionReport = loaded.data?.decision_report ?? null;
+  if (loaded.state !== "ready" || !decisionReport) return null;
+
+  const optimization = asRecord(decisionReport.sku_portfolio_optimization);
+  const queueRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return NextResponse.json({
+    ok: true,
+    state: "ready",
+    status: "READY",
+    latestSnapshot: false,
+    hasConnectedDataSource: true,
+    message: input.message ?? loaded.message ?? "Loaded current decision analysis from live canonical metrics.",
+    decision_report: decisionReport,
+    portfolioSummary: decisionReport.portfolioSummary ?? optimization.portfolioSummary ?? null,
+    allocationRecommendation: decisionReport.allocationRecommendation ?? optimization.allocationRecommendation ?? null,
+    skuDecisions: queueRows,
+    riskAlerts: Array.isArray(decisionReport.riskAlerts) ? decisionReport.riskAlerts : [],
+    executionPlan: Array.isArray(decisionReport.executionPlan) ? decisionReport.executionPlan : [],
+    generated_at: loaded.data?.metadata.computed_at ?? null,
+    source_platforms: loaded.data?.metadata.source_platforms ?? [],
+    lineage: loaded.lineage,
+    liveFallback: true,
+    snapshot: {
+      id: null,
+      type: "LiveDecisionReport",
+      latestSnapshot: false
+    },
+    performance: snapshotPerformance(input.startedAt, "snapshot"),
+    debug: {
+      queueRows: queueRows.length,
+      portfolioRows: portfolioRows.length
+    }
+  });
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const url = new URL(request.url);
@@ -249,6 +310,13 @@ export async function GET(request: Request) {
   const reportCache = await findOptimizationReportCache(prisma, {
     workspaceId: session.workspace.id,
     mode: decisionMode
+  }).catch((error) => {
+    console.warn("[decision-report] optimization cache lookup failed; using live fallback when available", {
+      workspace_id: session.workspace.id,
+      mode: decisionMode,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
   });
 
   if (reportCache) {
@@ -266,6 +334,14 @@ export async function GET(request: Request) {
           startedAt
         });
       }
+
+      const liveResponse = await liveDecisionReportResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: "Loaded current decision analysis while the optimization cache refreshes."
+      });
+      if (liveResponse) return liveResponse;
 
       let job = await latestOptimizationJob(session.workspace.id);
 
@@ -312,6 +388,14 @@ export async function GET(request: Request) {
           startedAt
         });
       }
+
+      const liveResponse = await liveDecisionReportResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: "Loaded current decision analysis because the cached optimization rows are incomplete."
+      });
+      if (liveResponse) return liveResponse;
 
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
@@ -377,6 +461,14 @@ export async function GET(request: Request) {
         });
       }
 
+      const liveResponse = await liveDecisionReportResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: "Loaded current decision analysis because the cached optimization snapshot is stale."
+      });
+      if (liveResponse) return liveResponse;
+
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
         reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
@@ -433,11 +525,18 @@ export async function GET(request: Request) {
   const snapshot = await findLatestDecisionSnapshot(prisma, {
     workspaceId: session.workspace.id,
     optimizationType
+  }).catch((error) => {
+    console.warn("[decision-report] decision snapshot lookup failed; using live fallback when available", {
+      workspace_id: session.workspace.id,
+      optimization_type: optimizationType,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
   });
 
   const recommendationsJson = asRecord(snapshot?.recommendationsJson);
 
-  if (snapshot && Object.keys(recommendationsJson).length) {
+  if (snapshot && Object.keys(recommendationsJson).length && !cacheNeedsOptimizationRefresh(recommendationsJson)) {
     const freshness = await decisionSnapshotFreshness(prisma, {
       workspaceId: session.workspace.id,
       snapshot: {
@@ -522,6 +621,14 @@ export async function GET(request: Request) {
 
   const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
   if (refreshAvailability.canRefresh) {
+    const liveResponse = await liveDecisionReportResponse({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
+      startedAt,
+      message: "Loaded current decision analysis while the optimization cache refreshes."
+    });
+    if (liveResponse) return liveResponse;
+
     let job = await latestOptimizationJob(session.workspace.id);
 
     if (!job || !isPendingOptimizationStatus(job.status)) {

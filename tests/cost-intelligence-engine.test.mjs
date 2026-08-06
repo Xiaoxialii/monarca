@@ -59,11 +59,11 @@ test("cost intelligence aggregates real SKU fulfillment platform payment and ref
 
   assert.equal(result.totals.cogs, 120);
   assert.equal(result.totals.shipping_cost, 20);
-  assert.equal(result.totals.fulfillment_cost, 0);
-  assert.equal(result.totals.platform_fee, 49.7);
-  assert.equal(result.totals.payment_fee, 0);
-  assert.equal(result.totals.refund_cost, 0);
-  assert.equal(result.totals.total_cost, 189.7);
+  assert.equal(result.totals.fulfillment_cost, 7);
+  assert.equal(result.totals.platform_fee, 9);
+  assert.equal(result.totals.payment_fee, 8.7);
+  assert.equal(result.totals.refund_cost, 25);
+  assert.equal(result.totals.total_cost, 219.7);
   assert.equal(result.totals.net_profit, 80.3);
   assert.equal(result.totals.margin, 0.2677);
   assert.equal(result.data_quality.cost_confidence, 1);
@@ -151,9 +151,9 @@ test("portfolio profitability reconciles to SKU unit economics when order and it
   assert.equal(result.totals.refund_cost, skuRefundCost);
   assert.equal(skuRevenue, 150);
   assert.equal(skuShipping, 8);
-  assert.equal(skuPlatformFee, 9.9);
-  assert.equal(skuPaymentFee, 0);
-  assert.equal(skuRefundCost, 0);
+  assert.equal(skuPlatformFee, 3);
+  assert.equal(skuPaymentFee, 2.9);
+  assert.equal(skuRefundCost, 4);
   assert.equal(result.data_quality.portfolio_reconciliation.source, "sku_unit_economics");
   assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "FAILED");
   assert.equal(result.data_quality.portfolio_reconciliation.order_revenue, 100);
@@ -175,9 +175,9 @@ test("cost intelligence safely degrades when cost fields are missing", () => {
 
   assert.equal(result.totals.cogs, 45);
   assert.equal(result.totals.shipping_cost, 8);
-  assert.equal(result.totals.platform_fee, 9.9);
-  assert.equal(result.totals.payment_fee, 0);
-  assert.equal(result.totals.refund_cost, 0);
+  assert.equal(result.totals.platform_fee, 3);
+  assert.equal(result.totals.payment_fee, 2.9);
+  assert.equal(result.totals.refund_cost, 4);
   assert.equal(result.totals.net_profit, 37.1);
   assert.ok(result.data_quality.cost_confidence < 0.1);
   assert.ok(result.data_quality.missing_cost_fields.includes("ecommerce_order_items.cogs"));
@@ -191,6 +191,30 @@ test("cost intelligence safely degrades when cost fields are missing", () => {
   assert.equal(result.sku_unit_economics[0].roas_display, "No Ads");
   assert.equal(result.sku_unit_economics[0].roas_status, "not_advertised");
   assert.notEqual(result.sku_unit_economics[0].recommended_action, "REDUCE_AD_SPEND");
+});
+
+test("ad attribution revenue rows do not receive benchmark COGS", () => {
+  const result = calculateCostIntelligence({
+    revenue: 300,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { platform: "shopify", order_id: "SHOP-1", sku: "SKU-A", quantity: 1, revenue: 100, price: 100, cogs: 40 },
+      { platform: "amazon", order_id: "AMZ-1", sku: "SKU-A", quantity: 1, revenue: 80, price: 80, cogs: 30 },
+      { platform: "meta_ads", order_id: "META-1", sku: "SKU-A", quantity: 1, revenue: 120, price: 120 }
+    ],
+    products: [],
+    orders: [],
+    ads: [{ platform: "meta_ads", sku: "SKU-A", campaign_id: "C-1", spend: 10 }],
+    inventory: []
+  });
+
+  const row = result.sku_unit_economics[0];
+  assert.equal(result.totals.cogs, 70);
+  assert.equal(row.cost_breakdown.cogs, 70);
+  assert.equal(row.revenue, 300);
+  assert.ok(!result.data_quality.estimated_components.includes("cogs"));
+  assert.ok(!row.estimated_components.includes("cogs"));
 });
 
 test("No Ads SKU is not interpreted as poor ad performance", () => {
@@ -557,6 +581,45 @@ test("SKU profitability uses direct channel source costs without duplicated allo
   assert.equal(row?.ad_allocation_method, "direct");
   assert.equal(result.totals.net_profit, result.sku_unit_economics.reduce((sum, item) => Math.round((sum + item.net_profit) * 100) / 100, 0));
   assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "PASSED");
+});
+
+test("SKU profitability prioritizes product unit cost and reconciles SKU_00479 style totals", () => {
+  const result = calculateCostIntelligence({
+    revenue: 23218,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      {
+        order_id: "ORDER-00479",
+        product_id: "PRODUCT-00479",
+        sku: "SKU_00479",
+        quantity: 131,
+        revenue: 23218,
+        cogs: 12735.67,
+        shipping_cost: 18.95,
+        platform_fee: 600,
+        payment_fee: 366.01
+      }
+    ],
+    products: [{ product_id: "PRODUCT-00479", sku: "SKU_00479", unit_cost: 8480.47 / 131 }],
+    orders: [{ order_id: "ORDER-00479", revenue: 23218 }],
+    ads: [{ ad_id: "AD-00479", sku: "SKU_00479", spend: 806 }],
+    inventory: [{ sku: "SKU_00479", stock_level: 558 }]
+  });
+
+  const row = result.sku_unit_economics.find((item) => item.sku === "SKU_00479");
+  assert.equal(row?.revenue, 23218);
+  assert.equal(row?.quantity, 131);
+  assert.equal(row?.cogs, 8480.47);
+  assert.equal(row?.ad_cost_allocated, 806);
+  assert.equal(row?.shipping_cost, 18.95);
+  assert.equal(row?.platform_fee, 600);
+  assert.equal(row?.payment_fee, 366.01);
+  assert.equal(row?.total_cost, 10271.43);
+  assert.equal(row?.net_profit, 12946.57);
+  assert.equal(row?.margin, 0.5576);
+  assert.equal(row?.net_profit, Math.round((row.revenue - row.total_cost) * 100) / 100);
+  assert.equal(row?.total_cost, Math.round((row.cogs + (row.ad_cost_allocated ?? 0) + row.shipping_cost + row.platform_fee + row.payment_fee + row.fulfillment_cost + row.refund_cost) * 100) / 100);
 });
 
 test("SKU direct ads keep multiple same-campaign source rows instead of collapsing spend", () => {

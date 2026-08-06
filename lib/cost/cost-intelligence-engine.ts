@@ -1,5 +1,6 @@
 import { resolveCogsSemantic, type CogsSemanticType } from "../semantic/cost/cogs-semantic-resolver";
 import { calculateSkuProfitAndAllocation, type InventoryRiskStatus, type SkuAttributionMethod, type SkuRoasConfidence, type SkuRoasStatus } from "../sku/sku-profit-allocation-engine";
+import type { DemandTrend, InventoryDecision } from "@/lib/inventory/inventory-decision-engine";
 import { calculateSkuProfitability, CANONICAL_PROFITABILITY_ENGINE_VERSION, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 
 export type CostInputRow = Record<string, unknown>;
@@ -12,6 +13,8 @@ export type CostSkuUnit = {
   size?: string;
   color?: string;
   revenue: number;
+  commerce_revenue?: number;
+  attribution_only_revenue?: number;
   quantity: number;
   cogs: number;
   ad_cost_allocated: number | null;
@@ -96,6 +99,16 @@ export type CostSkuUnit = {
     estimated: true;
   };
   inventory_confidence?: number;
+  lifecycle_stage?: string;
+  lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+  demand_trend?: DemandTrend;
+  inventory_decision?: InventoryDecision;
+  inventory_risk_score?: number;
+  inventory_recommended_action?: InventoryDecision["recommended_action"];
+  inventory_risk_reason?: string;
+  inventory_value?: number;
+  paid_dependency_score?: number;
+  organic_sales_ratio?: number;
   cost_breakdown: {
     cogs: number;
     shipping: number;
@@ -237,6 +250,7 @@ export function calculateCostIntelligence(input: {
     const quantity = numberValue(item.quantity, 1);
     const itemRevenue = roundCurrency(numberValue(item.revenue, numberValue(item.price, numberValue(item.unit_price)) * quantity));
     const sku = stringValue(item.sku) || "UNTRACKED-SKU";
+    const attributionOnlyRevenue = isAttributionOnlyRevenueRow(item);
     const costResolution = resolveItemCogs({
       item,
       productCostByProductId,
@@ -244,11 +258,17 @@ export function calculateCostIntelligence(input: {
       quantity,
       itemRevenue
     });
-    const rowCogs = costResolution
+    const rowCogs = attributionOnlyRevenue && !costResolution
+      ? 0
+      : costResolution
       ? costResolution.resolution.normalized_cogs
       : roundCurrency((quantity ? itemRevenue / quantity : 0) * COST_BENCHMARKS.cogsRate * quantity);
 
-    if (!costResolution) {
+    if (!costResolution && attributionOnlyRevenue) {
+      cogsConfidenceTotal += 0.65 * Math.max(itemRevenue, 1);
+      cogsConfidenceWeight += Math.max(itemRevenue, 1);
+      cogsTypeBreakdown.unknown += 1;
+    } else if (!costResolution) {
       estimatedCogs += rowCogs;
       cogsConfidenceTotal += 0.2 * Math.max(itemRevenue, 1);
       cogsConfidenceWeight += Math.max(itemRevenue, 1);
@@ -274,6 +294,11 @@ export function calculateCostIntelligence(input: {
         productMetadata(item)
     );
     current.revenue = roundCurrency(current.revenue + itemRevenue);
+    if (attributionOnlyRevenue) {
+      current.attribution_only_revenue = roundCurrency((current.attribution_only_revenue ?? 0) + itemRevenue);
+    } else {
+      current.commerce_revenue = roundCurrency((current.commerce_revenue ?? 0) + itemRevenue);
+    }
     current.quantity += quantity;
     current.cogs = roundCurrency(current.cogs + rowCogs);
     current.shipping_cost = roundCurrency(current.shipping_cost + itemCostValue(item, ["shipping_cost", "shipping_expense", "shipping_fee", "carrier_cost", "postage_cost"]));
@@ -285,7 +310,7 @@ export function calculateCostIntelligence(input: {
     current.refund_amount = roundCurrency(current.refund_amount + itemRefundAmount);
     current.reverse_logistics_cost = roundCurrency(current.reverse_logistics_cost + itemReverseLogistics);
     current.refund_cost = roundCurrency(current.refund_cost + itemRefundAmount + itemReverseLogistics);
-    current.estimated = current.estimated || !costResolution || Boolean(costResolution.resolution.estimated_cost_flag);
+    current.estimated = current.estimated || (!costResolution && !attributionOnlyRevenue) || Boolean(costResolution?.resolution.estimated_cost_flag);
     if (costResolution) {
       current.cogs_type = mergeCogsType(current.cogs_type, costResolution.resolution.cogs_type);
       current.cogs_confidence = weightedAverageConfidence({
@@ -302,7 +327,7 @@ export function calculateCostIntelligence(input: {
       current.cogs_confidence = weightedAverageConfidence({
         existingConfidence: current.cogs_confidence,
         existingWeight: Math.max(current.revenue - itemRevenue, 0),
-        nextConfidence: 0.2,
+        nextConfidence: attributionOnlyRevenue ? 0.65 : 0.2,
         nextWeight: Math.max(itemRevenue, 1)
       });
     }
@@ -314,7 +339,8 @@ export function calculateCostIntelligence(input: {
     cogs = estimatedCogs;
   }
 
-  if ((orderItems.length && realCostRows < orderItems.length) || (!orderItems.length && revenue > 0)) {
+  const cogsRequiredOrderItemCount = orderItems.filter((item) => !isAttributionOnlyRevenueRow(item)).length;
+  if ((cogsRequiredOrderItemCount > 0 && realCostRows < cogsRequiredOrderItemCount) || (!orderItems.length && revenue > 0)) {
     missingCostFields.add("ecommerce_order_items.cogs");
     estimatedComponents.add("cogs");
   }
@@ -392,7 +418,7 @@ export function calculateCostIntelligence(input: {
   }
 
   const totalFeeCost = roundCurrency(platformFeeTotal + paymentFeeTotal + fulfillmentCost + refundCost);
-  const totalCost = roundCurrency(cogs + shippingTotal + totalFeeCost);
+  const totalCost = roundCurrency(cogs + shippingTotal + totalFeeCost + adSpend);
   const estimatedCost = roundCurrency(
     estimatedCogs +
       estimatedFulfillmentCost +
@@ -541,9 +567,9 @@ function resolveItemCogs(input: {
     { value: item.line_cost, fieldName: "line_cost" },
     { value: item.row_cogs, fieldName: "row_cogs" },
     { value: item.row_cost, fieldName: "row_cost" },
-    { value: item.cogs, fieldName: "cogs" },
     { value: productCostByProductId.get(stringValue(item.product_id)), fieldName: "unit_cost" },
-    { value: productCostBySku.get(stringValue(item.sku)), fieldName: "unit_cost" }
+    { value: productCostBySku.get(stringValue(item.sku)), fieldName: "unit_cost" },
+    { value: item.cogs, fieldName: "cogs" }
   ];
 
   for (const candidate of candidates) {
@@ -560,7 +586,20 @@ function resolveItemCogs(input: {
   return null;
 }
 
-function summarizeSkuUnitEconomics(rows: CostSkuUnit[]) {
+type SkuEconomicsSummaryRow = {
+  revenue: number;
+  cogs: number;
+  ad_cost_allocated: number | null;
+  shipping_cost: number;
+  platform_fee: number;
+  payment_fee: number;
+  fulfillment_cost: number;
+  refund_cost: number;
+  total_cost: number;
+  net_profit: number;
+};
+
+function summarizeSkuUnitEconomics(rows: SkuEconomicsSummaryRow[]) {
   const totals = {
     revenue: roundCurrency(sum(rows.map((row) => row.revenue))),
     cogs: roundCurrency(sum(rows.map((row) => row.cogs))),
@@ -623,7 +662,10 @@ function buildPortfolioReconciliation(input: {
       input.skuTotals.cogs -
       input.skuTotals.ad_spend -
       input.skuTotals.shipping_cost -
-      input.skuTotals.platform_fee
+      input.skuTotals.platform_fee -
+      input.skuTotals.payment_fee -
+      input.skuTotals.fulfillment_cost -
+      input.skuTotals.refund_cost
   );
   const skuFormulaDifference = roundCurrency(input.skuTotals.net_profit - skuFormulaNetProfit);
   const warnings: string[] = [];
@@ -724,7 +766,10 @@ function allocateSkuEconomics(input: {
 }) {
   const { rows, shippingCost, platformFee, paymentFee, fulfillmentCost, refundCost, estimatedComponents } = input;
   if (!rows.length) return [];
-  const allocationRevenue = roundCurrency(sum(rows.map((row) => row.revenue)));
+  const commerceAllocationRevenue = roundCurrency(sum(rows.map((row) => row.commerce_revenue ?? 0)));
+  const allocationRevenue = commerceAllocationRevenue > 0
+    ? commerceAllocationRevenue
+    : roundCurrency(sum(rows.map((row) => row.revenue)));
   const directShippingCost = roundCurrency(sum(rows.map((row) => row.shipping_cost)));
   const directPlatformFee = roundCurrency(sum(rows.map((row) => row.platform_fee)));
   const directPaymentFee = roundCurrency(sum(rows.map((row) => row.payment_fee)));
@@ -738,27 +783,50 @@ function allocateSkuEconomics(input: {
 
   const allocatedNonAdCosts = rows
     .map((row) => {
-      const share = allocationRevenue > 0 ? row.revenue / allocationRevenue : 1 / rows.length;
+      const shareBase = commerceAllocationRevenue > 0 ? row.commerce_revenue ?? 0 : row.revenue;
+      const share = allocationRevenue > 0 ? shareBase / allocationRevenue : 1 / rows.length;
       const allocatedShippingCost = roundCurrency(row.shipping_cost + allocatableShippingCost * share);
       const allocatedPlatformFee = roundCurrency(row.platform_fee + allocatablePlatformFee * share);
       const allocatedPaymentFee = roundCurrency(row.payment_fee + allocatablePaymentFee * share);
       const allocatedFulfillmentCost = roundCurrency(row.fulfillment_cost + allocatableFulfillmentCost * share);
       const allocatedRefundCost = roundCurrency(row.refund_cost + allocatableRefundCost * share);
-      const visibleFeeCost = roundCurrency(allocatedPlatformFee + allocatedPaymentFee + allocatedFulfillmentCost + allocatedRefundCost);
       const skuEstimatedComponents = skuEstimatedComponentsForRow(row, estimatedComponents);
+      const profitability = calculateSkuProfitability({
+        sku: row.sku,
+        revenue: row.revenue,
+        cogs: row.cogs,
+        shippingCost: allocatedShippingCost,
+        fulfillmentCost: allocatedFulfillmentCost,
+        platformFee: allocatedPlatformFee,
+        paymentFee: allocatedPaymentFee,
+        refundCost: allocatedRefundCost,
+        adSpend: 0,
+        cogsStatus: row.cogs_status ?? (row.cogs > 0 ? (row.estimated ? "ESTIMATED" : "AVAILABLE") : row.revenue > 0 ? "MISSING" : "AVAILABLE"),
+        cogsConfidence: row.cogs_confidence,
+        adAllocationMethod: "UNKNOWN",
+        attributionConfidence: 1,
+        criticalFieldsMissing: skuEstimatedComponents
+      });
 
       return {
         ...row,
         ad_cost_allocated: 0,
         shipping_cost: allocatedShippingCost,
-        platform_fee: visibleFeeCost,
-        payment_fee: 0,
-        fulfillment_cost: 0,
-        refund_cost: 0,
+        platform_fee: allocatedPlatformFee,
+        payment_fee: allocatedPaymentFee,
+        fulfillment_cost: allocatedFulfillmentCost,
+        refund_cost: allocatedRefundCost,
         refund_amount: allocatedRefundCost,
-        total_cost: roundCurrency(row.cogs + allocatedShippingCost + visibleFeeCost),
-        net_profit: 0,
-        margin: 0,
+        total_cost: profitability.total_cost,
+        net_profit: profitability.net_profit,
+        margin: profitability.margin,
+        gross_profit: profitability.gross_profit,
+        operating_cost: profitability.operating_cost,
+        contribution_profit: profitability.contribution_profit,
+        profitability_confidence: profitability.profitability_confidence,
+        validation_status: profitability.validation.validation_status,
+        optimization_allowed: profitability.validation.optimization_allowed,
+        warnings: profitability.validation.warnings,
         sku_roas: 0,
         roas_value: null,
         roas_display: "No Ads",
@@ -772,10 +840,10 @@ function allocateSkuEconomics(input: {
           cogs: row.cogs,
           shipping: allocatedShippingCost,
           ads: 0,
-          platform_fee: visibleFeeCost,
-          payment_fee: 0,
-          fulfillment: 0,
-          refund: 0
+          platform_fee: allocatedPlatformFee,
+          payment_fee: allocatedPaymentFee,
+          fulfillment: allocatedFulfillmentCost,
+          refund: allocatedRefundCost
         },
         channel_breakdown: {},
         ad_allocation_method: "none" as const,
@@ -828,6 +896,8 @@ function emptySkuCostRow(sku: string): CostSkuUnit {
   return {
     sku,
     revenue: 0,
+    commerce_revenue: 0,
+    attribution_only_revenue: 0,
     quantity: 0,
     cogs: 0,
     ad_cost_allocated: 0,
@@ -893,6 +963,17 @@ function mergeCogsType(current: CogsSemanticType | "mixed", next: CogsSemanticTy
   if (current === "unknown") return next;
   if (current === next) return current;
   return "mixed";
+}
+
+function isAttributionOnlyRevenueRow(row: CostInputRow) {
+  const platform = stringValue(row.platform).toLowerCase();
+  return (
+    platform === "meta_ads" ||
+    platform === "google_ads" ||
+    platform === "tiktok_ads" ||
+    platform === "facebook_ads" ||
+    platform === "ads"
+  );
 }
 
 function weightedAverageConfidence(input: {

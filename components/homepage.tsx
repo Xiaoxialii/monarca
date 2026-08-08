@@ -73,10 +73,10 @@ const integrationRows = [
 ];
 
 const featureMeta = [
-  { icon: Database, className: "bg-emerald-100/80" },
+  { icon: Database, className: "bg-[#eee8dc] text-[#40382c]" },
   { icon: AlertTriangle, className: "bg-lime-100/75" },
   { icon: ListChecks, className: "bg-teal-100/80" },
-  { icon: TrendingUp, className: "bg-emerald-100/70" }
+  { icon: TrendingUp, className: "bg-[#0f5f49] text-emerald-50" }
 ];
 
 const useCaseIcons = [ShoppingBag, Rocket, UsersRound];
@@ -137,7 +137,7 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "AI Profit Optimization System",
+      eyebrow: "Ecommerce Profit Optimization System",
       headline: "AI Profit Optimization System",
       subheadline: "Connect data. Execute optimal profit decisions",
       teamLabel: "Three-layer profit control that turns data changes into operating actions",
@@ -174,23 +174,23 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "",
-      title: "An AI profit-control flow from data connection to profit optimization",
+      title: "",
       cards: [
         {
-          title: "Connect scattered data",
-          text: "Connect Excel, databases, and business systems into one profit-control system"
+          title: "Build Your Profit Intelligence Layer",
+          text: "Connect ecommerce, advertising, inventory, and operational data into a unified view of your business and SKU-level profitability."
         },
         {
-          title: "Find growth opportunities",
-          text: "Break down revenue, profit, ads, inventory, and SKU performance to locate what is affecting profit"
+          title: "Understand What Drives Profit",
+          text: "Analyze products, customers, channels, costs, and operational constraints to identify what is truly driving or hurting profitability."
         },
         {
-          title: "Generate optimal decisions",
-          text: "Recommend budget, inventory, channel, and SKU-level actions with expected profit impact"
+          title: "Simulate Thousands of Strategies",
+          text: "Evaluate thousands of possible business scenarios across advertising spend, inventory allocation, pricing, and SKU portfolio decisions to find the most profitable path."
         },
         {
-          title: "Track action impact",
-          text: "Continuously monitor whether metrics improve after each action and close the data-driven loop"
+          title: "Execute & Optimize Continuously",
+          text: "Receive AI-powered recommendations with expected profit impact, track real-world outcomes, and continuously improve decisions through a closed-loop system."
         }
       ]
     },
@@ -394,7 +394,7 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "AI Profit Optimization System",
+      eyebrow: "电商利润优化系统",
       headline: "AI Profit Optimization System",
       subheadline: "连接数据，生成最优利润决策",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
@@ -431,7 +431,7 @@ const homepageCopy = {
     },
     features: {
       eyebrow: "",
-      title: "一套 AI 利润控制流，完成从数据连接到利润优化的全过程",
+      title: "",
       cards: [
         {
           title: "连接分散数据",
@@ -883,10 +883,11 @@ function MobileNavDrawer({
 }
 
 function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
+  const isZh = copy.cards[0]?.title === "连接分散数据";
   const scrollingCards = [...copy.cards, ...copy.cards];
 
   return (
-    <section id="alerts" className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-12">
+    <section id="alerts" className="mx-auto max-w-7xl px-5 pb-10 pt-2 sm:px-8 sm:pb-12 sm:pt-3">
       {copy.eyebrow || copy.title ? (
         <div className="mb-6">
           <div>
@@ -901,8 +902,20 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
           </div>
         </div>
       ) : null}
+      <div className="mx-auto mb-12 max-w-4xl px-1 py-8 text-center sm:mb-14 sm:py-10">
+        <p className="text-xl font-semibold leading-tight tracking-normal text-slate-400 sm:text-2xl lg:text-3xl">
+          {isZh ? "Monarca 连接电商与经营数据。" : "Monarca connects ecommerce and operational data."}
+        </p>
+        <p className="mt-2 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
+          {isZh
+            ? "分析 SKU 级利润表现，模拟数千种经营场景，并推荐利润最大化行动。"
+            : "Analyzes SKU-level profitability, simulates thousands of business scenarios, and recommends profit-maximizing actions."}
+        </p>
+      </div>
+      <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "工作方式" : "How it works"}</p>
       <div className="feature-card-marquee -mx-5 overflow-x-auto px-5 [scrollbar-width:none] sm:-mx-8 sm:px-8 [&::-webkit-scrollbar]:hidden">
-        <div className="feature-card-track flex gap-4 pr-4">
+        <div className="overflow-hidden rounded-[34px] shadow-[0_18px_60px_rgba(15,23,42,0.06)]">
+          <div className="feature-card-track flex gap-0">
         {scrollingCards.map((card, index) => {
           const cardIndex = index % copy.cards.length;
           const meta = featureMeta[cardIndex];
@@ -911,7 +924,7 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
               key={`${card.title}-${index}`}
               aria-hidden={index >= copy.cards.length}
               className={cn(
-                "feature-card-reveal group relative min-h-[172px] w-[82vw] shrink-0 overflow-hidden rounded-3xl border border-white/70 p-4 shadow-[0_16px_50px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_70px_rgba(6,78,59,0.13)] sm:w-[360px] lg:w-[380px]",
+                "feature-card-reveal group relative min-h-[156px] w-[82vw] shrink-0 overflow-hidden border-y border-r border-white/70 p-5 transition duration-300 sm:w-[360px] lg:w-[390px]",
                 meta.className
               )}
               style={{ "--feature-card-delay": `${cardIndex * 120}ms` } as React.CSSProperties}
@@ -919,11 +932,85 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
               <div className="mb-6 grid size-9 place-items-center rounded-2xl bg-white/85 text-slate-950 shadow-sm transition duration-300 group-hover:scale-105 group-hover:text-emerald-800">
                 <meta.icon className="size-4" />
               </div>
-              <h3 className="text-base font-semibold text-slate-950 sm:text-lg">{card.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{card.text}</p>
+              <p className={cn("mb-2 text-xs font-semibold uppercase tracking-[0.18em]", cardIndex === 0 || cardIndex === 3 ? "text-white/80" : "text-emerald-700/80")}>
+                Step {cardIndex + 1}
+              </p>
+              <h3 className={cn("text-base font-semibold sm:text-lg", cardIndex === 0 || cardIndex === 3 ? "text-white" : "text-slate-950")}>{card.title}</h3>
+              <p className={cn("mt-2 text-sm leading-6", cardIndex === 0 || cardIndex === 3 ? "text-white/82" : "text-slate-600")}>{card.text}</p>
             </div>
           );
         })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SkuSimulationScene({ isZh }: { isZh: boolean }) {
+  const scenarios = [
+    { sku: "SKU_00479", platform: "Amazon", metric: "Inventory 558u", spend: "Ad +$140", profit: "+$12.9K", signal: "Best", className: "left-[5%] top-[24%] w-[58%] sku-float-a" },
+    { sku: "SKU_00806", platform: "Shopify", metric: "Stock 170u", spend: "Hold ads", profit: "+$8.7K", signal: "Hold", className: "right-[7%] top-[43%] w-[50%] sku-float-b" },
+    { sku: "SKU_01306", platform: "Meta Ads", metric: "ROAS gate", spend: "Budget +8%", profit: "+$7.4K", signal: "Scale", className: "left-[12%] top-[62%] w-[54%] sku-float-c" },
+    { sku: "SKU_01588", platform: "Amazon", metric: "Coverage 45d", spend: "Test +$69", profit: "+$6.2K", signal: "Test", className: "right-[14%] top-[76%] w-[46%] sku-float-d" },
+    { sku: "SKU_00085", platform: "Meta Ads", metric: "Margin 42%", spend: "Test spend", profit: "+$5.1K", signal: "Test", className: "left-[34%] top-[35%] w-[42%] sku-float-e" }
+  ];
+
+  return (
+    <section className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen pb-6 pt-1 lg:pb-8">
+      <div className="relative min-h-[160px] overflow-hidden bg-gradient-to-r from-[#020617] via-[#050816] to-[#020617] px-8 py-4 text-white shadow-[0_18px_56px_rgba(2,6,23,0.28)] sm:px-12 lg:min-h-[176px] lg:px-16">
+        <div className="absolute inset-0 opacity-15 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:42px_42px]" />
+        <div className="relative flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200 sm:text-sm">
+              {isZh ? "实时 SKU 组合优化" : "Live SKU portfolio optimizing"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-900/20 px-3 py-1.5 text-xs font-semibold text-[#047857] ring-1 ring-[#047857]/35 sm:text-sm">
+              {isZh ? "利润提升 +18.4%" : "Profit lift +18.4%"}
+            </span>
+            <span className="rounded-full bg-cyan-300/12 px-3 py-1.5 text-xs font-semibold text-cyan-50 ring-1 ring-cyan-200/20 sm:text-sm">
+              {isZh ? "运行中" : "Running"}
+            </span>
+          </div>
+        </div>
+
+        <div className="relative mt-3 h-[100px] overflow-hidden sm:h-[112px]">
+          {scenarios.map((scenario, index) => (
+            <div
+              key={scenario.sku}
+              className={cn(
+                "sku-combo-pill absolute grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-2xl border border-white/12 bg-white/[0.06] px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-sm",
+                scenario.className
+              )}
+              style={{ "--sku-row-delay": `${index * 150}ms` } as React.CSSProperties}
+            >
+              <div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-xs font-semibold sm:text-sm">{scenario.sku}</p>
+                  <span className="rounded-full bg-cyan-300/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-cyan-50">
+                    {scenario.platform}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-slate-300">
+                  <span>{scenario.metric}</span>
+                  <span className="text-slate-500">/</span>
+                  <span>{scenario.spend}</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-bold text-[#047857] sm:text-sm">{scenario.profit}</p>
+              </div>
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white">
+                {scenario.signal}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="sku-simulation-orbit absolute bottom-4 left-8 right-8 h-1 rounded-full bg-white/10">
+          <span className="absolute left-0 top-0 h-full w-1/3 rounded-full bg-gradient-to-r from-cyan-200 to-sky-200" />
         </div>
       </div>
     </section>
@@ -1086,8 +1173,8 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
     ? ["读取 Amazon / Shopify / Ads 利润链路", "模拟利润放大方案", "确认库存和毛利空间", "计算 SKU 级净利润提升", "优化跨渠道增长分配"]
     : ["Reading Amazon / Shopify / Ads profit paths", "Simulating profit scaling scenarios", "Confirming inventory and margin headroom", "Computing SKU-level profit lift", "Optimizing cross-channel growth allocation"];
   const processSteps = isZh
-    ? ["Data", "Diagnosis", "Simulation", "Optimization", "Action"]
-    : ["Data", "Diagnosis", "Simulation", "Optimization", "Action"];
+    ? ["数据", "理解", "模拟", "优化", "执行", "衡量", "学习", "优化"]
+    : ["DATA", "UNDERSTAND", "SIMULATE", "OPTIMIZE", "EXECUTE", "MEASURE", "LEARN", "OPTIMIZE"];
   const simulations = isZh
     ? [
         { name: "维持当前投放结构", impact: "0%", detail: "利润继续受 CAC 与库存约束压缩" },
@@ -1150,35 +1237,40 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
 
           <div className="relative grid gap-5">
             <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
-              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 sm:size-10">
-                <TrendingUp className="size-4" />
-              </div>
-              <div className="min-w-0 rounded-[24px] bg-emerald-50/80 p-3 ring-1 ring-emerald-100 sm:p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">{flow.alert.label}</span>
-                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-800">
-                    {isZh ? "⚡ 高增长潜力" : "⚡ High growth potential"}
-                  </span>
-                </div>
-                <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-emerald-800 sm:text-3xl">{flow.alert.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-emerald-950/70">{flow.alert.text}</p>
-              </div>
-            </div>
-
-            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
               <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-slate-50 text-slate-700 ring-1 ring-slate-200 sm:size-10">
                 <Zap className="size-4" />
               </div>
-              <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  {isZh ? "利润控制链路" : "Profit control flow"}
+              <div className="grid min-w-0 gap-3 sm:grid-cols-[13rem_1fr] sm:items-center">
+                <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
+                  {isZh ? "利润优化链路" : "Profit Control Flow"}
                 </p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-5">
-                  {processSteps.map((step, index) => (
-                    <div key={step} className={cn("rounded-2xl px-3 py-2 text-center text-xs font-semibold ring-1", index < 3 ? "bg-emerald-50 text-emerald-800 ring-emerald-100" : "bg-slate-50 text-slate-600 ring-slate-200")}>
-                      {step}
-                    </div>
-                  ))}
+                <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {processSteps.map((step, index) => (
+                      <div key={`${step}-${index}`} className="flex items-center gap-2">
+                        <div
+                          className={cn(
+                            "min-w-[6.8rem] rounded-2xl px-3 py-2 text-center text-[0.65rem] font-bold tracking-[0.12em] ring-1 sm:min-w-[7.4rem]",
+                            index >= 6
+                              ? "bg-[#0f5f49] text-emerald-50 ring-[#0f5f49]"
+                              : "bg-emerald-50 text-emerald-800 ring-emerald-100"
+                          )}
+                        >
+                          {step}
+                        </div>
+                        {index < processSteps.length - 1 ? (
+                          <span
+                            className={cn(
+                              "text-sm font-black leading-none",
+                              index === 6 ? "text-emerald-800" : "text-slate-400"
+                            )}
+                          >
+                            {index === 6 ? "↺" : "→"}
+                          </span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1187,6 +1279,9 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
               <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-amber-50 text-amber-700 ring-1 ring-amber-100 sm:size-10">
                 <BrainCircuit className="size-4" />
               </div>
+              <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
+                {isZh ? "理解" : "UNDERSTAND"}
+              </p>
               <div className="min-w-0 overflow-hidden rounded-[24px] bg-slate-50/90 p-3 ring-1 ring-slate-900/[0.05] sm:p-4">
                 <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{flow.diagnosis.label}</span>
                 <h3 className="mt-3 break-words text-base font-semibold leading-7 text-slate-950 sm:text-lg">{flow.diagnosis.title}</h3>
@@ -1204,12 +1299,11 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
             </div>
 
             <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
-              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-sky-50 text-sky-700 ring-1 ring-sky-100 sm:size-10">
-                <BarChart3 className="size-4" />
-              </div>
+              <p className="text-sm font-semibold leading-tight tracking-normal text-slate-950 sm:text-base">
+                {isZh ? "跨渠道驱动因素" : "Cross-Channel Drivers"}
+              </p>
               <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{isZh ? "跨渠道驱动因素" : "Cross-channel drivers"}</p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-3">
                   {flow.evidence.map((item) => (
                     <div key={item.metric} className="min-w-0 rounded-2xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-900/[0.04]">
                       <p className="text-xs font-semibold text-slate-500">{item.metric}</p>
@@ -1230,14 +1324,16 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
               <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100 sm:size-10">
                 <TrendingUp className="size-4" />
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
+                  {isZh ? "模拟层" : "Simulation Layer"}
+                </p>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-100">
+                  {isZh ? "滚动模拟中" : "Simulation running"}
+                </span>
+              </div>
               <div className="min-w-0 overflow-hidden rounded-[24px] bg-indigo-50/70 p-3 ring-1 ring-indigo-100 sm:p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">{isZh ? "模拟层" : "Simulation layer"}</p>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-100">
-                    {isZh ? "滚动模拟中" : "Simulation running"}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-3">
                   {simulations.map((scenario) => (
                     <div key={scenario.name} className="rounded-2xl bg-white px-3 py-3 ring-1 ring-indigo-100">
                       <p className="text-xs font-semibold text-slate-500">{scenario.name}</p>
@@ -1262,42 +1358,44 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
               <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 sm:size-10">
                 <Check className="size-4" />
               </div>
-              <div className="min-w-0 rounded-[24px] bg-emerald-50/80 p-3 ring-1 ring-emerald-100 sm:p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">{isZh ? "优化层 · 最优决策" : "Optimization layer · Best decision"}</p>
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                    {isZh ? "预期利润 +18.4%" : "Expected profit +18.4%"}
-                  </span>
-                </div>
-                <h3 className="mt-3 break-words text-base font-semibold leading-7 text-emerald-950 sm:text-lg">{bestDecision.title}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
+                  {isZh ? "优化层 · 最优决策" : "Optimization Layer · Best Decision"}
+                </p>
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-100">
+                  {isZh ? "预期利润 +18.4%" : "Expected profit +18.4%"}
+                </span>
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-800 p-3 text-white ring-1 ring-emerald-700/70 shadow-[0_18px_60px_rgba(6,78,59,0.18)] sm:p-4">
+                <h3 className="break-words text-base font-semibold leading-7 text-white sm:text-lg">{bestDecision.title}</h3>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "利润影响" : "Profit impact"}</p>
-                    <p className="mt-1 text-2xl font-semibold text-emerald-700">{bestDecision.impact}</p>
+                  <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "利润影响" : "Profit impact"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-emerald-100">{bestDecision.impact}</p>
                   </div>
-                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "置信度" : "Confidence"}</p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-950">{bestDecision.confidence}</p>
+                  <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "置信度" : "Confidence"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-white">{bestDecision.confidence}</p>
                   </div>
-                  <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{isZh ? "约束" : "Constraints"}</p>
-                    <p className="mt-1 text-sm font-semibold leading-6 text-slate-700">{bestDecision.constraints.join(" / ")}</p>
+                  <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "约束" : "Constraints"}</p>
+                    <p className="mt-1 text-sm font-semibold leading-6 text-emerald-50">{bestDecision.constraints.join(" / ")}</p>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {bestDecision.actions.map((action) => (
-                    <div key={action} className="flex min-w-0 items-start gap-2 rounded-2xl bg-white px-3 py-2 ring-1 ring-emerald-100">
-                      <ArrowRight className="size-4 shrink-0 text-emerald-700" />
-                      <p className="break-words text-sm font-semibold leading-5 text-emerald-950">{action}</p>
+                    <div key={action} className="flex min-w-0 items-start gap-2 rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
+                      <ArrowRight className="size-4 shrink-0 text-emerald-200" />
+                      <p className="break-words text-sm font-semibold leading-5 text-white">{action}</p>
                     </div>
                   ))}
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-4">
                   {channels.map((channel) => (
-                    <div key={channel.name} className="rounded-2xl bg-emerald-100/60 px-3 py-2 ring-1 ring-emerald-200">
-                      <p className="text-xs font-semibold text-emerald-900">{channel.name}</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-950">{channel.decision}</p>
-                      <p className="text-xs leading-5 text-slate-600">{channel.impact}</p>
+                    <div key={channel.name} className="rounded-2xl bg-emerald-300/10 px-3 py-2 ring-1 ring-emerald-200/18">
+                      <p className="text-xs font-semibold text-emerald-100">{channel.name}</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{channel.decision}</p>
+                      <p className="text-xs leading-5 text-emerald-50/70">{channel.impact}</p>
                     </div>
                   ))}
                 </div>
@@ -1433,7 +1531,23 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
     >
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
         <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:h-16 sm:px-6 lg:h-14 lg:px-8">
-          <Logo label={copy.logo} className="h-10 sm:h-11" />
+          <div className="flex items-center gap-5">
+            <Logo label={copy.logo} className="h-10 sm:h-11" />
+            <div className="hidden items-center gap-3 lg:flex">
+              <Button asChild className="h-10 rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800">
+                <Link href="/consulting">
+                  {copy.hero.primaryCta}
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="h-10 rounded-full border-slate-200 bg-white/70 px-5 text-sm text-slate-950 hover:bg-white">
+                <Link href="/consulting?intent=demo">
+                  {copy.hero.secondaryCta}
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <label className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 sm:gap-2 sm:px-3 lg:text-xs">
               <Languages className="size-4" />
@@ -1483,47 +1597,35 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
         onClose={() => setIsMobileNavOpen(false)}
       />
 
-      <section className="relative mx-auto grid max-w-7xl gap-10 overflow-hidden px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[0.86fr_1.14fr] lg:items-center lg:gap-12 lg:overflow-visible lg:px-8 lg:pb-14 lg:pt-18">
+      <section className="hero-grid-paper relative mx-auto grid max-w-7xl gap-6 overflow-hidden px-4 pb-2 pt-6 text-center sm:px-6 sm:pb-3 sm:pt-8 lg:min-h-[405px] lg:items-center lg:overflow-visible lg:px-8 lg:pb-2 lg:pt-8">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
-        <div className="relative z-10 w-full max-w-[calc(100vw-2rem)] overflow-hidden lg:max-w-none lg:overflow-visible lg:pl-10 xl:pl-14">
-          <div className="mb-7 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-7 lg:text-xs">
+        <div className="relative z-10 mx-auto flex w-full max-w-[calc(100vw-2rem)] flex-col items-center overflow-hidden lg:max-w-6xl lg:overflow-visible">
+          <div className="mb-4 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-4 lg:text-xs">
             <Zap className="size-3.5 sm:size-4" />
             {copy.hero.eyebrow}
           </div>
           <h1
-            className="w-full max-w-2xl break-words text-[2.45rem] font-black leading-[1.02] tracking-normal text-slate-950 [overflow-wrap:anywhere] sm:text-[3.4rem] sm:[overflow-wrap:normal] lg:text-[3.18rem] lg:leading-[1.02]"
+            className="w-full max-w-5xl break-words text-[3rem] font-black leading-[0.98] tracking-normal text-[#063f35] [overflow-wrap:anywhere] sm:text-[4.05rem] sm:[overflow-wrap:normal] lg:text-[4.6rem] lg:leading-[0.97] xl:text-[5.15rem]"
           >
             {isZh ? (
-              <span className="hero-title-shimmer whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{copy.hero.headline}</span>
+              <span className="block">
+                <span className="block text-slate-950">AI Profit Agent</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">利润优化</span>
+              </span>
             ) : (
               <span className="block">
-                <span className="block">AI Profit</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Optimization</span>
-                <span className="block">System</span>
+                <span className="block text-slate-950">AI Profit Agent</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Profit Optimization</span>
               </span>
             )}
           </h1>
           {copy.hero.subheadline ? (
-            <p className="mt-6 max-w-[calc(100vw-2rem)] break-words text-base leading-[1.7] text-slate-600 [overflow-wrap:anywhere] sm:max-w-xl sm:[overflow-wrap:normal] lg:mt-6 lg:text-[1.02rem] lg:leading-8">
+            <p className="mt-4 max-w-[calc(100vw-2rem)] break-words text-xl font-medium leading-[1.42] text-[#064e3b] [overflow-wrap:anywhere] sm:max-w-3xl sm:text-2xl sm:[overflow-wrap:normal] lg:mt-5 lg:text-[1.55rem] lg:leading-[1.3]">
               <span className="lg:hidden">{copy.hero.subheadline}</span>
               <span className="hidden lg:inline">{copy.hero.subheadline}</span>
             </p>
           ) : null}
-          <div className="mt-9 flex max-w-[calc(100vw-2rem)] flex-col gap-3 sm:flex-row lg:mt-9 lg:max-w-none">
-            <Button asChild className="h-12 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto lg:h-10">
-              <Link href="/consulting">
-                {copy.hero.primaryCta}
-                <ArrowRight />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-12 w-full rounded-full border-slate-200 bg-white/70 px-5 text-sm sm:w-auto lg:h-10">
-              <Link href="/consulting?intent=demo">
-                {copy.hero.secondaryCta}
-                <ArrowRight />
-              </Link>
-            </Button>
-          </div>
-          <div className="mt-7 hidden flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 lg:flex">
+          <div className="mt-4 hidden flex-col gap-3 sm:flex-row sm:items-center sm:justify-center sm:gap-5 lg:flex">
             {copy.hero.trust.map((item) => (
               <TrustItem key={item}>{item}</TrustItem>
             ))}
@@ -1533,15 +1635,16 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
           </div>
         </div>
 
-        <div className="relative z-10 hidden lg:flex lg:justify-end">
+        <div className="relative z-10 hidden">
           <HeroVisualization isZh={isZh} />
         </div>
 
       </section>
 
+      <SkuSimulationScene isZh={isZh} />
       <FeatureCards copy={copy.features} />
-      <UseCaseSection copy={copy.useCases} />
       <InvestigationPreview copy={copy.investigation} />
+      <UseCaseSection copy={copy.useCases} />
       <Integrations copy={copy.integrations} />
       <PricingSection copy={copy.pricing} />
     </main>

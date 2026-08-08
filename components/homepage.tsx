@@ -396,7 +396,7 @@ const homepageCopy = {
     hero: {
       eyebrow: "电商利润优化系统",
       headline: "AI Profit Optimization System",
-      subheadline: "连接数据，生成最优利润决策",
+      subheadline: "连接数据，执行最优利润决策",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
         { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
@@ -904,7 +904,7 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         </p>
         <p className="mt-2 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
-            ? "分析 SKU 级利润表现，模拟数千种经营场景，并推荐利润最大化行动。"
+            ? "分析 SKU 级利润表现，模拟数千种经营场景，并执行利润最大化行动。"
             : "Analyzes SKU-level profitability, simulates thousands of business scenarios, and recommends profit-maximizing actions."}
         </p>
       </div>
@@ -1455,7 +1455,7 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
       <div className="overflow-hidden rounded-[30px] bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 p-5 text-white shadow-[0_24px_90px_rgba(6,78,59,0.18)] sm:p-7">
         <div className="flex flex-col gap-5 py-8 text-center sm:py-10 lg:items-center">
           <p className="mx-auto max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
-            {isZh ? "连接你的电商、广告和库存数据，开始生成最优利润决策。" : "Connect your commerce, ads, and inventory data to generate optimal profit decisions."}
+            {isZh ? "连接你的电商、广告和库存数据，开始执行最优利润决策。" : "Connect your commerce, ads, and inventory data to generate optimal profit decisions."}
           </p>
           <Button asChild className="h-12 w-full rounded-full bg-white px-8 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 sm:w-auto">
             <Link href="/sign-up">

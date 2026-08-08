@@ -791,10 +791,6 @@ function BusinessCaseAnalysisCard({ compact = false, isZh = false }: { compact?:
   );
 }
 
-function HeroPreviewCardMobile({ isZh }: { isZh: boolean }) {
-  return <BusinessCaseAnalysisCard compact isZh={isZh} />;
-}
-
 function HeroVisualization({ isZh }: { isZh: boolean }) {
   return (
     <div className="relative mx-auto w-full max-w-[520px] lg:mx-0">
@@ -1629,9 +1625,6 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
             {copy.hero.trust.map((item) => (
               <TrustItem key={item}>{item}</TrustItem>
             ))}
-          </div>
-          <div className="lg:hidden">
-            <HeroPreviewCardMobile isZh={isZh} />
           </div>
         </div>
 

@@ -943,6 +943,15 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
   );
 }
 
+function HeroEyebrowBadge({ label }: { label: string }) {
+  return (
+    <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm">
+      <Zap className="size-3.5 sm:size-4" />
+      {label}
+    </div>
+  );
+}
+
 function SkuSimulationScene({ isZh }: { isZh: boolean }) {
   const scenarios = [
     { sku: "SKU_00479", platform: "Amazon", metric: "Inventory 558u", spend: "Ad +$140", profit: "+$12.9K", signal: "Best", className: "left-[5%] top-[24%] w-[58%] sku-float-a" },
@@ -954,7 +963,7 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
 
   return (
     <section className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen pb-6 pt-1 lg:pb-8">
-      <div className="relative min-h-[160px] overflow-hidden bg-gradient-to-r from-[#020617] via-[#050816] to-[#020617] px-8 py-4 text-white shadow-[0_18px_56px_rgba(2,6,23,0.28)] sm:px-12 lg:min-h-[176px] lg:px-16">
+      <div className="relative min-h-[176px] overflow-hidden bg-gradient-to-r from-[#020617] via-[#050816] to-[#020617] px-8 py-4 text-white shadow-[0_18px_56px_rgba(2,6,23,0.28)] sm:px-12 lg:min-h-[192px] lg:px-16">
         <div className="absolute inset-0 opacity-15 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:42px_42px]" />
         <div className="relative flex items-center justify-between gap-4">
           <div>
@@ -972,40 +981,46 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
           </div>
         </div>
 
-        <div className="relative mt-3 h-[100px] overflow-hidden sm:h-[112px]">
-          {scenarios.map((scenario, index) => (
-            <div
-              key={scenario.sku}
-              className={cn(
-                "sku-combo-pill absolute grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-2xl border border-white/12 bg-white/[0.06] px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-sm",
-                scenario.className
-              )}
-              style={{ "--sku-row-delay": `${index * 150}ms` } as React.CSSProperties}
-            >
-              <div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <p className="text-xs font-semibold sm:text-sm">{scenario.sku}</p>
-                  <span className="rounded-full bg-cyan-300/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-cyan-50">
-                    {scenario.platform}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-slate-300">
-                  <span>{scenario.metric}</span>
-                  <span className="text-slate-500">/</span>
-                  <span>{scenario.spend}</span>
-                </div>
+        <div className="sku-combo-marquee relative mt-3 h-[100px] overflow-hidden sm:h-[112px]">
+          <div className="sku-combo-track flex h-full w-max">
+            {[0, 1].map((copyIndex) => (
+              <div key={copyIndex} className="relative h-full w-screen shrink-0" aria-hidden={copyIndex === 1}>
+                {scenarios.map((scenario, index) => (
+                  <div
+                    key={`${scenario.sku}-${copyIndex}`}
+                    className={cn(
+                      "sku-combo-pill absolute grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-2xl border border-white/12 bg-white/[0.06] px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-sm",
+                      scenario.className
+                    )}
+                    style={{ "--sku-row-delay": `${index * 150}ms` } as React.CSSProperties}
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-xs font-semibold sm:text-sm">{scenario.sku}</p>
+                        <span className="rounded-full bg-cyan-300/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-cyan-50">
+                          {scenario.platform}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-slate-300">
+                        <span>{scenario.metric}</span>
+                        <span className="text-slate-500">/</span>
+                        <span>{scenario.spend}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-[#047857] sm:text-sm">{scenario.profit}</p>
+                    </div>
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white">
+                      {scenario.signal}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="text-right">
-                <p className="text-xs font-bold text-[#047857] sm:text-sm">{scenario.profit}</p>
-              </div>
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white">
-                {scenario.signal}
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
-        <div className="sku-simulation-orbit absolute bottom-4 left-8 right-8 h-1 rounded-full bg-white/10">
+        <div className="sku-simulation-orbit relative mt-2 h-1 rounded-full bg-white/10">
           <span className="absolute left-0 top-0 h-full w-1/3 rounded-full bg-gradient-to-r from-cyan-200 to-sky-200" />
         </div>
       </div>
@@ -1593,13 +1608,13 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
         onClose={() => setIsMobileNavOpen(false)}
       />
 
+      <div className="mx-auto flex max-w-7xl justify-center px-4 pt-6 sm:px-6 sm:pt-7 lg:px-8">
+        <HeroEyebrowBadge label={copy.hero.eyebrow} />
+      </div>
+
       <section className="hero-grid-paper relative mx-auto grid max-w-7xl gap-6 overflow-hidden px-4 pb-2 pt-6 text-center sm:px-6 sm:pb-3 sm:pt-8 lg:min-h-[405px] lg:items-center lg:overflow-visible lg:px-8 lg:pb-2 lg:pt-8">
         <div className="absolute left-0 right-0 top-0 -z-0 hidden h-px bg-gradient-to-r from-transparent via-emerald-900/40 to-transparent lg:block" />
         <div className="relative z-10 mx-auto flex w-full max-w-[calc(100vw-2rem)] flex-col items-center overflow-hidden lg:max-w-6xl lg:overflow-visible">
-          <div className="mb-4 inline-flex max-w-full items-center gap-2 rounded-full border border-[#9fcdb5]/80 bg-[#d8efe3]/80 px-3 py-1.5 text-xs font-medium text-emerald-950 sm:text-sm lg:mb-4 lg:text-xs">
-            <Zap className="size-3.5 sm:size-4" />
-            {copy.hero.eyebrow}
-          </div>
           <h1
             className="w-full max-w-5xl break-words text-[3rem] font-black leading-[0.98] tracking-normal text-[#063f35] [overflow-wrap:anywhere] sm:text-[4.05rem] sm:[overflow-wrap:normal] lg:text-[4.6rem] lg:leading-[0.97] xl:text-[5.15rem]"
           >

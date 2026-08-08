@@ -99,6 +99,39 @@ body {
   animation-play-state: paused;
 }
 
+.sku-combo-marquee {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+
+.sku-combo-track {
+  animation: sku-combo-scroll 18s linear infinite;
+}
+
+.sku-combo-marquee:hover .sku-combo-track {
+  animation-play-state: paused;
+}
+
+.sku-combo-pill {
+  animation: sku-simulation-pulse 3.6s ease-in-out infinite;
+  animation-delay: var(--sku-row-delay, 0ms);
+  will-change: border-color;
+}
+
+.sku-simulation-orbit::after {
+  animation: sku-simulation-scan 2.8s ease-in-out infinite;
+  background: #a7f3d0;
+  border-radius: 999px;
+  box-shadow: 0 0 24px rgba(167, 243, 208, 0.8);
+  content: "";
+  height: 12px;
+  left: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+}
+
 .feature-card-reveal::after {
   background: linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.55) 42%, transparent 72%);
   content: "";
@@ -141,6 +174,37 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes sku-simulation-pulse {
+  0%,
+  100% {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  50% {
+    border-color: rgba(110, 231, 183, 0.42);
+  }
+}
+
+@keyframes sku-combo-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes sku-simulation-scan {
+  0% {
+    left: 0%;
+  }
+
+  50% {
+    left: calc(100% - 12px);
+  }
+
+  100% {
+    left: 0%;
   }
 }
 
@@ -192,6 +256,10 @@ body {
   }
 
   .integration-marquee-track {
+    animation: none;
+  }
+
+  .sku-combo-track {
     animation: none;
   }
 

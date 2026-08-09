@@ -488,7 +488,7 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "AI 利润控制系统",
+      sectionTitle: "利润优化系统",
       sectionSubtitle: "",
       eyebrow: "",
       title: "收入下降 12.4%",
@@ -1501,7 +1501,7 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
   return (
     <div className="mx-auto mb-10 mt-10 grid max-w-7xl gap-8 lg:grid-cols-[0.95fr_0.82fr] lg:items-center">
       <div>
-        <h2 className="text-left text-2xl font-semibold tracking-normal text-slate-500 sm:text-4xl">
+        <h2 className="text-left text-xl font-semibold tracking-normal text-slate-500 sm:text-3xl">
           {isZh ? "第一步，一键连接你的电商数据" : "First, connect your commerce data in one click"}
         </h2>
       </div>

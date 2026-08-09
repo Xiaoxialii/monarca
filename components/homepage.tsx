@@ -20,6 +20,7 @@ import {
   X,
   Zap
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -1512,9 +1513,17 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
       </div>
       <div className="lg:flex lg:justify-end">
         <div className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
+          <Image
+            className="block aspect-video w-full rounded-[20px] bg-slate-100 object-cover md:hidden"
+            src="/commerce-data-preview-poster.png"
+            alt="Commerce data connection preview"
+            width={1200}
+            height={675}
+            sizes="(max-width: 767px) 100vw, 560px"
+          />
           <video
             ref={videoRef}
-            className="block aspect-video w-full rounded-[20px] bg-slate-100 object-cover"
+            className="hidden aspect-video w-full rounded-[20px] bg-slate-100 object-cover md:block"
             autoPlay
             muted
             loop

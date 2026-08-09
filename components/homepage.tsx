@@ -185,8 +185,8 @@ const homepageCopy = {
           text: "Analyze products, customers, channels, costs, and operational constraints to identify what is truly driving or hurting profitability."
         },
         {
-          title: "Simulate Thousands of Strategies",
-          text: "Evaluate thousands of possible business scenarios across advertising spend, inventory allocation, pricing, and SKU portfolio decisions to find the most profitable path."
+          title: "Simulate Tens of Thousands of Strategies",
+          text: "Evaluate tens of thousands of possible business scenarios across advertising spend, inventory allocation, pricing, and SKU portfolio decisions to find the most profitable path."
         },
         {
           title: "Execute & Optimize Continuously",
@@ -249,7 +249,7 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "AI Profit Optimization Engine",
+      sectionTitle: "AI Profit Optimization Syetem",
       sectionSubtitle:
         "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision.",
       eyebrow: "",
@@ -904,8 +904,8 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         </p>
         <p className="mt-2 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
-            ? "分析 SKU 级利润表现，模拟数千种经营场景，并执行利润最大化行动。"
-            : "Analyzes SKU-level profitability, simulates thousands of business scenarios, and recommends profit-maximizing actions."}
+            ? "分析 SKU 级利润表现，模拟数万种经营场景，并执行利润最大化行动。"
+            : "Analyzes SKU-level profitability, simulates tens of thousands of business scenarios, and recommends profit-maximizing actions."}
         </p>
       </div>
       <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "工作方式" : "How it works"}</p>
@@ -1489,8 +1489,12 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = 0.5;
+    const video = videoRef.current;
+    if (video) {
+      video.playbackRate = 0.5;
+      video.play().catch(() => {
+        // Mobile browsers can defer autoplay until the video is visible.
+      });
     }
   }, []);
 
@@ -1510,14 +1514,21 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
         <div className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
           <video
             ref={videoRef}
-            className="block w-full rounded-[20px]"
-            src="/commerce-data-preview.mp4"
+            className="block aspect-video w-full rounded-[20px] bg-slate-100 object-cover"
             autoPlay
             muted
             loop
             playsInline
-            preload="metadata"
-          />
+            preload="auto"
+            onCanPlay={(event) => {
+              event.currentTarget.playbackRate = 0.5;
+              event.currentTarget.play().catch(() => {
+                // Keep the first loaded frame visible if autoplay is delayed.
+              });
+            }}
+          >
+            <source src="/commerce-data-preview.mp4" type="video/mp4" />
+          </video>
         </div>
       </div>
     </div>

@@ -251,8 +251,7 @@ const homepageCopy = {
     },
     investigation: {
       sectionTitle: "AI Profit Optimization Syetem",
-      sectionSubtitle:
-        "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision.",
+      sectionSubtitle: "",
       eyebrow: "",
       title: "Revenue dropped 12.4%",
       evidenceTitle: "Driver chain",
@@ -490,7 +489,7 @@ const homepageCopy = {
     },
     investigation: {
       sectionTitle: "AI 利润控制系统",
-      sectionSubtitle: "发现收入、转化、成本或库存异常后，Monarca AI 会诊断利润驱动因素，模拟跨渠道方案，并输出最优经营决策。",
+      sectionSubtitle: "",
       eyebrow: "",
       title: "收入下降 12.4%",
       evidenceTitle: "证据链",

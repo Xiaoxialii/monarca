@@ -1520,6 +1520,13 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
             loop
             playsInline
             preload="auto"
+            poster="/commerce-data-preview-poster.png"
+            onClick={(event) => {
+              event.currentTarget.playbackRate = 0.5;
+              event.currentTarget.play().catch(() => {
+                // The poster remains visible if mobile autoplay is blocked.
+              });
+            }}
             onCanPlay={(event) => {
               event.currentTarget.playbackRate = 0.5;
               event.currentTarget.play().catch(() => {

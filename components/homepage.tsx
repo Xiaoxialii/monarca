@@ -904,8 +904,8 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         </p>
         <p className="mt-2 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
-            ? "分析 SKU 级利润表现，模拟数万种经营场景，并执行利润最大化行动。"
-            : "Analyzes SKU-level profitability, simulates tens of thousands of business scenarios, and recommends profit-maximizing actions."}
+            ? "分析 SKU 级利润表现，并模拟数万种经营场景，执行利润最大化行动"
+            : "Analyze SKU-level profit performance, simulate tens of thousands of operating scenarios, and execute profit-maximizing actions."}
         </p>
       </div>
       <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "工作方式" : "How it works"}</p>

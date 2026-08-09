@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -1239,8 +1239,9 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
         <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
           {copy.sectionTitle}
         </h2>
-        <p className="mt-3 text-sm leading-6 text-slate-500">{copy.sectionSubtitle}</p>
       </div>
+
+      <DataSourcePreviewSection isZh={isZh} />
 
       <div className="overflow-hidden rounded-[30px] bg-white p-3 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.06] sm:p-6">
         <div className="relative mx-auto max-w-5xl overflow-hidden">
@@ -1481,6 +1482,45 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = 0.5;
+    }
+  }, []);
+
+  return (
+    <div className="mx-auto mb-10 mt-10 grid max-w-7xl gap-8 lg:grid-cols-[0.95fr_0.82fr] lg:items-center">
+      <div>
+        <h2 className="text-left text-2xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
+          {isZh ? "第一步，一键连接你的电商数据" : "First, connect your commerce data in one click"}
+        </h2>
+        <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-slate-500 sm:text-base">
+          {isZh
+            ? "当收入、转化、成本或库存出现异常后，Monarca AI 会诊断利润驱动因素，模拟跨渠道场景，并输出最优运营决策。"
+            : "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision."}
+        </p>
+      </div>
+      <div className="lg:flex lg:justify-end">
+        <div className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
+          <video
+            ref={videoRef}
+            className="block w-full rounded-[20px]"
+            src="/commerce-data-preview.mp4"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 

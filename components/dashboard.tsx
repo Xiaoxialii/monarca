@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   BarChart3,
   Bell,
@@ -19,6 +20,8 @@ import {
   LineChart,
   Loader2,
   Lock,
+  Megaphone,
+  Package,
   Users,
   PanelLeft,
   Plus,
@@ -26,6 +29,9 @@ import {
   Settings,
   ShieldCheck,
   Share2,
+  ShoppingBag,
+  FileSpreadsheet,
+  Server,
   Table2,
   Trash2,
   Copy,
@@ -5877,13 +5883,9 @@ function ImportDataSection({
           <DataSourcesWorkspace
             copy={copy}
             connectedSources={connectedSources}
+            onAddConnectedSource={onAddConnectedSource}
             onRemoveConnectedSource={onRemoveConnectedSource}
             isLoadingConnectedSources={isLoadingConnectedSources}
-            onConnect={(sourceName) => {
-              if (typeof window !== "undefined") {
-                window.location.href = `/dashboard/import-data/connect?source=${encodeURIComponent(sourceName)}`;
-              }
-            }}
           />
         </div>
       )}
@@ -6058,8 +6060,7 @@ function sourceIsSyncing(source: ConnectedSourceRow) {
     "SCHEMA_READY",
     "CANONICALIZING",
     "GENERATING",
-    "INDEXING",
-    "PENDING_FIRST_SYNC"
+    "INDEXING"
   ];
 
   return sourceStatusValues(source).some((status) => syncingStatuses.includes(status));
@@ -6080,15 +6081,19 @@ function sourceSyncProgress(source: ConnectedSourceRow) {
     "SCHEMA_READY",
     "CANONICALIZING",
     "GENERATING",
-    "INDEXING",
-    "PENDING_FIRST_SYNC"
+    "INDEXING"
   ].includes(value)) ?? normalizedSourceStatus(source);
-  if (status === "QUEUED" || status === "PENDING_FIRST_SYNC") return 8;
+  if (status === "QUEUED") return 8;
   if (status === "RUNNING" || status === "SYNCING" || status === "PROCESSING") return 45;
   if (status === "SCHEMA_READY" || status === "CANONICALIZING") return 72;
   if (status === "GENERATING" || status === "INDEXING") return 90;
 
   return null;
+}
+
+function sourceNeedsConnectedSourceRefresh(source: ConnectedSourceRow) {
+  const activeStatuses = new Set(["QUEUED", "RUNNING", "SYNCING", "PROCESSING", "SCHEMA_READY", "CANONICALIZING", "GENERATING", "INDEXING"]);
+  return sourceStatusValues(source).some((status) => activeStatuses.has(status));
 }
 
 function businessSourceSyncProgress(rows: ConnectedSourceRow[]) {
@@ -6261,10 +6266,29 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
 }
 
 function businessSourceIcon(sourceId: string) {
-  if (sourceId === "meta_ads") return <BarChart3 className="size-5" />;
+  if (sourceId === "shopify") return <ShoppingBag className="size-7" />;
+  if (sourceId === "amazon") return <Package className="size-7" />;
+  if (sourceId === "meta_ads") return <Megaphone className="size-7" />;
+  if (sourceId === "file") return <FileSpreadsheet className="size-7" />;
   if (sourceId === "inventory") return <Table2 className="size-5" />;
-  if (sourceId === "database") return <Database className="size-5" />;
-  return <Activity className="size-5" />;
+  if (sourceId === "database") return <Server className="size-7" />;
+  return <Database className="size-7" />;
+}
+
+function integrationSourceIcon(name: string) {
+  const normalized = name.toLowerCase();
+  if (normalized.includes("shopify") || normalized.includes("woo") || normalized.includes("tiktok shop")) {
+    return <ShoppingBag className="size-4" />;
+  }
+  if (normalized.includes("amazon")) return <Package className="size-4" />;
+  if (normalized.includes("ads")) return <Megaphone className="size-4" />;
+  if (normalized.includes("excel") || normalized.includes("csv") || normalized.includes("sheets")) {
+    return <FileSpreadsheet className="size-4" />;
+  }
+  if (normalized.includes("sql") || normalized.includes("snowflake") || normalized.includes("bigquery") || normalized.includes("database")) {
+    return <Server className="size-4" />;
+  }
+  return <Database className="size-4" />;
 }
 
 function resolveDatabaseConnectorType(source: DataSourceDefinition) {
@@ -6295,18 +6319,20 @@ function resolveConnectorSourceName(name: string, copy: DashboardCopy) {
 function DataSourcesWorkspace({
   copy,
   connectedSources,
+  onAddConnectedSource,
   onRemoveConnectedSource,
-  isLoadingConnectedSources,
-  onConnect
+  isLoadingConnectedSources
 }: {
   copy: DashboardCopy;
   connectedSources: ConnectedSourceRow[];
+  onAddConnectedSource: (source: ConnectedSourceRow) => void;
   onRemoveConnectedSource: (sourceId: string) => void;
   isLoadingConnectedSources: boolean;
-  onConnect: (sourceName: string) => void;
 }) {
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [workspaceSources, setWorkspaceSources] = useState<ConnectedSourceRow[]>(connectedSources);
+  const [isConnectorPickerOpen, setIsConnectorPickerOpen] = useState(false);
+  const [selectedConnectorSourceName, setSelectedConnectorSourceName] = useState<string | null>(null);
   const businessSources = useMemo(
     () => buildBusinessSources(workspaceSources.length > 0 ? workspaceSources : connectedSources, isZh),
     [connectedSources, isZh, workspaceSources]
@@ -6322,90 +6348,145 @@ function DataSourcesWorkspace({
     setWorkspaceSources((current) => current.filter((row) => !sourceIds.includes(row.id)));
     sourceIds.forEach((sourceId) => onRemoveConnectedSource(sourceId));
   };
-  return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(300px,400px)_minmax(0,1fr)] xl:items-start">
-      <section className="mt-6 min-w-0 overflow-hidden rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 xl:mt-10">
-          <div className="flex items-center justify-between gap-3">
-            <div className="w-full">
-              <h3 className="text-center text-lg font-semibold tracking-tight text-slate-950">
-                {isZh ? "已连接业务源" : "Connected Sources"}
-              </h3>
+
+  if (isConnectorPickerOpen) {
+    return (
+      <div className="mx-auto mt-6 w-full max-w-[1180px] xl:mt-10">
+        <AvailableIntegrationsWorkspace
+          copy={copy}
+          onConnect={setSelectedConnectorSourceName}
+          onClose={() => setIsConnectorPickerOpen(false)}
+        />
+        {selectedConnectorSourceName ? (
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
+            <div className="relative w-full max-w-[1040px]">
+              <button
+                type="button"
+                className="absolute -right-3 -top-3 z-10 grid size-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-lg transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label={isZh ? "关闭弹窗" : "Close modal"}
+                onClick={() => setSelectedConnectorSourceName(null)}
+              >
+                <X className="size-5" />
+              </button>
+              <ConnectorPanel
+                key={selectedConnectorSourceName}
+                copy={copy}
+                onAddConnectedSource={(source) => {
+                  onAddConnectedSource(source);
+                  setSelectedConnectorSourceName(null);
+                  setIsConnectorPickerOpen(false);
+                }}
+                connectionPage
+                initialSourceName={selectedConnectorSourceName}
+              />
             </div>
           </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto mt-6 w-full max-w-[1180px] xl:mt-10">
+      <section className="rounded-[32px] border border-slate-200 bg-white/90 p-5 shadow-sm">
+        <h3 className="text-center text-xl font-semibold tracking-tight text-slate-950">
+          {isZh ? "Connect your commerce data in one click" : "Connect your commerce data in one click"}
+        </h3>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setIsConnectorPickerOpen(true)}
+            className="group flex min-h-[220px] flex-col items-center justify-center rounded-[24px] border border-slate-200 bg-white p-6 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+          >
+            <Plus className="size-8 text-slate-600 transition group-hover:text-emerald-800" />
+            <span className="mt-6 text-base font-medium text-slate-600 transition group-hover:text-slate-950">
+              {isZh ? "New data source" : "New data source"}
+            </span>
+          </button>
 
           {isLoadingConnectedSources && !hasAnySources && businessSources.length === 0 ? (
-            <div className="mt-5 rounded-3xl bg-slate-50 p-8 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
-              <Loader2 className="mr-2 inline size-4 animate-spin" />
+            <div className="flex min-h-[220px] items-center justify-center rounded-[24px] bg-slate-50 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
+              <Loader2 className="mr-2 size-4 animate-spin" />
               {isZh ? "正在加载已连接业务源" : "Loading connected business sources"}
             </div>
-          ) : businessSources.length > 0 ? (
-            <div className="mt-5 grid max-h-[60vh] gap-3 overflow-y-scroll overscroll-contain pr-2 [scrollbar-color:#cbd5e1_transparent] [scrollbar-width:thin] sm:grid-cols-2 xl:max-h-[520px] xl:grid-cols-1">
-              {businessSources.map((source) => (
-                <div
-                  key={source.id}
-                  className="relative flex items-center gap-4 rounded-[28px] border border-slate-200 bg-white p-4 transition hover:border-slate-300 hover:bg-slate-50/60"
-                >
-                  <button
-                    type="button"
-                    className="absolute -right-2.5 -top-2.5 grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                    aria-label={`${isZh ? "删除" : "Delete"} ${source.name}`}
-                    onClick={() => removeBusinessSource(source)}
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                  <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-600">
-                    {businessSourceIcon(source.id)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h4 className="truncate text-base font-semibold text-slate-950">{source.name}</h4>
-                        <p className="mt-1 truncate text-sm font-medium text-slate-500">{source.typeLabel}</p>
-                      </div>
-                      <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold", sourceStatusBadgeClass(source.status))}>
-                        {source.statusLabel}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500">
-                      <span>{source.datasets.length} {isZh ? "个数据集" : source.datasets.length === 1 ? "dataset" : "datasets"}</span>
-                      <span className="size-1 rounded-full bg-slate-300" aria-hidden="true" />
-                      <span>{isZh ? "最近同步" : "Last sync"} {source.lastSyncLabel}</span>
-                    </div>
-                    {source.syncProgress !== null ? (
-                      <div className="mt-4">
-                        <div className="h-1.5 overflow-hidden rounded-full bg-[#efe9dc]">
-                          <div
-                            className="h-full rounded-full bg-[#46648f] transition-all duration-500"
-                            style={{ width: `${source.syncProgress}%` }}
-                          />
-                        </div>
-                        <p className="mt-2 text-center text-[11px] font-bold uppercase tracking-[0.22em] text-[#5b5f8d]">
-                          {isZh ? "INDEXING" : "INDEXING"} - {source.syncProgress}%
-                        </p>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
           ) : (
-            <div className="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm font-semibold text-slate-500">
-              {isZh ? "连接你的电商数据，解锁 AI 利润智能。" : "Connect your commerce data. Unlock AI profit intelligence."}
-            </div>
+            businessSources.map((source) => (
+              <BusinessSourceProjectCard
+                key={source.id}
+                source={source}
+                isZh={isZh}
+                onRemove={() => removeBusinessSource(source)}
+              />
+            ))
           )}
+        </div>
       </section>
+    </div>
+  );
+}
 
-      <AvailableIntegrationsWorkspace copy={copy} onConnect={onConnect} />
+function BusinessSourceProjectCard({
+  source,
+  isZh,
+  onRemove
+}: {
+  source: BusinessSourceView;
+  isZh: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="group relative min-h-[220px] overflow-hidden rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <button
+        type="button"
+        className="absolute right-4 top-4 z-10 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+        aria-label={`${isZh ? "删除" : "Delete"} ${source.name}`}
+        onClick={onRemove}
+      >
+        <X className="size-4" />
+      </button>
+      <div className="grid h-28 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+        {businessSourceIcon(source.id)}
+      </div>
+      <div className="mt-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="truncate text-base font-medium text-slate-800">{source.name}</h4>
+          <p className="mt-1.5 text-sm font-medium text-slate-500">{source.typeLabel}</p>
+        </div>
+        <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold", sourceStatusBadgeClass(source.status))}>
+          {source.statusLabel}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-500">
+        <span>{source.datasets.length} {isZh ? "个数据集" : source.datasets.length === 1 ? "dataset" : "datasets"}</span>
+        <span className="size-1 rounded-full bg-slate-300" aria-hidden="true" />
+        <span>{isZh ? "最近同步" : "Last sync"} {source.lastSyncLabel}</span>
+      </div>
+      {source.syncProgress !== null ? (
+        <div className="mt-4">
+          <div className="h-1.5 overflow-hidden rounded-full bg-[#efe9dc]">
+            <div
+              className="h-full rounded-full bg-[#46648f] transition-all duration-500"
+              style={{ width: `${source.syncProgress}%` }}
+            />
+          </div>
+          <p className="mt-2 text-center text-[11px] font-bold uppercase tracking-[0.22em] text-[#5b5f8d]">
+            {isZh ? "INDEXING" : "INDEXING"} - {source.syncProgress}%
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function AvailableIntegrationsWorkspace({
   copy,
-  onConnect
+  onConnect,
+  onClose
 }: {
   copy: DashboardCopy;
   onConnect: (sourceName: string) => void;
+  onClose?: () => void;
 }) {
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
@@ -6448,12 +6529,23 @@ function AvailableIntegrationsWorkspace({
   const activeGroup = groups[activeGroupIndex] ?? groups[0];
 
   return (
-    <div className="mx-auto mt-6 w-full max-w-[860px] xl:mt-10">
+    <div className="mx-auto w-full max-w-[1120px]">
       <h3 className="text-center text-lg font-semibold tracking-tight text-slate-950">
         {isZh ? "一键连接你的电商数据" : "Connect your commerce data in one click"}
       </h3>
 
-      <section className="mt-5 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <section className="relative mt-5 rounded-[32px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      {onClose ? (
+        <button
+          type="button"
+          className="absolute right-5 top-5 inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+          aria-label={isZh ? "返回上一页" : "Back to previous page"}
+          onClick={onClose}
+        >
+          <ArrowLeft className="size-4" />
+          {isZh ? "返回" : "Back"}
+        </button>
+      ) : null}
       <div className="flex justify-center">
         <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-full bg-slate-100 p-1">
           {groups.map((group, index) => {
@@ -6490,7 +6582,7 @@ function AvailableIntegrationsWorkspace({
                     <p className="mt-1 text-sm font-medium leading-snug text-slate-500">{integration.description}</p>
                   </div>
                   <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800">
-                    {integration.name.includes("Ads") ? <BarChart3 className="size-4" /> : integration.name.includes("Excel") || integration.name.includes("Sheets") ? <FileText className="size-4" /> : <Database className="size-4" />}
+                    {integrationSourceIcon(integration.name)}
                   </span>
                 </div>
                 {isSupported ? (
@@ -7500,75 +7592,10 @@ function ConnectorPanel({
 
           {showWizard ? (
           <div className="rounded-lg border bg-white p-3 shadow-sm">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{copy.connectors.previewTitle}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {selectedSource.name}
-                </p>
-              </div>
-              <Badge variant="secondary">{selectedSource.type}</Badge>
-            </div>
-            <div className="space-y-2 rounded-lg border border-dashed bg-secondary/25 p-3">
-	              {isOAuthSource ? (
-	                <>
-	                  {[
-	                    `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
-	                    `${isZh ? "授权方式" : "Auth"}: OAuth`,
-	                    isShopifySource
-	                      ? `${isZh ? "数据口径" : "Schema"}: ecommerce_canonical_v1`
-	                      : isMetaAdsSource
-	                        ? `${isZh ? "数据口径" : "Schema"}: ecommerce_ads`
-	                      : `${isZh ? "状态" : "Status"}: ${isZh ? "待接入" : "not enabled"}`,
-	                    `${isZh ? "Token 存储" : "Token storage"}: ${isZh ? "加密保存" : "encrypted"}`
-	                  ].map((row) => (
-	                    <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
-	                      <span className="size-1.5 rounded-full bg-emerald-700/70" aria-hidden="true" />
-	                      {row}
-	                    </div>
-	                  ))}
-	                </>
-	              ) : isFileSource ? (
-                <>
-                  {[
-                    `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
-                    `${isZh ? "文件" : "File"}: ${selectedFile?.name ?? "-"}`,
-                    `${isZh ? "格式" : "Format"}: ${selectedFile?.name.split(".").pop()?.toUpperCase() ?? "CSV / XLSX"}`,
-                    `${isZh ? "处理方式" : "Mode"}: ${isZh ? "上传并读取结构" : "Upload and scan schema"}`
-                  ].map((row) => (
-                    <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="size-1.5 rounded-full bg-emerald-700/70" aria-hidden="true" />
-                      {row}
-                    </div>
-                  ))}
-                </>
-              ) : isSupportedDatabase ? (
-                <>
-                  {[
-                    `${isZh ? "类型" : "Type"}: ${selectedSource.name}`,
-                    `${isZh ? "地址" : "Host"}: ${databaseHostPreview}`,
-                    `${isZh ? "数据库" : "Database"}: ${databaseNamePreview}`,
-                    `Port: ${effectiveDatabasePort} (${databasePort ? (isZh ? "自定义" : "custom") : (isZh ? "自动" : "auto")})`,
-                    `SSL: ${databaseSsl ? "On" : "Off"}`
-                  ].map((row) => (
-                    <div key={row} className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="size-1.5 rounded-full bg-emerald-700/70" aria-hidden="true" />
-                      {row}
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="text-xs leading-5 text-muted-foreground">
-                  {isZh
-                    ? "当前版本支持 PostgreSQL 和 MySQL 的连接测试"
-                    : "This wizard currently supports PostgreSQL and MySQL connection testing"}
-                </div>
-              )}
-            </div>
             {connectionResult ? (
               <div
                 className={cn(
-                  "mt-3 rounded-lg border px-3 py-2 text-xs font-medium",
+                  "rounded-lg border px-3 py-2 text-xs font-medium",
                   connectionResult.ok
                     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                     : "border-rose-200 bg-rose-50 text-rose-700"
@@ -18617,6 +18644,16 @@ export function Dashboard({
       window.removeEventListener("monarca-data-sources-updated", refreshConnectedSources);
     };
   }, [isUserLoaded, loadConnectedSources]);
+
+  useEffect(() => {
+    if (!isUserLoaded || !connectedSources.some(sourceNeedsConnectedSourceRefresh)) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadConnectedSources({ silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [connectedSources, isUserLoaded, loadConnectedSources]);
 
   if (!isLocaleReady) {
     return <div className="h-screen bg-background" />;

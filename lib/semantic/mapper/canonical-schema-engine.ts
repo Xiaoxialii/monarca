@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
+import { inferSourceTableType, resolveCostField } from "@/lib/semantic/cost/cost-field-resolver";
 import { normalizeRows } from "@/lib/semantic/engine/field-analyzer";
 import type { CanonicalConcept, CanonicalDataset, SemanticMappingDecision } from "@/lib/semantic/types";
 
 const SCHEMA_VERSION = "ecommerce_canonical_v1" as const;
 
 const ORDER_FIELDS = new Set<CanonicalConcept>(["order_id", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "tax_amount", "shipping_revenue", "order_date", "currency", "customer_id", "status", "shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"]);
-const ITEM_FIELDS = new Set<CanonicalConcept>(["order_id", "product_id", "sku", "quantity", "price", "unit_price", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "cogs", "product_cost"]);
+const ITEM_FIELDS = new Set<CanonicalConcept>(["order_id", "product_id", "sku", "quantity", "price", "unit_price", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "cogs"]);
 const PRODUCT_FIELDS = new Set<CanonicalConcept>(["product_id", "product_name", "sku", "price", "unit_price", "product_cost"]);
 const CUSTOMER_FIELDS = new Set<CanonicalConcept>(["customer_id", "email_hash", "country"]);
 const REFUND_FIELDS = new Set<CanonicalConcept>(["refund_id", "order_id", "refund_amount", "refund_reason"]);
@@ -46,6 +47,8 @@ type CanonicalValidationIssue = {
   field?: string;
   reason: string;
 };
+
+type CanonicalFieldMappingMetadata = NonNullable<CanonicalDataset["metadata"]["field_mappings"]>[number];
 
 type CanonicalBuildResult = {
   row?: Record<string, unknown>;
@@ -128,6 +131,10 @@ export function buildCanonicalDatasetFromMappedRecords(records: CanonicalMappedR
       .map((warning) => ({ field: String(warning.field), reason: warning.reason })),
     rowCount: rows.length
   }));
+  const fieldMappings = records
+    .flatMap((record) => Array.isArray(record.metadata?.field_mappings) ? record.metadata.field_mappings : [])
+    .filter((mapping): mapping is CanonicalFieldMappingMetadata => Boolean(mapping) && typeof mapping === "object");
+  const costFieldMappings = records.flatMap((record) => costResolutionMappingsForRecord(record));
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -143,6 +150,7 @@ export function buildCanonicalDatasetFromMappedRecords(records: CanonicalMappedR
         rejected
       },
       generation_audit: generationAudit,
+      field_mappings: [...fieldMappings, ...costFieldMappings],
       dedupe: {
         canonical_key_strategy: "hash(platform + source_id + order_id)",
         duplicate_count: beforeDedupe - afterDedupe
@@ -181,7 +189,17 @@ function mappedRecordsFromSemanticInput(input: {
       fields,
       unknown_fields: unknownFields,
       metadata: {
-        mapping_confidence: average(input.mappings.map((mapping) => mapping.confidence))
+        mapping_confidence: average(input.mappings.map((mapping) => mapping.confidence)),
+        field_mappings: input.mappings
+          .filter((mapping) => mapping.canonical !== "unknown")
+          .map((mapping) => ({
+            canonical_field: mapping.canonical,
+            source_column: mapping.source_field ?? lastPathPart(mapping.field),
+            source_system: input.platform ?? "auto-detected",
+            mapping_confidence: mapping.confidence,
+            mapping_method: mapping.mapping_method,
+            requires_confirmation: mapping.requires_confirmation
+          }))
       }
     };
   });
@@ -189,6 +207,7 @@ function mappedRecordsFromSemanticInput(input: {
 
 function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sourceId: string): Record<CanonicalTableName, CanonicalBuildResult> {
   const fields = record.fields;
+  const normalizedCostFields = normalizeCostFieldsForRecord(record);
   const stableSourceId = sourceId || String(fields.order_id ?? fields.product_id ?? fields.sku ?? fields.campaign_id ?? fields.warehouse_id ?? "");
 
   return {
@@ -206,9 +225,9 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       table: "ecommerce_order_items",
       platform,
       sourceId: stableSourceId,
-      fields,
+      fields: normalizedCostFields.orderItemFields,
       allowedFields: ITEM_FIELDS,
-      triggerFields: ["product_id", "price", "unit_price", "revenue", "gross_sales", "net_sales", "cogs", "product_cost", "refund_amount"],
+      triggerFields: ["product_id", "price", "unit_price", "revenue", "gross_sales", "net_sales", "cogs", "refund_amount"],
       requiredFields: ["order_id", "sku"],
       defaults: { order_id: stableSourceId || `source-${canonicalKey({ platform, sku: fields.sku ?? "" }).slice(0, 12)}`, quantity: 1 }
     }),
@@ -216,7 +235,7 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       table: "ecommerce_products",
       platform,
       sourceId: stableSourceId,
-      fields,
+      fields: normalizedCostFields.productFields,
       allowedFields: PRODUCT_FIELDS,
       triggerFields: ["product_id", "product_name", "sku", "price", "unit_price", "product_cost"],
       requiredFields: ["product_id", "platform"],
@@ -249,7 +268,7 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       fields,
       allowedFields: ADS_FIELDS,
       triggerFields: ["campaign_id", "ad_id", "ad_spend", "impressions", "clicks", "conversions", "attribution_revenue", "event_date"],
-      requiredFields: ["campaign_id", "date", "spend", "platform"],
+      requiredFields: ["spend", "platform"],
       defaults: { campaign_id: stableSourceId || "unknown-campaign" }
     }),
     ecommerce_inventory: buildTableRow({
@@ -265,9 +284,89 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
     ecommerce_costs: buildCostRows({
       platform,
       sourceId: stableSourceId,
-      fields
+      fields: normalizedCostFields.costFields
     })
   };
+}
+
+function normalizeCostFieldsForRecord(record: CanonicalMappedRecord) {
+  const fields = record.fields;
+  const sourceTableType = inferSourceTableType(fields);
+  const orderItemFields: Partial<Record<CanonicalConcept, unknown>> = { ...fields };
+  const productFields: Partial<Record<CanonicalConcept, unknown>> = { ...fields };
+  const costFields: Partial<Record<CanonicalConcept, unknown>> = { ...fields };
+
+  for (const field of ["cogs", "product_cost"] as CanonicalConcept[]) {
+    if (!hasValue(fields[field])) continue;
+    const resolution = resolveCostField({
+      source_table_type: sourceTableType,
+      column_name: field,
+      sample_value: fields[field],
+      sku_mapping: hasValue(fields.sku),
+      field_set: fields
+    });
+    if (!resolution) continue;
+
+    if (resolution.target_entity === "ecommerce_products") {
+      delete orderItemFields.cogs;
+      delete orderItemFields.product_cost;
+      assignIfUseful(productFields, "product_cost", fields[field]);
+      costFields.product_cost = fields[field];
+      delete costFields.cogs;
+      continue;
+    }
+
+    delete productFields.cogs;
+    delete productFields.product_cost;
+    assignIfUseful(orderItemFields, "cogs", fields[field]);
+    costFields.cogs = fields[field];
+    delete costFields.product_cost;
+  }
+
+  return {
+    sourceTableType,
+    orderItemFields,
+    productFields,
+    costFields
+  };
+}
+
+function costResolutionMappingsForRecord(record: CanonicalMappedRecord): CanonicalFieldMappingMetadata[] {
+  const normalized = normalizeCostFieldsForRecord(record);
+  const fieldMappings = Array.isArray(record.metadata?.field_mappings) ? record.metadata.field_mappings : [];
+  const sourceColumnFor = (field: CanonicalConcept) => {
+    const mapping = fieldMappings.find((candidate) => {
+      const canonicalField = (candidate as CanonicalFieldMappingMetadata).canonical_field;
+      return canonicalField === field;
+    }) as CanonicalFieldMappingMetadata | undefined;
+    return mapping?.source_column ?? field;
+  };
+
+  const mappings: CanonicalFieldMappingMetadata[] = [];
+  for (const field of ["cogs", "product_cost"] as CanonicalConcept[]) {
+    if (!hasValue(record.fields[field])) continue;
+    const resolution = resolveCostField({
+      source_table_type: normalized.sourceTableType,
+      column_name: field,
+      sample_value: record.fields[field],
+      sku_mapping: hasValue(record.fields.sku),
+      field_set: record.fields
+    });
+    if (!resolution) continue;
+
+    mappings.push({
+      canonical_field: resolution.canonical_field,
+      source_column: sourceColumnFor(field),
+      source_system: record.platform ?? "auto-detected",
+      source_file_type: resolution.source_table_type,
+      target_entity: resolution.target_entity,
+      mapping_confidence: resolution.confidence,
+      mapping_method: "semantic_context",
+      requires_confirmation: resolution.status === "LOW_CONFIDENCE"
+    });
+  }
+
+  return mappings;
 }
 
 function buildTableRow(input: {

@@ -11,6 +11,7 @@ import {
 } from "@/lib/dashboard/optimization-report-cache";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
+import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import {
   enqueueSkuOptimizationJob,
   processJob,
@@ -24,7 +25,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
-  "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
+  "Connected, but optimization needs order id/date, SKU order items, revenue, unit cost/COGS, shipping cost, platform fee, payment fee, refunds, SKU-level ad spend, inventory on hand, and channel/platform fields to generate reliable profit lift.";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -222,7 +223,7 @@ async function freshOptimizationCacheResponse(input: {
   if (cacheNeedsOptimizationRefresh(refreshedPayload)) return null;
 
   return NextResponse.json({
-    ...refreshedPayload,
+    ...await withOptimizationReadiness(input.workspaceId, refreshedPayload),
     snapshot: {
       id: refreshedCache.id,
       type: "OptimizationReportCache",
@@ -257,6 +258,7 @@ async function liveDecisionReportResponse(input: {
   const optimization = asRecord(decisionReport.sku_portfolio_optimization);
   const queueRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
   const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+  const optimizationReadiness = validateOptimizationData(loaded.data);
 
   return NextResponse.json({
     ok: true,
@@ -274,6 +276,8 @@ async function liveDecisionReportResponse(input: {
     generated_at: loaded.data?.metadata.computed_at ?? null,
     source_platforms: loaded.data?.metadata.source_platforms ?? [],
     lineage: loaded.lineage,
+    optimizationReadiness,
+    optimizationReadinessDebug: readinessDebug(loaded, "current_canonical_metrics"),
     liveFallback: true,
     snapshot: {
       id: null,
@@ -286,6 +290,70 @@ async function liveDecisionReportResponse(input: {
       portfolioRows: portfolioRows.length
     }
   });
+}
+
+async function withOptimizationReadiness(workspaceId: string, payload: Record<string, unknown>) {
+  const loaded = await loadEcommerceSalesDashboardData({
+    workspaceId,
+    decisionMode: "full"
+  }).catch(() => null);
+  const optimizationReadiness = loaded?.data ? validateOptimizationData(loaded.data) : null;
+
+  return {
+    ...payload,
+    optimizationReadiness,
+    optimizationReadinessDebug: readinessDebug(loaded, "cached_payload_with_current_canonical_metrics")
+  };
+}
+
+function readinessDebug(
+  loaded: Awaited<ReturnType<typeof loadEcommerceSalesDashboardData>> | null,
+  source: "cached_payload_with_current_canonical_metrics" | "current_canonical_metrics"
+) {
+  const data = loaded?.data ?? null;
+  const mappings = data?.metadata.field_mappings ?? [];
+  const adSpendMapping = mappings.find((mapping) => mapping.canonical_field === "ad_spend") ?? null;
+  const eventDateMapping = mappings.find((mapping) => mapping.canonical_field === "event_date") ?? null;
+  const orderDateMapping = mappings.find((mapping) => mapping.canonical_field === "order_date") ?? null;
+  const adSourceField = adSpendMapping?.source_field ?? adSpendMapping?.source_column ?? null;
+  const adSourceFile = adSpendMapping?.source_file ?? adSpendMapping?.source_system ?? adSpendMapping?.source_file_type ?? null;
+  const orderDateSourceField = orderDateMapping?.source_field ?? orderDateMapping?.source_column ?? null;
+  const orderDateSourceFile = orderDateMapping?.source_file ?? orderDateMapping?.source_system ?? orderDateMapping?.source_file_type ?? null;
+
+  return {
+    source,
+    loader_state: loaded?.state ?? "unavailable",
+    lineage: loaded?.lineage ?? null,
+    canonical_metrics: {
+      ad_spend: data?.metrics.ads.ad_spend ?? null,
+      business_ad_spend: data?.metrics.business.ad_spend ?? null
+    },
+    mapping_debug: {
+      ad_spend: adSpendMapping ? {
+        canonical_field: adSpendMapping.canonical_field,
+        source_field: adSourceField,
+        source_file: adSourceFile,
+        confidence: adSpendMapping.mapping_confidence,
+        status: adSpendMapping.requires_confirmation ? "NEEDS_CONFIRMATION" : "AVAILABLE"
+      } : null,
+      event_date: eventDateMapping ? {
+        canonical_field: eventDateMapping.canonical_field,
+        source_field: eventDateMapping.source_field ?? eventDateMapping.source_column ?? null,
+        source_file: eventDateMapping.source_file ?? eventDateMapping.source_system ?? eventDateMapping.source_file_type ?? null,
+        confidence: eventDateMapping.mapping_confidence,
+        status: eventDateMapping.requires_confirmation ? "NEEDS_CONFIRMATION" : "AVAILABLE"
+      } : null,
+      order_date: orderDateMapping ? {
+        canonical_field: orderDateMapping.canonical_field,
+        source_field: orderDateSourceField,
+        source_file: orderDateSourceFile,
+        confidence: orderDateMapping.mapping_confidence,
+        status: orderDateMapping.requires_confirmation ? "NEEDS_CONFIRMATION" : "AVAILABLE"
+      } : null,
+      meta_date_maps_to_order_date: orderDateSourceField === "date" && /meta/i.test(String(orderDateSourceFile ?? ""))
+    },
+    missing_fields: data?.quality.missing_fields ?? []
+  };
 }
 
 export async function GET(request: Request) {
@@ -415,7 +483,7 @@ export async function GET(request: Request) {
       }
 
       return NextResponse.json({
-        ...cachedPayload,
+        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
         ok: true,
         state: "stale",
         status: "STALE",
@@ -487,7 +555,7 @@ export async function GET(request: Request) {
       }
 
       return NextResponse.json({
-        ...cachedPayload,
+        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
         ok: true,
         state: "stale",
         status: "STALE",
@@ -509,7 +577,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      ...cachedPayload,
+      ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
       snapshot: {
         id: reportCache.id,
         type: "OptimizationReportCache",
@@ -581,7 +649,7 @@ export async function GET(request: Request) {
       }
 
       return NextResponse.json({
-        ...recommendationsJson,
+        ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
         ok: true,
         state: "stale",
         status: "STALE",
@@ -601,7 +669,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      ...recommendationsJson,
+      ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
       snapshot: {
         id: snapshot.id,
         type: "DecisionSnapshot",
@@ -682,14 +750,23 @@ export async function GET(request: Request) {
     source_platforms: [],
     lineage: null,
     missingDataRequirements: [
-      "sales_order_history",
-      "order_line_items",
-      "refunds",
-      "customers",
-      "inventory",
-      "unit_costs",
-      "fulfillment_costs",
-      "ad_spend"
+      "orders.order_id",
+      "orders.order_date",
+      "order_items.sku",
+      "order_items.quantity",
+      "order_items.revenue",
+      "products.sku_or_product_id",
+      "cost.unit_cost_or_cogs",
+      "cost.shipping_cost",
+      "cost.platform_fee",
+      "cost.payment_fee",
+      "refunds.order_id",
+      "refunds.refund_amount",
+      "ads.ad_spend",
+      "ads.sku_or_product_id",
+      "inventory.sku",
+      "inventory.inventory_on_hand",
+      "channel.channel_or_platform"
     ],
     warning: "DECISION_SNAPSHOT_MISS",
     performance: snapshotPerformance(startedAt, "snapshot")

@@ -2,6 +2,7 @@ import { resolveCogsSemantic, type CogsSemanticType } from "../semantic/cost/cog
 import { calculateSkuProfitAndAllocation, type InventoryRiskStatus, type SkuAttributionMethod, type SkuRoasConfidence, type SkuRoasStatus } from "../sku/sku-profit-allocation-engine";
 import type { DemandTrend, InventoryDecision } from "@/lib/inventory/inventory-decision-engine";
 import { calculateSkuProfitability, CANONICAL_PROFITABILITY_ENGINE_VERSION, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
+import { resolveSkuCost } from "@/lib/semantic/cost/cost-field-resolver";
 
 export type CostInputRow = Record<string, unknown>;
 
@@ -319,6 +320,7 @@ export function calculateCostIntelligence(input: {
         nextConfidence: costResolution.resolution.confidence,
         nextWeight: Math.max(itemRevenue, 1)
       });
+      current.cogs_status = current.cogs_confidence >= 0.8 ? "AVAILABLE" : "ESTIMATED";
       if (costResolution.resolution.estimated_cost_flag || costResolution.resolution.confidence < 0.7) {
         current.cogs_semantic_warnings.push(costResolution.resolution.reason);
       }
@@ -556,6 +558,32 @@ function resolveItemCogs(input: {
 }) {
   const { item, productCostByProductId, productCostBySku, quantity, itemRevenue } = input;
   const price = firstFiniteNumber(item.price, item.unit_price, quantity ? itemRevenue / quantity : null);
+  const semanticCost = resolveSkuCost({
+    orderItemCogs: firstFiniteNumber(item.cogs, item.total_cogs, item.line_cogs, item.row_cogs),
+    productCost: firstFiniteNumber(
+      item.product_cost,
+      item.cost_price,
+      item.manufacturing_cost,
+      item.procurement_cost,
+      productCostByProductId.get(stringValue(item.product_id)),
+      productCostBySku.get(stringValue(item.sku))
+    ),
+    productUnitCost: item.unit_cost,
+    otherCost: firstFiniteNumber(item.line_cost, item.row_cost)
+  });
+
+  if (semanticCost.value !== null) {
+    const fieldName = costFieldNameFromSource({ item, source: semanticCost.source });
+    const resolution = resolveCogsSemantic({
+      cogs: semanticCost.value,
+      quantity,
+      revenue: itemRevenue,
+      price,
+      fieldName
+    });
+    if (resolution) return { resolution, fieldName };
+  }
+
   const candidates: Array<{ value: unknown; fieldName: string }> = [
     { value: item.cost_price, fieldName: "cost_price" },
     { value: item.product_cost, fieldName: "product_cost" },
@@ -584,6 +612,20 @@ function resolveItemCogs(input: {
   }
 
   return null;
+}
+
+function costFieldNameFromSource(input: { item: CostInputRow; source: string | null }) {
+  if (input.source === "ecommerce_order_items.cogs") {
+    if (firstFiniteNumber(input.item.total_cogs) !== null) return "total_cogs";
+    if (firstFiniteNumber(input.item.line_cogs) !== null) return "line_cogs";
+    if (firstFiniteNumber(input.item.row_cogs) !== null) return "row_cogs";
+    return "cogs";
+  }
+
+  if (input.source === "ecommerce_products.product_cost" || input.source === "ecommerce_products.unit_cost") return "unit_cost";
+  if (firstFiniteNumber(input.item.line_cost) !== null) return "line_cost";
+  if (firstFiniteNumber(input.item.row_cost) !== null) return "row_cost";
+  return "cost";
 }
 
 type SkuEconomicsSummaryRow = {

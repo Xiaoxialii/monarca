@@ -48,7 +48,17 @@ function dataset() {
       unknown_fields: [],
       validation: { accepted_rows: 7, rejected_rows: 0, warnings: [], rejected: [] },
       dedupe: { canonical_key_strategy: "hash(platform + source_id + order_id)", duplicate_count: 0 },
-      mapping_confidence: 0.98
+      mapping_confidence: 0.98,
+      field_mappings: [
+        {
+          canonical_field: "ad_spend",
+          source_column: "spend",
+          source_system: "Meta Ads",
+          mapping_confidence: 1,
+          mapping_method: "exact_alias",
+          requires_confirmation: false
+        }
+      ]
     }
   };
 }
@@ -86,6 +96,7 @@ test("canonical snapshot generator produces dashboard-ready ecommerce snapshot",
   assert.equal(snapshot.tables.length, 5);
   assert.equal(snapshot.tables.find((table) => table.name === "ecommerce_orders").artifactKey, "normalized/ecommerce_orders.jsonl");
   assert.equal(snapshot.dashboardSnapshot.metrics.refund_rate, 0.0333);
+  assert.deepEqual(snapshot.field_mappings, dataset().metadata.field_mappings);
 });
 
 test("canonical snapshot schema detection accepts both camel and snake schema version fields", () => {

@@ -315,16 +315,35 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
 
                   return {
                     field: typeof record?.field === "string" ? record.field : "",
+                    source_column: typeof record?.source_column === "string" ? record.source_column : typeof record?.field === "string" ? record.field : "",
                     canonical: typeof record?.canonical === "string" ? record.canonical : "",
+                    canonical_field: typeof record?.canonical_field === "string" ? record.canonical_field : typeof record?.canonical === "string" ? record.canonical : "",
                     confidence: toNumber(record?.confidence),
-                    source: typeof record?.source === "string" ? record.source : "engine"
+                    source: typeof record?.source === "string" ? record.source : "engine",
+                    mapping_method: typeof record?.mapping_method === "string" ? record.mapping_method : null,
+                    requires_confirmation: record?.requires_confirmation === true,
+                    suggested_mappings: Array.isArray(record?.suggested_mappings)
+                      ? record.suggested_mappings.map((candidate) => {
+                          const candidateRecord = asRecord(candidate);
+                          return {
+                            canonical_field: typeof candidateRecord?.canonical_field === "string" ? candidateRecord.canonical_field : "",
+                            confidence: toNumber(candidateRecord?.confidence),
+                            reason: typeof candidateRecord?.reason === "string" ? candidateRecord.reason : ""
+                          };
+                        }).filter((candidate) => candidate.canonical_field)
+                      : []
                   };
                 }).filter((mapping) => mapping.field)
               : Object.entries(mappings ?? {}).map(([field, canonical]) => ({
                   field,
+                  source_column: field,
                   canonical: typeof canonical === "string" ? canonical : String(canonical),
+                  canonical_field: typeof canonical === "string" ? canonical : String(canonical),
                   confidence: toNumber(semantic?.confidence),
-                  source: "engine"
+                  source: "engine",
+                  mapping_method: null,
+                  requires_confirmation: false,
+                  suggested_mappings: []
                 })),
             unknown_fields: Array.isArray(semantic?.unknown_fields)
               ? semantic.unknown_fields.filter((field): field is string => typeof field === "string")
@@ -445,7 +464,8 @@ export async function GET(request: Request) {
             id: true,
             dataSourceId: true,
             status: true,
-        errorMessage: true,
+            errorMessage: true,
+            progress: true,
             startedAt: true,
             lastHeartbeatAt: true,
             completedAt: true,
@@ -519,6 +539,7 @@ export async function GET(request: Request) {
           ? {
               id: latestIngestionJob.id,
               status: latestIngestionJob.status,
+              progress: latestIngestionJob.progress,
               startedAt: latestIngestionJob.startedAt?.toISOString() ?? null,
               lastHeartbeatAt: latestIngestionJob.lastHeartbeatAt?.toISOString() ?? null,
               completedAt: latestIngestionJob.completedAt?.toISOString() ?? null,

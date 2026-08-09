@@ -931,7 +931,7 @@ function priceRiskPenaltyForAction(input: {
       ? input.demandElasticity.demand_change / input.demandElasticity.price_change
       : -0.8;
   const coverageDays = input.sku.sales_velocity > 0 ? input.sku.inventory / Math.max(0.1, input.sku.sales_velocity) : 999;
-  const excessThreshold = input.thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const excessThreshold = input.thresholdProfile?.inventory_threshold.excess_coverage_days ?? 30;
   const restockThreshold = input.thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
   const marketPrice = marketReasonablePrice(input.sku);
   const marketRisk = marketPrice && input.sku.price < marketPrice ? 0 : 0.28;

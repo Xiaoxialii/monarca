@@ -18,7 +18,7 @@ export const DEFAULT_OPTIMIZATION_POLICY: OptimizationPolicy = {
         minimumMarginalRoas: 3.0,
         minimumMargin: 0.35,
         minimumConfidence: 0.7,
-        minimumInventoryCoverageDays: 30,
+        minimumInventoryCoverageDays: 7,
         maximumBudgetIncreasePct: 0.3,
         minimumCustomerQuality: 0.45,
         roasAnomalyThreshold: 20
@@ -43,7 +43,7 @@ export const DEFAULT_OPTIMIZATION_POLICY: OptimizationPolicy = {
     },
     inventory: {
       stockoutRiskDays: 14,
-      excessInventoryDays: 90,
+      excessInventoryDays: 30,
       minimumInventoryTurnover: 0.12,
       maximumInventoryInvestment: Number.POSITIVE_INFINITY
     },

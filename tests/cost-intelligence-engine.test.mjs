@@ -583,7 +583,7 @@ test("SKU profitability uses direct channel source costs without duplicated allo
   assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "PASSED");
 });
 
-test("SKU profitability prioritizes product unit cost and reconciles SKU_00479 style totals", () => {
+test("SKU profitability prioritizes order item cogs over product unit cost", () => {
   const result = calculateCostIntelligence({
     revenue: 23218,
     refundAmount: 0,
@@ -610,16 +610,45 @@ test("SKU profitability prioritizes product unit cost and reconciles SKU_00479 s
   const row = result.sku_unit_economics.find((item) => item.sku === "SKU_00479");
   assert.equal(row?.revenue, 23218);
   assert.equal(row?.quantity, 131);
-  assert.equal(row?.cogs, 8480.47);
+  assert.equal(row?.cogs, 12735.67);
   assert.equal(row?.ad_cost_allocated, 806);
   assert.equal(row?.shipping_cost, 18.95);
   assert.equal(row?.platform_fee, 600);
   assert.equal(row?.payment_fee, 366.01);
-  assert.equal(row?.total_cost, 10271.43);
-  assert.equal(row?.net_profit, 12946.57);
-  assert.equal(row?.margin, 0.5576);
+  assert.equal(row?.total_cost, 14526.63);
+  assert.equal(row?.net_profit, 8691.37);
+  assert.equal(row?.margin, 0.3743);
   assert.equal(row?.net_profit, Math.round((row.revenue - row.total_cost) * 100) / 100);
   assert.equal(row?.total_cost, Math.round((row.cogs + (row.ad_cost_allocated ?? 0) + row.shipping_cost + row.platform_fee + row.payment_fee + row.fulfillment_cost + row.refund_cost) * 100) / 100);
+});
+
+test("SKU profitability falls back to product unit cost when order item cogs is missing", () => {
+  const result = calculateCostIntelligence({
+    revenue: 23218,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      {
+        order_id: "ORDER-00479",
+        product_id: "PRODUCT-00479",
+        sku: "SKU_00479",
+        quantity: 131,
+        revenue: 23218,
+        shipping_cost: 18.95,
+        platform_fee: 600,
+        payment_fee: 366.01
+      }
+    ],
+    products: [{ product_id: "PRODUCT-00479", sku: "SKU_00479", unit_cost: 8480.47 / 131 }],
+    orders: [{ order_id: "ORDER-00479", revenue: 23218 }],
+    ads: [{ ad_id: "AD-00479", sku: "SKU_00479", spend: 806 }],
+    inventory: [{ sku: "SKU_00479", stock_level: 558 }]
+  });
+
+  const row = result.sku_unit_economics.find((item) => item.sku === "SKU_00479");
+  assert.equal(row?.cogs, 8480.47);
+  assert.equal(row?.cogs_status, "AVAILABLE");
+  assert.equal(row?.cogs_confidence, 1);
 });
 
 test("SKU direct ads keep multiple same-campaign source rows instead of collapsing spend", () => {

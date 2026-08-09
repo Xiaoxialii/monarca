@@ -177,6 +177,25 @@ test("canonical engine normalizes ads mapped records into ecommerce_ads", () => 
   assert.equal(result.tables.ecommerce_ads[0].attribution_revenue, 250);
 });
 
+test("canonical engine preserves advertising spend when campaign date is unavailable", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "meta_ads",
+      source_id: "uploaded-ads-row-1",
+      fields: {
+        ad_spend: 120,
+        impressions: 1000,
+        clicks: 50
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_ads.length, 1);
+  assert.equal(result.tables.ecommerce_ads[0].spend, 120);
+  assert.equal(result.tables.ecommerce_ads[0].campaign_id, "uploaded-ads-row-1");
+  assert.equal(result.metadata.validation.rejected.some((row) => row.table === "ecommerce_ads"), false);
+});
+
 test("canonical engine preserves ecommerce profit fields on order items", () => {
   const result = buildCanonicalDatasetFromMappedRecords([
     {
@@ -200,6 +219,95 @@ test("canonical engine preserves ecommerce profit fields on order items", () => 
   assert.equal(result.tables.ecommerce_order_items[0].cogs, 60);
   assert.equal(result.tables.ecommerce_orders[0].shipping_cost, 12);
   assert.equal(result.tables.ecommerce_costs.length, 4);
+});
+
+test("canonical engine resolves cogs as order item cost in order item context", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "csv",
+      source_id: "order-row-1",
+      fields: {
+        order_id: "O-1",
+        order_date: "2026-06-01",
+        sku: "SKU-ORDER-COST",
+        quantity: 2,
+        revenue: 100,
+        cogs: 45
+      },
+      metadata: {
+        field_mappings: [
+          { canonical_field: "cogs", source_column: "cogs", source_system: "csv", mapping_confidence: 1 }
+        ]
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_order_items.length, 1);
+  assert.equal(result.tables.ecommerce_order_items[0].cogs, 45);
+  assert.equal(result.tables.ecommerce_products[0]?.product_cost, undefined);
+  assert.ok(result.metadata.field_mappings.some((mapping) =>
+    mapping.canonical_field === "cogs" &&
+    mapping.source_column === "cogs" &&
+    mapping.source_file_type === "order_items" &&
+    mapping.target_entity === "ecommerce_order_items"
+  ));
+});
+
+test("canonical engine resolves cogs as product cost in product catalog context", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "csv",
+      source_id: "catalog-row-1",
+      fields: {
+        sku: "SKU-CATALOG-COST",
+        product_name: "Margin Hoodie",
+        category: "Apparel",
+        cogs: 12.5
+      },
+      metadata: {
+        field_mappings: [
+          { canonical_field: "cogs", source_column: "cogs", source_system: "csv", mapping_confidence: 1 }
+        ]
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_order_items.length, 0);
+  assert.equal(result.tables.ecommerce_products.length, 1);
+  assert.equal(result.tables.ecommerce_products[0].product_cost, 12.5);
+  assert.ok(result.metadata.field_mappings.some((mapping) =>
+    mapping.canonical_field === "product_cost" &&
+    mapping.source_column === "cogs" &&
+    mapping.source_file_type === "product_catalog" &&
+    mapping.target_entity === "ecommerce_products"
+  ));
+});
+
+test("canonical engine accepts product catalog product_cost without creating order item cogs", () => {
+  const result = buildCanonicalDatasetFromMappedRecords([
+    {
+      platform: "csv",
+      source_id: "catalog-row-2",
+      fields: {
+        sku: "SKU-PRODUCT-COST",
+        product_name: "Unit Cost Tee",
+        product_cost: 9.75
+      },
+      metadata: {
+        field_mappings: [
+          { canonical_field: "product_cost", source_column: "unit_cost", source_system: "csv", mapping_confidence: 0.95 }
+        ]
+      }
+    }
+  ]);
+
+  assert.equal(result.tables.ecommerce_order_items.length, 0);
+  assert.equal(result.tables.ecommerce_products[0].product_cost, 9.75);
+  assert.ok(result.metadata.field_mappings.some((mapping) =>
+    mapping.canonical_field === "product_cost" &&
+    mapping.source_column === "unit_cost" &&
+    mapping.source_file_type === "product_catalog"
+  ));
 });
 
 test("canonical engine builds inventory rows from stock fields", () => {

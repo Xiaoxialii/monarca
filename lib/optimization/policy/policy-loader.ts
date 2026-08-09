@@ -55,10 +55,10 @@ function applyIndustryPolicy(base: OptimizationPolicy, industry: string): Optimi
   if (/fashion|apparel|beauty/.test(normalized)) {
     policy.userBenchmark = { roas: 3.0, margin: 0.48, conversionRate: 0.025, inventoryTurnover: 0.2, cac: 32 };
     policy.thresholds.advertising.scaleAds.minimumMargin = 0.34;
-    policy.thresholds.inventory.excessInventoryDays = 90;
+    policy.thresholds.inventory.excessInventoryDays = 30;
   } else if (/home|furniture|decor/.test(normalized)) {
     policy.userBenchmark = { roas: 2.4, margin: 0.38, conversionRate: 0.018, inventoryTurnover: 0.11, cac: 55 };
-    policy.thresholds.inventory.excessInventoryDays = 120;
+    policy.thresholds.inventory.excessInventoryDays = 45;
   } else if (/electronics|gadget/.test(normalized)) {
     policy.userBenchmark = { roas: 2.8, margin: 0.24, conversionRate: 0.016, inventoryTurnover: 0.18, cac: 48 };
     policy.thresholds.advertising.scaleAds.minimumMargin = 0.2;
@@ -126,7 +126,7 @@ function applyOptimizationOutcomeHistory(policy: OptimizationPolicy, history: No
   }
 
   if (inventory.length) {
-    next.thresholds.inventory.excessInventoryDays = Math.round(Math.max(45, next.thresholds.inventory.excessInventoryDays * actualPredictionRatio(inventory)));
+    next.thresholds.inventory.excessInventoryDays = Math.round(Math.max(30, next.thresholds.inventory.excessInventoryDays * actualPredictionRatio(inventory)));
   }
 
   return next;

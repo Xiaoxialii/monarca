@@ -1269,14 +1269,14 @@ function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
                         >
                           {step}
                         </div>
-                        {index < processSteps.length - 1 ? (
+                        {index < processSteps.length ? (
                           <span
                             className={cn(
                               "text-sm font-black leading-none",
-                              index === 6 ? "text-emerald-800" : "text-slate-400"
+                              index === processSteps.length - 1 ? "text-emerald-800" : "text-slate-400"
                             )}
                           >
-                            {index === 6 ? "↺" : "→"}
+                            {index === processSteps.length - 1 ? "↺" : "→"}
                           </span>
                         ) : null}
                       </div>

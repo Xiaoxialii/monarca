@@ -87,7 +87,7 @@ body {
 }
 
 .hero-title-shimmer {
-  background: linear-gradient(110deg, #020617 0%, #020617 38%, #34d399 48%, #f8fafc 52%, #020617 62%, #020617 100%);
+  background: linear-gradient(110deg, #064e3b 0%, #065f46 30%, #10b981 42%, #6ee7b7 50%, #f8fafc 56%, #94a3b8 68%, #063f35 100%);
   background-clip: text;
   background-size: 260% 100%;
   -webkit-background-clip: text;

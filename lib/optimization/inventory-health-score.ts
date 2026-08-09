@@ -103,7 +103,7 @@ export function assessSelectedInventoryMix(rows: ProfitSimulationResult[]): Inve
 
 export function clearInventoryQualityScore(sku: PortfolioSkuInput, thresholdProfile?: DynamicThresholdProfile): ClearInventoryQuality {
   const coverageDays = skuInventoryCoverageDays(sku);
-  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 30;
   const forecast = demandForecast(sku);
   const inventoryPressure = clamp01((coverageDays - excessThreshold) / Math.max(30, excessThreshold));
   const demandBelowInventory = forecast < sku.inventory;

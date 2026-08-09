@@ -57,6 +57,19 @@ export type EcommerceSalesDashboardData = {
     schema_version: "ecommerce_canonical_v1";
     source_platforms: string[];
     computed_at: string;
+    field_mappings?: Array<{
+      canonical_field: string;
+      source_column: string;
+      source_field?: string;
+      source_file?: string;
+      source_system?: string;
+      source_file_type?: string;
+      target_entity?: string;
+      mapping_confidence: number;
+      mapping_method?: string;
+      requires_confirmation?: boolean;
+      status?: string;
+    }>;
     date_range?: {
       preset: string;
       startDate?: string | null;
@@ -174,6 +187,12 @@ export function buildEcommerceSalesDashboardData(
       schema_version: metricResult.metadata.schema_version,
       source_platforms: metricResult.metadata.source_platforms,
       computed_at: metricResult.metadata.computed_at,
+      field_mappings: dataset.metadata.field_mappings?.map((mapping) => ({
+        ...mapping,
+        source_field: mapping.source_column,
+        source_file: sourceFileLabel(mapping.source_system),
+        status: mapping.requires_confirmation ? "NEEDS_CONFIRMATION" : "AVAILABLE"
+      })),
       date_range: {
         preset: filtered.dateRange.preset,
         startDate: filtered.dateRange.startDate ?? null,
@@ -338,6 +357,15 @@ function spreadMonthDate(date: string, index: number) {
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const day = (index % daysInMonth) + 1;
   return `${match[1]}-${match[2]}-${String(day).padStart(2, "0")}`;
+}
+
+function sourceFileLabel(sourceSystem?: string) {
+  const normalized = String(sourceSystem ?? "").toLowerCase();
+  if (normalized === "meta_ads" || normalized === "meta" || normalized === "facebook_ads") return "Meta Ads";
+  if (normalized === "google_ads") return "Google Ads";
+  if (normalized === "amazon_ads") return "Amazon Ads";
+  if (normalized === "shopify_ads") return "Shopify Ads";
+  return sourceSystem || "Uploaded file";
 }
 
 function aggregateRefundsByPeriod(rows: CanonicalRow[], granularity: "day" | "week" | "month") {

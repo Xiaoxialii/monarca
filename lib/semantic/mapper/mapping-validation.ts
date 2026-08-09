@@ -60,7 +60,7 @@ const REVENUE_CONCEPTS = new Set<CanonicalConcept>([
   "shipping_revenue"
 ]);
 
-const ADS_FIELDS = ["ad_spend", "ads_spend", "advertising_spend", "marketing_spend", "media_spend", "campaign_spend"];
+const ADS_FIELDS = ["ad_spend", "ads_spend", "advertising_spend", "advertising_cost", "amount_spent", "total_spend", "total_ad_spend", "marketing_spend", "media_spend", "campaign_spend"];
 
 const ADS_CONCEPTS = new Set<CanonicalConcept>(["ad_spend"]);
 
@@ -85,12 +85,14 @@ export function validateSemanticMapping(sourceField: string, predictedConcept: C
     return reject(sourceField, predictedConcept, "price_requires_unit_price_mapping_not_aggregated_revenue");
   }
 
-  if (matchesAny(normalized, REVENUE_FIELDS) && !REVENUE_CONCEPTS.has(predictedConcept)) {
-    return reject(sourceField, predictedConcept, "revenue_field_must_map_to_revenue_concept");
+  if (matchesAny(normalized, ADS_FIELDS)) {
+    return ADS_CONCEPTS.has(predictedConcept)
+      ? { sourceField, predictedConcept, accepted: true }
+      : reject(sourceField, predictedConcept, "advertising_spend_must_map_to_ad_spend");
   }
 
-  if (matchesAny(normalized, ADS_FIELDS) && !ADS_CONCEPTS.has(predictedConcept)) {
-    return reject(sourceField, predictedConcept, "advertising_spend_must_map_to_ad_spend");
+  if (matchesAny(normalized, REVENUE_FIELDS) && !REVENUE_CONCEPTS.has(predictedConcept)) {
+    return reject(sourceField, predictedConcept, "revenue_field_must_map_to_revenue_concept");
   }
 
   if (matchesAny(normalized, DATE_FIELDS) && predictedConcept !== "event_date" && predictedConcept !== "order_date") {

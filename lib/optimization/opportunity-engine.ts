@@ -48,11 +48,11 @@ function detectSkuOpportunitySpace(sku: PortfolioSkuInput, thresholdProfile?: Dy
   const confidence = sku.prediction_confidence ?? 0.55;
   const growthMarginThreshold = thresholdProfile?.scale_ads_threshold.margin ?? 0.25;
   const growthConfidenceThreshold = thresholdProfile?.scale_ads_threshold.confidence ?? 0.6;
-  const growthCoverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 14;
+  const growthCoverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 7;
   const priceMarginThreshold = thresholdProfile?.price_threshold.margin_headroom ?? 0.18;
   const priceConversionThreshold = thresholdProfile?.price_threshold.conversion_stability ?? 0.01;
   const restockCoverageThreshold = thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
-  const excessCoverageThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const excessCoverageThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 30;
   const adWasteRoasThreshold = thresholdProfile?.portfolio_health_threshold.marginal_roas ?? 1.35;
   const estimatedRoas = sku.ads_spend > 0 ? sku.revenue / Math.max(1, sku.ads_spend) : 0;
   const marginalRoasThreshold = thresholdProfile?.scale_ads_threshold.marginal_roas ?? 2.2;

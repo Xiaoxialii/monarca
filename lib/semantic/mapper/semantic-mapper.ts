@@ -2,6 +2,7 @@ import { analyzeRawFields } from "@/lib/semantic/engine/field-analyzer";
 import { SemanticIntelligenceEngine } from "@/lib/semantic/engine/semantic-intelligence-engine";
 import { buildCanonicalSchema } from "@/lib/semantic/mapper/canonical-schema-engine";
 import { firstValidCandidate, validateSemanticMapping } from "@/lib/semantic/mapper/mapping-validation";
+import { ambiguousFieldSuggestions, mappingMethodFromCandidate, registryCandidatesForField } from "@/lib/semantic/field-mapping/canonical-field-registry";
 import type { SemanticMemoryStore } from "@/lib/semantic/memory";
 import type { MappingValidationResult, RawFieldObservation, SemanticCandidate, SemanticMapperResult, SemanticMappingDecision } from "@/lib/semantic/types";
 
@@ -22,7 +23,12 @@ export class RuntimeSemanticMapper {
   async map(rawData: unknown, options: SemanticMapperOptions = {}): Promise<SemanticMapperResult> {
     const analyzer = analyzeRawFields(rawData);
     const engineResult = this.input.engine.analyzeFields(analyzer.fields);
-    const candidatesByField = groupCandidates(engineResult.candidates);
+    const siblingFieldContext = analyzer.fields.map((field) => field.field).join("_");
+    const registryCandidates = analyzer.fields.flatMap((field) => registryCandidatesForField({
+      ...field,
+      context: [...field.context, siblingFieldContext]
+    }));
+    const candidatesByField = groupCandidates([...registryCandidates, ...engineResult.candidates]);
     const decisions: SemanticMappingDecision[] = [];
     const pendingWrites: Array<{ field: RawFieldObservation; decision: SemanticMappingDecision }> = [];
     const validationResults: MappingValidationResult[] = [];
@@ -33,10 +39,13 @@ export class RuntimeSemanticMapper {
       const engineCandidates = candidatesByField.get(field.field) ?? [];
       const memoryCandidates = await this.memoryCandidates(field, options.platform);
       const memoryCandidate = memoryCandidates[0];
+      const registryCandidate = engineCandidates.find((candidate) => candidate.source === "registry" && candidate.confidence >= 0.9);
       const threshold = options.memoryConfidenceThreshold ?? 0.72;
-      const preferred = memoryCandidate && memoryCandidate.confidence >= threshold
-        ? memoryCandidate
-        : engineCandidates.find((candidate) => candidate.maps_to !== "unknown");
+      const preferred = registryCandidate
+        ? registryCandidate
+        : memoryCandidate && memoryCandidate.confidence >= threshold
+          ? memoryCandidate
+          : engineCandidates.find((candidate) => candidate.maps_to !== "unknown");
       const selectedValidation = preferred
         ? validateSemanticMapping(field.field, preferred.maps_to)
         : null;
@@ -57,21 +66,41 @@ export class RuntimeSemanticMapper {
       if (memoryCandidate && memoryCandidate.confidence >= threshold) memoryHits += 1;
       validationResults.push(validation);
 
-      const decision: SemanticMappingDecision = selected
+      const requiresConfirmation = !selected || selected.confidence < 0.72 || mappingMethodFromCandidate(selected) === "ai_suggested";
+      const suggestedMappings = [...memoryCandidates, ...engineCandidates]
+        .filter((candidate) => candidate.maps_to !== "unknown")
+        .slice(0, 3)
+        .map((candidate) => ({
+          canonical_field: candidate.maps_to,
+          confidence: candidate.confidence,
+          reason: candidate.reason
+        }));
+      const finalSuggestedMappings = suggestedMappings.length ? suggestedMappings : ambiguousFieldSuggestions(field);
+      const decision: SemanticMappingDecision = selected && !requiresConfirmation
         ? {
             field: field.path || field.field,
+            source_field: field.field,
             canonical: selected.maps_to,
+            canonical_field: selected.maps_to,
             confidence: selected.confidence,
-            source: selected.source === "memory" ? "memory" : "engine",
+            source: selected.source === "registry" ? "registry" : selected.source === "memory" ? "memory" : "engine",
+            mapping_method: mappingMethodFromCandidate(selected),
+            requires_confirmation: false,
             candidates: [...memoryCandidates, ...engineCandidates],
+            suggested_mappings: finalSuggestedMappings,
             validation
           }
         : {
             field: field.path || field.field,
+            source_field: field.field,
             canonical: "unknown",
+            canonical_field: "unknown",
             confidence: 0,
             source: "unmapped",
-            candidates: engineCandidates,
+            mapping_method: selected ? mappingMethodFromCandidate(selected) : undefined,
+            requires_confirmation: Boolean(finalSuggestedMappings.length),
+            candidates: [...memoryCandidates, ...engineCandidates],
+            suggested_mappings: finalSuggestedMappings,
             validation
           };
 

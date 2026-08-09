@@ -45,7 +45,7 @@ type RecommendationIdentityContext = {
 };
 
 const OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE =
-  "Connected, but operating reports need sales/order history, order line items, refunds, customers, inventory, unit costs, fulfillment costs, and ad spend to generate reliable KPIs and recommendations.";
+  "Connected, but optimization needs order id/date, SKU order items, revenue, unit cost/COGS, shipping cost, platform fee, payment fee, refunds, SKU-level ad spend, inventory on hand, and channel/platform fields to generate reliable profit lift.";
 const PROFIT_INPUT_ROW_LIMIT = 250;
 
 export async function generateEcommerceDecisionSnapshots(
@@ -723,7 +723,7 @@ function compactPortfolioOptimization(
         ? [{
           step: 1,
           action: "MONITOR",
-          description: "Review partial optimization recommendations after enriching cost, refund, inventory, and ad spend inputs.",
+          description: "Review partial optimization recommendations after enriching cost, refund, SKU-level ad spend, inventory, and channel inputs.",
           skuIds: compactSkuDecisions.map((row) => String(asRecord(row)?.skuId ?? "")).filter(Boolean),
           estimatedProfitImpact: totalProfitImpact
         }]
@@ -809,8 +809,8 @@ function partialSkuRecommendations(
     const action = "OPTIMIZE";
     const sourceAction = profitInputModel.profitDataCoverage >= 70 ? "VALIDATE_AND_SCALE" : "ENRICH_PROFIT_INPUTS";
     const recommendation = profitInputModel.profitDataCoverage >= 70
-      ? "Revenue and demand signals are available, but missing cost inputs reduce profit certainty. Validate unit costs and fulfillment costs before increasing spend materially."
-      : "Sales activity is present, but profit inputs are incomplete. Track this SKU and enrich cost, inventory, refund, and ad spend data before running full optimization.";
+      ? "Revenue and demand signals are available, but missing profit inputs reduce certainty. Validate unit costs, shipping cost, platform fee, payment fee, refunds, SKU-level ad spend, inventory, and channel data before increasing spend materially."
+      : "Sales activity is present, but profit inputs are incomplete. Track this SKU and enrich cost, refund, SKU-level ad spend, inventory, and channel data before running full optimization.";
     const title = profitInputModel.profitDataCoverage >= 70
       ? `Review growth opportunity for ${row.sku}`
       : `Enrich profit inputs for ${row.sku}`;

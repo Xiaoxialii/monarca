@@ -97,7 +97,7 @@ export function evaluateInventoryDecision(input: InventoryDecisionInput): Invent
   const capitalRisk = inventoryValue > Math.max(10000, input.revenue * 0.6) ? 0.18 : inventoryValue > Math.max(5000, input.revenue * 0.35) ? 0.1 : 0.02;
   const channelRisk = strongestChannel >= 0.65 ? 0.08 : strongestChannel > 0 && strongestChannel < 0.45 ? -0.04 : 0.02;
   const advertisingDependencyRisk = paidDependencyScore > 0.25 && (input.roas_confidence ?? "LOW") === "LOW" ? 0.16 : paidDependencyScore > 0.15 ? 0.08 : 0.02;
-  const supplyRisk = runway !== null && runway < 21 ? 0.22 : runway !== null && runway > 90 ? 0.16 : 0.03;
+  const supplyRisk = runway !== null && runway < 21 ? 0.22 : runway !== null && runway > 30 ? 0.16 : 0.03;
   const seasonalityAdjustment = seasonalityScore > 0.65 ? -0.12 : 0;
 
   const riskScore = clamp(
@@ -116,13 +116,13 @@ export function evaluateInventoryDecision(input: InventoryDecisionInput): Invent
     reasons.push(`Inventory coverage is ${roundRatio(runway)} days, below the 14-day stockout threshold.`);
   } else if (
     runway !== null &&
-    runway > 90 &&
+    runway > 30 &&
     (lifecycle === "DECLINING" || demandTrend.direction === "DOWN" || sellThroughRate < 0.25)
   ) {
     riskStatus = margin < 0.2 ? "LIQUIDATION_RISK" : "EXCESS_INVENTORY";
     action = margin < 0.2 && dataConfidence !== "LOW" ? "LIQUIDATE" : "REDUCE_PURCHASE";
     reasons.push(`Inventory coverage is ${roundRatio(runway)} days while demand indicators are weak.`);
-  } else if (runway !== null && runway > 120 && inventoryValue > Math.max(5000, input.revenue * 0.25)) {
+  } else if (runway !== null && runway > 60 && inventoryValue > Math.max(5000, input.revenue * 0.25)) {
     riskStatus = "OVERSTOCK_RISK";
     action = dataConfidence === "LOW" ? "MONITOR" : "INCREASE_DEMAND";
     reasons.push(`Inventory value ${roundCurrency(inventoryValue)} is high relative to current demand.`);

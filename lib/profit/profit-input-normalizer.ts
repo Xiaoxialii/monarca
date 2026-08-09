@@ -49,28 +49,44 @@ export type ProfitInputModel = {
   confidenceScore: number;
 };
 
-const PROFIT_REQUIREMENTS = [
-  "sales_order_history",
-  "order_line_items",
-  "refunds",
-  "customers",
-  "inventory",
-  "unit_costs",
-  "fulfillment_costs",
-  "warehouse_costs",
-  "ad_spend"
+const OPTIMIZATION_CORE_REQUIREMENTS = [
+  "orders.order_id",
+  "orders.order_date",
+  "order_items.sku",
+  "order_items.quantity",
+  "order_items.revenue",
+  "products.sku_or_product_id",
+  "cost.unit_cost_or_cogs",
+  "cost.shipping_cost",
+  "cost.platform_fee",
+  "cost.payment_fee",
+  "refunds.order_id",
+  "refunds.refund_amount",
+  "ads.ad_spend",
+  "ads.sku_or_product_id",
+  "inventory.sku",
+  "inventory.inventory_on_hand",
+  "channel.channel_or_platform"
 ] as const;
 
-const MISSING_FIELD_ALIASES: Record<typeof PROFIT_REQUIREMENTS[number], RegExp[]> = {
-  sales_order_history: [/ecommerce_orders\.\*/, /orders/i],
-  order_line_items: [/ecommerce_order_items\.\*/, /line_?items/i],
-  refunds: [/ecommerce_refunds\.\*/, /refund/i],
-  customers: [/ecommerce_customers\.customer_id/, /customer/i],
-  inventory: [/ecommerce_inventory\.\*/, /inventory|stock/i],
-  unit_costs: [/ecommerce_order_items\.cogs/, /cogs|unit_cost/i],
-  fulfillment_costs: [/fulfillment|handling_cost/i],
-  warehouse_costs: [/warehouse_cost/i],
-  ad_spend: [/ecommerce_ads\.\*/, /ecommerce_ads\.spend/, /ad_spend|spend/i]
+const OPTIMIZATION_CORE_FIELD_ALIASES: Record<typeof OPTIMIZATION_CORE_REQUIREMENTS[number], RegExp[]> = {
+  "orders.order_id": [/ecommerce_orders\.\*/, /ecommerce_orders\.order_id/, /^orders?\.order_id$/i],
+  "orders.order_date": [/ecommerce_orders\.order_date/, /^orders?\.order_date$/i],
+  "order_items.sku": [/ecommerce_order_items\.\*/, /ecommerce_order_items\.sku/, /line_?items?.*sku/i],
+  "order_items.quantity": [/ecommerce_order_items\.\*/, /ecommerce_order_items\.quantity/, /line_?items?.*quantity/i],
+  "order_items.revenue": [/ecommerce_order_items\.\*/, /ecommerce_order_items\.(revenue|price|paid_amount|order_amount|net_sales)/, /line_?items?.*(revenue|price|amount)/i],
+  "products.sku_or_product_id": [/ecommerce_products\.\*/, /ecommerce_products\.(sku|product_id|variant_id)/, /products?.*(sku|product_id)/i],
+  "cost.unit_cost_or_cogs": [/ecommerce_order_items\.cogs/, /cogs|unit_cost|product_cost/i],
+  "cost.shipping_cost": [/ecommerce_orders\.shipping_cost/, /shipping_(cost|fee|expense)|carrier_cost|postage_cost/i],
+  "cost.platform_fee": [/ecommerce_orders\.platform_fee/, /platform_fee|marketplace_fee|selling_fee|commission_fee/i],
+  "cost.payment_fee": [/ecommerce_orders\.payment_fee/, /payment_fee|processing_fee|transaction_fee|stripe_fee/i],
+  "refunds.order_id": [/ecommerce_refunds\.\*/, /ecommerce_refunds\.order_id/, /refunds?.*order_id/i],
+  "refunds.refund_amount": [/ecommerce_refunds\.\*/, /ecommerce_refunds\.(amount|refund_amount)/, /refund/i],
+  "ads.ad_spend": [/ecommerce_ads\.\*/, /ecommerce_ads\.spend/, /ad_spend|ads?_spend|spend/i],
+  "ads.sku_or_product_id": [/ecommerce_ads\.\*/, /ecommerce_ads\.(sku|product_id|variant_id)/, /ads?.*(sku|product_id)/i],
+  "inventory.sku": [/ecommerce_inventory\.\*/, /ecommerce_inventory\.sku/, /inventory.*sku/i],
+  "inventory.inventory_on_hand": [/ecommerce_inventory\.\*/, /ecommerce_inventory\.(stock_level|inventory_on_hand|available_stock|stock)/, /inventory_on_hand|stock_level|available_stock/i],
+  "channel.channel_or_platform": [/channel|platform|source_platform/i]
 };
 
 export function normalizeProfitInputs(data: EcommerceSalesDashboardData): ProfitInputModel {
@@ -78,7 +94,8 @@ export function normalizeProfitInputs(data: EcommerceSalesDashboardData): Profit
   const topProfitSkus = report.sku_breakdown.top_profit_skus;
   const topRevenueSkus = report.sku_breakdown.top_revenue_skus;
   const revenueBySku = new Map(topRevenueSkus.map((row) => [row.sku, row]));
-  const missingFields = Array.from(new Set(data.quality.missing_fields ?? []));
+  const sourceMissingFields = Array.from(new Set(data.quality.missing_fields ?? []));
+  const missingFields = optimizationMissingFields(data, sourceMissingFields);
   const totals = {
     revenue: numberValue(report.performance_overview.revenue),
     ad_spend: numberValue(report.performance_overview.ad_spend),
@@ -117,7 +134,7 @@ export function normalizeProfitInputs(data: EcommerceSalesDashboardData): Profit
       adAllocationMethod: canonicalAdAllocationMethod("ad_allocation_method" in row ? row.ad_allocation_method : undefined),
       attributionConfidence: "attribution_confidence" in row ? numberValue(row.attribution_confidence) : undefined
     });
-    const rowMissingFields = missingFields.filter((field) => /cogs|fulfillment|handling|warehouse|refund|ads|spend/i.test(field));
+    const rowMissingFields = missingFields.filter((field) => /cogs|unit_cost|shipping|platform_fee|payment_fee|refund|ads|spend|inventory/i.test(field));
 
     totals.cogs += cogs;
     totals.fulfillment_cost += fulfillment;
@@ -174,27 +191,69 @@ export function normalizeProfitInputs(data: EcommerceSalesDashboardData): Profit
 }
 
 export function profitDataCoverage(data: EcommerceSalesDashboardData, missingFields = data.quality.missing_fields ?? []) {
-  const missing = new Set<typeof PROFIT_REQUIREMENTS[number]>();
+  const missing = optimizationMissingRequirementSet(data, Array.from(new Set(missingFields)));
+  const present = OPTIMIZATION_CORE_REQUIREMENTS.length - missing.size;
 
-  for (const requirement of PROFIT_REQUIREMENTS) {
-    const aliases = MISSING_FIELD_ALIASES[requirement];
+  return Math.max(0, Math.min(100, Math.round((present / OPTIMIZATION_CORE_REQUIREMENTS.length) * 100)));
+}
+
+function optimizationMissingFields(data: EcommerceSalesDashboardData, missingFields: string[]) {
+  const missingRequirements = optimizationMissingRequirementSet(data, missingFields);
+  return OPTIMIZATION_CORE_REQUIREMENTS.filter((requirement) => missingRequirements.has(requirement));
+}
+
+function optimizationMissingRequirementSet(data: EcommerceSalesDashboardData, missingFields: string[]) {
+  const missing = new Set<typeof OPTIMIZATION_CORE_REQUIREMENTS[number]>();
+
+  for (const requirement of OPTIMIZATION_CORE_REQUIREMENTS) {
+    const aliases = OPTIMIZATION_CORE_FIELD_ALIASES[requirement];
     if (aliases.some((pattern) => missingFields.some((field) => pattern.test(field)))) {
       missing.add(requirement);
     }
   }
 
-  if (data.metrics.core.orders > 0) missing.delete("sales_order_history");
-  if (data.metrics.core.sku_revenue.length > 0) missing.delete("order_line_items");
-  if (data.metrics.ads.ad_spend > 0) missing.delete("ad_spend");
-  if (data.catalog_health.sku_count > 0 || data.catalog_health.catalog_row_count > 0) {
-    missing.delete("inventory");
-  }
-  if (data.refund_insights.refund_amount > 0 || !missingFields.some((field) => /refund/i.test(field))) {
-    missing.delete("refunds");
-  }
+  const skuRevenueRows = data.metrics.core.sku_revenue;
+  const skuUnitRows = data.metrics.business.sku_unit_economics ?? [];
+  const totalSkuRevenue = skuRevenueRows.reduce((sum, row) => sum + numberValue(row.revenue), 0);
+  const totalSkuQuantity = skuRevenueRows.reduce((sum, row) => sum + numberValue(row.quantity), 0);
+  const hasSkuUnitRows = skuUnitRows.length > 0;
+  const sourcePlatforms = data.metadata.source_platforms ?? [];
 
-  const present = PROFIT_REQUIREMENTS.length - missing.size;
-  return Math.max(0, Math.min(100, Math.round((present / PROFIT_REQUIREMENTS.length) * 100)));
+  if (data.metrics.core.orders > 0) missing.delete("orders.order_id");
+  if (data.trends.daily_revenue.length > 0 || !missingFields.some((field) => /order_date/i.test(field))) missing.delete("orders.order_date");
+  if (skuRevenueRows.length > 0) {
+    missing.delete("order_items.sku");
+    missing.delete("products.sku_or_product_id");
+  }
+  if (totalSkuQuantity > 0) missing.delete("order_items.quantity");
+  if (totalSkuRevenue > 0) missing.delete("order_items.revenue");
+  if (data.catalog_health.sku_count > 0 || data.catalog_health.catalog_row_count > 0) missing.delete("products.sku_or_product_id");
+  if (hasSkuUnitRows && skuUnitRows.some((row) => numberValue(row.cogs) > 0 && row.cogs_status !== "MISSING")) missing.delete("cost.unit_cost_or_cogs");
+  if (!missingFields.some((field) => /shipping_cost/i.test(field))) missing.delete("cost.shipping_cost");
+  if (!missingFields.some((field) => /platform_fee/i.test(field))) missing.delete("cost.platform_fee");
+  if (!missingFields.some((field) => /payment_fee/i.test(field))) missing.delete("cost.payment_fee");
+  if (!missingFields.some((field) => /refund/i.test(field)) || data.refund_insights.refund_amount > 0) {
+    missing.delete("refunds.order_id");
+    missing.delete("refunds.refund_amount");
+  }
+  if (numberValue(data.metrics.ads.ad_spend) > 0 || numberValue(data.metrics.business.ad_spend) > 0) missing.delete("ads.ad_spend");
+  if (
+    data.metrics.attribution.sku_attribution_coverage > 0 ||
+    skuUnitRows.some((row) => numberValue(row.ad_cost_allocated) > 0) ||
+    !missingFields.some((field) => /ecommerce_ads\.\*|ecommerce_ads\.(sku|product_id|variant_id)/i.test(field))
+  ) {
+    missing.delete("ads.sku_or_product_id");
+  }
+  if (data.catalog_health.sku_count > 0 || hasSkuUnitRows) missing.delete("inventory.sku");
+  if (
+    skuUnitRows.some((row) => numberValue(row.stock_level ?? row.available_stock) > 0) ||
+    !missingFields.some((field) => /inventory|stock/i.test(field))
+  ) {
+    missing.delete("inventory.inventory_on_hand");
+  }
+  if (sourcePlatforms.length > 0 || skuUnitRows.some((row) => Object.keys(row.channel_breakdown ?? {}).length > 0)) missing.delete("channel.channel_or_platform");
+
+  return missing;
 }
 
 function optimizationLevel(coverage: number): ProfitInputModel["optimizationLevel"] {

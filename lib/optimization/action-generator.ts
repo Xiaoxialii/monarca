@@ -95,7 +95,7 @@ function generateSkuActions(sku: PortfolioSkuInput, opportunity: Opportunity, li
   const opportunityTypes = new Set(opportunity.opportunity_types?.length ? opportunity.opportunity_types : [opportunity.opportunity_type]);
   const coverageDays = sku.sales_velocity > 0 ? sku.inventory / Math.max(0.1, sku.sales_velocity) : 999;
   const restockThreshold = thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
-  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 30;
   const priceStep = thresholdProfile?.business_objective === "PROFIT" ? 0.1 : 0.05;
   const canIncreasePrice = isPriceIncreaseEligible(sku, thresholdProfile, coverageDays);
   const canScaleAds = isScaleAdsEligible(sku, thresholdProfile, coverageDays);
@@ -260,7 +260,7 @@ function isPriceIncreaseEligible(sku: PortfolioSkuInput, thresholdProfile?: Dyna
   if (elasticity < -1) return false;
 
   const restockThreshold = thresholdProfile?.inventory_threshold.restock_coverage_days ?? 21;
-  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 90;
+  const excessThreshold = thresholdProfile?.inventory_threshold.excess_coverage_days ?? 30;
   if (coverageDays < restockThreshold || coverageDays > excessThreshold) return false;
 
   return true;
@@ -275,7 +275,7 @@ function isScaleAdsEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicTh
   if ((sku.cac_confidence ?? sku.customer_metric_confidence ?? "LOW") === "LOW") return false;
 
   const confidenceThreshold = thresholdProfile?.scale_ads_threshold.confidence ?? 0.6;
-  const coverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 30;
+  const coverageThreshold = thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? 7;
   const marginThreshold = thresholdProfile?.scale_ads_threshold.margin ?? 0.3;
   const marginalRoasThreshold = thresholdProfile?.scale_ads_threshold.marginal_roas ?? 2.2;
   const estimatedRoas = normalizedRoasForActionGenerator(sku.revenue / Math.max(1, sku.ads_spend), sku.ads_spend, attributionConfidence, sku.roas_confidence);
@@ -311,7 +311,7 @@ function shouldCreateUncertaintyAdTest(
 ) {
   const marginThreshold = Math.max(0.18, (thresholdProfile?.scale_ads_threshold.margin ?? policy.thresholds.advertising.scaleAds.minimumMargin) - 0.08);
   const confidenceThreshold = Math.max(0.28, (thresholdProfile?.scale_ads_threshold.confidence ?? policy.thresholds.portfolioHealth.minimumConfidence) - 0.2);
-  const coverageThreshold = Math.max(14, (thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? policy.thresholds.advertising.scaleAds.minimumInventoryCoverageDays) * 0.5);
+  const coverageThreshold = Math.max(7, (thresholdProfile?.scale_ads_threshold.inventory_coverage_days ?? policy.thresholds.advertising.scaleAds.minimumInventoryCoverageDays) * 0.5);
   return sku.revenue > 0 &&
     sku.net_profit > 0 &&
     sku.margin >= marginThreshold &&

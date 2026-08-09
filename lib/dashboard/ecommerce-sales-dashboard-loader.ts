@@ -207,7 +207,8 @@ async function readCanonicalDatasetFromSnapshot(schemaJson: Record<string, unkno
         canonical_key_strategy: "hash(platform + source_id + order_id)",
         duplicate_count: 0
       },
-      mapping_confidence: Number(schemaJson.confidenceScore ?? 0)
+      mapping_confidence: Number(schemaJson.confidenceScore ?? 0),
+      field_mappings: fieldMappingsFromSchemaJson(schemaJson)
     }
   };
 }
@@ -239,6 +240,9 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
           'checksum', snapshot."schemaJson"->'checksum',
           'missingFields', snapshot."schemaJson"->'missingFields',
           'confidenceScore', snapshot."schemaJson"->'confidenceScore',
+          'field_mappings', snapshot."schemaJson"->'field_mappings',
+          'fieldMappings', snapshot."schemaJson"->'fieldMappings',
+          'metadata', snapshot."schemaJson"->'metadata',
           'canonicalDataset', snapshot."schemaJson"->'canonicalDataset',
           'canonical_dataset', snapshot."schemaJson"->'canonical_dataset',
           'dashboardSnapshot', snapshot."schemaJson"->'dashboardSnapshot'
@@ -344,7 +348,11 @@ function mergeCanonicalDatasets(left: CanonicalDataset, right: CanonicalDataset)
         canonical_key_strategy: "hash(platform + source_id + order_id)",
         duplicate_count: left.metadata.dedupe.duplicate_count + right.metadata.dedupe.duplicate_count
       },
-      mapping_confidence: Math.max(left.metadata.mapping_confidence, right.metadata.mapping_confidence)
+      mapping_confidence: Math.max(left.metadata.mapping_confidence, right.metadata.mapping_confidence),
+      field_mappings: [
+        ...(left.metadata.field_mappings ?? []),
+        ...(right.metadata.field_mappings ?? [])
+      ]
     }
   };
 }
@@ -425,8 +433,31 @@ function canonicalMetadataValue(value: unknown): CanonicalDataset["metadata"] {
       canonical_key_strategy: "hash(platform + source_id + order_id)",
       duplicate_count: Number(dedupe.duplicate_count ?? 0)
     },
-    mapping_confidence: Number(metadata.mapping_confidence ?? 0)
+    mapping_confidence: Number(metadata.mapping_confidence ?? 0),
+    field_mappings: fieldMappingsFromSchemaJson({ metadata })
   };
+}
+
+function fieldMappingsFromSchemaJson(schemaJson: Record<string, unknown>) {
+  const metadata = objectValue(schemaJson.metadata);
+  const candidates = [
+    schemaJson.field_mappings,
+    schemaJson.fieldMappings,
+    metadata.field_mappings,
+    metadata.fieldMappings
+  ];
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+
+    return candidate.filter((mapping): mapping is NonNullable<CanonicalDataset["metadata"]["field_mappings"]>[number] => (
+      Boolean(mapping) &&
+      typeof mapping === "object" &&
+      !Array.isArray(mapping)
+    ));
+  }
+
+  return [];
 }
 
 function sourcePlatforms(schemaJson: Record<string, unknown>) {

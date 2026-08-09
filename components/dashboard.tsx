@@ -1535,6 +1535,17 @@ type ConnectedSourceRow = {
   syncStatus?: string | null;
   statusReason?: string | null;
   statusAction?: string | null;
+  ingestionJob?: {
+    id: string;
+    status: string | null;
+    progress?: number | null;
+    startedAt?: string | null;
+    lastHeartbeatAt?: string | null;
+    completedAt?: string | null;
+    attemptCount?: number | null;
+    retryCount?: number | null;
+    updatedAt?: string | null;
+  } | null;
   connectionMode?: string | null;
   authMethod?: string | null;
   config?: {
@@ -1576,9 +1587,18 @@ type ConnectedSourceRow = {
         mappings?: Record<string, string>;
         mapping_details?: Array<{
           field: string;
+          source_column?: string;
           canonical: string;
+          canonical_field?: string;
           confidence?: number | null;
           source?: string | null;
+          mapping_method?: string | null;
+          requires_confirmation?: boolean;
+          suggested_mappings?: Array<{
+            canonical_field: string;
+            confidence?: number | null;
+            reason?: string;
+          }>;
         }>;
         unknown_fields?: string[];
       };
@@ -3982,11 +4002,14 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
 
   if (details.length > 0) {
     return details.map((mapping) => ({
-      field: mapping.field,
-      canonical: mapping.canonical || "unknown",
+      field: mapping.source_column || mapping.field,
+      canonical: mapping.canonical_field || mapping.canonical || "unknown",
       confidence: mapping.confidence ?? source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
       source: mapping.source ?? "engine",
-      type: fieldTypes.get(mapping.field) ?? "unknown"
+      method: mapping.mapping_method ?? null,
+      requiresConfirmation: mapping.requires_confirmation === true,
+      suggestions: mapping.suggested_mappings ?? [],
+      type: fieldTypes.get(mapping.source_column || mapping.field) ?? "unknown"
     }));
   }
 
@@ -3999,6 +4022,9 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
       canonical: canonical || "unknown",
       confidence: source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
       source: "engine",
+      method: null,
+      requiresConfirmation: false,
+      suggestions: [],
       type: fieldTypes.get(field) ?? "unknown"
     }));
   }
@@ -4014,6 +4040,9 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
         canonical: semanticName,
         confidence: semanticName === "unknown" ? 0.35 : 0.55,
         source: "schema",
+        method: null,
+        requiresConfirmation: semanticName === "unknown",
+        suggestions: [],
         type: column.type ?? "unknown"
       };
     })
@@ -4926,8 +4955,14 @@ function SettingsConnectedSourcesPanel({
                                     <div className="min-w-0">
                                       <p className="truncate font-medium text-foreground">{mapping.field}</p>
                                       <p className="mt-0.5 truncate text-muted-foreground">
-                                        {mapping.type} · {mapping.source}
+                                        {mapping.type} · {mapping.method ?? mapping.source}
                                       </p>
+                                      {mapping.requiresConfirmation ? (
+                                        <p className="mt-0.5 truncate text-amber-700">
+                                          {isZh ? "需要确认" : "Needs confirmation"}
+                                          {mapping.suggestions?.length ? ` · ${mapping.suggestions.map((item) => item.canonical_field).slice(0, 3).join(", ")}` : ""}
+                                        </p>
+                                      ) : null}
                                     </div>
                                     <select
                                       value={selectedMapping}
@@ -5942,6 +5977,7 @@ type BusinessSourceView = {
   typeLabel: string;
   status: string;
   statusLabel: string;
+  syncProgress: number | null;
   lastSyncLabel: string;
   datasets: BusinessDatasetView[];
   summaryLabel: string;
@@ -5992,7 +6028,88 @@ function formatBusinessNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function normalizedSourceStatus(source: ConnectedSourceRow) {
+  return (
+    source.ingestionJob?.status ||
+    source.syncStatus ||
+    source.schema?.unifiedIngestion?.status ||
+    source.status ||
+    ""
+  ).toUpperCase();
+}
+
+function sourceStatusValues(source: ConnectedSourceRow) {
+  return [
+    source.ingestionJob?.status,
+    source.syncStatus,
+    source.schema?.unifiedIngestion?.status,
+    source.status
+  ]
+    .filter((status): status is string => typeof status === "string" && status.trim().length > 0)
+    .map((status) => status.toUpperCase());
+}
+
+function sourceIsSyncing(source: ConnectedSourceRow) {
+  const syncingStatuses = [
+    "QUEUED",
+    "RUNNING",
+    "SYNCING",
+    "PROCESSING",
+    "SCHEMA_READY",
+    "CANONICALIZING",
+    "GENERATING",
+    "INDEXING",
+    "PENDING_FIRST_SYNC"
+  ];
+
+  return sourceStatusValues(source).some((status) => syncingStatuses.includes(status));
+}
+
+function sourceSyncProgress(source: ConnectedSourceRow) {
+  const explicitProgress = source.ingestionJob?.progress;
+  if (typeof explicitProgress === "number" && Number.isFinite(explicitProgress)) {
+    return Math.max(0, Math.min(100, Math.round(explicitProgress)));
+  }
+
+  const statuses = sourceStatusValues(source);
+  const status = statuses.find((value) => [
+    "QUEUED",
+    "RUNNING",
+    "SYNCING",
+    "PROCESSING",
+    "SCHEMA_READY",
+    "CANONICALIZING",
+    "GENERATING",
+    "INDEXING",
+    "PENDING_FIRST_SYNC"
+  ].includes(value)) ?? normalizedSourceStatus(source);
+  if (status === "QUEUED" || status === "PENDING_FIRST_SYNC") return 8;
+  if (status === "RUNNING" || status === "SYNCING" || status === "PROCESSING") return 45;
+  if (status === "SCHEMA_READY" || status === "CANONICALIZING") return 72;
+  if (status === "GENERATING" || status === "INDEXING") return 90;
+
+  return null;
+}
+
+function businessSourceSyncProgress(rows: ConnectedSourceRow[]) {
+  const syncingRows = rows.filter(sourceIsSyncing);
+  if (syncingRows.length === 0) return null;
+
+  const progressValues = syncingRows
+    .map(sourceSyncProgress)
+    .filter((value): value is number => typeof value === "number");
+
+  if (progressValues.length === 0) return null;
+
+  return Math.max(1, Math.min(99, Math.round(progressValues.reduce((sum, value) => sum + value, 0) / progressValues.length)));
+}
+
 function businessSourceStatus(rows: ConnectedSourceRow[]) {
+  const activeSource = rows.find(sourceIsSyncing);
+  if (activeSource) {
+    return activeSource.syncStatus || activeSource.ingestionJob?.status || activeSource.status || "RUNNING";
+  }
+
   if (rows.some((source) => (source.syncStatus || source.status || "").toUpperCase() === "CONNECTED")) {
     return "CONNECTED";
   }
@@ -6109,6 +6226,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       ...definition,
       status,
       statusLabel: sourceStatusLabel(status, isZh),
+      syncProgress: businessSourceSyncProgress(rows),
       lastSyncLabel: isZh ? "今天" : "Today",
       datasets: detectedDatasets.length > 0 ? detectedDatasets : definition.fallbackDatasets,
       sourceRows: rows
@@ -6127,6 +6245,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       summaryLabel: isZh ? "已连接业务数据源" : "Connected business data source",
       status: source.syncStatus || source.status,
       statusLabel: sourceStatusLabel(source.syncStatus || source.status, isZh),
+      syncProgress: businessSourceSyncProgress([source]),
       lastSyncLabel: source.lastSyncAt
         ? new Date(source.lastSyncAt).toLocaleDateString(isZh ? "zh-CN" : "en-US")
         : (isZh ? "今天" : "Today"),
@@ -6252,6 +6371,19 @@ function DataSourcesWorkspace({
                       <span className="size-1 rounded-full bg-slate-300" aria-hidden="true" />
                       <span>{isZh ? "最近同步" : "Last sync"} {source.lastSyncLabel}</span>
                     </div>
+                    {source.syncProgress !== null ? (
+                      <div className="mt-4">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#efe9dc]">
+                          <div
+                            className="h-full rounded-full bg-[#46648f] transition-all duration-500"
+                            style={{ width: `${source.syncProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-center text-[11px] font-bold uppercase tracking-[0.22em] text-[#5b5f8d]">
+                          {isZh ? "INDEXING" : "INDEXING"} - {source.syncProgress}%
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -9775,6 +9907,36 @@ type ProfitOptimizationJobPayload = {
   status?: ProfitOptimizationJobStatus;
   currentStep?: string | null;
   message?: string;
+  recommendedAction?: string;
+  optimizationReadiness?: OptimizationReadinessViewData | null;
+  validation?: OptimizationReadinessViewData | null;
+};
+
+type OptimizationReadinessViewData = {
+  status?: "READY" | "BLOCKED" | "WARNING";
+  score?: number;
+  canOptimize?: string[];
+  limitations?: string[];
+  missingFields?: string[];
+  missingRequiredFields?: string[];
+  missingRecommendedFields?: string[];
+  affectedModules?: string[];
+  userMessage?: string;
+  recommendedAction?: string;
+  moduleReadiness?: Array<{
+    id?: string;
+    label?: string;
+    status?: "READY" | "BLOCKED" | "WARNING";
+    confidence?: number;
+    missingRequiredFields?: string[];
+    missingRecommendedFields?: string[];
+    limitations?: string[];
+  }>;
+  fieldHelp?: Record<string, {
+    title?: string;
+    description?: string;
+    fix?: string;
+  }>;
 };
 
 type ProfitOptimizationJobStatusPayload = {
@@ -16672,6 +16834,168 @@ function OfficialLogisticsRegistryPanel({
   );
 }
 
+function OptimizationReadinessCard({
+  readiness,
+  locale,
+  isLoading,
+  onReview
+}: {
+  readiness: OptimizationReadinessViewData | null;
+  locale: Locale;
+  isLoading: boolean;
+  onReview: () => void;
+}) {
+  const isZh = locale === "zh";
+  const status = readiness?.status ?? (isLoading ? "WARNING" : "READY");
+  const score = typeof readiness?.score === "number" ? readiness.score : null;
+  const blocked = status === "BLOCKED";
+  const warning = status === "WARNING";
+  const modules = readiness?.moduleReadiness ?? [];
+
+  return (
+    <Card className={cn(
+      "border shadow-sm",
+      blocked ? "border-rose-200 bg-rose-50" : warning ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"
+    )}>
+      <CardContent className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-bold text-slate-950">{isZh ? "Optimization Readiness" : "Optimization Readiness"}</p>
+              <Badge
+                variant="secondary"
+                className={cn(blocked ? "bg-rose-100 text-rose-800" : "bg-white text-slate-700")}
+              >
+                {isLoading ? (isZh ? "检查中" : "Checking") : status}
+              </Badge>
+              {score !== null ? (
+                <span className="text-xs font-semibold text-slate-600">{score}%</span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs font-medium text-slate-600">
+              {readiness?.userMessage ?? (isZh ? "正在检查优化所需数据。" : "Checking required optimization data.")}
+            </p>
+          </div>
+          {blocked ? (
+            <Button type="button" variant="outline" size="sm" onClick={onReview}>
+              <AlertTriangle className="size-4" />
+              {isZh ? "查看缺失数据" : "Review data requirements"}
+            </Button>
+          ) : null}
+        </div>
+
+        {modules.length ? (
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {modules.slice(0, 4).map((module) => {
+              const moduleStatus = module.status ?? "WARNING";
+              const Icon = moduleStatus === "READY" ? CheckCircle2 : AlertTriangle;
+              return (
+                <div key={module.label ?? module.id} className="rounded-lg border bg-white/80 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-xs font-bold text-slate-800">{module.label}</p>
+                    <Icon className={cn(
+                      "size-4 shrink-0",
+                      moduleStatus === "READY" ? "text-emerald-600" : moduleStatus === "BLOCKED" ? "text-rose-600" : "text-amber-600"
+                    )} />
+                  </div>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    {moduleStatus === "READY"
+                      ? (isZh ? "Ready" : "Ready")
+                      : moduleStatus === "BLOCKED"
+                        ? (isZh ? "Blocked" : "Blocked")
+                        : (isZh ? "Limited" : "Limited")}
+                    {typeof module.confidence === "number" ? ` · ${Math.round(module.confidence * 100)}%` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {readiness?.limitations?.length ? (
+          <div className="flex flex-wrap gap-2">
+            {readiness.limitations.slice(0, 3).map((item) => (
+              <span key={item} className="rounded-full border bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OptimizationValidationModal({
+  readiness,
+  locale,
+  onClose
+}: {
+  readiness: OptimizationReadinessViewData;
+  locale: Locale;
+  onClose: () => void;
+}) {
+  const isZh = locale === "zh";
+  const missing = readiness.missingRequiredFields ?? [];
+  const fieldHelp = readiness.fieldHelp ?? {};
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-2xl border bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b p-5">
+          <div>
+            <p className="text-lg font-bold text-slate-950">{isZh ? "Optimization Cannot Start Yet" : "Optimization Cannot Start Yet"}</p>
+            <p className="mt-1 text-sm font-medium text-slate-600">
+              {readiness.userMessage ?? (isZh ? "缺少必需字段。" : "Required fields are missing.")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label={isZh ? "关闭" : "Close"}
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="space-y-4 p-5">
+          <div className="space-y-3">
+            {missing.map((field) => {
+              const helpText = fieldHelp[field];
+              return (
+                <div key={field} className="rounded-xl border border-rose-100 bg-rose-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="size-4 text-rose-600" />
+                    <p className="text-sm font-bold text-rose-950">{helpText?.title ?? field}</p>
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-slate-700">{helpText?.description ?? field}</p>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">{helpText?.fix ?? readiness.recommendedAction}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {readiness.missingRecommendedFields?.length ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-bold text-amber-950">{isZh ? "Optimization Quality Warning" : "Optimization Quality Warning"}</p>
+              <p className="mt-1 text-sm font-medium text-amber-900">
+                {isZh ? "这些字段不会阻止优化，但会降低部分推荐的置信度。" : "These fields do not block optimization, but they lower confidence for some recommendations."}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {readiness.missingRecommendedFields.slice(0, 8).map((field) => (
+                  <span key={field} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-900">
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReportsPage({
   copy,
   locale,
@@ -16729,6 +17053,7 @@ function ReportsPage({
     message?: string;
     hasConnectedDataSource?: boolean;
     decision_report?: DecisionIntelligenceReportV1 | null;
+    optimizationReadiness?: OptimizationReadinessViewData | null;
     optimizationRun?: {
       completed_at?: string | null;
       started_at?: string | null;
@@ -16741,6 +17066,7 @@ function ReportsPage({
   const [isRunningProfitOptimization, setIsRunningProfitOptimization] = useState(false);
   const [profitOptimizationRunStatus, setProfitOptimizationRunStatus] = useState<ProfitOptimizationJobStatus | "IDLE">("IDLE");
   const [profitOptimizationRunStep, setProfitOptimizationRunStep] = useState<string | null>(null);
+  const [optimizationValidationModal, setOptimizationValidationModal] = useState<OptimizationReadinessViewData | null>(null);
   const analysisDecisionReportRequestRef = useRef(0);
   const reportApiHasConnectedDatabase = reportData?.hasConnectedDataSource === true;
   const decisionApiHasConnectedDatabase = analysisDecisionReportPayload?.hasConnectedDataSource === true || Boolean(analysisDecisionReportPayload?.decision_report);
@@ -16833,6 +17159,13 @@ function ReportsPage({
   }, [effectiveHasConnectedDatabase, loadAnalysisDecisionReport]);
 
   const startProfitOptimization = useCallback(async () => {
+    const currentReadiness = analysisDecisionReportPayload?.optimizationReadiness ?? null;
+    if (currentReadiness?.status === "BLOCKED") {
+      setOptimizationValidationModal(currentReadiness);
+      setStatusMessage(currentReadiness.userMessage ?? (isZh ? "缺少必需数据，无法开始优化。" : "Required data is missing. Optimization cannot start."));
+      return;
+    }
+
     setStatusMessage(null);
     setHasStartedProfitOptimization(true);
     setIsRunningProfitOptimization(true);
@@ -16852,6 +17185,10 @@ function ReportsPage({
       );
 
       if (!response.ok || !payload?.ok || !payload.jobId) {
+        const validation = payload?.optimizationReadiness ?? payload?.validation ?? null;
+        if (validation?.status === "BLOCKED") {
+          setOptimizationValidationModal(validation);
+        }
         throw new Error(payload?.message || (isZh ? "创建优化任务失败" : "Failed to create optimization job"));
       }
 
@@ -16903,7 +17240,7 @@ function ReportsPage({
     } finally {
       setIsRunningProfitOptimization(false);
     }
-  }, [isZh, loadAnalysisDecisionReport]);
+  }, [analysisDecisionReportPayload?.optimizationReadiness, isZh, loadAnalysisDecisionReport]);
 
 	  const generateAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
 	    setIsGenerating(true);
@@ -17012,6 +17349,8 @@ function ReportsPage({
 	    setSelectedAnalysisDateRange(nextRange);
 	  }, [analysisAvailableDateRange?.endDate, analysisAvailableDateRange?.latestDataDate, analysisAvailableDateRange?.startDate]);
 
+  const optimizationReadiness = analysisDecisionReportPayload?.optimizationReadiness ?? null;
+  const optimizationBlocked = optimizationReadiness?.status === "BLOCKED";
   const reportHeaderAction = (
     <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">
       <span>
@@ -17022,7 +17361,8 @@ function ReportsPage({
       <button
         type="button"
         onClick={() => void startProfitOptimization()}
-        disabled={isRunningProfitOptimization}
+        disabled={isRunningProfitOptimization || optimizationBlocked}
+        title={optimizationBlocked ? (isZh ? "补充缺失必需数据后继续" : "Add missing required data to continue") : undefined}
         className="inline-flex items-center gap-1.5 font-bold text-slate-950 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <RefreshCw className={cn("size-3.5", isRunningProfitOptimization && "animate-spin")} />
@@ -17047,6 +17387,21 @@ function ReportsPage({
         <div className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm">
           {statusMessage}
         </div>
+      ) : null}
+
+      <OptimizationReadinessCard
+        readiness={optimizationReadiness}
+        locale={locale}
+        isLoading={isLoadingAnalysisDecisionReport && !optimizationReadiness}
+        onReview={() => setOptimizationValidationModal(optimizationReadiness)}
+      />
+
+      {optimizationValidationModal ? (
+        <OptimizationValidationModal
+          readiness={optimizationValidationModal}
+          locale={locale}
+          onClose={() => setOptimizationValidationModal(null)}
+        />
       ) : null}
 
       {shouldShowEmptyAnalysisState ? (

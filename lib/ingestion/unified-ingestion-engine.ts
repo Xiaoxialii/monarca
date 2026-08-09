@@ -104,9 +104,14 @@ export async function runUnifiedIngestionPipeline(input: UnifiedIngestionInput):
       mappings: Object.fromEntries(semanticResult.mappings.map((mapping) => [mapping.field, mapping.canonical])),
       mapping_details: semanticResult.mappings.map((mapping) => ({
         field: mapping.field,
+        source_column: mapping.source_field ?? mapping.field,
         canonical: mapping.canonical,
+        canonical_field: mapping.canonical_field ?? mapping.canonical,
         confidence: mapping.confidence,
-        source: mapping.source
+        source: mapping.source,
+        mapping_method: mapping.mapping_method,
+        requires_confirmation: mapping.requires_confirmation,
+        suggested_mappings: mapping.suggested_mappings
       })),
       confidence: semanticResult.confidence,
       memory_hits: semanticResult.memory_hits,

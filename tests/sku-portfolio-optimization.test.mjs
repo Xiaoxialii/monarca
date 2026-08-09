@@ -840,13 +840,14 @@ test("default expert baseline policy is conservative when merchant history is un
   assert.equal(policy.thresholds.advertising.scaleAds.minimumMarginalRoas, 3);
   assert.equal(policy.thresholds.advertising.scaleAds.minimumMargin, 0.35);
   assert.equal(policy.thresholds.advertising.scaleAds.minimumConfidence, 0.7);
+  assert.equal(policy.thresholds.advertising.scaleAds.minimumInventoryCoverageDays, 7);
   assert.equal(policy.thresholds.advertising.scaleAds.maximumBudgetIncreasePct, 0.3);
   assert.equal(policy.thresholds.advertising.reduceAds.roasThreshold, 1.5);
   assert.equal(policy.thresholds.pricing.maximumIncreasePct, 0.05);
   assert.equal(policy.thresholds.pricing.maximumDecreasePct, 0.1);
   assert.equal(policy.thresholds.pricing.minimumElasticityConfidence, 0.7);
   assert.equal(policy.thresholds.inventory.stockoutRiskDays, 14);
-  assert.equal(policy.thresholds.inventory.excessInventoryDays, 90);
+  assert.equal(policy.thresholds.inventory.excessInventoryDays, 30);
   assert.equal(policy.lifecycle.newProductDays, 30);
   assert.equal(policy.lifecycle.growthRevenueThreshold, 0.15);
   assert.equal(policy.lifecycle.declineRevenueThreshold, -0.1);
@@ -994,7 +995,7 @@ test("SCALE_ADS eligibility requires margin ROAS confidence inventory coverage a
     sku,
     action: "SCALE_ADS",
     policy: DEFAULT_OPTIMIZATION_POLICY,
-    coverageDays: 10,
+    coverageDays: 5,
     marginalRoas: 12,
     confidence: 0.82
   });
@@ -1759,14 +1760,14 @@ test("mature SKU at market average does not generate PRICE_UP", () => {
     revenue_growth: 0.06,
     order_growth: 0.04,
     conversion_trend: 0.01,
-    inventory: 320,
+    inventory: 200,
     sales_velocity: 8,
     conversion_rate: 0.04,
     margin: 0.42
   });
   const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("MATURE"), sku: sku.sku }]]);
   const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
-  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku)], lifecycleBySku, thresholdProfile });
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku, "PRICING")], lifecycleBySku, thresholdProfile });
   const actionSet = actions.map((action) => action.portfolio_action);
 
   assert.equal(actionSet.includes("PRICE_UP_5"), false);
@@ -1785,14 +1786,14 @@ test("mature underpriced SKU with stable demand allows PRICE_UP", () => {
     revenue_growth: 0.08,
     order_growth: 0.05,
     conversion_trend: 0.01,
-    inventory: 320,
+    inventory: 200,
     sales_velocity: 8,
     conversion_rate: 0.045,
     margin: 0.42
   });
   const lifecycleBySku = new Map([[sku.sku, { ...matureLifecycle("MATURE"), sku: sku.sku }]]);
   const thresholdProfile = buildDynamicThresholdProfile(priceTestInput(sku));
-  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku)], lifecycleBySku, thresholdProfile });
+  const actions = generateOptimizationActions({ skus: [sku], opportunities: [unitOpportunity(sku, "PRICING")], lifecycleBySku, thresholdProfile });
   const actionSet = actions.map((action) => action.portfolio_action);
 
   assert.ok(actionSet.includes("PRICE_UP_5") || actionSet.includes("PRICE_UP_10"));

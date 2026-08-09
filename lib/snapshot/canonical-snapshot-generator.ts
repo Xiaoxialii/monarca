@@ -64,6 +64,7 @@ export function buildCanonicalSnapshotJson(input: {
     confidenceScore: input.manifest.confidenceScore ?? dashboard?.quality.confidence_score ?? 0,
     missingFields: input.manifest.missingFields ?? dashboard?.quality.missing_fields ?? [],
     estimationUsed: input.manifest.estimationUsed ?? Boolean(dashboard?.quality.estimated_metrics.length),
+    field_mappings: input.canonicalDataset?.metadata.field_mappings ?? [],
     syncStartedAt: input.manifest.syncStartedAt ?? null,
     syncFinishedAt: input.manifest.syncFinishedAt ?? null,
     metrics: dashboard?.metrics ?? null,

@@ -65,7 +65,7 @@ export type SemanticCandidate = {
   field: string;
   maps_to: CanonicalConcept;
   confidence: number;
-  source: "engine" | "memory" | "feedback";
+  source: "engine" | "memory" | "feedback" | "registry";
   reason: string;
 };
 
@@ -100,10 +100,15 @@ export type SemanticFeedbackEvent = {
 
 export type SemanticMappingDecision = {
   field: string;
+  source_field?: string;
   canonical: CanonicalConcept;
+  canonical_field?: CanonicalConcept;
   confidence: number;
-  source: "memory" | "engine" | "unmapped";
+  source: "memory" | "engine" | "registry" | "unmapped";
+  mapping_method?: "exact_match" | "exact_alias" | "alias_match" | "semantic_match" | "ai_suggested";
+  requires_confirmation?: boolean;
   candidates: SemanticCandidate[];
+  suggested_mappings?: Array<{ canonical_field: CanonicalConcept; confidence: number; reason: string }>;
   validation?: MappingValidationResult;
 };
 
@@ -144,6 +149,16 @@ export type CanonicalDataset = {
       mappedColumns: string[];
       rejectedColumns: Array<{ field: string; reason: string }>;
       rowCount: number;
+    }>;
+    field_mappings?: Array<{
+      canonical_field: CanonicalConcept;
+      source_column: string;
+      source_system?: string;
+      source_file_type?: string;
+      target_entity?: string;
+      mapping_confidence: number;
+      mapping_method?: string;
+      requires_confirmation?: boolean;
     }>;
     dedupe: {
       canonical_key_strategy: "hash(platform + source_id + order_id)";

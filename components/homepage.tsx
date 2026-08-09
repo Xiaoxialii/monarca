@@ -1152,8 +1152,7 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
   );
 }
 
-function InvestigationPreview({ copy }: { copy: HomeCopy["investigation"] }) {
-  const isZh = copy.sectionTitle === "AI 利润控制系统";
+function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"]; isZh: boolean }) {
   const flow = {
     alert: {
       label: isZh ? "利润机会" : "Profit opportunity",
@@ -1499,21 +1498,27 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
   }, []);
 
   return (
-    <div className="mx-auto mb-10 mt-10 grid max-w-7xl gap-8 lg:grid-cols-[0.95fr_0.82fr] lg:items-center">
+    <div className="mx-auto mb-10 mt-10 grid max-w-7xl gap-8 lg:grid-cols-[0.62fr_1.18fr] lg:items-center">
       <div>
-        <h2 className="text-left text-xl font-semibold tracking-normal text-slate-500 sm:text-3xl">
-          {isZh ? "第一步，一键连接你的电商数据" : "First, connect your commerce data in one click"}
+        <h2 className="text-left text-xl font-semibold leading-tight tracking-normal text-slate-500 sm:text-3xl">
+          <span className="block">{isZh ? "第一步，" : "First, connect your"}</span>
+          <span className="block">{isZh ? "一键连接你的电商数据" : "commerce data in one click"}</span>
         </h2>
+        <p className="mt-5 max-w-xl text-left text-base font-medium leading-7 text-slate-950 sm:text-lg sm:leading-8">
+          {isZh
+            ? "分析每个 SKU 的真实盈利能力，模拟不同增长策略，帮助企业找到最优产品组合、广告投入和库存配置，实现利润最大化。"
+            : "Analyze SKU-level profitability, simulate different growth strategies, and help businesses identify the optimal product mix, advertising allocation, and inventory strategy to maximize profit."}
+        </p>
       </div>
       <div className="lg:flex lg:justify-end">
-        <div className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
+        <div className="w-full max-w-[760px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
           <Image
             className="block aspect-video w-full rounded-[20px] bg-slate-100 object-cover md:hidden"
             src="/commerce-data-preview-poster.png"
             alt="Commerce data connection preview"
             width={1200}
             height={675}
-            sizes="(max-width: 767px) 100vw, 560px"
+            sizes="(max-width: 767px) 100vw, 760px"
           />
           <video
             ref={videoRef}
@@ -1712,7 +1717,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
 
       <SkuSimulationScene isZh={isZh} />
       <FeatureCards copy={copy.features} />
-      <InvestigationPreview copy={copy.investigation} />
+      <InvestigationPreview copy={copy.investigation} isZh={isZh} />
       <UseCaseSection copy={copy.useCases} />
       <Integrations copy={copy.integrations} />
       <PricingSection copy={copy.pricing} />

@@ -963,8 +963,8 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
 
   return (
     <section className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen pb-6 pt-1 lg:pb-8">
-      <div className="relative min-h-[176px] overflow-hidden bg-gradient-to-r from-[#020617] via-[#050816] to-[#020617] px-8 py-4 text-white shadow-[0_18px_56px_rgba(2,6,23,0.28)] sm:px-12 lg:min-h-[192px] lg:px-16">
-        <div className="absolute inset-0 opacity-15 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:42px_42px]" />
+      <div className="relative min-h-[176px] overflow-hidden bg-gradient-to-r from-[#001d16] via-[#003324] to-[#001d16] px-8 py-4 text-white shadow-[0_18px_56px_rgba(0,29,22,0.28)] sm:px-12 lg:min-h-[192px] lg:px-16">
+        <div className="absolute inset-0 opacity-18 [background-image:linear-gradient(rgba(167,243,208,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(167,243,208,0.1)_1px,transparent_1px)] [background-size:42px_42px]" />
         <div className="relative flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200 sm:text-sm">
@@ -972,7 +972,7 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-emerald-900/20 px-3 py-1.5 text-xs font-semibold text-[#047857] ring-1 ring-[#047857]/35 sm:text-sm">
+            <span className="rounded-full bg-emerald-300/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 ring-1 ring-emerald-200/25 sm:text-sm">
               {isZh ? "利润提升 +18.4%" : "Profit lift +18.4%"}
             </span>
             <span className="rounded-full bg-cyan-300/12 px-3 py-1.5 text-xs font-semibold text-cyan-50 ring-1 ring-cyan-200/20 sm:text-sm">
@@ -989,7 +989,7 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
                   <div
                     key={`${scenario.sku}-${copyIndex}`}
                     className={cn(
-                      "sku-combo-pill absolute grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-2xl border border-white/12 bg-white/[0.06] px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-sm",
+                      "sku-combo-pill absolute grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-2xl border border-emerald-100/14 bg-emerald-950/32 px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] backdrop-blur-sm",
                       scenario.className
                     )}
                     style={{ "--sku-row-delay": `${index * 150}ms` } as React.CSSProperties}
@@ -1008,7 +1008,7 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-bold text-[#047857] sm:text-sm">{scenario.profit}</p>
+                      <p className="text-xs font-bold text-emerald-300 sm:text-sm">{scenario.profit}</p>
                     </div>
                     <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white">
                       {scenario.signal}

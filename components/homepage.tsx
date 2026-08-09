@@ -1504,11 +1504,6 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
         <h2 className="text-left text-2xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
           {isZh ? "第一步，一键连接你的电商数据" : "First, connect your commerce data in one click"}
         </h2>
-        <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-slate-500 sm:text-base">
-          {isZh
-            ? "Monarca 连接业务数据，模拟未来经营场景，优化决策，并持续跟踪执行结果，帮助实现利润最大化。"
-            : "Monarca connects your business data, models future scenarios, optimizes decisions, and continuously executes strategies to maximize profitability."}
-        </p>
       </div>
       <div className="lg:flex lg:justify-end">
         <div className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">

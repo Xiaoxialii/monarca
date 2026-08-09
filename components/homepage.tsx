@@ -1507,8 +1507,8 @@ function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
         </h2>
         <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-slate-500 sm:text-base">
           {isZh
-            ? "当收入、转化、成本或库存出现异常后，Monarca AI 会诊断利润驱动因素，模拟跨渠道场景，并输出最优运营决策。"
-            : "After revenue, conversion, cost, or inventory anomalies appear, Monarca AI diagnoses profit drivers, simulates cross-channel scenarios, and outputs the optimal operating decision."}
+            ? "Monarca 连接业务数据，模拟未来经营场景，优化决策，并持续跟踪执行结果，帮助实现利润最大化。"
+            : "Monarca connects your business data, models future scenarios, optimizes decisions, and continuously executes strategies to maximize profitability."}
         </p>
       </div>
       <div className="lg:flex lg:justify-end">

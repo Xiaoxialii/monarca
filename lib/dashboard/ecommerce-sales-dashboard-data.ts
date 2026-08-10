@@ -98,14 +98,12 @@ export function buildEcommerceSalesDashboardData(
   const items = metricDataset.tables.ecommerce_order_items;
   const products = metricDataset.tables.ecommerce_products;
   const refunds = metricDataset.tables.ecommerce_refunds;
-  const itemSkuCount = new Set(items.map((row) => stringValue(row.sku)).filter(Boolean)).size;
   const productSkuValues = products.map((row) => stringValue(row.sku)).filter(Boolean);
-  const productSkuCount = new Set(productSkuValues).size;
   const trackedSkuCount = new Set(productSkuValues.filter((sku) => !isUntrackedSku(sku))).size;
   const untrackedSkuCount = new Set(productSkuValues.filter(isUntrackedSku)).size;
   const productCount = uniqueCatalogProductCount(products);
   const variantCount = uniqueCatalogVariantCount(products);
-  const totalSkuCount = itemSkuCount || productSkuCount;
+  const totalSkuCount = uniqueSkuCountAcrossSources(metricDataset.tables);
   const productRevenueTotal = metricResult.metrics.product_performance.reduce((sum, row) => sum + row.revenue, 0);
   const skuRevenueTotal = metricResult.metrics.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
   const topSkuRevenue = metricResult.metrics.sku_revenue[0]?.revenue ?? 0;
@@ -173,11 +171,11 @@ export function buildEcommerceSalesDashboardData(
     catalog_health: {
       product_count: productCount,
       variant_count: variantCount,
-      sku_count: productSkuCount || totalSkuCount,
+      sku_count: totalSkuCount,
       tracked_sku_count: trackedSkuCount,
       untracked_sku_count: untrackedSkuCount,
       catalog_row_count: products.length,
-      sku_density: productCount ? roundRatio((productSkuCount || totalSkuCount) / productCount) : null,
+      sku_density: productCount ? roundRatio(totalSkuCount / productCount) : null,
       price_distribution: priceDistribution(products, items),
       product_concentration: topProductShare
     },
@@ -449,6 +447,26 @@ function uniqueCatalogVariantCount(products: CanonicalRow[]) {
   );
 
   return variantIds.size || products.length;
+}
+
+function uniqueSkuCountAcrossSources(tables: CanonicalDataset["tables"]) {
+  const skuValues = new Set<string>();
+  const rowsBySource = [
+    tables.ecommerce_order_items,
+    tables.ecommerce_products,
+    tables.ecommerce_refunds,
+    tables.ecommerce_ads ?? [],
+    (tables.ecommerce_inventory ?? tables.inventory ?? []) as CanonicalRow[]
+  ];
+
+  for (const rows of rowsBySource) {
+    for (const row of rows as CanonicalRow[]) {
+      const sku = stringValue(row.sku);
+      if (sku) skuValues.add(sku);
+    }
+  }
+
+  return skuValues.size;
 }
 
 function isUntrackedSku(sku: string) {

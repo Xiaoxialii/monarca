@@ -434,7 +434,7 @@ export function optimizeSkuPortfolio(input: PortfolioOptimizationInput): Portfol
     constraints: optimizationInput.constraints,
     logger: logDecisionContractRejection
   });
-  const simulations = contractValidation.valid;
+  const simulations = applyOptimizationQueueEligibilityGate(contractValidation.valid, optimizationInput, optimizationPolicy);
   const validBySku = groupValidPortfolioSimulations(optimizationInput, simulations, optimizationPolicy);
   const selected = solveGlobalPortfolio(validBySku, optimizationInput, optimizationPolicy);
   const selectedDecisionRows = selected.rows;
@@ -607,6 +607,117 @@ function applyDecisionConfidenceGate(
       } : row.policy_trace
     };
   });
+}
+
+const MIN_INCREMENTAL_NET_PROFIT_ROI = 0.2;
+const LOW_ATTRIBUTION_CONFIDENCE_CUTOFF = 0.55;
+const UNIFORM_BUDGET_SPREAD_MIN_SKUS = 10;
+const UNIFORM_BUDGET_SPREAD_COVERAGE_RATIO = 0.75;
+const UNIFORM_BUDGET_SPREAD_KEEP_RATIO = 0.25;
+
+function applyOptimizationQueueEligibilityGate(
+  rows: ProfitSimulationResult[],
+  input: PortfolioOptimizationInput,
+  policy: OptimizationPolicy
+): ProfitSimulationResult[] {
+  const skuById = new Map(input.skus.map((sku) => [sku.sku, sku]));
+  const eligibleRows = rows.filter((row) => {
+    if (row.profit_delta <= 0) return false;
+
+    const sku = skuById.get(row.sku);
+    const currentMargin = sku?.margin ?? row.before_state.margin;
+    if (currentMargin <= 0 || row.predicted_margin <= 0) return false;
+
+    if (!isIncrementalAdsOptimizationAction(row)) return true;
+
+    const additionalAdSpend = additionalAdSpendForSimulation(row);
+    if (additionalAdSpend <= 0) return false;
+    if (row.profit_delta / additionalAdSpend < MIN_INCREMENTAL_NET_PROFIT_ROI) return false;
+    if (!hasEnoughInventoryForAdScaling(row, sku, policy)) return false;
+    if (attributionConfidenceForSimulation(row, sku) < LOW_ATTRIBUTION_CONFIDENCE_CUTOFF) return false;
+    if (sku?.roas_confidence === "LOW") return false;
+
+    return true;
+  });
+
+  return removeUniformBudgetSpreadRows(eligibleRows, input);
+}
+
+function isIncrementalAdsOptimizationAction(row: ProfitSimulationResult) {
+  return [
+    "TEST_AD_SPEND",
+    "SCALE_ADS",
+    "SCALE_ADS_PRICE_UP_5",
+    "RESTOCK_AND_SCALE",
+    "SHIFT_CHANNEL",
+    "CREATE_BUNDLE"
+  ].includes(row.action) || row.unified_action === "SCALE_ADS" || row.unified_action === "EXPAND_CHANNEL";
+}
+
+function additionalAdSpendForSimulation(row: ProfitSimulationResult) {
+  return roundCurrency(Math.max(0, row.recommended_ads_spend - row.current_ads_spend));
+}
+
+function attributionConfidenceForSimulation(
+  row: ProfitSimulationResult,
+  sku: PortfolioOptimizationInput["skus"][number] | undefined
+) {
+  return row.confidence_breakdown.attribution_confidence ?? sku?.attribution_confidence ?? sku?.prediction_confidence ?? 0;
+}
+
+function hasEnoughInventoryForAdScaling(
+  row: ProfitSimulationResult,
+  sku: PortfolioOptimizationInput["skus"][number] | undefined,
+  policy: OptimizationPolicy
+) {
+  if (row.current_inventory < row.required_inventory) return false;
+  if (!sku || sku.sales_velocity <= 0) return row.current_inventory > 0;
+
+  const coverageDays = sku.inventory / Math.max(0.1, sku.sales_velocity);
+  const minimumCoverageDays = Math.min(
+    row.simulation_horizon.days,
+    policy.thresholds.advertising.scaleAds.minimumInventoryCoverageDays
+  );
+
+  return coverageDays >= minimumCoverageDays;
+}
+
+function removeUniformBudgetSpreadRows(
+  rows: ProfitSimulationResult[],
+  input: PortfolioOptimizationInput
+) {
+  const scaleRows = rows.filter((row) => isIncrementalAdsOptimizationAction(row) && additionalAdSpendForSimulation(row) > 0);
+  const skuCount = Math.max(1, new Set(input.skus.map((sku) => sku.sku)).size);
+  const distinctBudgetDeltas = new Set(scaleRows.map((row) => Math.round(additionalAdSpendForSimulation(row))));
+  const looksLikeUniformBudgetSpread =
+    scaleRows.length >= UNIFORM_BUDGET_SPREAD_MIN_SKUS &&
+    scaleRows.length / skuCount >= UNIFORM_BUDGET_SPREAD_COVERAGE_RATIO &&
+    distinctBudgetDeltas.size <= 2;
+
+  if (!looksLikeUniformBudgetSpread) return rows;
+
+  const keepCount = Math.max(3, Math.ceil(skuCount * UNIFORM_BUDGET_SPREAD_KEEP_RATIO));
+  const keepKeys = new Set(scaleRows
+    .slice()
+    .sort((left, right) => {
+      const leftSpend = additionalAdSpendForSimulation(left);
+      const rightSpend = additionalAdSpendForSimulation(right);
+      const leftRoi = leftSpend > 0 ? left.profit_delta / leftSpend : 0;
+      const rightRoi = rightSpend > 0 ? right.profit_delta / rightSpend : 0;
+
+      return rightRoi - leftRoi ||
+        right.profit_delta - left.profit_delta ||
+        right.confidence - left.confidence ||
+        left.sku.localeCompare(right.sku);
+    })
+    .slice(0, keepCount)
+    .map((row) => optimizationSimulationKey(row)));
+
+  return rows.filter((row) => !isIncrementalAdsOptimizationAction(row) || keepKeys.has(optimizationSimulationKey(row)));
+}
+
+function optimizationSimulationKey(row: ProfitSimulationResult) {
+  return `${row.sku}:${row.action}:${row.generated_action ?? ""}:${row.recommended_ads_spend}:${row.profit_delta}`;
 }
 
 function optimizationSkuScore(sku: PortfolioOptimizationInput["skus"][number]) {

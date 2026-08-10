@@ -304,7 +304,29 @@ export async function enqueueSkuOptimizationJob(
 
   const now = new Date();
   for (const existing of existingJobs) {
-    if (existing.status === "QUEUED") return existing;
+    if (existing.status === "QUEUED") {
+      if (existing.updatedAt >= queuedBeforeDate(now)) return existing;
+
+      await client.asyncJob.updateMany({
+        where: {
+          id: existing.id,
+          status: "QUEUED"
+        },
+        data: {
+          status: "FAILED",
+          progress: 100,
+          currentStep: "Failed - stale queued optimization job",
+          errorMessage: `Superseded because SKU optimization stayed queued for more than ${Math.round(QUEUED_ASYNC_JOB_MS / 60000)} minutes.`,
+          heartbeatAt: now,
+          lockedAt: null,
+          lockedBy: null,
+          retryCount: existing.maxRetries,
+          completedAt: now
+        }
+      });
+      continue;
+    }
+
     if (!isStaleSkuOptimizationJob(existing, now)) return existing;
 
     await client.asyncJob.updateMany({

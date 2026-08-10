@@ -175,8 +175,6 @@ function compactReportSnapshotContent(content: ReturnType<typeof decisionSnapsho
       ...decisionReport,
       sku_portfolio_optimization: {
         ...optimization,
-        skuDecisions: [],
-        recommended_portfolio: [],
         currentPortfolio: undefined,
         lifecycleClassifications: [],
         budget_plan: [],
@@ -184,9 +182,9 @@ function compactReportSnapshotContent(content: ReturnType<typeof decisionSnapsho
         inventory_plan: [],
         simulations: []
       },
-      skuDecisions: []
+      skuDecisions: Array.isArray(decisionReport.skuDecisions) ? decisionReport.skuDecisions : []
     },
-    skuDecisions: [],
+    skuDecisions: Array.isArray(record.skuDecisions) ? record.skuDecisions : [],
     profitInputModel: {
       ...profitInputModel,
       rows: []

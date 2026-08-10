@@ -10044,7 +10044,7 @@ async function waitForProfitOptimizationJob(
 ) {
   const terminalStatuses = new Set<ProfitOptimizationJobStatus>(["COMPLETED", "FAILED", "CANCELLED"]);
 
-  for (let attempt = 0; attempt < 90; attempt += 1) {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 2000));
     const { response, payload } = await fetchReportJson<ProfitOptimizationJobStatusPayload>(
       `/api/jobs/${encodeURIComponent(jobId)}`,
@@ -17222,8 +17222,8 @@ function ReportsPage({
       return;
     }
 
+    const previousHasStartedProfitOptimization = hasStartedProfitOptimization;
     setStatusMessage(null);
-    setHasStartedProfitOptimization(true);
     setIsRunningProfitOptimization(true);
     setProfitOptimizationRunStatus("QUEUED");
     setProfitOptimizationRunStep(profitOptimizationStatusMessage("QUEUED", null, isZh));
@@ -17248,6 +17248,7 @@ function ReportsPage({
         throw new Error(payload?.message || (isZh ? "创建优化任务失败" : "Failed to create optimization job"));
       }
 
+      setHasStartedProfitOptimization(true);
       setProfitOptimizationRunStatus(payload.status ?? "QUEUED");
       setProfitOptimizationRunStep(profitOptimizationStatusMessage(payload.status, payload.currentStep, isZh));
 
@@ -17290,13 +17291,14 @@ function ReportsPage({
       }
       setStatusMessage(isZh ? "利润优化已完成，推荐已刷新。" : "Profit optimization completed and recommendations refreshed.");
     } catch (error) {
+      setHasStartedProfitOptimization(previousHasStartedProfitOptimization);
       setProfitOptimizationRunStatus("FAILED");
       setProfitOptimizationRunStep(error instanceof Error ? error.message : (isZh ? "优化运行失败" : "Optimization failed"));
       setStatusMessage(error instanceof Error ? error.message : (isZh ? "优化运行失败" : "Optimization failed"));
     } finally {
       setIsRunningProfitOptimization(false);
     }
-  }, [analysisDecisionReportPayload?.optimizationReadiness, isZh, loadAnalysisDecisionReport]);
+  }, [analysisDecisionReportPayload?.optimizationReadiness, hasStartedProfitOptimization, isZh, loadAnalysisDecisionReport]);
 
 	  const generateAnalysisReport = useCallback(async (dateRange: SelectedReportDateRange = selectedAnalysisDateRange) => {
 	    setIsGenerating(true);

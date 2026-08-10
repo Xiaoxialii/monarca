@@ -128,6 +128,12 @@ const currencyDecimal = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
+const currencyWhole = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0
+});
 const compactCurrency = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -1824,8 +1830,19 @@ function SkuPortfolioOptimizationPanel({
   const sourceSkuIds = sourceRows.length
     ? sourceRows.map((row) => row.sku)
     : Array.from(new Set(optimizationSimulations.map((row) => String(objectRecord(row).sku ?? ""))).values()).filter(Boolean);
-  const currentPortfolioProfit = safeNumber(summary.current_portfolio_profit);
-  const currentSkuCount = safeNumber(summary.input_sku_count) || sourceRows.length || sourceSkuIds.length;
+  const currentPortfolioProfit =
+    firstNumberOrNull(report.performance_overview?.net_profit, report.executive_summary?.net_profit) ??
+    safeNumber(summary.current_portfolio_profit);
+  const currentSkuCount =
+    firstNumberOrNull(
+      report.executive_summary?.sku_count,
+      sourceRows.length ? sourceRows.length : null,
+      sourceSkuIds.length ? sourceSkuIds.length : null,
+      summary.input_sku_count
+    ) ?? 0;
+  const currentAdSpend =
+    firstNumberOrNull(report.performance_overview?.ad_spend, report.ads_breakdown?.ad_spend) ??
+    currentAdSpendFromOptimizationSummary(summary);
   const totalExpectedProfitGain = safeNumber(optimization.total_expected_profit_gain);
   const liftRate = currentPortfolioProfit > 0 ? totalExpectedProfitGain / currentPortfolioProfit : 0;
   const simulationHorizonDays = safeNumber(summary.simulation_horizon_days ?? selectedRows[0]?.simulation_horizon?.days, 30);
@@ -1863,19 +1880,24 @@ function SkuPortfolioOptimizationPanel({
     return selectedOpsDecision ? [fallbackSkuReportRowFromDecision(selectedOpsDecision, portfolioRowsBySku.get(selectedOpsDecision.skuId))] : [];
   }, [decisionRows, focusedOpsSku, portfolioRowsBySku, visibleSkuRows]);
   const decisionActionFilter: PortfolioDecisionFilter = "ALL";
-  const optimizationQueueRows = decisionRows.filter((row) => isOptimizationQueueRow(row));
-  const filteredDecisionRows = (optimizationQueueRows.length ? optimizationQueueRows : decisionRows)
-    .filter((row) => decisionFilterMatchesRow(row, decisionActionFilter));
+  const rawOptimizationQueueRows = decisionRows.filter((row) =>
+    isOptimizationQueueRow(row) &&
+    isOptimizationQueueEligibleRow(row, portfolioRowsBySku.get(row.skuId))
+  );
+  const optimizationQueueRows = capUniformBudgetSpreadDecisionRows(rawOptimizationQueueRows, currentSkuCount, portfolioRowsBySku);
+  const filteredDecisionRows = optimizationQueueRows.filter((row) => decisionFilterMatchesRow(row, decisionActionFilter));
   const acceptedDecisionRows = filteredDecisionRows.filter((row) => actionStatuses[decisionRowKey(row)] === "accepted");
   const pendingDecisionRows = filteredDecisionRows.filter((row) => shouldShowInOptimizationQueue(row, actionStatuses));
   const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
   const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
-  const decisionRowsExpectedProfitGain = decisionRows.reduce<number>(
+  const decisionRowsExpectedProfitGain = pendingDecisionRows.reduce<number>(
     (sum, row) => sum + profitImpactForDecision(row, portfolioRowsBySku.get(row.skuId)),
     0
   );
   const expectedProfitGain =
-    totalExpectedProfitGain ||
+    optimizationStarted
+      ? decisionRowsExpectedProfitGain
+      : totalExpectedProfitGain ||
     safeNumber(summary.total_expected_profit_gain) ||
     safeNumber(summary.expected_profit_gain) ||
     safeNumber(optimization.portfolioSummary?.totalProfitImpact) ||
@@ -1884,10 +1906,11 @@ function SkuPortfolioOptimizationPanel({
   const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
-  const displayedCurrentAdSpend = shouldBlankOptimizationSummary ? 0 : currentAdSpendFromOptimizationSummary(summary);
+  const displayedCurrentAdSpend = shouldBlankOptimizationSummary ? 0 : currentAdSpend;
   const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
   const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : expectedProfitGain;
   const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
+  const displayedOptimizedProfit = displayedCurrentProfit + displayedExpectedProfitGain;
   const displayedOptimizationAdSpend = shouldBlankOptimizationSummary
     ? 0
     : displayedCurrentAdSpend + pendingDecisionRows.reduce((sum, row) => {
@@ -1895,7 +1918,9 @@ function SkuPortfolioOptimizationPanel({
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
       return sum + Math.max(0, adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
     }, 0);
-  const displayedOptimizationProjectedProfit = displayedCurrentProfit + displayedExpectedProfitGain;
+  const displayedOptimizationAdditionalAds = shouldBlankOptimizationSummary
+    ? 0
+    : Math.max(0, displayedOptimizationAdSpend - displayedCurrentAdSpend);
   const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
     ? 0
     : acceptedImpactSummary?.expectedProfitImpact
@@ -2325,10 +2350,13 @@ function SkuPortfolioOptimizationPanel({
                   <div className="mt-3 grid gap-2">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "预计利润" : "Projected Profit"}
+                        {isZh ? "优化后利润" : "Optimized Profit"}
                       </p>
                       <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedOptimizationProjectedProfit)}
+                        {currencyDecimal.format(displayedOptimizedProfit)}
+                      </p>
+                      <p className="mt-0.5 text-xs font-bold text-slate-500">
+                        {signedCurrency(displayedExpectedProfitGain)} ({formatSignedPercentText(displayedLiftRate)})
                       </p>
                     </div>
                     <div>
@@ -2341,10 +2369,15 @@ function SkuPortfolioOptimizationPanel({
                     </div>
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "广告花费" : "Ad Spend"}
+                        {isZh ? "优化后广告花费" : "Optimized Ad Spend"}
                       </p>
                       <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedOptimizationAdSpend)}
+                        {currencyWhole.format(displayedOptimizationAdSpend)}
+                      </p>
+                      <p className="mt-0.5 text-xs font-bold text-slate-500">
+                        {isZh
+                          ? `（新增投入 + ${currencyWhole.format(displayedOptimizationAdditionalAds)}）`
+                          : `(+ ${currencyWhole.format(displayedOptimizationAdditionalAds)} investment)`}
                       </p>
                     </div>
                   </div>
@@ -2374,10 +2407,10 @@ function SkuPortfolioOptimizationPanel({
                     </div>
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "广告花费" : "Ad Spend"}
+                        {isZh ? "新增广告投入" : "Additional Ad Spend"}
                       </p>
                       <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedAcceptedAdditionalAds)}
+                        {signedCurrency(displayedAcceptedAdditionalAds)}
                       </p>
                     </div>
                   </div>
@@ -2737,6 +2770,137 @@ function isOptimizationQueueRow(row: PortfolioDecisionRow) {
 
   const impact = Math.abs(profitImpactForDecision(row));
   return row.action !== "MONITOR" || impact > 1 || row.inventoryRisk === true || row.budgetOpportunity === true;
+}
+
+const MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI = 0.2;
+const MIN_QUEUE_ATTRIBUTION_CONFIDENCE = 0.45;
+const UNIFORM_QUEUE_BUDGET_MIN_ROWS = 10;
+const UNIFORM_QUEUE_BUDGET_COVERAGE_RATIO = 0.75;
+const UNIFORM_QUEUE_BUDGET_KEEP_RATIO = 0.25;
+
+function isOptimizationQueueEligibleRow(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  if (isNoActionDecisionRow(row)) return false;
+
+  const profitLift = profitImpactForDecision(row, recommendation);
+  if (profitLift <= 0) return false;
+  if (!hasPositiveDecisionMargin(row, recommendation)) return false;
+
+  if (!isIncrementalAdsDecision(row, recommendation)) return true;
+
+  const additionalAdSpend = adsBudgetDeltaForDecision(row, recommendation);
+  if (additionalAdSpend <= 0) return false;
+  if (profitLift / additionalAdSpend < MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI) return false;
+  if (!hasEnoughDecisionInventory(row, recommendation)) return false;
+  if (decisionAttributionConfidence(row, recommendation) < MIN_QUEUE_ATTRIBUTION_CONFIDENCE) return false;
+
+  return true;
+}
+
+function capUniformBudgetSpreadDecisionRows(
+  rows: PortfolioDecisionRow[],
+  currentSkuCount: number,
+  portfolioRowsBySku: Map<string, PortfolioRow>
+) {
+  const scaleRows = rows.filter((row) => isIncrementalAdsDecision(row, portfolioRowsBySku.get(row.skuId)));
+  const skuCount = Math.max(1, currentSkuCount || new Set(rows.map((row) => row.skuId)).size);
+  const distinctBudgetDeltas = new Set(scaleRows.map((row) => Math.round(adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)))));
+  const looksLikeUniformBudgetSpread =
+    scaleRows.length >= UNIFORM_QUEUE_BUDGET_MIN_ROWS &&
+    scaleRows.length / skuCount >= UNIFORM_QUEUE_BUDGET_COVERAGE_RATIO &&
+    distinctBudgetDeltas.size <= 2;
+
+  if (!looksLikeUniformBudgetSpread) return rows;
+
+  const keepCount = Math.max(3, Math.ceil(skuCount * UNIFORM_QUEUE_BUDGET_KEEP_RATIO));
+  const keepKeys = new Set(scaleRows
+    .slice()
+    .sort((left, right) => {
+      const leftRecommendation = portfolioRowsBySku.get(left.skuId);
+      const rightRecommendation = portfolioRowsBySku.get(right.skuId);
+      const leftSpend = adsBudgetDeltaForDecision(left, leftRecommendation);
+      const rightSpend = adsBudgetDeltaForDecision(right, rightRecommendation);
+      const leftLift = profitImpactForDecision(left, leftRecommendation);
+      const rightLift = profitImpactForDecision(right, rightRecommendation);
+      const leftRoi = leftSpend > 0 ? leftLift / leftSpend : 0;
+      const rightRoi = rightSpend > 0 ? rightLift / rightSpend : 0;
+
+      return rightRoi - leftRoi ||
+        rightLift - leftLift ||
+        safeNumber(objectRecord(right).confidence) - safeNumber(objectRecord(left).confidence) ||
+        left.skuId.localeCompare(right.skuId);
+    })
+    .slice(0, keepCount)
+    .map((row) => decisionRowKey(row)));
+
+  return rows.filter((row) => !isIncrementalAdsDecision(row, portfolioRowsBySku.get(row.skuId)) || keepKeys.has(decisionRowKey(row)));
+}
+
+function isIncrementalAdsDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const goal = optimizationGoalForDecision(row, recommendation);
+  const rawAction = String(objectRecord(row).sourceAction || row.action || "").toUpperCase();
+
+  return goal.actionLabel === "Scale Ads" ||
+    goal.actionLabel === "Expand Channel" ||
+    rawAction.includes("SCALE_ADS") ||
+    rawAction.includes("TEST_AD_SPEND") ||
+    rawAction.includes("SHIFT_CHANNEL");
+}
+
+function hasPositiveDecisionMargin(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const beforeState = objectRecord(rowRecord.before_state ?? recommendation?.before_state);
+  const afterState = objectRecord(rowRecord.after_state);
+  const currentMetrics = objectRecord(rowRecord.current_metrics);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendation?.simulation);
+  const currentMargin = firstNumberOrNull(
+    beforeState.margin,
+    currentMetrics.margin,
+    recommendation?.before_state?.margin
+  );
+  const predictedMargin = firstNumberOrNull(
+    rowRecord.predicted_margin,
+    afterState.margin,
+    simulation.predicted_margin
+  );
+
+  return (currentMargin ?? 0) > 0 && (predictedMargin ?? currentMargin ?? 0) > 0;
+}
+
+function hasEnoughDecisionInventory(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendation?.simulation);
+  const beforeState = objectRecord(rowRecord.before_state ?? recommendation?.before_state);
+  const currentInventory = firstNumberOrNull(
+    rowRecord.current_inventory,
+    simulation.current_inventory,
+    beforeState.inventory,
+    recommendation?.before_state?.inventory
+  );
+  const requiredInventory = firstNumberOrNull(
+    rowRecord.required_inventory,
+    simulation.required_inventory,
+    recommendation?.simulation?.required_inventory
+  );
+
+  if (currentInventory === null || requiredInventory === null) return true;
+  return currentInventory >= requiredInventory;
+}
+
+function decisionAttributionConfidence(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const confidenceBreakdown = objectRecord(rowRecord.confidence_breakdown ?? recommendation?.confidence_breakdown);
+  const estimate = objectRecord(rowRecord.simulation_estimate ?? recommendation?.simulation_estimate);
+  const estimateBreakdown = objectRecord(estimate.confidence_breakdown);
+  const decisionConfidence = objectRecord(rowRecord.decision_confidence ?? recommendation?.decision_confidence);
+  const signalQuality = objectRecord(decisionConfidence.signal_quality);
+
+  return firstNumberOrNull(
+    confidenceBreakdown.attribution_confidence,
+    estimateBreakdown.attribution_confidence,
+    signalQuality.attributionConfidence,
+    recommendation?.confidence_breakdown?.attribution_confidence,
+    rowRecord.attribution_confidence
+  ) ?? 0;
 }
 
 function OptimizationDecisionRail({
@@ -4183,15 +4347,6 @@ function SelectedSkuOptimizationPanel({
   return (
     <aside className="sticky bottom-0 top-auto mx-auto max-h-[68vh] max-w-5xl overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
       <div className="p-0">
-        <div>
-          <p className="text-base font-bold text-slate-950">AI SKU Decision Center</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            Evidence, scenario simulation, lifecycle strategy, and execution feedback for the selected SKU.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-6 p-0">
         <p className="text-sm font-bold text-slate-950">AI Decision Summary</p>
         <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
           <div className="flex items-start justify-between gap-3">

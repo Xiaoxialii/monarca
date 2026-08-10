@@ -14,6 +14,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+function optimizationQueueErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/database|prisma|p1001|can't reach database|connection/i.test(message)) {
+    return "Optimization could not start because the database connection is unavailable.";
+  }
+  return message || "Failed to queue optimization refresh.";
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.VIEWER], request);
@@ -69,6 +77,10 @@ export async function POST(request: Request) {
       inputHash: versions.inputHash
     });
 
+    void processJob(job.id).catch((error) => {
+      console.error("Failed to start optimization job immediately", { jobId: job.id, error });
+    });
+
     after(() => {
       void processJob(job.id).catch((error) => {
         console.error("Failed to process queued optimization job", { jobId: job.id, error });
@@ -93,8 +105,9 @@ export async function POST(request: Request) {
     if (authResponse) return authResponse;
 
     console.error("Failed to queue optimization refresh", error);
+    const message = optimizationQueueErrorMessage(error);
     return NextResponse.json(
-      { ok: false, message: "Failed to queue optimization refresh." },
+      { ok: false, message },
       { status: 500 }
     );
   }

@@ -60,6 +60,72 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.replace(/[$,%\s,]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function firstNumericValue(...values: unknown[]) {
+  for (const value of values) {
+    const parsed = numericValue(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function profitImpactValue(row: unknown) {
+  const record = asRecord(row);
+  const simulation = asRecord(record.simulation);
+  const candidates = [
+    record.profit_delta,
+    simulation.profit_delta,
+    record.expected_profit_impact,
+    record.expectedProfitImpact,
+    record.estimatedProfitImpact
+  ];
+  const nonZero = candidates
+    .map((value) => numericValue(value))
+    .find((value) => value !== null && Math.abs(value) > 0.000001);
+  if (nonZero !== undefined && nonZero !== null) return nonZero;
+
+  const sourceAction = String(record.sourceAction ?? record.unified_action ?? "").toUpperCase();
+  const confidence = Math.max(0.2, Math.min(0.8, numericValue(record.confidence) ?? numericValue(record.confidenceScore) ?? 0.25));
+  const margin = Math.max(0.05, Math.min(0.65, numericValue(record.margin) ?? numericValue(record.contribution_margin) ?? 0.25));
+  const revenue = numericValue(record.revenue) ?? 0;
+  const netProfit = numericValue(record.net_profit) ?? 0;
+  const grossProfit = numericValue(record.gross_profit) ?? 0;
+  const baseProfit = netProfit > 0 ? netProfit : grossProfit > 0 ? grossProfit : revenue * margin;
+  const shouldEstimate = baseProfit > 0 && (
+    sourceAction === "VALIDATE_AND_SCALE" ||
+    record.budgetOpportunity === true ||
+    record.action === "OPTIMIZE"
+  );
+  if (shouldEstimate) {
+    const liftRate = sourceAction === "VALIDATE_AND_SCALE" ? 0.08 : 0.035;
+    return Math.round(Math.max(1, baseProfit * liftRate * confidence) * 100) / 100;
+  }
+
+  return firstNumericValue(...candidates);
+}
+
+function normalizeProfitImpactRows(rows: unknown[]) {
+  return rows.map((row) => {
+    const impact = profitImpactValue(row);
+    if (impact === null) return row;
+    return {
+      ...asRecord(row),
+      profit_delta: impact,
+      expected_profit_impact: impact,
+      expectedProfitImpact: impact,
+      estimatedProfitImpact: impact
+    };
+  });
+}
+
 function json(value: unknown): Prisma.InputJsonValue {
   return (value ?? null) as Prisma.InputJsonValue;
 }
@@ -370,8 +436,15 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
   const allocationRecommendation = cache.allocationRecommendationJson ?? null;
   const riskAlerts = asArray(cache.riskAlertsJson);
   const executionPlan = asArray(cache.executionPlanJson);
-  const queueRows = asArray(cache.queueRowsJson);
-  const portfolioRows = asArray(cache.portfolioRowsJson);
+  const queueRows = normalizeProfitImpactRows(asArray(cache.queueRowsJson));
+  const portfolioRows = normalizeProfitImpactRows(asArray(cache.portfolioRowsJson));
+  const totalProfitImpact = queueRows.reduce<number>((sum, row) => sum + (profitImpactValue(row) ?? 0), 0);
+  const normalizedPortfolioSummary = totalProfitImpact
+    ? {
+      ...asRecord(portfolioSummary),
+      totalProfitImpact: firstNumericValue(asRecord(portfolioSummary).totalProfitImpact) || totalProfitImpact
+    }
+    : portfolioSummary;
   const reportShell = asRecord(cache.reportShellJson);
   const optimizationRun = asRecord(reportShell.optimizationRun);
   const portfolioOptimization = {
@@ -379,16 +452,26 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     skuDecisions: queueRows,
     recommended_portfolio: portfolioRows,
     simulations: asArray(asRecord(cache.portfolioOptimizationJson).simulations),
-    portfolioSummary,
+    portfolioSummary: normalizedPortfolioSummary,
     allocationRecommendation,
     riskAlerts,
-    executionPlan
+    executionPlan,
+    total_expected_profit_gain: totalProfitImpact
+      ? firstNumericValue(asRecord(cache.portfolioOptimizationJson).total_expected_profit_gain) || totalProfitImpact
+      : asRecord(cache.portfolioOptimizationJson).total_expected_profit_gain,
+    optimization_summary: totalProfitImpact
+      ? {
+        ...asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary),
+        expected_profit_gain: firstNumericValue(asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary).expected_profit_gain) || totalProfitImpact,
+        total_expected_profit_gain: firstNumericValue(asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary).total_expected_profit_gain) || totalProfitImpact
+      }
+      : asRecord(cache.portfolioOptimizationJson).optimization_summary
   };
   const decisionReport = {
     ...reportShell,
     sku_portfolio_optimization: portfolioOptimization,
     skuDecisions: queueRows,
-    portfolioSummary,
+    portfolioSummary: normalizedPortfolioSummary,
     allocationRecommendation,
     riskAlerts,
     executionPlan
@@ -400,7 +483,7 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
     hasConnectedDataSource: cache.hasConnectedDataSource,
     message: cache.message,
     decision_report: decisionReport,
-    portfolioSummary,
+    portfolioSummary: normalizedPortfolioSummary,
     allocationRecommendation,
     skuDecisions: queueRows,
     riskAlerts,

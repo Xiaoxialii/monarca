@@ -106,7 +106,7 @@ const signInCopy = {
 type SignInCopy = (typeof signInCopy)[CopyLocale];
 type CodeFactor = Extract<SignInFirstFactor, { strategy: "email_code" }>;
 
-function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/dashboard") {
+function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/optimization") {
   const value = searchParams?.get("redirect_url");
 
   if (value?.startsWith("/") && !value.startsWith("//")) {

@@ -118,7 +118,7 @@ const signUpCopy = {
 
 type SignUpCopy = (typeof signUpCopy)[CopyLocale];
 
-function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/dashboard") {
+function authRedirectPath(searchParams: { get: (key: string) => string | null } | null, fallback = "/optimization") {
   const value = searchParams?.get("redirect_url");
 
   if (value?.startsWith("/") && !value.startsWith("//")) {

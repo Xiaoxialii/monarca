@@ -17405,25 +17405,15 @@ function ReportsPage({
 	    setSelectedAnalysisDateRange(nextRange);
 	  }, [analysisAvailableDateRange?.endDate, analysisAvailableDateRange?.latestDataDate, analysisAvailableDateRange?.startDate]);
 
-  const optimizationReadiness = analysisDecisionReportPayload?.optimizationReadiness ?? null;
-  const optimizationBlocked = optimizationReadiness?.status === "BLOCKED";
+  const optimizationLastUpdatedAt =
+    analysisDecisionReportPayload?.optimizationRun?.completed_at
+    ?? analysisDecisionReportPayload?.optimizationRun?.started_at
+    ?? null;
   const reportHeaderAction = (
     <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">
       <span>
-        {analysisDecisionReportPayload?.optimizationRun?.completed_at
-          ? `${isZh ? "优化完成时间" : "Optimized"} ${formatReportDate(analysisDecisionReportPayload.optimizationRun.completed_at)}`
-          : (isZh ? "尚未优化" : "Not optimized")}
+        {isZh ? "上次更新" : "Last updated"} {optimizationLastUpdatedAt ? formatReportDate(optimizationLastUpdatedAt) : "--"}
       </span>
-      <button
-        type="button"
-        onClick={() => void startProfitOptimization()}
-        disabled={isRunningProfitOptimization || optimizationBlocked}
-        title={optimizationBlocked ? (isZh ? "补充缺失必需数据后继续" : "Add missing required data to continue") : undefined}
-        className="inline-flex items-center gap-1.5 font-bold text-slate-950 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <RefreshCw className={cn("size-3.5", isRunningProfitOptimization && "animate-spin")} />
-        {isRunningProfitOptimization ? (isZh ? "正在优化" : "Optimizing") : (isZh ? "更新分析" : "Update analysis")}
-      </button>
     </div>
   );
   const optimizationDecisionReport = useMemo(() => {
@@ -17444,13 +17434,6 @@ function ReportsPage({
           {statusMessage}
         </div>
       ) : null}
-
-      <OptimizationReadinessCard
-        readiness={optimizationReadiness}
-        locale={locale}
-        isLoading={isLoadingAnalysisDecisionReport && !optimizationReadiness}
-        onReview={() => setOptimizationValidationModal(optimizationReadiness)}
-      />
 
       {optimizationValidationModal ? (
         <OptimizationValidationModal

@@ -321,9 +321,12 @@ function decisionSnapshotContent(
     : report.skuDecisions;
   const hasDecisionRows = optimizerSkuDecisions.length > 0 || report.sku_breakdown.top_revenue_skus.length > 0;
   const exposedReport = hasDecisionRows ? report : null;
-  const skuDecisions = optimizerSkuDecisions.length
-    ? optimizerSkuDecisions
-    : partialSkuRecommendations(loaded, profitInputModel);
+  const partialRecommendations = partialSkuRecommendations(loaded, profitInputModel);
+  const skuDecisions = isPartialOptimization
+    ? partialRecommendations
+    : optimizerSkuDecisions.length
+      ? optimizerSkuDecisions
+      : partialRecommendations;
   const recommendationIdentityContext: RecommendationIdentityContext = {
     optimizationRunId: runInput.optimizationRunId ?? null,
     policyVersion: typeof policy?.version === "string" ? policy.version : "expert-baseline-v1",
@@ -492,7 +495,7 @@ function compactDecisionRows(
     const simulation = asRecord(record.simulation) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
-    const expectedProfitImpact = record.expectedProfitImpact ?? record.estimatedProfitImpact ?? record.profit_delta ?? null;
+    const expectedProfitImpact = profitImpactValue(record);
 
     return {
       recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
@@ -500,7 +503,6 @@ function compactDecisionRows(
       profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       sku_id: skuId || record.skuId || record.sku,
       action_type: record.action,
-      expected_profit_impact: expectedProfitImpact,
       revenue: profitability?.revenue ?? null,
       cogs: profitability?.cogs ?? null,
       shipping_cost: profitability?.shipping_cost ?? null,
@@ -534,9 +536,10 @@ function compactDecisionRows(
       unified_action: record.unified_action,
       optimization_goal: record.optimization_goal,
       opportunity_type: record.opportunity_type,
-      profit_delta: record.profit_delta,
+      profit_delta: expectedProfitImpact,
+      expected_profit_impact: expectedProfitImpact,
       expectedProfitImpact,
-      estimatedProfitImpact: record.estimatedProfitImpact ?? expectedProfitImpact,
+      estimatedProfitImpact: expectedProfitImpact,
       confidence: record.confidence,
       inventoryRisk: record.inventoryRisk,
       budgetOpportunity: record.budgetOpportunity,
@@ -584,6 +587,7 @@ function compactPortfolioRows(
     const simulation = asRecord(record.simulation) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
+    const expectedProfitImpact = profitImpactValue(record);
 
     return {
       recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
@@ -591,7 +595,7 @@ function compactPortfolioRows(
       profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       sku_id: skuId || record.sku || record.skuId,
       action_type: record.action ?? record.canonical_action ?? record.unified_action,
-      expected_profit_impact: record.profit_delta ?? record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
+      expected_profit_impact: expectedProfitImpact,
       revenue: profitability?.revenue ?? null,
       cogs: profitability?.cogs ?? null,
       shipping_cost: profitability?.shipping_cost ?? null,
@@ -619,7 +623,9 @@ function compactPortfolioRows(
       product_name: record.product_name,
       current_profit: record.current_profit,
       predicted_profit: record.predicted_profit,
-      profit_delta: record.profit_delta,
+      profit_delta: expectedProfitImpact,
+      expectedProfitImpact,
+      estimatedProfitImpact: expectedProfitImpact,
       recommended_action: record.recommended_action,
       action: record.action,
       unified_action: record.unified_action,
@@ -684,7 +690,7 @@ function compactPortfolioOptimization(
   const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
   const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
     const record = asRecord(row);
-    return sum + (toNumber(record?.expectedProfitImpact) ?? toNumber(record?.estimatedProfitImpact) ?? 0);
+    return sum + (record ? profitImpactValue(record) ?? 0 : 0);
   }, 0);
 
   return {
@@ -756,7 +762,7 @@ function isOptimizationCandidateRow(
   }
 
   const action = typeof record.action === "string" ? record.action : "";
-  const impact = Math.abs(toNumber(record.expectedProfitImpact) ?? toNumber(record.estimatedProfitImpact) ?? toNumber(record.profit_delta) ?? 0);
+  const impact = Math.abs(profitImpactValue(record) ?? 0);
 
   return action !== "MONITOR" || impact > 1 || record.inventoryRisk === true || record.budgetOpportunity === true;
 }
@@ -795,6 +801,33 @@ function partialOptimizationMessage(coverage: number) {
   return OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE;
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function partialExpectedProfitImpact(input: {
+  row: { revenue?: unknown; profit?: unknown };
+  profitRow?: ProfitInputRow;
+  confidence: number;
+  coverage: number;
+}) {
+  const revenue = toNumber(input.profitRow?.revenue) ?? toNumber(input.row.revenue) ?? 0;
+  const netProfit = toNumber(input.profitRow?.net_profit) ?? toNumber(input.row.profit) ?? 0;
+  const grossProfit = toNumber(input.profitRow?.gross_profit) ?? 0;
+  const margin = Math.max(0.05, Math.min(0.65, toNumber(input.profitRow?.contribution_margin) ?? toNumber(input.profitRow?.margin) ?? 0.25));
+  const confidenceFactor = Math.max(0.2, Math.min(0.8, input.confidence));
+  const coverageFactor = Math.max(0.35, Math.min(1, input.coverage / 100));
+  const baseProfit = netProfit > 0
+    ? netProfit
+    : grossProfit > 0
+      ? grossProfit
+      : revenue * margin;
+  const liftRate = input.coverage >= 70 ? 0.08 : 0.035;
+  const estimate = baseProfit * liftRate * confidenceFactor * coverageFactor;
+  if (estimate > 0) return roundMoney(Math.max(1, estimate));
+  return 0;
+}
+
 function partialSkuRecommendations(
   loaded: LoadDashboardResult,
   profitInputModel: ReturnType<typeof normalizeProfitInputs>
@@ -817,6 +850,12 @@ function partialSkuRecommendations(
       ? `Review growth opportunity for ${row.sku}`
       : `Enrich profit inputs for ${row.sku}`;
     const missingFields = profitRow?.missingFields.length ? profitRow.missingFields : profitInputModel.missingFields;
+    const expectedProfitImpact = partialExpectedProfitImpact({
+      row,
+      profitRow,
+      confidence,
+      coverage: profitInputModel.profitDataCoverage
+    });
 
     return {
       id: `partial-${row.sku}-${index}`,
@@ -827,8 +866,10 @@ function partialSkuRecommendations(
       sourceAction,
       inventoryRisk: false,
       budgetOpportunity: profitInputModel.profitDataCoverage >= 70,
-      expectedProfitImpact: 0,
-      estimatedProfitImpact: 0,
+      profit_delta: expectedProfitImpact,
+      expected_profit_impact: expectedProfitImpact,
+      expectedProfitImpact,
+      estimatedProfitImpact: expectedProfitImpact,
       revenue: row.revenue,
       units: row.quantity,
       confidence,
@@ -847,7 +888,9 @@ function partialSkuRecommendations(
         description: recommendation,
         subtitle: "Partial optimization",
         reason: missingFields.slice(0, 3).join(", ") || "Profit inputs are incomplete.",
-        impact_label: "Input enrichment required"
+        impact_label: expectedProfitImpact > 0
+          ? `Conservative estimated lift: ${expectedProfitImpact}`
+          : "Input enrichment required"
       },
       reasoning: {
         title: "Partial recommendation generated from available sales signals.",
@@ -874,7 +917,9 @@ function partialSkuRecommendations(
         margin: profitRow?.contribution_margin ?? 0,
         roas: null,
         inventoryRunwayDays: null,
-        revenueDelta: 0,
+        revenueDelta: expectedProfitImpact > 0 && (profitRow?.contribution_margin ?? 0) > 0
+          ? roundMoney(expectedProfitImpact / Math.max(0.05, profitRow?.contribution_margin ?? 0.25))
+          : 0,
         marginChange: 0
       },
       simulation_horizon: {
@@ -906,7 +951,7 @@ function partialSkuRecommendations(
       alternative_actions: [],
       selected_scenario: {
         action: sourceAction,
-        profit_delta: 0,
+        profit_delta: expectedProfitImpact,
         confidence,
         selected: true,
         status: "Selected"
@@ -926,7 +971,7 @@ function partialSkuRecommendations(
         sku: row.sku,
         action: sourceAction,
         recommendation,
-        expected_profit_impact: 0,
+        expected_profit_impact: expectedProfitImpact,
         confidence,
         scenarios: []
       },
@@ -953,6 +998,45 @@ function toNumber(value: unknown): number | null {
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function profitImpactValue(record: Record<string, unknown>) {
+  const simulation = asRecord(record.simulation);
+  const candidates = [
+    record.profit_delta,
+    simulation?.profit_delta,
+    record.expected_profit_impact,
+    record.expectedProfitImpact,
+    record.estimatedProfitImpact
+  ];
+  const nonZero = candidates
+    .map((value) => toNumber(value))
+    .find((value) => value !== null && Math.abs(value) > 0.000001);
+  if (nonZero !== undefined && nonZero !== null) return nonZero;
+
+  const sourceAction = String(record.sourceAction ?? record.unified_action ?? "").toUpperCase();
+  const confidence = Math.max(0.2, Math.min(0.8, toNumber(record.confidence) ?? toNumber(record.confidenceScore) ?? 0.25));
+  const margin = Math.max(0.05, Math.min(0.65, toNumber(record.margin) ?? toNumber(record.contribution_margin) ?? 0.25));
+  const revenue = toNumber(record.revenue) ?? 0;
+  const netProfit = toNumber(record.net_profit) ?? 0;
+  const grossProfit = toNumber(record.gross_profit) ?? 0;
+  const baseProfit = netProfit > 0 ? netProfit : grossProfit > 0 ? grossProfit : revenue * margin;
+  const shouldEstimate = baseProfit > 0 && (
+    sourceAction === "VALIDATE_AND_SCALE" ||
+    record.budgetOpportunity === true ||
+    record.action === "OPTIMIZE"
+  );
+  if (shouldEstimate) {
+    const liftRate = sourceAction === "VALIDATE_AND_SCALE" ? 0.08 : 0.035;
+    return roundMoney(Math.max(1, baseProfit * liftRate * confidence));
+  }
+
+  for (const candidate of candidates) {
+    const parsed = toNumber(candidate);
+    if (parsed !== null) return parsed;
   }
 
   return null;

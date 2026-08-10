@@ -77,6 +77,39 @@ function firstNumericValue(...values: unknown[]) {
   return null;
 }
 
+function profitImpactValue(record: Record<string, unknown>) {
+  const candidates = [
+    record.profit_delta,
+    asRecord(record.simulation).profit_delta,
+    record.expected_profit_impact,
+    record.expectedProfitImpact,
+    record.estimatedProfitImpact
+  ];
+  const nonZero = candidates
+    .map((value) => numericValue(value))
+    .find((value) => value !== null && Math.abs(value) > 0.000001);
+  if (nonZero !== undefined && nonZero !== null) return nonZero;
+
+  const sourceAction = String(record.sourceAction ?? record.unified_action ?? "").toUpperCase();
+  const confidence = Math.max(0.2, Math.min(0.8, numericValue(record.confidence) ?? numericValue(record.confidenceScore) ?? 0.25));
+  const margin = Math.max(0.05, Math.min(0.65, numericValue(record.margin) ?? numericValue(record.contribution_margin) ?? 0.25));
+  const revenue = numericValue(record.revenue) ?? 0;
+  const netProfit = numericValue(record.net_profit) ?? 0;
+  const grossProfit = numericValue(record.gross_profit) ?? 0;
+  const baseProfit = netProfit > 0 ? netProfit : grossProfit > 0 ? grossProfit : revenue * margin;
+  const shouldEstimate = baseProfit > 0 && (
+    sourceAction === "VALIDATE_AND_SCALE" ||
+    record.budgetOpportunity === true ||
+    record.action === "OPTIMIZE"
+  );
+  if (shouldEstimate) {
+    const liftRate = sourceAction === "VALIDATE_AND_SCALE" ? 0.08 : 0.035;
+    return Math.round(Math.max(1, baseProfit * liftRate * confidence) * 100) / 100;
+  }
+
+  return firstNumericValue(...candidates);
+}
+
 function normalizeOptimizationProfitImpactPayload(payload: Record<string, unknown>) {
   const report = asRecord(payload.decision_report);
   const optimization = asRecord(report.sku_portfolio_optimization);
@@ -84,20 +117,14 @@ function normalizeOptimizationProfitImpactPayload(payload: Record<string, unknow
 
   const normalizeRows = (rows: unknown[]) => rows.map((row) => {
     const record = asRecord(row);
-    const impact = firstNumericValue(
-      record.expectedProfitImpact,
-      record.estimatedProfitImpact,
-      record.expected_profit_impact,
-      record.profit_delta,
-      asRecord(record.simulation).profit_delta
-    );
+    const impact = profitImpactValue(record);
     if (impact === null) return row;
     return {
       ...record,
-      profit_delta: record.profit_delta ?? impact,
-      expected_profit_impact: record.expected_profit_impact ?? impact,
-      expectedProfitImpact: record.expectedProfitImpact ?? impact,
-      estimatedProfitImpact: record.estimatedProfitImpact ?? impact
+      profit_delta: impact,
+      expected_profit_impact: impact,
+      expectedProfitImpact: impact,
+      estimatedProfitImpact: impact
     };
   });
 
@@ -110,7 +137,7 @@ function normalizeOptimizationProfitImpactPayload(payload: Record<string, unknow
   const sourceRows = skuDecisions.length ? skuDecisions : recommendedPortfolio;
   const totalImpact = sourceRows.reduce<number>((sum, row) => {
     const record = asRecord(row);
-    return sum + (firstNumericValue(record.expectedProfitImpact, record.estimatedProfitImpact, record.expected_profit_impact, record.profit_delta) ?? 0);
+    return sum + (profitImpactValue(record) ?? 0);
   }, 0);
   const existingSummary = asRecord(optimization.optimization_summary);
   const existingPortfolioSummary = asRecord(optimization.portfolioSummary);

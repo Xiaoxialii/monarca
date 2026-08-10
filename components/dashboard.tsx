@@ -1779,6 +1779,7 @@ let connectedSourcesWorkspaceIdCache: string | null = null;
 let connectedSourcesUserIdCache: string | null = null;
 let analysisReportsPageDataCache: unknown = null;
 let reportsPageDataCache: unknown = null;
+const removedConnectedSourceIds = new Set<string>();
 const CONNECTED_SOURCES_BROWSER_CACHE_PREFIX = "monarca.connectedSources.v2";
 const CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -1831,6 +1832,11 @@ function writeConnectedSourcesBrowserCache(sources: ConnectedSourceRow[], worksp
   } catch {
     // Ignore storage failures; the in-memory cache still works during this session.
   }
+}
+
+function withoutLocallyRemovedSources(sources: ConnectedSourceRow[]) {
+  if (removedConnectedSourceIds.size === 0) return sources;
+  return sources.filter((source) => !removedConnectedSourceIds.has(source.id));
 }
 
 function Sidebar({
@@ -3893,17 +3899,35 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
   const snapshotJson = valueAsRecord(snapshot.schemaJson);
   const sourceSchema = valueAsRecord(response.schema);
   const rawUploadSchema = valueAsRecord(snapshotJson.rawUploadSchema);
-  const schema = Object.keys(sourceSchema).length > 0
-    ? sourceSchema
-    : Object.keys(rawUploadSchema).length > 0
+  const schema = Object.keys(rawUploadSchema).length > 0
+    ? rawUploadSchema
+    : Object.keys(snapshotJson).length > 0
+      ? snapshotJson
+      : sourceSchema;
+  const semanticMappingCache = valueAsRecord(
+    snapshotJson.semanticMappingCache ??
+    rawUploadSchema.semanticMappingCache ??
+    schema.semanticMappingCache
+  );
+  const cachedMappingDetails = Array.isArray(semanticMappingCache.field_mappings)
+    ? semanticMappingCache.field_mappings
+    : [];
+  const cachedMappingConfidence = cachedMappingDetails.length
+    ? cachedMappingDetails.reduce((sum, mapping) => sum + (valueAsNumber(valueAsRecord(mapping).confidence) ?? 0), 0) / cachedMappingDetails.length
+    : null;
+  const schemaWithTables = Array.isArray(schema.tables) && schema.tables.length > 0
+    ? schema
+    : Object.keys(rawUploadSchema).length > 0 && Array.isArray(rawUploadSchema.tables) && rawUploadSchema.tables.length > 0
       ? rawUploadSchema
-      : snapshotJson;
+      : Array.isArray(snapshotJson.tables) && snapshotJson.tables.length > 0
+        ? snapshotJson
+        : schema;
   const unifiedIngestion = valueAsRecord(schema.unifiedIngestion ?? rawUploadSchema.unifiedIngestion ?? snapshotJson.unifiedIngestion);
   const semantic = valueAsRecord(unifiedIngestion.semantic);
   const detectedSchema = valueAsRecord(unifiedIngestion.detectedSchema);
   const canonical = valueAsRecord(unifiedIngestion.canonical);
   const learning = valueAsRecord(unifiedIngestion.learning);
-  const tables = Array.isArray(schema.tables) ? schema.tables : [];
+  const tables = Array.isArray(schemaWithTables.tables) ? schemaWithTables.tables : [];
   const tableRows = tables.map((table) => {
     const tableRecord = valueAsRecord(table);
     const columns = Array.isArray(tableRecord.columns) ? tableRecord.columns : [];
@@ -3932,7 +3956,7 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
     ? semantic.mapping_details
     : Array.isArray(semantic.mappingDetails)
       ? semantic.mappingDetails
-      : [];
+      : cachedMappingDetails;
   const semanticMappings = Object.fromEntries(
     Object.entries(valueAsRecord(semantic.mappings)).map(([field, canonical]) => [
       field,
@@ -3941,17 +3965,17 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
   );
 
   return {
-    tableCount: valueAsNumber(schema.tableCount) ?? tableRows.length,
-    columnCount: valueAsNumber(schema.columnCount) ?? tableRows.reduce((sum, table) => sum + table.columns.length, 0),
-    scannedAt: typeof schema.scannedAt === "string"
-      ? schema.scannedAt
+    tableCount: valueAsNumber(schemaWithTables.tableCount) ?? tableRows.length,
+    columnCount: valueAsNumber(schemaWithTables.columnCount) ?? tableRows.reduce((sum, table) => sum + table.columns.length, 0),
+    scannedAt: typeof schemaWithTables.scannedAt === "string"
+      ? schemaWithTables.scannedAt
       : typeof snapshot.createdAt === "string"
         ? snapshot.createdAt
         : null,
-    unifiedIngestion: Object.keys(unifiedIngestion).length > 0
+    unifiedIngestion: Object.keys(unifiedIngestion).length > 0 || cachedMappingDetails.length > 0
       ? {
           status: typeof unifiedIngestion.status === "string" ? unifiedIngestion.status : null,
-          source: typeof unifiedIngestion.source === "string" ? unifiedIngestion.source : null,
+          source: typeof unifiedIngestion.source === "string" ? unifiedIngestion.source : typeof semanticMappingCache.source === "string" ? semanticMappingCache.source : null,
           sampledRows: valueAsNumber(unifiedIngestion.sampledRows),
           totalParsedRows: valueAsNumber(unifiedIngestion.totalParsedRows),
           detectedSchema: {
@@ -3967,17 +3991,22 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
             }).filter((field) => field.name)
           },
           semantic: {
-            confidence: valueAsNumber(semantic.confidence),
+            confidence: valueAsNumber(semantic.confidence) ?? cachedMappingConfidence,
             memory_hits: valueAsNumber(semantic.memory_hits),
             engine_candidates: valueAsNumber(semantic.engine_candidates),
             mappings: semanticMappings,
             mapping_details: mappingDetails.map((mapping) => {
               const record = valueAsRecord(mapping);
               return {
-                field: typeof record.field === "string" ? record.field : "",
-                canonical: typeof record.canonical === "string" ? record.canonical : "",
+                field: typeof record.source_column === "string" ? record.source_column : typeof record.field === "string" ? record.field : "",
+                source_column: typeof record.source_column === "string" ? record.source_column : typeof record.field === "string" ? record.field : "",
+                canonical: typeof record.canonical_field === "string" ? record.canonical_field : typeof record.canonical === "string" ? record.canonical : "",
+                canonical_field: typeof record.canonical_field === "string" ? record.canonical_field : typeof record.canonical === "string" ? record.canonical : "",
                 confidence: valueAsNumber(record.confidence),
-                source: typeof record.source === "string" ? record.source : "engine"
+                source: typeof record.source === "string" ? record.source : typeof semanticMappingCache.source === "string" ? semanticMappingCache.source : "engine",
+                mapping_method: typeof record.mapping_method === "string" ? record.mapping_method : null,
+                requires_confirmation: record.requires_confirmation === true,
+                suggested_mappings: Array.isArray(record.suggested_mappings) ? record.suggested_mappings : []
               };
             }).filter((mapping) => mapping.field),
             unknown_fields: Array.isArray(semantic.unknown_fields)
@@ -6334,10 +6363,10 @@ function DataSourcesWorkspace({
   const [isConnectorPickerOpen, setIsConnectorPickerOpen] = useState(false);
   const [selectedConnectorSourceName, setSelectedConnectorSourceName] = useState<string | null>(null);
   const businessSources = useMemo(
-    () => buildBusinessSources(workspaceSources.length > 0 ? workspaceSources : connectedSources, isZh),
-    [connectedSources, isZh, workspaceSources]
+    () => buildBusinessSources(workspaceSources, isZh),
+    [isZh, workspaceSources]
   );
-  const hasAnySources = connectedSources.length > 0 || workspaceSources.length > 0;
+  const hasAnySources = workspaceSources.length > 0;
 
   useEffect(() => {
     setWorkspaceSources(connectedSources);
@@ -18420,6 +18449,7 @@ export function Dashboard({
           : "#overview";
 
   const addConnectedSource = (source: ConnectedSourceRow) => {
+    removedConnectedSourceIds.delete(source.id);
     setConnectedSources((current) => {
       const next = current.some((item) => item.id === source.id) ? current : [source, ...current];
       connectedSourcesCache = next;
@@ -18438,6 +18468,7 @@ export function Dashboard({
   };
 
   const removeConnectedSource = (sourceId: string) => {
+    removedConnectedSourceIds.add(sourceId);
     const previousSources = connectedSources;
     const previousDeletedSources = deletedSources;
     const failureMessage = copy.connectors.title === "连接数据源"
@@ -18466,6 +18497,7 @@ export function Dashboard({
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload?.ok) {
+        removedConnectedSourceIds.delete(sourceId);
         connectedSourcesCache = previousSources;
         writeConnectedSourcesBrowserCache(previousSources, connectedSourcesWorkspaceIdCache, connectedSourcesUserIdCache);
         setConnectedSources(previousSources);
@@ -18476,6 +18508,7 @@ export function Dashboard({
 
       window.dispatchEvent(new Event("monarca-data-sources-updated"));
     }).catch(() => {
+      removedConnectedSourceIds.delete(sourceId);
       connectedSourcesCache = previousSources;
       writeConnectedSourcesBrowserCache(previousSources, connectedSourcesWorkspaceIdCache, connectedSourcesUserIdCache);
       setConnectedSources(previousSources);
@@ -18485,6 +18518,7 @@ export function Dashboard({
   };
 
   const restoreDeletedSource = (sourceId: string) => {
+    removedConnectedSourceIds.delete(sourceId);
     const failureMessage = copy.connectors.title === "连接数据源"
       ? "恢复数据源失败，请确认当前账号有 Owner / Admin 权限后重试"
       : "Failed to restore data source. Confirm your account has Owner / Admin access and try again.";
@@ -18508,6 +18542,7 @@ export function Dashboard({
   };
 
   const permanentlyDeleteSource = (sourceId: string) => {
+    removedConnectedSourceIds.add(sourceId);
     const isZh = copy.connectors.title === "连接数据源";
     const confirmed = window.confirm(
       isZh
@@ -18530,6 +18565,7 @@ export function Dashboard({
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload?.ok) {
+        removedConnectedSourceIds.delete(sourceId);
         setDeletedSources(previousDeletedSources);
         window.alert(payload?.message || failureMessage);
         return;
@@ -18537,6 +18573,7 @@ export function Dashboard({
 
       window.dispatchEvent(new Event("monarca-data-sources-updated"));
     }).catch(() => {
+      removedConnectedSourceIds.delete(sourceId);
       setDeletedSources(previousDeletedSources);
       window.alert(failureMessage);
     });
@@ -18557,7 +18594,7 @@ export function Dashboard({
       const payload = await response.json().catch(() => null);
 
       if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
-        const nextSources = payload.dataSources as ConnectedSourceRow[];
+        const nextSources = withoutLocallyRemovedSources(payload.dataSources as ConnectedSourceRow[]);
         const nextWorkspaceId = typeof payload.workspace?.id === "string" ? payload.workspace.id : null;
         const nextUserId = connectedSourcesUserIdCache;
         const workspaceChanged = Boolean(
@@ -18626,10 +18663,11 @@ export function Dashboard({
         readConnectedSourcesMemoryCache(currentWorkspaceId, currentUserId) ??
         readConnectedSourcesBrowserCache(currentWorkspaceId, currentUserId);
       if (cachedSources) {
+        const filteredCachedSources = withoutLocallyRemovedSources(cachedSources);
         connectedSourcesWorkspaceIdCache = currentWorkspaceId;
         connectedSourcesUserIdCache = currentUserId;
-        connectedSourcesCache = cachedSources;
-        setConnectedSources(cachedSources);
+        connectedSourcesCache = filteredCachedSources;
+        setConnectedSources(filteredCachedSources);
         setIsLoadingConnectedSources(false);
       }
 

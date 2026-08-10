@@ -66,6 +66,30 @@ const ADS_CONCEPTS = new Set<CanonicalConcept>(["ad_spend"]);
 
 const DATE_FIELDS = ["date", "day", "month", "report_date", "campaign_date", "event_date", "date_start", "insight_date"];
 
+const CHANNEL_FIELDS = [
+  "channel",
+  "platform",
+  "sales_channel",
+  "order_channel",
+  "fulfillment_channel",
+  "fulfilment_channel",
+  "fulfillment_service",
+  "fulfillment_method",
+  "delivery_channel",
+  "shipping_channel",
+  "region",
+  "market",
+  "utm_campaign"
+];
+
+const CHANNEL_CONCEPTS = new Set<CanonicalConcept>([
+  "channel",
+  "order_channel",
+  "fulfillment_channel",
+  "region",
+  "utm_campaign"
+]);
+
 export function validateSemanticMapping(sourceField: string, predictedConcept: CanonicalConcept): MappingValidationResult {
   if (predictedConcept === "unknown") {
     return { sourceField, predictedConcept, accepted: true };
@@ -97,6 +121,10 @@ export function validateSemanticMapping(sourceField: string, predictedConcept: C
 
   if (matchesAny(normalized, DATE_FIELDS) && predictedConcept !== "event_date" && predictedConcept !== "order_date") {
     return reject(sourceField, predictedConcept, "date_field_must_map_to_date_concept");
+  }
+
+  if (matchesAny(normalized, CHANNEL_FIELDS) && !CHANNEL_CONCEPTS.has(predictedConcept)) {
+    return reject(sourceField, predictedConcept, "channel_field_must_map_to_channel_concept");
   }
 
   return { sourceField, predictedConcept, accepted: true };

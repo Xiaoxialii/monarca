@@ -213,6 +213,24 @@ export async function DELETE(
         status: true
       }
     });
+    await prisma.unifiedIngestionJob.updateMany({
+      where: {
+        workspaceId: session.workspace.id,
+        dataSourceId: dataSource.id,
+        status: {
+          notIn: ["COMPLETED", "FAILED", "CANCELLED"]
+        }
+      },
+      data: {
+        status: "CANCELLED",
+        progress: 100,
+        currentStep: "Cancelled",
+        errorMessage: "Data source was removed.",
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: new Date()
+      }
+    });
     await clearWorkspaceReportCaches(prisma, session.workspace.id);
 
     return NextResponse.json({ ok: true, dataSource: removedDataSource, deactivatedMetricCount });

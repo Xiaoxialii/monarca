@@ -60,6 +60,95 @@ function cacheNeedsOptimizationRefresh(payload: unknown) {
   );
 }
 
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[$,%\s,]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function firstNumericValue(...values: unknown[]) {
+  for (const value of values) {
+    const parsed = numericValue(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function normalizeOptimizationProfitImpactPayload(payload: Record<string, unknown>) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  if (!Object.keys(report).length || !Object.keys(optimization).length) return payload;
+
+  const normalizeRows = (rows: unknown[]) => rows.map((row) => {
+    const record = asRecord(row);
+    const impact = firstNumericValue(
+      record.expectedProfitImpact,
+      record.estimatedProfitImpact,
+      record.expected_profit_impact,
+      record.profit_delta,
+      asRecord(record.simulation).profit_delta
+    );
+    if (impact === null) return row;
+    return {
+      ...record,
+      profit_delta: record.profit_delta ?? impact,
+      expected_profit_impact: record.expected_profit_impact ?? impact,
+      expectedProfitImpact: record.expectedProfitImpact ?? impact,
+      estimatedProfitImpact: record.estimatedProfitImpact ?? impact
+    };
+  });
+
+  const skuDecisions = Array.isArray(optimization.skuDecisions)
+    ? normalizeRows(optimization.skuDecisions)
+    : [];
+  const recommendedPortfolio = Array.isArray(optimization.recommended_portfolio)
+    ? normalizeRows(optimization.recommended_portfolio)
+    : [];
+  const sourceRows = skuDecisions.length ? skuDecisions : recommendedPortfolio;
+  const totalImpact = sourceRows.reduce<number>((sum, row) => {
+    const record = asRecord(row);
+    return sum + (firstNumericValue(record.expectedProfitImpact, record.estimatedProfitImpact, record.expected_profit_impact, record.profit_delta) ?? 0);
+  }, 0);
+  const existingSummary = asRecord(optimization.optimization_summary);
+  const existingPortfolioSummary = asRecord(optimization.portfolioSummary);
+  const shouldPatchSummary = Math.abs(totalImpact) > 0;
+  const optimizationSummary = shouldPatchSummary
+    ? {
+      ...existingSummary,
+      expected_profit_gain: firstNumericValue(existingSummary.expected_profit_gain) || totalImpact,
+      total_expected_profit_gain: firstNumericValue(existingSummary.total_expected_profit_gain) || totalImpact
+    }
+    : existingSummary;
+
+  return {
+    ...payload,
+    total_expected_profit_gain: shouldPatchSummary
+      ? firstNumericValue(payload.total_expected_profit_gain) || totalImpact
+      : payload.total_expected_profit_gain,
+    decision_report: {
+      ...report,
+      sku_portfolio_optimization: {
+        ...optimization,
+        total_expected_profit_gain: shouldPatchSummary
+          ? firstNumericValue(optimization.total_expected_profit_gain) || totalImpact
+          : optimization.total_expected_profit_gain,
+        optimization_summary: optimizationSummary,
+        portfolioSummary: shouldPatchSummary
+          ? {
+            ...existingPortfolioSummary,
+            totalProfitImpact: firstNumericValue(existingPortfolioSummary.totalProfitImpact) || totalImpact
+          }
+          : existingPortfolioSummary,
+        skuDecisions,
+        recommended_portfolio: recommendedPortfolio
+      }
+    }
+  };
+}
+
 async function hasReadyCanonicalSources(workspaceId: string) {
   const readySnapshots = await prisma.schemaSnapshot.count({
     where: {
@@ -293,6 +382,7 @@ async function liveDecisionReportResponse(input: {
 }
 
 async function withOptimizationReadiness(workspaceId: string, payload: Record<string, unknown>) {
+  const normalizedPayload = normalizeOptimizationProfitImpactPayload(payload);
   const loaded = await loadEcommerceSalesDashboardData({
     workspaceId,
     decisionMode: "full"
@@ -300,7 +390,7 @@ async function withOptimizationReadiness(workspaceId: string, payload: Record<st
   const optimizationReadiness = loaded?.data ? validateOptimizationData(loaded.data) : null;
 
   return {
-    ...payload,
+    ...normalizedPayload,
     optimizationReadiness,
     optimizationReadinessDebug: readinessDebug(loaded, "cached_payload_with_current_canonical_metrics")
   };

@@ -899,10 +899,10 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         </div>
       ) : null}
       <div className="mx-auto mb-12 max-w-4xl px-1 py-8 text-center sm:mb-14 sm:py-10">
-        <p className="text-xl font-semibold leading-tight tracking-normal text-slate-400 sm:text-2xl lg:text-3xl">
+        <p className="mb-4 text-xl font-semibold leading-tight tracking-normal text-slate-400 sm:text-2xl lg:text-3xl">
           {isZh ? "Monarca 连接电商与经营数据。" : "Monarca connects ecommerce and operational data."}
         </p>
-        <p className="mt-2 text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
+        <p className="text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
             ? "分析 SKU 级利润表现，并模拟数万种经营场景，执行利润最大化行动"
             : "Analyze SKU-level profit performance, simulate tens of thousands of operating scenarios, and execute profit-maximizing actions."}
@@ -1466,10 +1466,10 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
   const isZh = copy.eyebrow === "价格";
 
   return (
-    <section id="pricing" className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
-      <div className="overflow-hidden rounded-[30px] bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 p-5 text-white shadow-[0_24px_90px_rgba(6,78,59,0.18)] sm:p-7">
-        <div className="flex flex-col gap-5 py-8 text-center sm:py-10 lg:items-center">
-          <p className="mx-auto max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
+    <>
+      <section id="pricing" className="mt-10 bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 px-5 py-14 text-white sm:px-8 sm:py-16">
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-5 text-center">
+          <p className="max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
             {isZh ? "连接你的电商、广告和库存数据，开始执行最优利润决策。" : "Connect your commerce, ads, and inventory data to generate optimal profit decisions."}
           </p>
           <Button asChild className="h-12 w-full rounded-full bg-white px-8 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 sm:w-auto">
@@ -1479,8 +1479,17 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
             </Link>
           </Button>
         </div>
-      </div>
-    </section>
+      </section>
+      <footer className="px-5 py-8 sm:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 border-t border-slate-200 pt-7 text-sm font-medium text-slate-500 sm:flex-row sm:items-start sm:justify-between">
+          <p>2026 Monarca AI. © 2026 All rights reserved.</p>
+          <div className="flex flex-wrap gap-x-8 gap-y-3 sm:justify-end">
+            <span>Terms and Conditions</span>
+            <span>Privacy Policy</span>
+          </div>
+        </div>
+      </footer>
+    </>
   );
 }
 

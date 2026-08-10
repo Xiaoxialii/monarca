@@ -1,6 +1,8 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { ConnectionStatus } from "@prisma/client";
 import { buildEcommerceSalesDashboardData, adaptCanonicalDatasetForMetrics } from "@/lib/dashboard/ecommerce-sales-dashboard-data";
+import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { buildSemanticMappingCache } from "@/lib/semantic/schema-mapping-cache";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 
 export const ECOMMERCE_CANONICAL_SCHEMA_VERSION = "ecommerce_canonical_v1" as const;
@@ -48,6 +50,25 @@ export function buildCanonicalSnapshotJson(input: {
   const sourceProvider = input.manifest.sourceProvider ?? "canonical";
   const adaptedDataset = input.canonicalDataset ? adaptCanonicalDatasetForMetrics(input.canonicalDataset) : null;
   const dashboard = adaptedDataset ? buildEcommerceSalesDashboardData(adaptedDataset) : null;
+  const tables = ECOMMERCE_CANONICAL_TABLES
+    .filter((name) => input.artifacts[name])
+    .map((name) => ({
+      name,
+      rowCount: input.artifacts[name]?.rowCount ?? 0,
+      artifactKey: input.artifacts[name]?.artifactKey ?? null,
+      checksum: input.artifacts[name]?.checksum ?? null,
+      columns: (input.artifacts[name]?.columns ?? canonicalColumns(name)).map((column) => ({
+        ...column,
+        type: column.type ?? "unknown",
+        nullable: false
+      }))
+    }));
+  const semanticLayer = buildSemanticLayer(tables);
+  const semanticMappingCache = buildSemanticMappingCache({
+    tables,
+    semanticLayer,
+    source: "canonical_snapshot_generation"
+  });
 
   return {
     businessType: input.manifest.businessType ?? "ecommerce",
@@ -74,15 +95,9 @@ export function buildCanonicalSnapshotJson(input: {
     analytics: input.manifest.analytics ?? null,
     semanticLearning: input.manifest.semanticLearning ?? null,
     guardrailReport: input.manifest.guardrailReport ?? null,
-    tables: ECOMMERCE_CANONICAL_TABLES
-      .filter((name) => input.artifacts[name])
-      .map((name) => ({
-      name,
-      rowCount: input.artifacts[name]?.rowCount ?? 0,
-      artifactKey: input.artifacts[name]?.artifactKey ?? null,
-      checksum: input.artifacts[name]?.checksum ?? null,
-      columns: input.artifacts[name]?.columns ?? canonicalColumns(name)
-    }))
+    semanticLayer,
+    semanticMappingCache,
+    tables
   };
 }
 

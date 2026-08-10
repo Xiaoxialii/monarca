@@ -27,6 +27,24 @@ function toNumber(value: unknown) {
   return null;
 }
 
+function schemaTables(value: unknown) {
+  const schema = asRecord(value);
+  const rawUploadSchema = asRecord(schema?.rawUploadSchema);
+  if (Array.isArray(schema?.tables)) return schema.tables;
+  if (Array.isArray(rawUploadSchema?.tables)) return rawUploadSchema.tables;
+  return [];
+}
+
+function schemaHasMapping(value: unknown) {
+  const schema = asRecord(value);
+  const rawUploadSchema = asRecord(schema?.rawUploadSchema);
+  return Boolean(schema?.semanticMappingCache || rawUploadSchema?.semanticMappingCache);
+}
+
+function schemaHasUsableDetails(value: unknown) {
+  return schemaTables(value).length > 0 || schemaHasMapping(value);
+}
+
 function publicConfig(configValue: unknown) {
   const config = asRecord(configValue);
 
@@ -245,24 +263,43 @@ function syncStatusFromSource(source: {
 function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshotReport: unknown) {
   const schemas = asRecord(sourceSchemas);
   const snapshot = asRecord(snapshotSchema);
+  const rawUploadSchema = asRecord(snapshot?.rawUploadSchema);
+  const sourceRawUploadSchema = asRecord(schemas?.rawUploadSchema);
   const report = asRecord(snapshotReport);
-  const unifiedIngestion = asRecord(schemas?.unifiedIngestion) ?? asRecord(snapshot?.unifiedIngestion);
+  const unifiedIngestion =
+    asRecord(schemas?.unifiedIngestion) ??
+    asRecord(sourceRawUploadSchema?.unifiedIngestion) ??
+    asRecord(rawUploadSchema?.unifiedIngestion) ??
+    asRecord(snapshot?.unifiedIngestion);
   const semantic = asRecord(unifiedIngestion?.semantic);
   const detectedSchema = asRecord(unifiedIngestion?.detectedSchema);
   const canonical = asRecord(unifiedIngestion?.canonical);
   const learning = asRecord(unifiedIngestion?.learning);
+  const semanticMappingCache =
+    asRecord(snapshot?.semanticMappingCache) ??
+    asRecord(rawUploadSchema?.semanticMappingCache) ??
+    asRecord(schemas?.semanticMappingCache) ??
+    asRecord(sourceRawUploadSchema?.semanticMappingCache);
+  const cachedMappingDetails = Array.isArray(semanticMappingCache?.field_mappings) ? semanticMappingCache.field_mappings : null;
   const mappingDetails = Array.isArray(semantic?.mapping_details)
     ? semantic.mapping_details
     : Array.isArray(semantic?.mappingDetails)
       ? semantic.mappingDetails
-      : null;
+      : cachedMappingDetails;
+  const cachedMappingConfidence = cachedMappingDetails?.length
+    ? cachedMappingDetails.reduce((sum, mapping) => sum + (toNumber(asRecord(mapping)?.confidence) ?? 0), 0) / cachedMappingDetails.length
+    : null;
   const mappings = asRecord(semantic?.mappings);
   const detectedFields = Array.isArray(detectedSchema?.fields) ? detectedSchema.fields : [];
   const tables = Array.isArray(schemas?.tables)
     ? schemas.tables
-    : Array.isArray(snapshot?.tables)
-      ? snapshot.tables
-      : null;
+    : Array.isArray(sourceRawUploadSchema?.tables)
+      ? sourceRawUploadSchema.tables
+      : Array.isArray(rawUploadSchema?.tables)
+        ? rawUploadSchema.tables
+        : Array.isArray(snapshot?.tables)
+          ? snapshot.tables
+          : null;
   const tableCount =
     toNumber(report?.tableCount) ??
     (tables ? tables.length : null);
@@ -285,12 +322,12 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
         : typeof snapshot?.scannedAt === "string"
           ? snapshot.scannedAt
           : null,
-    unifiedIngestion: unifiedIngestion
+    unifiedIngestion: unifiedIngestion || cachedMappingDetails?.length
       ? {
-          status: typeof unifiedIngestion.status === "string" ? unifiedIngestion.status : null,
-          source: typeof unifiedIngestion.source === "string" ? unifiedIngestion.source : null,
-          sampledRows: toNumber(unifiedIngestion.sampledRows),
-          totalParsedRows: toNumber(unifiedIngestion.totalParsedRows),
+          status: typeof unifiedIngestion?.status === "string" ? unifiedIngestion.status : null,
+          source: typeof unifiedIngestion?.source === "string" ? unifiedIngestion.source : typeof semanticMappingCache?.source === "string" ? semanticMappingCache.source : null,
+          sampledRows: toNumber(unifiedIngestion?.sampledRows),
+          totalParsedRows: toNumber(unifiedIngestion?.totalParsedRows),
           detectedSchema: {
             detected_type: typeof detectedSchema?.detected_type === "string" ? detectedSchema.detected_type : null,
             confidence: toNumber(detectedSchema?.confidence),
@@ -305,7 +342,7 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
             }).filter((field) => field.name)
           },
           semantic: {
-            confidence: toNumber(semantic?.confidence),
+            confidence: toNumber(semantic?.confidence) ?? cachedMappingConfidence,
             memory_hits: toNumber(semantic?.memory_hits),
             engine_candidates: toNumber(semantic?.engine_candidates),
             mappings: mappings ?? {},
@@ -314,12 +351,12 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
                   const record = asRecord(mapping);
 
                   return {
-                    field: typeof record?.field === "string" ? record.field : "",
+                    field: typeof record?.source_column === "string" ? record.source_column : typeof record?.field === "string" ? record.field : "",
                     source_column: typeof record?.source_column === "string" ? record.source_column : typeof record?.field === "string" ? record.field : "",
-                    canonical: typeof record?.canonical === "string" ? record.canonical : "",
+                    canonical: typeof record?.canonical_field === "string" ? record.canonical_field : typeof record?.canonical === "string" ? record.canonical : "",
                     canonical_field: typeof record?.canonical_field === "string" ? record.canonical_field : typeof record?.canonical === "string" ? record.canonical : "",
                     confidence: toNumber(record?.confidence),
-                    source: typeof record?.source === "string" ? record.source : "engine",
+                    source: typeof record?.source === "string" ? record.source : typeof semanticMappingCache?.source === "string" ? semanticMappingCache.source : "engine",
                     mapping_method: typeof record?.mapping_method === "string" ? record.mapping_method : null,
                     requires_confirmation: record?.requires_confirmation === true,
                     suggested_mappings: Array.isArray(record?.suggested_mappings)
@@ -415,6 +452,8 @@ export async function GET(request: Request) {
         connectionMode: true,
         authMethod: true,
         lastErrorMessage: true,
+        schemas: true,
+        config: true,
         connectedAt: true,
         lastSyncAt: true,
         createdAt: true,
@@ -439,6 +478,8 @@ export async function GET(request: Request) {
             schemaStatus: true,
             canonicalStatus: true,
             canonicalVersion: true,
+            schemaJson: true,
+            qualityReport: true,
             createdAt: true
           },
           orderBy: {
@@ -446,11 +487,19 @@ export async function GET(request: Request) {
           }
         })
       : [];
-    const latestSnapshotBySourceId = new Map<string, typeof latestSnapshots[number]>();
+    const snapshotsBySourceId = new Map<string, typeof latestSnapshots[number][]>();
     for (const snapshot of latestSnapshots) {
-      if (snapshot.dataSourceId && !latestSnapshotBySourceId.has(snapshot.dataSourceId)) {
-        latestSnapshotBySourceId.set(snapshot.dataSourceId, snapshot);
-      }
+      if (!snapshot.dataSourceId) continue;
+      const sourceSnapshots = snapshotsBySourceId.get(snapshot.dataSourceId) ?? [];
+      sourceSnapshots.push(snapshot);
+      snapshotsBySourceId.set(snapshot.dataSourceId, sourceSnapshots);
+    }
+    const latestSnapshotBySourceId = new Map<string, typeof latestSnapshots[number]>();
+    for (const [sourceId, sourceSnapshots] of snapshotsBySourceId) {
+      latestSnapshotBySourceId.set(
+        sourceId,
+        sourceSnapshots.find((snapshot) => schemaHasUsableDetails(snapshot.schemaJson)) ?? sourceSnapshots[0]
+      );
     }
     const latestIngestionJobs = dataSources.length
       ? await prisma.unifiedIngestionJob.findMany({
@@ -501,6 +550,8 @@ export async function GET(request: Request) {
             connectionMode: true,
             authMethod: true,
             lastErrorMessage: true,
+            schemas: true,
+            config: true,
             connectedAt: true,
             lastSyncAt: true,
             createdAt: true,
@@ -550,11 +601,11 @@ export async function GET(request: Request) {
           : null,
         connectionMode: source.connectionMode,
         authMethod: source.authMethod,
-        config: publicConfig(null),
+        config: publicConfig(source.config),
         schema: schemaSummary(
-          null,
-          null,
-          null
+          source.schemas,
+          latestSnapshotBySourceId.get(source.id)?.schemaJson ?? null,
+          latestSnapshotBySourceId.get(source.id)?.qualityReport ?? null
         ),
         connectedAt: source.connectedAt?.toISOString() ?? null,
         lastSyncAt: source.lastSyncAt?.toISOString() ?? null,

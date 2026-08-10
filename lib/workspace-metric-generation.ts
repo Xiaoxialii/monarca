@@ -9,6 +9,12 @@ import {
   upsertBusinessMetricRegistryDefinitions
 } from "@/lib/metrics/metric-registry";
 import { compileLogisticsKpiOperatingSystem } from "@/lib/logistics-kpi-operating-system";
+import {
+  buildSemanticMappingCache,
+  cachedSemanticLayerForTables,
+  readSemanticMappingCache,
+  semanticMappingCacheSummary
+} from "@/lib/semantic/schema-mapping-cache";
 
 type MetricGenerationClient = PrismaClient | Prisma.TransactionClient;
 
@@ -269,7 +275,9 @@ export async function generateWorkspaceMetricsFromConnectedSources(
     };
   }
 
-  const semanticLayer = buildSemanticLayer(context.tables);
+  const cachedSemanticLayer = cachedSemanticLayerForTables(context.primarySnapshot.schemaJson, context.tables);
+  const semanticLayer = (cachedSemanticLayer ?? buildSemanticLayer(context.tables)) as ReturnType<typeof buildSemanticLayer>;
+  const cachedMappingCache = cachedSemanticLayer ? readSemanticMappingCache(context.primarySnapshot.schemaJson) : null;
   const metricRegistry = buildBusinessMetricRegistry({
     tables: context.tables,
     semanticLayer,
@@ -306,6 +314,11 @@ export async function generateWorkspaceMetricsFromConnectedSources(
     workspaceId,
     tables: context.tables
   });
+  const semanticMappingCache = cachedMappingCache ?? buildSemanticMappingCache({
+    tables: context.tables,
+    semanticLayer,
+    source: "workspace_metric_generation"
+  });
 
   await client.schemaSnapshot.update({
     where: {
@@ -315,6 +328,7 @@ export async function generateWorkspaceMetricsFromConnectedSources(
       schemaJson: {
         ...asRecord(context.primarySnapshot.schemaJson),
         semanticLayer,
+        semanticMappingCache,
         metricRegistry: finalizedMetricRegistry,
         logisticsKpiOperatingSystem
       },
@@ -331,7 +345,8 @@ export async function generateWorkspaceMetricsFromConnectedSources(
           : finalizedMetricRegistry.industry,
         analysisDomain: finalizedMetricRegistry.industry === "logistics_service_kpi" ? "branch_kpi_and_ticket_resolution" : undefined,
         missingCoreMetrics: finalizedMetricRegistry.missingCoreMetrics,
-        logisticsKpiOperatingSystem
+        logisticsKpiOperatingSystem,
+        semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
       }
     }
   });

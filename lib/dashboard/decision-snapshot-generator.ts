@@ -492,6 +492,7 @@ function compactDecisionRows(
     const simulation = asRecord(record.simulation) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
+    const expectedProfitImpact = record.expectedProfitImpact ?? record.estimatedProfitImpact ?? record.profit_delta ?? null;
 
     return {
       recommendation_id: recommendationIdentityForDecision(record, recommendationIdentityContext),
@@ -499,7 +500,7 @@ function compactDecisionRows(
       profitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION,
       sku_id: skuId || record.skuId || record.sku,
       action_type: record.action,
-      expected_profit_impact: record.expectedProfitImpact ?? record.estimatedProfitImpact ?? null,
+      expected_profit_impact: expectedProfitImpact,
       revenue: profitability?.revenue ?? null,
       cogs: profitability?.cogs ?? null,
       shipping_cost: profitability?.shipping_cost ?? null,
@@ -533,8 +534,9 @@ function compactDecisionRows(
       unified_action: record.unified_action,
       optimization_goal: record.optimization_goal,
       opportunity_type: record.opportunity_type,
-      expectedProfitImpact: record.expectedProfitImpact,
-      estimatedProfitImpact: record.estimatedProfitImpact,
+      profit_delta: record.profit_delta,
+      expectedProfitImpact,
+      estimatedProfitImpact: record.estimatedProfitImpact ?? expectedProfitImpact,
       confidence: record.confidence,
       inventoryRisk: record.inventoryRisk,
       budgetOpportunity: record.budgetOpportunity,
@@ -754,7 +756,7 @@ function isOptimizationCandidateRow(
   }
 
   const action = typeof record.action === "string" ? record.action : "";
-  const impact = Math.abs(toNumber(record.expectedProfitImpact) ?? toNumber(record.estimatedProfitImpact) ?? 0);
+  const impact = Math.abs(toNumber(record.expectedProfitImpact) ?? toNumber(record.estimatedProfitImpact) ?? toNumber(record.profit_delta) ?? 0);
 
   return action !== "MONITOR" || impact > 1 || record.inventoryRisk === true || record.budgetOpportunity === true;
 }

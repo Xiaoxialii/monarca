@@ -2267,7 +2267,10 @@ function SkuPortfolioOptimizationPanel({
 	      ) : null}
 	      <div className="space-y-2">
 	        <div className="min-w-0 space-y-2">
-				      <div className="grid items-stretch gap-0 xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]">
+				      <div className={cn(
+              "grid items-stretch gap-0",
+              !isResolvingOptimizationState && "xl:h-[640px] xl:grid-cols-[390px_6px_minmax(0,1fr)]"
+            )}>
 			        <div className="flex min-h-0 min-w-0 flex-col gap-3 p-4 xl:order-3 xl:h-full xl:overflow-hidden xl:p-5">
 	          {!shouldShowOptimizationStarter ? (
 	          <div className="z-20 flex w-full shrink-0 flex-wrap items-center gap-2 rounded-full bg-slate-100/95 p-1 shadow-sm shadow-slate-950/5 backdrop-blur">
@@ -2448,8 +2451,11 @@ function SkuPortfolioOptimizationPanel({
             </div>
 	        </div>
 	        </div>
-	        <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
+	        {!isResolvingOptimizationState ? (
+	          <div className="hidden min-h-full self-stretch bg-emerald-100/45 xl:order-2 xl:block" aria-hidden="true" />
+	        ) : null}
 
+	        {!isResolvingOptimizationState ? (
 	        <div className="min-h-0 min-w-0 space-y-2 xl:order-1 xl:h-full xl:self-stretch">
 		        <div className={cn(
 	            "min-h-0 min-w-0 rounded-lg xl:h-full",
@@ -2506,6 +2512,7 @@ function SkuPortfolioOptimizationPanel({
             )}
           </div>
         </div>
+	        ) : null}
       </div>
         </div>
       </div>
@@ -2530,9 +2537,14 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
           {isZh ? "最大化 SKU 组合利润" : "Maximize Your SKU Profit Portfolio"}
         </h2>
         {isLoadingData ? (
-          <p className="mt-5 text-sm font-semibold text-[#5747e8]">
-            {isZh ? "正在加载优化数据" : "Loading optimization data"}
-          </p>
+          <div className="mt-5 space-y-5">
+            <p className="text-sm font-semibold text-slate-950">
+              {isZh ? "正在检查优化所需数据。" : "Checking required optimization data."}
+            </p>
+            <div className="inline-grid size-12 place-items-center rounded-lg bg-[#6bb99a] text-white shadow-sm shadow-[rgba(7,150,105,0.16)]">
+              <RefreshCw className="size-5 animate-spin" />
+            </div>
+          </div>
         ) : null}
       </div>
     </div>

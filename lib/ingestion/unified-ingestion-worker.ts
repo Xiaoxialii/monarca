@@ -8,6 +8,7 @@ import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { InMemorySemanticMemoryStore } from "@/lib/semantic/memory";
+import { buildSemanticMappingCache, semanticMappingCacheSummary } from "@/lib/semantic/schema-mapping-cache";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
@@ -478,6 +479,32 @@ export async function processIngestionJob(
       throw new Error("Unified ingestion job metadata is incomplete.");
     }
 
+    const activeDataSource = await client.dataSourceConnection.findFirst({
+      where: {
+        id: dataSourceId,
+        workspaceId,
+        isActive: true
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!activeDataSource) {
+      stopJobHeartbeat();
+      await updateJob(client, jobId, {
+        status: "CANCELLED",
+        progress: 100,
+        currentStep: "Cancelled",
+        errorMessage: "Data source was removed.",
+        heartbeatAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: new Date()
+      });
+      return { ok: false, jobId };
+    }
+
     const content = await readUploadedFile(metadata, source);
 
     await setJobState({
@@ -489,12 +516,18 @@ export async function processIngestionJob(
     const tables = await inferSchema(source, fileName, content);
     const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
+    const semanticMappingCache = buildSemanticMappingCache({
+      tables: schemaTables,
+      semanticLayer,
+      source: "unified_ingestion_sync"
+    });
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
     const schemaPayload = {
       scannedAt: new Date().toISOString(),
       fileName,
       fileSize: metadata.fileSize ?? 0,
       tables: schemaTables,
+      semanticMappingCache,
       unifiedIngestion: pendingUnifiedIngestionSummary({
         source: businessSource,
         transportSource: source,
@@ -506,7 +539,8 @@ export async function processIngestionJob(
       columnCount,
       semanticFieldCount: semanticLayer.fields.length,
       businessEntityCount: semanticLayer.entities.length,
-      generatedMetricCount: semanticLayer.metrics.length
+      generatedMetricCount: semanticLayer.metrics.length,
+      semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
     };
 
     if (schemaSnapshotId) await client.schemaSnapshot.updateMany({
@@ -581,7 +615,8 @@ export async function processIngestionJob(
     const schemaJson = {
       sourceId: dataSourceId,
       rawUploadSchema: completedSchemaPayload,
-      ...canonicalSchemaJson
+      ...canonicalSchemaJson,
+      semanticMappingCache
     } as Prisma.InputJsonValue;
 
     await setJobState({
@@ -613,7 +648,8 @@ export async function processIngestionJob(
         qualityReport: {
           ...qualityReport,
           canonicalArtifactBacked: canonicalRowCount > 0,
-          canonicalRowCount
+          canonicalRowCount,
+          semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
         } as Prisma.InputJsonValue
       }
     });
@@ -629,7 +665,10 @@ export async function processIngestionJob(
     });
 
     await client.dataSourceConnection.updateMany({
-      where: { id: dataSourceId },
+      where: {
+        id: dataSourceId,
+        isActive: true
+      },
       data: {
         isActive: true,
         status: canonicalRowCount > 0 ? ConnectionStatus.CONNECTED : ConnectionStatus.FAILED,
@@ -693,7 +732,10 @@ export async function processIngestionJob(
 
     if (dataSourceId) {
       await client.dataSourceConnection.updateMany({
-        where: { id: dataSourceId },
+        where: {
+          id: dataSourceId,
+          isActive: true
+        },
         data: {
           status: ConnectionStatus.FAILED,
           lastErrorMessage: message
@@ -758,7 +800,10 @@ async function markIngestionJobExhausted(
   }
 
   await client.dataSourceConnection.updateMany({
-    where: { id: job.dataSourceId },
+    where: {
+      id: job.dataSourceId,
+      isActive: true
+    },
     data: {
       status: ConnectionStatus.FAILED,
       lastErrorMessage: message

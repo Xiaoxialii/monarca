@@ -274,11 +274,13 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
           scopeStatus
         }
       }),
-      prisma.dataSourceConnection.update({
-        where: { id: account.dataSourceId },
+      prisma.dataSourceConnection.updateMany({
+        where: {
+          id: account.dataSourceId,
+          isActive: true
+        },
         data: {
           status: ConnectionStatus.PENDING,
-          isActive: true,
           lastErrorMessage: `Shopify permissions need update. Missing scopes: ${missingScopes.join(", ")}.`,
           config: {
             ...(account.dataSource.config && typeof account.dataSource.config === "object" && !Array.isArray(account.dataSource.config) ? account.dataSource.config : {}),
@@ -621,11 +623,13 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
         })
       ));
 
-      await tx.dataSourceConnection.update({
-        where: { id: account.dataSourceId! },
+      await tx.dataSourceConnection.updateMany({
+        where: {
+          id: account.dataSourceId!,
+          isActive: true
+        },
         data: {
           status: ConnectionStatus.CONNECTED,
-          isActive: true,
           lastErrorMessage: null,
           lastSyncAt: syncWindowEnd,
           schemas: snapshotJson as Prisma.InputJsonValue,

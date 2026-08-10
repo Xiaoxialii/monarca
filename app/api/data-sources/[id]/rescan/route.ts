@@ -10,6 +10,7 @@ import { runUnifiedIngestionPipeline } from "@/lib/ingestion/unified-ingestion-e
 import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
 import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
+import { buildSemanticMappingCache, semanticMappingCacheSummary } from "@/lib/semantic/schema-mapping-cache";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 import { generateUniversalDataAnalysisReport } from "@/lib/report-generation/universal-report-generator";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -221,6 +222,11 @@ async function rescanUploadedSource(input: {
   });
   const tables = publicTables(upload.tables);
   const semanticLayer = buildSemanticLayer(upload.tables);
+  const semanticMappingCache = buildSemanticMappingCache({
+    tables,
+    semanticLayer,
+    source: "uploaded_source_rescan"
+  });
   const analysisReport = generateUniversalDataAnalysisReport(tables);
   const unifiedIngestionResult = await buildUnifiedUploadIngestionSummary({
     workspaceId: input.dataSource.workspaceId,
@@ -234,6 +240,7 @@ async function rescanUploadedSource(input: {
     fileName: upload.fileName,
     tables,
     semanticLayer,
+    semanticMappingCache,
     unifiedIngestion,
     analysisReport
   };
@@ -289,7 +296,8 @@ async function rescanUploadedSource(input: {
           ? {
             sourceId: input.dataSource.id,
             rawUploadSchema: schemaPayload,
-            ...canonicalSchemaJson
+            ...canonicalSchemaJson,
+            semanticMappingCache
           }
           : {
             sourceId: input.dataSource.id,
@@ -303,7 +311,8 @@ async function rescanUploadedSource(input: {
           generatedMetricCount: semanticLayer.metrics.length,
           analysisReport,
           canonicalArtifactBacked: Boolean(canonicalSchemaJson),
-          rescan: true
+          rescan: true,
+          semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
         }
       }
     });
@@ -423,12 +432,18 @@ export async function POST(
     const tables = await introspectDatabase(config);
     const scannedAt = new Date().toISOString();
     const semanticLayer = buildSemanticLayer(tables);
+    const semanticMappingCache = buildSemanticMappingCache({
+      tables,
+      semanticLayer,
+      source: "database_source_rescan"
+    });
     const tableStats = await getDataSourceStats(config, tables);
     const schemaPayload = {
       scannedAt,
       databaseType: type,
       tables,
       semanticLayer,
+      semanticMappingCache,
       stats: tableStats
     };
     const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
@@ -498,7 +513,8 @@ export async function POST(
             semanticFieldCount: semanticLayer.fields.length,
             businessEntityCount: semanticLayer.entities.length,
             generatedMetricCount: semanticLayer.metrics.length,
-            stats: tableStats
+            stats: tableStats,
+            semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
           }
         }
       });

@@ -5,7 +5,7 @@ import type { CanonicalConcept, CanonicalDataset, SemanticMappingDecision } from
 
 const SCHEMA_VERSION = "ecommerce_canonical_v1" as const;
 
-const ORDER_FIELDS = new Set<CanonicalConcept>(["order_id", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "tax_amount", "shipping_revenue", "order_date", "currency", "customer_id", "status", "shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"]);
+const ORDER_FIELDS = new Set<CanonicalConcept>(["order_id", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "tax_amount", "shipping_revenue", "order_date", "currency", "customer_id", "country", "region", "channel", "order_channel", "fulfillment_channel", "utm_campaign", "status", "shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"]);
 const ITEM_FIELDS = new Set<CanonicalConcept>(["order_id", "product_id", "sku", "quantity", "price", "unit_price", "revenue", "gross_sales", "net_sales", "discount_amount", "refund_amount", "cogs"]);
 const PRODUCT_FIELDS = new Set<CanonicalConcept>(["product_id", "product_name", "sku", "price", "unit_price", "product_cost"]);
 const CUSTOMER_FIELDS = new Set<CanonicalConcept>(["customer_id", "email_hash", "country"]);
@@ -20,7 +20,10 @@ const ADS_FIELDS = new Set<CanonicalConcept>([
   "clicks",
   "conversions",
   "attribution_revenue",
-  "event_date"
+  "event_date",
+  "channel",
+  "region",
+  "utm_campaign"
 ]);
 const INVENTORY_FIELDS = new Set<CanonicalConcept>(["sku", "stock_level", "available_stock", "inventory_quantity", "inventory_cost", "warehouse_id", "reorder_point"]);
 
@@ -217,7 +220,7 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       sourceId: stableSourceId,
       fields,
       allowedFields: ORDER_FIELDS,
-      triggerFields: ["order_id", "revenue", "gross_sales", "net_sales", "order_date", "currency", "customer_id", "status", "shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"],
+      triggerFields: ["order_id", "revenue", "gross_sales", "net_sales", "order_date", "currency", "customer_id", "country", "region", "channel", "order_channel", "fulfillment_channel", "utm_campaign", "status", "shipping_cost", "fulfillment_cost", "warehouse_cost", "payment_fee"],
       requiredFields: ["order_id", "platform"],
       defaults: { status: "unknown" }
     }),
@@ -267,7 +270,7 @@ function buildRowsForRecord(record: CanonicalMappedRecord, platform: string, sou
       sourceId: stableSourceId,
       fields,
       allowedFields: ADS_FIELDS,
-      triggerFields: ["campaign_id", "ad_id", "ad_spend", "impressions", "clicks", "conversions", "attribution_revenue", "event_date"],
+      triggerFields: ["campaign_id", "ad_id", "ad_spend", "impressions", "clicks", "conversions", "attribution_revenue", "event_date", "channel", "region", "utm_campaign"],
       requiredFields: ["spend", "platform"],
       defaults: { campaign_id: stableSourceId || "unknown-campaign" }
     }),

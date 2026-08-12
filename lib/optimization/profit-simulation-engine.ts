@@ -160,6 +160,8 @@ export type SimulationEstimate = {
   prediction_source:
     | "sku_historical_ads"
     | "sku_allocation"
+    | "sku_profitability_proxy"
+    | "controlled_test_spend_only"
     | "channel_history"
     | "category_benchmark"
     | "similar_sku_benchmark"
@@ -214,7 +216,9 @@ export type ProfitSimulationResult = {
   predicted_revenue: number;
   predicted_profit: number;
   profit_delta: number;
+  predicted_profit_delta?: number;
   predicted_margin: number;
+  margin?: number;
   confidence: number;
   risk: number;
   revenue_prediction: RevenuePrediction;
@@ -244,6 +248,17 @@ export type ProfitSimulationResult = {
   };
   opportunity_score: number;
   action_score: number;
+  recommendation_status?: "ELIGIBLE" | "RANKED" | "QUEUED" | "DISMISSED";
+  ranking_reason?: string;
+  queue_ready?: boolean;
+  queue_blocking_reason?: string;
+  expected_net_profit_lift?: number;
+  additional_ad_spend?: number;
+  marginal_roas?: number | null;
+  estimated_roas?: number | null;
+  inventory_days?: number | null;
+  inventory_coverage_days?: number | null;
+  attribution_confidence?: number;
   execution_feasibility: number;
   strategic_value: number;
   risk_penalty: number;
@@ -423,6 +438,13 @@ export function simulateSkuAction(
     : simulationEstimate
     ? simulationEstimate.profit_simulation.expected_profit_impact
     : roundCurrency(predictedProfit - currentProfit);
+  const additionalAdSpend = roundCurrency(Math.max(0, recommendedAdsSpend - sku.ads_spend));
+  const marginalRoas = simulationEstimate?.revenue_simulation.marginal_roas ?? adsResponse.marginal_roas ?? null;
+  const inventoryCoverageDays = sku.sales_velocity > 0
+    ? roundRatio(sku.inventory / Math.max(0.1, sku.sales_velocity))
+    : requiredInventory > 0
+      ? roundRatio(sku.inventory / Math.max(0.1, requiredInventory / Math.max(1, simulationHorizonDays)))
+      : null;
   const confidenceBreakdown = buildConfidenceBreakdown({
     sku,
     revenueConfidence: simulationEstimate?.confidence_breakdown.data_confidence ?? revenuePrediction.confidence,
@@ -484,7 +506,9 @@ export function simulateSkuAction(
     predicted_revenue: estimatedRevenue,
     predicted_profit: predictedProfit,
     profit_delta: profitDelta,
+    predicted_profit_delta: profitDelta,
     predicted_margin: predictedMargin,
+    margin: roundRatio(sku.margin),
     confidence,
     risk,
     revenue_prediction: revenuePrediction,
@@ -497,6 +521,12 @@ export function simulateSkuAction(
       days: simulationHorizonDays,
       label: `${simulationHorizonDays} days`
     },
+    additional_ad_spend: additionalAdSpend,
+    marginal_roas: marginalRoas,
+    estimated_roas: marginalRoas,
+    inventory_days: inventoryCoverageDays,
+    inventory_coverage_days: inventoryCoverageDays,
+    attribution_confidence: confidenceBreakdown.attribution_confidence,
     prediction_type: predictionProvider.mode,
     confidence_breakdown: confidenceBreakdown,
     required_cash: requiredCash,
@@ -556,7 +586,7 @@ function buildIncrementalProfitSimulationEstimate(input: {
   const estimatedComponents: string[] = [];
   const warnings: string[] = [];
   const days = input.simulationHorizonDays || 30;
-  const source = resolveRoasSource(input.sku, input.ads, input.allSkus);
+  const source = resolveRoasSource(input.sku, input.ads, input.allSkus, input.action);
   const currentSpend = Math.max(0, input.sku.ads_spend);
   const additionalAdSpend = roundCurrency(Math.max(0, input.additionalAdSpend));
   const scaleRatio = currentSpend > 0 ? additionalAdSpend / Math.max(1, currentSpend) : 0;
@@ -667,7 +697,12 @@ function usableRoas(row: AdsCampaignInput) {
   return typeof row.roas === "number" && Number.isFinite(row.roas) && row.roas > 0;
 }
 
-function resolveRoasSource(sku: PortfolioSkuInput, ads: AdsCampaignInput[], allSkus: PortfolioSkuInput[]) {
+function resolveRoasSource(
+  sku: PortfolioSkuInput,
+  ads: AdsCampaignInput[],
+  allSkus: PortfolioSkuInput[],
+  action?: PortfolioAction
+) {
   const skuAds = ads.filter((row) => row.sku === sku.sku && row.spend > 0 && usableRoas(row));
   if (skuAds.length) {
     const confidence = skuAds.reduce((sum, row) => sum + (row.attribution_confidence ?? 0.86) * Math.max(1, row.spend), 0) /
@@ -720,6 +755,20 @@ function resolveRoasSource(sku: PortfolioSkuInput, ads: AdsCampaignInput[], allS
     };
   }
 
+  const spendOnlyRows = ads.filter((row) => row.spend > 0);
+  const hasSkuSpend = sku.ads_spend > 0 || spendOnlyRows.some((row) => row.sku === sku.sku);
+  if (action === "TEST_AD_SPEND" && hasSkuSpend && sku.revenue > 0) {
+    const margin = contributionMargin(sku).margin;
+    const skuSpend = Math.max(1, sku.ads_spend || median(spendOnlyRows.map((row) => row.spend).filter((value) => Number.isFinite(value) && value > 0)));
+    const revenueToSpendProxy = safeRatio(sku.revenue, skuSpend);
+    const marginAdjustedProxy = revenueToSpendProxy * Math.max(0.35, Math.min(0.75, margin + 0.18));
+    return {
+      predictionSource: sku.ads_spend > 0 ? "sku_profitability_proxy" as const : "controlled_test_spend_only" as const,
+      baseRoas: Math.max(2.5, Math.min(6.5, marginAdjustedProxy)),
+      confidence: 0.45
+    };
+  }
+
   return {
     predictionSource: "rule_based_conservative_fallback" as const,
     baseRoas: 1.5,
@@ -748,6 +797,8 @@ function median(values: number[]) {
 function attributionFactor(source: SimulationEstimate["prediction_source"]) {
   if (source === "sku_historical_ads") return 0.85;
   if (source === "sku_allocation") return 0.72;
+  if (source === "sku_profitability_proxy") return 0.58;
+  if (source === "controlled_test_spend_only") return 0.45;
   if (source === "channel_history") return 0.58;
   if (source === "category_benchmark") return 0.5;
   if (source === "similar_sku_benchmark") return 0.55;

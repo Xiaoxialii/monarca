@@ -120,7 +120,7 @@ export function evaluateActionEligibility(input: {
     requireRule(normalizedRoas.value !== null && roasConfidence !== "LOW", "ROAS sanity check passed.", normalizedRoas.reason ?? "ROAS anomaly requires attribution validation.");
     requireRule(sku.margin >= threshold.minimumMargin, "Margin sufficient.", "Margin below scale ads threshold.");
     requireRule(confidence >= threshold.minimumConfidence, "Confidence sufficient.", "Confidence below scale ads threshold.");
-    requireRule(attributionConfidence >= 0.65, "Ad attribution confidence sufficient.", "Ad attribution confidence below scale ads threshold.");
+    requireRule(attributionConfidence >= 0.45, "Ad attribution confidence sufficient.", "Ad attribution confidence below scale ads threshold.");
     requireRule(sku.cogs_status !== "MISSING", "COGS available for growth action.", "COGS missing; growth action blocked.");
     requireRule(sku.optimization_allowed !== false, "Profit validation allows optimization.", "Profit validation blocks aggressive optimization.");
     requireRule(coverageDays >= threshold.minimumInventoryCoverageDays, "Inventory sufficient.", "Inventory coverage below scale ads threshold.");
@@ -190,10 +190,10 @@ function normalizedRoasForPolicy(input: {
   anomalyThreshold: number;
 }) {
   if (!Number.isFinite(input.rawRoas) || input.rawRoas <= 0) return { value: null, confidence: "LOW" as const, reason: "Missing ROAS attribution." };
-  if (input.skuRoasConfidence === "LOW") return { value: null, confidence: "LOW" as const, reason: "ROAS marked low confidence upstream." };
+  if (input.skuRoasConfidence === "LOW" && input.attributionConfidence < 0.45) return { value: null, confidence: "LOW" as const, reason: "ROAS marked low confidence upstream." };
   if (input.spend < 25) return { value: null, confidence: "LOW" as const, reason: "Low spend attribution." };
   if (input.rawRoas > input.anomalyThreshold) return { value: null, confidence: "LOW" as const, reason: "ROAS anomaly requires attribution validation." };
-  if (input.attributionConfidence < 0.55) return { value: null, confidence: "LOW" as const, reason: "Ad attribution confidence below threshold." };
+  if (input.attributionConfidence < 0.45) return { value: null, confidence: "LOW" as const, reason: "Ad attribution confidence below threshold." };
   return {
     value: input.rawRoas,
     confidence: input.attributionConfidence >= 0.8 ? "HIGH" as const : "MEDIUM" as const,

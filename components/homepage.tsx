@@ -1480,13 +1480,9 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
           </Button>
         </div>
       </section>
-      <footer className="px-5 py-8 sm:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-end gap-4 border-t border-slate-200 pt-7 text-right text-sm font-medium text-slate-500">
+      <footer className="px-5 pb-14 pt-8 sm:px-8 sm:pb-16">
+        <div className="mx-auto flex max-w-7xl flex-col items-end border-t border-slate-200 pt-7 text-right text-sm font-medium text-slate-500">
           <p>2026 Monarca AI. © 2026 All rights reserved.</p>
-          <div className="flex flex-col items-end gap-3">
-            <span>Privacy Policy</span>
-            <span>Terms and Conditions</span>
-          </div>
         </div>
       </footer>
     </>

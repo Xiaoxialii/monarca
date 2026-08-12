@@ -976,6 +976,7 @@ function buildOptimizationAdsInput(input: {
 
   for (const campaign of input.campaigns) {
     const hasValidRoas = typeof campaign.roas === "number" && Number.isFinite(campaign.roas) && campaign.roas > 0;
+    const hasSpend = campaign.ad_spend > 0;
     rows.push({
       campaign_id: campaign.campaign_id,
       spend: campaign.ad_spend,
@@ -983,9 +984,9 @@ function buildOptimizationAdsInput(input: {
       clicks: 0,
       conversions: 0,
       roas: hasValidRoas ? campaign.roas : null,
-      attribution_status: hasValidRoas ? "attributed" : "missing",
+      attribution_status: hasValidRoas ? "attributed" : hasSpend ? "estimated" : "missing",
       attribution_source: "campaign_attribution",
-      attribution_confidence: campaign.attribution_confidence ?? (hasValidRoas ? 0.86 : 0)
+      attribution_confidence: campaign.attribution_confidence ?? (hasValidRoas ? 0.86 : hasSpend ? 0.45 : 0)
     });
   }
 

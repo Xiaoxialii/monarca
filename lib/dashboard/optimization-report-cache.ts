@@ -80,9 +80,13 @@ function firstNumericValue(...values: unknown[]) {
 function profitImpactValue(row: unknown) {
   const record = asRecord(row);
   const simulation = asRecord(record.simulation);
+  const simulationProfit = asRecord(simulation.profit_simulation);
   const candidates = [
     record.profit_delta,
     simulation.profit_delta,
+    simulationProfit.expected_profit_impact,
+    simulationProfit.incremental_profit,
+    simulationProfit.profit_delta,
     record.expected_profit_impact,
     record.expectedProfitImpact,
     record.estimatedProfitImpact
@@ -438,34 +442,39 @@ export function optimizationReportCachePayload(cache: OptimizationReportCacheRec
   const executionPlan = asArray(cache.executionPlanJson);
   const queueRows = normalizeProfitImpactRows(asArray(cache.queueRowsJson));
   const portfolioRows = normalizeProfitImpactRows(asArray(cache.portfolioRowsJson));
-  const totalProfitImpact = queueRows.reduce<number>((sum, row) => sum + (profitImpactValue(row) ?? 0), 0);
-  const normalizedPortfolioSummary = totalProfitImpact
+  const queuedProfitImpact = queueRows.reduce<number>((sum, row) => sum + (profitImpactValue(row) ?? 0), 0);
+  const cachedOptimizationSummary = asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary);
+  const cachedPortfolioOptimization = asRecord(cache.portfolioOptimizationJson);
+  const totalExpectedProfitGain =
+    firstNumericValue(cachedOptimizationSummary.total_expected_profit_gain) ??
+    firstNumericValue(cachedOptimizationSummary.expected_profit_gain) ??
+    firstNumericValue(cachedPortfolioOptimization.total_expected_profit_gain) ??
+    queuedProfitImpact;
+  const normalizedPortfolioSummary = totalExpectedProfitGain
     ? {
       ...asRecord(portfolioSummary),
-      totalProfitImpact: firstNumericValue(asRecord(portfolioSummary).totalProfitImpact) || totalProfitImpact
+      totalProfitImpact: firstNumericValue(asRecord(portfolioSummary).totalProfitImpact) ?? totalExpectedProfitGain
     }
     : portfolioSummary;
   const reportShell = asRecord(cache.reportShellJson);
   const optimizationRun = asRecord(reportShell.optimizationRun);
   const portfolioOptimization = {
-    ...asRecord(cache.portfolioOptimizationJson),
+    ...cachedPortfolioOptimization,
     skuDecisions: queueRows,
     recommended_portfolio: portfolioRows,
-    simulations: asArray(asRecord(cache.portfolioOptimizationJson).simulations),
+    simulations: asArray(cachedPortfolioOptimization.simulations),
     portfolioSummary: normalizedPortfolioSummary,
     allocationRecommendation,
     riskAlerts,
     executionPlan,
-    total_expected_profit_gain: totalProfitImpact
-      ? firstNumericValue(asRecord(cache.portfolioOptimizationJson).total_expected_profit_gain) || totalProfitImpact
-      : asRecord(cache.portfolioOptimizationJson).total_expected_profit_gain,
-    optimization_summary: totalProfitImpact
-      ? {
-        ...asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary),
-        expected_profit_gain: firstNumericValue(asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary).expected_profit_gain) || totalProfitImpact,
-        total_expected_profit_gain: firstNumericValue(asRecord(asRecord(cache.portfolioOptimizationJson).optimization_summary).total_expected_profit_gain) || totalProfitImpact
-      }
-      : asRecord(cache.portfolioOptimizationJson).optimization_summary
+    total_expected_profit_gain: totalExpectedProfitGain,
+    optimization_summary: {
+      ...cachedOptimizationSummary,
+      expected_profit_gain: firstNumericValue(cachedOptimizationSummary.expected_profit_gain) ?? totalExpectedProfitGain,
+      total_expected_profit_gain: totalExpectedProfitGain,
+      selected_sku_count: firstNumericValue(cachedOptimizationSummary.selected_sku_count) ?? queueRows.length,
+      queued_recommendation_count: queueRows.length
+    }
   };
   const decisionReport = {
     ...reportShell,

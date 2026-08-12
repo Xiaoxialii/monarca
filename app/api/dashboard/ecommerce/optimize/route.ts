@@ -3,9 +3,7 @@ import { after, NextResponse } from "next/server";
 import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
 import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
-import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
-import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
@@ -45,26 +43,6 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    const loaded = await loadEcommerceSalesDashboardData({
-      workspaceId: session.workspace.id,
-      dataSourceId: null,
-      decisionMode: "full"
-    });
-    const optimizationReadiness = validateOptimizationData(loaded.data);
-
-    if (optimizationReadiness.status === "BLOCKED") {
-      return NextResponse.json({
-        ok: false,
-        status: "BLOCKED",
-        message: optimizationReadiness.userMessage,
-        recommendedAction: optimizationReadiness.recommendedAction,
-        optimizationReadiness,
-        validation: optimizationReadiness,
-        jobId: null,
-        versions
-      }, { status: 409 });
-    }
-
     const staleSummary = await markDashboardCachesStale(prisma, {
       workspaceId: session.workspace.id,
       reason: "manual_optimization_refresh"
@@ -94,7 +72,6 @@ export async function POST(request: Request) {
       currentStep: job.currentStep,
       error: null,
       versions,
-      optimizationReadiness,
       cacheLifecycle: {
         state: "STALE",
         staleSummary

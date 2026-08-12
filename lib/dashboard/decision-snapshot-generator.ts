@@ -491,7 +491,10 @@ function compactDecisionRows(
     const timing = asRecord(record.timing) ?? {};
     const simulationHorizon = asRecord(record.simulation_horizon) ?? {};
     const simulation = asRecord(record.simulation) ?? {};
+    const simulationEstimate = asRecord(record.simulation_estimate) ?? {};
+    const confidenceBreakdown = asRecord(record.confidence_breakdown) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
+    const afterState = asRecord(record.after_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
     const expectedProfitImpact = profitImpactValue(record);
 
@@ -519,10 +522,21 @@ function compactDecisionRows(
       cogs_status: profitability?.cogs_status ?? null,
       cogs_confidence: profitability?.cogs_confidence ?? null,
       ad_allocation_method: profitability?.ad_allocation_method ?? null,
-      attribution_confidence: profitability?.attribution_confidence ?? null,
+      attribution_confidence: record.attribution_confidence ?? profitability?.attribution_confidence ?? null,
       profitability_confidence: profitability?.profitability_confidence ?? null,
       validation_status: profitability?.validation_status ?? null,
       optimization_allowed: profitability?.optimization_allowed ?? null,
+      recommendation_status: record.recommendation_status,
+      opportunity_score: record.opportunity_score,
+      ranking_reason: record.ranking_reason,
+      expected_net_profit_lift: record.expected_net_profit_lift ?? expectedProfitImpact,
+      additional_ad_spend: record.additional_ad_spend,
+      marginal_roas: record.marginal_roas,
+      inventory_days: record.inventory_days,
+      current_ads_spend: record.current_ads_spend,
+      recommended_ads_spend: record.recommended_ads_spend,
+      confidence_breakdown: Object.keys(confidenceBreakdown).length ? confidenceBreakdown : null,
+      simulation_estimate: Object.keys(simulationEstimate).length ? simulationEstimate : null,
       skuId: record.skuId,
       sku: record.sku ?? record.skuId,
       previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
@@ -563,11 +577,16 @@ function compactDecisionRows(
         required_inventory: simulation.required_inventory ?? inventoryEvidence.requiredInventory,
         current_inventory: simulation.current_inventory ?? inventoryEvidence.currentInventory,
         current_ads_spend: simulation.current_ads_spend,
-        recommended_ads_spend: simulation.recommended_ads_spend
+        recommended_ads_spend: simulation.recommended_ads_spend,
+        additional_ad_spend: simulation.additional_ad_spend ?? record.additional_ad_spend,
+        marginal_roas: simulation.marginal_roas ?? record.marginal_roas,
+        inventory_days: simulation.inventory_days ?? record.inventory_days,
+        confidence_breakdown: simulation.confidence_breakdown ?? confidenceBreakdown
       },
-      before_state: {
-        inventory: beforeState.inventory ?? inventoryEvidence.currentInventory
-      }
+      before_state: Object.keys(beforeState).length
+        ? beforeState
+        : { inventory: inventoryEvidence.currentInventory },
+      after_state: Object.keys(afterState).length ? afterState : null
     };
   });
 }
@@ -583,7 +602,10 @@ function compactPortfolioRows(
     const skuId = String(record.sku ?? record.skuId ?? "").trim();
     const profitability = profitabilityBySku?.get(skuId) ?? profitabilityBySku?.get(String(record.sku_id ?? ""));
     const simulation = asRecord(record.simulation) ?? {};
+    const simulationEstimate = asRecord(record.simulation_estimate) ?? {};
+    const confidenceBreakdown = asRecord(record.confidence_breakdown) ?? {};
     const beforeState = asRecord(record.before_state) ?? {};
+    const afterState = asRecord(record.after_state) ?? {};
     const inventoryEvidence = decisionContractInventoryEvidence(record.decision_contract);
     const expectedProfitImpact = profitImpactValue(record);
 
@@ -612,10 +634,21 @@ function compactPortfolioRows(
       cogs_status: profitability?.cogs_status ?? null,
       cogs_confidence: profitability?.cogs_confidence ?? null,
       ad_allocation_method: profitability?.ad_allocation_method ?? null,
-      attribution_confidence: profitability?.attribution_confidence ?? null,
+      attribution_confidence: record.attribution_confidence ?? profitability?.attribution_confidence ?? null,
       profitability_confidence: profitability?.profitability_confidence ?? null,
       validation_status: profitability?.validation_status ?? null,
       optimization_allowed: profitability?.optimization_allowed ?? null,
+      recommendation_status: record.recommendation_status,
+      opportunity_score: record.opportunity_score,
+      ranking_reason: record.ranking_reason,
+      expected_net_profit_lift: record.expected_net_profit_lift ?? expectedProfitImpact,
+      additional_ad_spend: record.additional_ad_spend,
+      marginal_roas: record.marginal_roas,
+      inventory_days: record.inventory_days,
+      current_ads_spend: record.current_ads_spend,
+      recommended_ads_spend: record.recommended_ads_spend,
+      confidence_breakdown: Object.keys(confidenceBreakdown).length ? confidenceBreakdown : null,
+      simulation_estimate: Object.keys(simulationEstimate).length ? simulationEstimate : null,
       sku: record.sku,
       previous_decision_context: activeDecisionContextForSku(activeDecisionContexts, skuId),
       product_name: record.product_name,
@@ -637,11 +670,16 @@ function compactPortfolioRows(
         predicted_revenue: simulation.predicted_revenue,
         required_inventory: simulation.required_inventory ?? inventoryEvidence.requiredInventory,
         current_inventory: simulation.current_inventory ?? inventoryEvidence.currentInventory,
-        inventory_impact: simulation.inventory_impact ?? inventoryEvidence.inventoryDelta
+        inventory_impact: simulation.inventory_impact ?? inventoryEvidence.inventoryDelta,
+        additional_ad_spend: simulation.additional_ad_spend ?? record.additional_ad_spend,
+        marginal_roas: simulation.marginal_roas ?? record.marginal_roas,
+        inventory_days: simulation.inventory_days ?? record.inventory_days,
+        confidence_breakdown: simulation.confidence_breakdown ?? confidenceBreakdown
       },
-      before_state: {
-        inventory: beforeState.inventory ?? inventoryEvidence.currentInventory
-      }
+      before_state: Object.keys(beforeState).length
+        ? beforeState
+        : { inventory: inventoryEvidence.currentInventory },
+      after_state: Object.keys(afterState).length ? afterState : null
     };
   });
 }
@@ -677,7 +715,12 @@ function compactPortfolioOptimization(
     ? optimization.skuDecisions
     : fallbackSkuDecisions;
   const availableSkuDecisions = portfolioSkuDecisions;
-  const queueDecisionRows = availableSkuDecisions.filter((row) => isOptimizationCandidateRow(row, activeDecisionContexts, recommendationIdentityContext));
+  const backendQueuedRows = availableSkuDecisions.filter((row) =>
+    String(asRecord(row)?.recommendation_status ?? "").toUpperCase() === "QUEUED"
+  );
+  const queueDecisionRows = backendQueuedRows.length
+    ? backendQueuedRows
+    : availableSkuDecisions.filter((row) => isOptimizationCandidateRow(row, activeDecisionContexts, recommendationIdentityContext));
   const compactSkuDecisions = compactDecisionRows(queueDecisionRows, activeDecisionContexts, recommendationIdentityContext, profitabilityBySku);
   const compactRecommendedPortfolio = compactPortfolioRows(
     optimization.recommended_portfolio,
@@ -686,19 +729,34 @@ function compactPortfolioOptimization(
     profitabilityBySku
   );
   const monitorCount = compactSkuDecisions.filter((row) => asRecord(row)?.action === "MONITOR").length;
-  const totalProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
+  const queuedProfitImpact = compactSkuDecisions.reduce<number>((sum, row) => {
     const record = asRecord(row);
     return sum + (record ? profitImpactValue(record) ?? 0 : 0);
   }, 0);
+  const optimizationSummaryRecord = asRecord(optimization.optimization_summary);
+  const portfolioSummaryRecord = asRecord(optimization.portfolioSummary);
+  const totalProfitImpact =
+    toNumber(optimizationSummaryRecord?.total_expected_profit_gain) ??
+    toNumber(optimizationSummaryRecord?.expected_profit_gain) ??
+    toNumber(portfolioSummaryRecord?.totalProfitImpact) ??
+    queuedProfitImpact;
+  const solverSelectedSkuCount =
+    toNumber(optimizationSummaryRecord?.solver_selected_sku_count) ??
+    toNumber(optimizationSummaryRecord?.solverSelectedSkuCount);
 
   return {
     ...optimization,
     optimization_summary: {
       ...optimization.optimization_summary,
-      total_opportunities: compactSkuDecisions.length,
-      selected_sku_count: compactSkuDecisions.length,
+      total_opportunities: optimization.optimization_summary.total_opportunities ?? compactSkuDecisions.length,
+      selected_sku_count: toNumber(optimizationSummaryRecord?.selected_sku_count) ?? compactSkuDecisions.length,
       expected_profit_gain: totalProfitImpact,
       total_expected_profit_gain: totalProfitImpact,
+      eligible_candidate_count: optimization.optimization_summary.eligible_candidate_count ?? optimization.optimization_summary.scenarios_tested ?? availableSkuDecisions.length,
+      ranked_opportunity_count: optimization.optimization_summary.ranked_opportunity_count ?? optimization.optimization_summary.total_opportunities ?? compactSkuDecisions.length,
+      queued_recommendation_count: compactSkuDecisions.length,
+      solver_selected_sku_count: solverSelectedSkuCount,
+      queued_expected_profit_gain: queuedProfitImpact,
       constraints_applied: Array.from(new Set([
         ...optimization.optimization_summary.constraints_applied,
         ...(activeDecisionContexts?.size ? ["active_decision_context_included"] : []),

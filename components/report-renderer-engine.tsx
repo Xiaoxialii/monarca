@@ -215,16 +215,24 @@ function firstNumberOrNull(...values: unknown[]) {
 function profitImpactForDecision(row: unknown, recommendation?: unknown) {
   const record = objectRecord(row);
   const simulation = objectRecord(record.simulation);
+  const simulationProfit = objectRecord(simulation.profit_simulation);
   const recommendationRecord = objectRecord(recommendation);
   const recommendationSimulation = objectRecord(recommendationRecord.simulation);
+  const recommendationSimulationProfit = objectRecord(recommendationSimulation.profit_simulation);
   const candidates = [
     record.profit_delta,
     simulation.profit_delta,
+    simulationProfit.expected_profit_impact,
+    simulationProfit.incremental_profit,
+    simulationProfit.profit_delta,
     record.expected_profit_impact,
     record.expectedProfitImpact,
     record.estimatedProfitImpact,
     recommendationRecord.profit_delta,
     recommendationSimulation.profit_delta,
+    recommendationSimulationProfit.expected_profit_impact,
+    recommendationSimulationProfit.incremental_profit,
+    recommendationSimulationProfit.profit_delta,
     recommendationRecord.expected_profit_impact,
     recommendationRecord.expectedProfitImpact,
     recommendationRecord.estimatedProfitImpact
@@ -1865,7 +1873,15 @@ function SkuPortfolioOptimizationPanel({
     [decisionRows, report]
   );
   const [loadedActionStatusHydrationKey, setLoadedActionStatusHydrationKey] = useState<string | null>(null);
-  const hasLoadedPersistedActionStatuses = !optimizationStarted || !decisionRows.length || loadedActionStatusHydrationKey === actionStatusHydrationKey;
+  const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
+  const hasPersistedOptimizationResult =
+    hasOptimizationResultRows ||
+    totalExpectedProfitGain > 0 ||
+    safeNumber(summary.total_expected_profit_gain) > 0 ||
+    safeNumber(summary.expected_profit_gain) > 0 ||
+    safeNumber(optimization.portfolioSummary?.totalProfitImpact) > 0;
+  const effectiveOptimizationStarted = optimizationStarted || hasPersistedOptimizationResult;
+  const hasLoadedPersistedActionStatuses = !effectiveOptimizationStarted || !decisionRows.length || loadedActionStatusHydrationKey === actionStatusHydrationKey;
   const isResolvingOptimizationState = isLoadingOptimization || !hasLoadedPersistedActionStatuses;
   const optimizationStartLabel = isZh ? "运行利润优化" : "Run Profit Optimization";
   const optimizationLoadingLabel = optimizationRunStep
@@ -1880,44 +1896,66 @@ function SkuPortfolioOptimizationPanel({
     return selectedOpsDecision ? [fallbackSkuReportRowFromDecision(selectedOpsDecision, portfolioRowsBySku.get(selectedOpsDecision.skuId))] : [];
   }, [decisionRows, focusedOpsSku, portfolioRowsBySku, visibleSkuRows]);
   const decisionActionFilter: PortfolioDecisionFilter = "ALL";
-  const rawOptimizationQueueRows = decisionRows.filter((row) =>
-    isOptimizationQueueRow(row) &&
-    isOptimizationQueueEligibleRow(row, portfolioRowsBySku.get(row.skuId))
-  );
-  const optimizationQueueRows = capUniformBudgetSpreadDecisionRows(rawOptimizationQueueRows, currentSkuCount, portfolioRowsBySku);
+  const backendRecommendedRows = decisionRows
+    .filter((row) => isOptimizationQueueRow(row))
+    .sort((left, right) =>
+      safeNumber(objectRecord(right).opportunity_score) - safeNumber(objectRecord(left).opportunity_score) ||
+      profitImpactForDecision(right, portfolioRowsBySku.get(right.skuId)) - profitImpactForDecision(left, portfolioRowsBySku.get(left.skuId)) ||
+      right.skuId.localeCompare(left.skuId)
+    );
+  const eligibleOptimizationRows = backendRecommendedRows.length
+    ? backendRecommendedRows
+    : decisionRows.filter((row) =>
+      isOptimizationQueueRow(row) &&
+      isOptimizationCandidateRow(row, portfolioRowsBySku.get(row.skuId))
+    );
+  const rankedOpportunityRows = backendRecommendedRows.length
+    ? backendRecommendedRows.slice(0, MAX_OPTIMIZATION_QUEUE_LIMIT)
+    : rankOptimizationOpportunities(eligibleOptimizationRows, portfolioRowsBySku);
+  const optimizationQueueRows = rankedOpportunityRows.slice(0, DEFAULT_OPTIMIZATION_QUEUE_LIMIT);
   const filteredDecisionRows = optimizationQueueRows.filter((row) => decisionFilterMatchesRow(row, decisionActionFilter));
   const acceptedDecisionRows = filteredDecisionRows.filter((row) => actionStatuses[decisionRowKey(row)] === "accepted");
   const pendingDecisionRows = filteredDecisionRows.filter((row) => shouldShowInOptimizationQueue(row, actionStatuses));
-  const hasOptimizationResultRows = decisionRows.length > 0 || selectedRows.length > 0;
   const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
+  const summaryRecord = objectRecord(summary);
   const decisionRowsExpectedProfitGain = pendingDecisionRows.reduce<number>(
     (sum, row) => sum + profitImpactForDecision(row, portfolioRowsBySku.get(row.skuId)),
     0
   );
   const expectedProfitGain =
-    optimizationStarted
-      ? decisionRowsExpectedProfitGain
+    effectiveOptimizationStarted
+      ? totalExpectedProfitGain ||
+        safeNumber(summary.total_expected_profit_gain) ||
+        safeNumber(summary.expected_profit_gain) ||
+        safeNumber(optimization.portfolioSummary?.totalProfitImpact) ||
+        decisionRowsExpectedProfitGain
       : totalExpectedProfitGain ||
     safeNumber(summary.total_expected_profit_gain) ||
     safeNumber(summary.expected_profit_gain) ||
     safeNumber(optimization.portfolioSummary?.totalProfitImpact) ||
     decisionRowsExpectedProfitGain;
   const expectedProfitLiftRate = currentPortfolioProfit > 0 ? expectedProfitGain / currentPortfolioProfit : liftRate;
-  const pendingOptimizationCount = optimizationStarted ? pendingDecisionRows.length : 0;
+  const pendingOptimizationCount = effectiveOptimizationStarted ? pendingDecisionRows.length : 0;
+  const solverSelectedSkuCount = firstNumberOrNull(summary.solver_selected_sku_count, summaryRecord.solverSelectedSkuCount);
+  const solverAdditionalAdSpend = firstNumberOrNull(summary.ads_budget_used, summaryRecord.adsBudgetUsed);
   const displayedCurrentSkuCount = shouldBlankOptimizationSummary ? 0 : currentSkuCount;
   const displayedCurrentProfit = shouldBlankOptimizationSummary ? 0 : currentPortfolioProfit;
   const displayedCurrentAdSpend = shouldBlankOptimizationSummary ? 0 : currentAdSpend;
-  const displayedPendingOptimizationCount = shouldBlankOptimizationSummary ? 0 : pendingOptimizationCount;
+  const displayedPendingOptimizationCount = shouldBlankOptimizationSummary
+    ? 0
+    : pendingOptimizationCount > 0
+      ? pendingOptimizationCount
+      : solverSelectedSkuCount ?? 0;
   const displayedExpectedProfitGain = shouldBlankOptimizationSummary ? 0 : expectedProfitGain;
   const displayedLiftRate = shouldBlankOptimizationSummary ? 0 : expectedProfitLiftRate;
   const displayedOptimizedProfit = displayedCurrentProfit + displayedExpectedProfitGain;
   const displayedOptimizationAdSpend = shouldBlankOptimizationSummary
     ? 0
-    : displayedCurrentAdSpend + pendingDecisionRows.reduce((sum, row) => {
+    : displayedCurrentAdSpend + (solverAdditionalAdSpend ?? pendingDecisionRows.reduce((sum, row) => {
       const actionLabel = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
-      return sum + Math.max(0, adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
-    }, 0);
+      return sum + Math.max(0, actualAdsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
+    }, 0));
   const displayedOptimizationAdditionalAds = shouldBlankOptimizationSummary
     ? 0
     : Math.max(0, displayedOptimizationAdSpend - displayedCurrentAdSpend);
@@ -1932,36 +1970,45 @@ function SkuPortfolioOptimizationPanel({
     : acceptedDecisionRows.reduce((sum, row) => {
       const actionLabel = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
-      return sum + Math.max(0, adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
+      return sum + Math.max(0, actualAdsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
     }, 0);
   const hasAcceptedOptimizationActions = (acceptedImpactSummary?.activeCount ?? acceptedDecisionRows.length) > 0;
   const displayedAcceptedSkuCount = acceptedImpactSummary?.activeCount ?? acceptedDecisionRows.length;
   const displayedPendingOptimizationCountLabel = numberFormat.format(displayedPendingOptimizationCount);
   const displayedPendingDecisionRows = shouldBlankOptimizationSummary ? [] : pendingDecisionRows;
+  const summaryEligibleCandidateCount = firstNumberOrNull(summary.eligible_candidate_count, summaryRecord.eligibleCandidateCount);
+  const summaryRankedOpportunityCount = firstNumberOrNull(summary.ranked_opportunity_count, summaryRecord.rankedOpportunityCount, summary.total_opportunities);
+  const summaryQueuedRecommendationCount = firstNumberOrNull(summary.queued_recommendation_count, summaryRecord.queuedRecommendationCount, summary.selected_sku_count);
+  const optimizationAnalysisStats = {
+    analyzedSkuCount: displayedCurrentSkuCount,
+    evaluatedSkuCount: shouldBlankOptimizationSummary ? 0 : summaryEligibleCandidateCount ?? eligibleOptimizationRows.length,
+    identifiedOpportunityCount: shouldBlankOptimizationSummary ? 0 : summaryRankedOpportunityCount ?? rankedOpportunityRows.length,
+    recommendedActionCount: shouldBlankOptimizationSummary ? 0 : summaryQueuedRecommendationCount ?? displayedPendingOptimizationCount
+  };
   const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
-  const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !optimizationStarted || isResolvingOptimizationState);
+  const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !effectiveOptimizationStarted || isResolvingOptimizationState);
 
   useEffect(() => {
     if (isResolvingOptimizationState) {
       setIsSkuOperationsOpen(true);
       return;
     }
-    if (optimizationStarted && !showSkuTableEmptyState) {
+    if (effectiveOptimizationStarted && !showSkuTableEmptyState) {
       setIsSkuOperationsOpen(false);
     }
-  }, [isResolvingOptimizationState, optimizationStarted, showSkuTableEmptyState]);
+  }, [effectiveOptimizationStarted, isResolvingOptimizationState, showSkuTableEmptyState]);
 
   useEffect(() => {
-    if (wasLoadingOptimizationRef.current && !isResolvingOptimizationState && optimizationStarted) {
+    if (wasLoadingOptimizationRef.current && !isResolvingOptimizationState && effectiveOptimizationStarted) {
       setIsSkuOperationsOpen(false);
     }
     wasLoadingOptimizationRef.current = isResolvingOptimizationState;
-  }, [isResolvingOptimizationState, optimizationStarted]);
+  }, [effectiveOptimizationStarted, isResolvingOptimizationState]);
 
   useEffect(() => {
-    if (!optimizationStarted || isResolvingOptimizationState || selectedDecisionRow || !pendingDecisionRows.length) {
+    if (!effectiveOptimizationStarted || isResolvingOptimizationState || selectedDecisionRow || !pendingDecisionRows.length) {
       return;
     }
     const firstDecision = pendingDecisionRows[0];
@@ -1969,10 +2016,10 @@ function SkuPortfolioOptimizationPanel({
     setIsSkuOperationsOpen(false);
     setSkuChannel("all");
     setExpandedSku(firstDecision.skuId);
-  }, [isResolvingOptimizationState, optimizationStarted, pendingDecisionRows, selectedDecisionRow]);
+  }, [effectiveOptimizationStarted, isResolvingOptimizationState, pendingDecisionRows, selectedDecisionRow]);
 
   useEffect(() => {
-    if (!optimizationStarted || !decisionRows.length) {
+    if (!effectiveOptimizationStarted || !decisionRows.length) {
       setLoadedActionStatusHydrationKey(actionStatusHydrationKey);
       return;
     }
@@ -2031,10 +2078,10 @@ function SkuPortfolioOptimizationPanel({
     return () => {
       cancelled = true;
     };
-  }, [actionStatusHydrationKey, optimizationStarted, decisionRows, report]);
+  }, [actionStatusHydrationKey, effectiveOptimizationStarted, decisionRows, report]);
 
   useEffect(() => {
-    if (!optimizationStarted) {
+    if (!effectiveOptimizationStarted) {
       setAcceptedImpactSummary(null);
       return;
     }
@@ -2066,7 +2113,7 @@ function SkuPortfolioOptimizationPanel({
     return () => {
       cancelled = true;
     };
-  }, [optimizationStarted]);
+  }, [effectiveOptimizationStarted]);
 
   const selectOptimizationQueueRow = (row: PortfolioDecisionRow) => {
     setSelectedDecisionRow(row);
@@ -2258,7 +2305,7 @@ function SkuPortfolioOptimizationPanel({
 
   const openDecisionIntelligence = () => {
     setFocusedOpsSku(null);
-    if (!optimizationStarted) {
+    if (!effectiveOptimizationStarted) {
       setIsSkuOperationsOpen(false);
       void onStartProfitOptimization?.();
       return;
@@ -2456,6 +2503,7 @@ function SkuPortfolioOptimizationPanel({
               simulationHorizonDays={simulationHorizonDays}
               actionStatuses={actionStatuses}
               acceptedAtByDecision={acceptedAtByDecision}
+              analysisStats={optimizationAnalysisStats}
               locale={locale}
               onSelect={selectOptimizationQueueRow}
               onAccept={(row) => void acceptDecisionAction(row)}
@@ -2772,67 +2820,202 @@ function isOptimizationQueueRow(row: PortfolioDecisionRow) {
   return row.action !== "MONITOR" || impact > 1 || row.inventoryRisk === true || row.budgetOpportunity === true;
 }
 
-const MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI = 0.2;
+const MIN_QUEUE_EXPECTED_NET_PROFIT_LIFT = 200;
+const MIN_QUEUE_CONFIDENCE = 0.65;
+const MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI = 0.5;
 const MIN_QUEUE_ATTRIBUTION_CONFIDENCE = 0.45;
-const UNIFORM_QUEUE_BUDGET_MIN_ROWS = 10;
-const UNIFORM_QUEUE_BUDGET_COVERAGE_RATIO = 0.75;
-const UNIFORM_QUEUE_BUDGET_KEEP_RATIO = 0.25;
+const MIN_QUEUE_MARGINAL_ROAS = 2.5;
+const MIN_QUEUE_INVENTORY_DAYS = 30;
+const MIN_QUEUE_DEMAND_CONFIDENCE = 0.7;
+const DEFAULT_OPTIMIZATION_QUEUE_LIMIT = 10;
+const MAX_OPTIMIZATION_QUEUE_LIMIT = 20;
 
-function isOptimizationQueueEligibleRow(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+type OptimizationQueueStatus = "ELIGIBLE" | "RANKED" | "QUEUED" | "DISMISSED";
+
+type OptimizationQueueQualification = {
+  status: OptimizationQueueStatus;
+  expectedNetProfitLift: number;
+  additionalAdSpend: number;
+  confidence: number;
+  opportunityScore: number;
+  rankingReason: string;
+  disqualifiedReason?: string;
+};
+
+type RankedPortfolioDecisionRow = PortfolioDecisionRow & {
+  recommendation_status?: OptimizationQueueStatus;
+  opportunity_score?: number;
+  ranking_reason?: string;
+};
+
+function isOptimizationCandidateRow(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
   if (isNoActionDecisionRow(row)) return false;
 
   const profitLift = profitImpactForDecision(row, recommendation);
   if (profitLift <= 0) return false;
   if (!hasPositiveDecisionMargin(row, recommendation)) return false;
 
-  if (!isIncrementalAdsDecision(row, recommendation)) return true;
-
-  const additionalAdSpend = adsBudgetDeltaForDecision(row, recommendation);
-  if (additionalAdSpend <= 0) return false;
-  if (profitLift / additionalAdSpend < MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI) return false;
-  if (!hasEnoughDecisionInventory(row, recommendation)) return false;
-  if (decisionAttributionConfidence(row, recommendation) < MIN_QUEUE_ATTRIBUTION_CONFIDENCE) return false;
-
   return true;
 }
 
-function capUniformBudgetSpreadDecisionRows(
+function rankOptimizationOpportunities(
   rows: PortfolioDecisionRow[],
-  currentSkuCount: number,
   portfolioRowsBySku: Map<string, PortfolioRow>
 ) {
-  const scaleRows = rows.filter((row) => isIncrementalAdsDecision(row, portfolioRowsBySku.get(row.skuId)));
-  const skuCount = Math.max(1, currentSkuCount || new Set(rows.map((row) => row.skuId)).size);
-  const distinctBudgetDeltas = new Set(scaleRows.map((row) => Math.round(adsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)))));
-  const looksLikeUniformBudgetSpread =
-    scaleRows.length >= UNIFORM_QUEUE_BUDGET_MIN_ROWS &&
-    scaleRows.length / skuCount >= UNIFORM_QUEUE_BUDGET_COVERAGE_RATIO &&
-    distinctBudgetDeltas.size <= 2;
-
-  if (!looksLikeUniformBudgetSpread) return rows;
-
-  const keepCount = Math.max(3, Math.ceil(skuCount * UNIFORM_QUEUE_BUDGET_KEEP_RATIO));
-  const keepKeys = new Set(scaleRows
-    .slice()
+  return rows
+    .map((row) => {
+      const recommendation = portfolioRowsBySku.get(row.skuId);
+      const qualification = qualifyOptimizationOpportunity(row, recommendation);
+      return {
+        ...row,
+        recommendation_status: qualification.status,
+        opportunity_score: qualification.opportunityScore,
+        ranking_reason: qualification.rankingReason
+      } as RankedPortfolioDecisionRow;
+    })
+    .filter((row) => row.recommendation_status === "QUEUED")
     .sort((left, right) => {
       const leftRecommendation = portfolioRowsBySku.get(left.skuId);
       const rightRecommendation = portfolioRowsBySku.get(right.skuId);
-      const leftSpend = adsBudgetDeltaForDecision(left, leftRecommendation);
-      const rightSpend = adsBudgetDeltaForDecision(right, rightRecommendation);
-      const leftLift = profitImpactForDecision(left, leftRecommendation);
-      const rightLift = profitImpactForDecision(right, rightRecommendation);
-      const leftRoi = leftSpend > 0 ? leftLift / leftSpend : 0;
-      const rightRoi = rightSpend > 0 ? rightLift / rightSpend : 0;
+      const leftQualification = qualifyOptimizationOpportunity(left, leftRecommendation);
+      const rightQualification = qualifyOptimizationOpportunity(right, rightRecommendation);
 
-      return rightRoi - leftRoi ||
-        rightLift - leftLift ||
-        safeNumber(objectRecord(right).confidence) - safeNumber(objectRecord(left).confidence) ||
+      return rightQualification.opportunityScore - leftQualification.opportunityScore ||
+        rightQualification.expectedNetProfitLift - leftQualification.expectedNetProfitLift ||
+        rightQualification.confidence - leftQualification.confidence ||
         left.skuId.localeCompare(right.skuId);
     })
-    .slice(0, keepCount)
-    .map((row) => decisionRowKey(row)));
+    .slice(0, MAX_OPTIMIZATION_QUEUE_LIMIT);
+}
 
-  return rows.filter((row) => !isIncrementalAdsDecision(row, portfolioRowsBySku.get(row.skuId)) || keepKeys.has(decisionRowKey(row)));
+function qualifyOptimizationOpportunity(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined): OptimizationQueueQualification {
+  const expectedNetProfitLift = profitImpactForDecision(row, recommendation);
+  const confidence = decisionRecommendationConfidence(row, recommendation);
+  const additionalAdSpend = actualAdsBudgetDeltaForDecision(row, recommendation);
+  const baseQualification: OptimizationQueueQualification = {
+    status: "ELIGIBLE",
+    expectedNetProfitLift,
+    additionalAdSpend,
+    confidence,
+    opportunityScore: 0,
+    rankingReason: "",
+  };
+
+  if (expectedNetProfitLift < MIN_QUEUE_EXPECTED_NET_PROFIT_LIFT) {
+    return {
+      ...baseQualification,
+      status: "DISMISSED",
+      disqualifiedReason: "Expected net profit lift is below the queue threshold",
+      rankingReason: "Expected net profit lift is below the queue threshold"
+    };
+  }
+
+  if (confidence < MIN_QUEUE_CONFIDENCE) {
+    return {
+      ...baseQualification,
+      status: "DISMISSED",
+      disqualifiedReason: "Recommendation confidence is below the queue threshold",
+      rankingReason: "Recommendation confidence is below the queue threshold"
+    };
+  }
+
+  if (isIncrementalAdsDecision(row, recommendation)) {
+    const incrementalRoi = additionalAdSpend > 0 ? expectedNetProfitLift / additionalAdSpend : 0;
+    const marginalRoas = marginalRoasForDecision(row, recommendation);
+    const inventoryDays = inventoryDaysForDecision(row, recommendation);
+    const attributionConfidence = decisionAttributionConfidence(row, recommendation);
+
+    if (additionalAdSpend <= 0) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Actual incremental ad spend is unavailable",
+        rankingReason: "Actual incremental ad spend is unavailable"
+      };
+    }
+    if (incrementalRoi < MIN_QUEUE_INCREMENTAL_NET_PROFIT_ROI) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Incremental net profit return is below the queue threshold",
+        rankingReason: "Incremental net profit return is below the queue threshold"
+      };
+    }
+    if (marginalRoas < MIN_QUEUE_MARGINAL_ROAS) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Marginal ROAS is below the queue threshold",
+        rankingReason: "Marginal ROAS is below the queue threshold"
+      };
+    }
+    if (inventoryDays < MIN_QUEUE_INVENTORY_DAYS) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Inventory coverage is below the queue threshold",
+        rankingReason: "Inventory coverage is below the queue threshold"
+      };
+    }
+    if (attributionConfidence < MIN_QUEUE_ATTRIBUTION_CONFIDENCE) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Ad attribution confidence is below the queue threshold",
+        rankingReason: "Ad attribution confidence is below the queue threshold"
+      };
+    }
+  }
+
+  if (isRestockDecision(row, recommendation)) {
+    if (!hasStockoutRisk(row, recommendation)) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "No stockout risk detected",
+        rankingReason: "No stockout risk detected"
+      };
+    }
+    if (demandConfidenceForDecision(row, recommendation) < MIN_QUEUE_DEMAND_CONFIDENCE) {
+      return {
+        ...baseQualification,
+        status: "DISMISSED",
+        disqualifiedReason: "Demand confidence is below the inventory threshold",
+        rankingReason: "Demand confidence is below the inventory threshold"
+      };
+    }
+  }
+
+  if (isReduceInventoryDecision(row, recommendation) && !hasExcessInventory(row, recommendation)) {
+    return {
+      ...baseQualification,
+      status: "DISMISSED",
+      disqualifiedReason: "No excess inventory detected",
+      rankingReason: "No excess inventory detected"
+    };
+  }
+
+  if (isPricingDecision(row, recommendation) && !hasPricingSimulationConfidence(row, recommendation)) {
+    return {
+      ...baseQualification,
+      status: "DISMISSED",
+      disqualifiedReason: "Pricing elasticity or margin simulation confidence is unavailable",
+      rankingReason: "Pricing elasticity or margin simulation confidence is unavailable"
+    };
+  }
+
+  const opportunityScore = optimizationOpportunityScore(row, recommendation, {
+    expectedNetProfitLift,
+    additionalAdSpend,
+    confidence
+  });
+
+  return {
+    ...baseQualification,
+    status: "QUEUED",
+    opportunityScore,
+    rankingReason: rankingReasonForOpportunity(row, recommendation)
+  };
 }
 
 function isIncrementalAdsDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
@@ -2846,44 +3029,272 @@ function isIncrementalAdsDecision(row: PortfolioDecisionRow, recommendation: Por
     rawAction.includes("SHIFT_CHANNEL");
 }
 
+function isRestockDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const goal = optimizationGoalForDecision(row, recommendation);
+  const rawAction = String(objectRecord(row).sourceAction || row.action || "").toUpperCase();
+
+  return goal.actionLabel === "Restock" ||
+    rawAction.includes("RESTOCK") ||
+    rawAction.includes("REPLENISH");
+}
+
+function isReduceInventoryDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const goal = optimizationGoalForDecision(row, recommendation);
+  const rawAction = String(objectRecord(row).sourceAction || row.action || "").toUpperCase();
+
+  return goal.actionLabel === "Reduce Inventory" ||
+    rawAction.includes("REDUCE_INVENTORY") ||
+    rawAction.includes("LIQUIDATE") ||
+    rawAction.includes("CLEAR_INVENTORY");
+}
+
+function isPricingDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const goal = optimizationGoalForDecision(row, recommendation);
+  const rawAction = String(objectRecord(row).sourceAction || row.action || "").toUpperCase();
+
+  return goal.actionLabel === "Price Up" ||
+    goal.actionLabel === "Price Down" ||
+    rawAction.includes("PRICE_UP") ||
+    rawAction.includes("PRICE_DOWN") ||
+    rawAction.includes("PRICING");
+}
+
+function optimizationOpportunityScore(
+  row: PortfolioDecisionRow,
+  recommendation: PortfolioRow | undefined,
+  values: { expectedNetProfitLift: number; additionalAdSpend: number; confidence: number }
+) {
+  const urgencyFactor = urgencyFactorForDecision(row, recommendation);
+  const feasibilityFactor = actionFeasibilityForDecision(row, recommendation, values.additionalAdSpend);
+  const riskFactor = riskFactorForDecision(row, recommendation);
+  const score = values.expectedNetProfitLift * values.confidence * feasibilityFactor * urgencyFactor * riskFactor;
+
+  return Math.max(0, Math.round(score * 100) / 100);
+}
+
+function rankingReasonForOpportunity(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  if (isIncrementalAdsDecision(row, recommendation)) {
+    return "High marginal ROAS with sufficient inventory coverage";
+  }
+  if (isRestockDecision(row, recommendation)) {
+    return "Stockout risk with sufficient demand confidence";
+  }
+  if (isReduceInventoryDecision(row, recommendation)) {
+    return "Excess inventory creates capital efficiency opportunity";
+  }
+  if (isPricingDecision(row, recommendation)) {
+    return "Pricing simulation indicates positive net profit impact";
+  }
+  return "Positive expected net profit impact with sufficient confidence";
+}
+
+function decisionRecommendationConfidence(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const decisionConfidence = objectRecord(rowRecord.decision_confidence ?? recommendationRecord.decision_confidence);
+  const confidenceBreakdown = objectRecord(rowRecord.confidence_breakdown ?? recommendationRecord.confidence_breakdown);
+  const simulationEstimate = objectRecord(rowRecord.simulation_estimate ?? recommendationRecord.simulation_estimate);
+  const simulationEstimateConfidence = objectRecord(simulationEstimate.confidence_breakdown);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendationRecord.simulation);
+  const simulationConfidence = objectRecord(simulation.confidence_breakdown);
+  const value = firstNumberOrNull(
+    decisionConfidence.score,
+    decisionConfidence.confidence,
+    rowRecord.confidence,
+    rowRecord.confidenceScore,
+    recommendationRecord.confidence,
+    recommendationRecord.confidenceScore,
+    confidenceBreakdown.overall_confidence,
+    confidenceBreakdown.optimization_confidence,
+    simulationEstimateConfidence.overall_confidence,
+    simulationConfidence.overall_confidence
+  );
+
+  return normalizeConfidence(value);
+}
+
+function normalizeConfidence(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return 0;
+  return value > 1 ? Math.max(0, Math.min(1, value / 100)) : Math.max(0, Math.min(1, value));
+}
+
+function marginalRoasForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendationRecord.simulation);
+  const profitSimulation = objectRecord(simulation.profit_simulation);
+  const estimate = objectRecord(rowRecord.simulation_estimate ?? recommendationRecord.simulation_estimate);
+  const estimateMetrics = objectRecord(estimate.metrics);
+  const estimateRevenueSimulation = objectRecord(estimate.revenue_simulation);
+
+  return firstNumberOrNull(
+    rowRecord.marginal_roas,
+    rowRecord.marginalROAS,
+    rowRecord.roas,
+    simulation.marginal_roas,
+    simulation.marginalROAS,
+    profitSimulation.marginal_roas,
+    estimateRevenueSimulation.marginal_roas,
+    estimateMetrics.marginal_roas,
+    recommendationRecord.marginal_roas,
+    recommendationRecord.roas
+  ) ?? 0;
+}
+
+function inventoryDaysForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const beforeState = objectRecord(rowRecord.before_state ?? recommendationRecord.before_state);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendationRecord.simulation);
+  const inventory = objectRecord(rowRecord.inventory ?? recommendationRecord.inventory);
+  const evidence = objectRecord(rowRecord.evidence ?? recommendationRecord.evidence);
+
+  return firstNumberOrNull(
+    rowRecord.inventory_days,
+    rowRecord.inventoryDays,
+    rowRecord.inventory_coverage_days,
+    rowRecord.inventoryCoverageDays,
+    rowRecord.days_of_inventory,
+    beforeState.inventory_days,
+    beforeState.inventoryCoverageDays,
+    simulation.inventory_days,
+    simulation.inventoryCoverageDays,
+    inventory.inventory_days,
+    inventory.coverage_days,
+    evidence.inventory_days,
+    evidence.inventoryRunwayDays,
+    evidence.inventory_runway_days,
+    recommendationRecord.inventoryRunwayDays,
+    recommendationRecord.inventory_days
+  ) ?? 0;
+}
+
+function urgencyFactorForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const inventoryDays = inventoryDaysForDecision(row, recommendation);
+  const explicitUrgency = firstNumberOrNull(
+    rowRecord.urgency_factor,
+    rowRecord.urgency,
+    recommendationRecord.urgency_factor,
+    recommendationRecord.urgency
+  );
+  if (explicitUrgency !== null) return Math.max(0.5, Math.min(1.5, explicitUrgency > 3 ? explicitUrgency / 100 : explicitUrgency));
+  if (hasStockoutRisk(row, recommendation) || inventoryDays > 0 && inventoryDays < 21) return 1.25;
+  if (inventoryDays > 90) return 1.1;
+  return 1;
+}
+
+function actionFeasibilityForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined, additionalAdSpend: number) {
+  if (isIncrementalAdsDecision(row, recommendation)) {
+    const inventoryDays = inventoryDaysForDecision(row, recommendation);
+    const inventoryFactor = inventoryDays >= 60 ? 1 : inventoryDays >= MIN_QUEUE_INVENTORY_DAYS ? 0.85 : 0;
+    const spendFactor = additionalAdSpend > 0 ? 1 : 0;
+    return Math.min(inventoryFactor, spendFactor);
+  }
+  if (isRestockDecision(row, recommendation)) return hasStockoutRisk(row, recommendation) ? 0.9 : 0;
+  if (isReduceInventoryDecision(row, recommendation)) return hasExcessInventory(row, recommendation) ? 0.85 : 0;
+  if (isPricingDecision(row, recommendation)) return hasPricingSimulationConfidence(row, recommendation) ? 0.8 : 0;
+  return 0.75;
+}
+
+function riskFactorForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const riskLevel = String(rowRecord.risk_level ?? rowRecord.risk ?? recommendationRecord.risk_level ?? recommendationRecord.risk ?? "").toLowerCase();
+  if (riskLevel.includes("high")) return 0.65;
+  if (riskLevel.includes("medium") || riskLevel.includes("moderate")) return 0.85;
+  return 1;
+}
+
+function hasStockoutRisk(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const inventoryDays = inventoryDaysForDecision(row, recommendation);
+
+  return row.inventoryRisk === true ||
+    rowRecord.stockout_risk === true ||
+    recommendationRecord.stockout_risk === true ||
+    (inventoryDays > 0 && inventoryDays < MIN_QUEUE_INVENTORY_DAYS);
+}
+
+function hasExcessInventory(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const inventoryDays = inventoryDaysForDecision(row, recommendation);
+
+  return rowRecord.excess_inventory === true ||
+    recommendationRecord.excess_inventory === true ||
+    inventoryDays > 90;
+}
+
+function demandConfidenceForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const confidenceBreakdown = objectRecord(rowRecord.confidence_breakdown ?? recommendationRecord.confidence_breakdown);
+  const decisionConfidence = objectRecord(rowRecord.decision_confidence ?? recommendationRecord.decision_confidence);
+  const signalQuality = objectRecord(decisionConfidence.signal_quality);
+
+  return normalizeConfidence(firstNumberOrNull(
+    rowRecord.demand_confidence,
+    confidenceBreakdown.demand_confidence,
+    signalQuality.demandConfidence,
+    recommendationRecord.demand_confidence
+  ));
+}
+
+function hasPricingSimulationConfidence(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const confidenceBreakdown = objectRecord(rowRecord.confidence_breakdown ?? recommendationRecord.confidence_breakdown);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendationRecord.simulation);
+  const profitSimulation = objectRecord(simulation.profit_simulation);
+  const elasticityConfidence = normalizeConfidence(firstNumberOrNull(
+    rowRecord.price_elasticity_confidence,
+    confidenceBreakdown.price_elasticity_confidence,
+    recommendationRecord.price_elasticity_confidence
+  ));
+  const marginSimulation = firstNumberOrNull(
+    rowRecord.margin_impact,
+    rowRecord.expected_margin_impact,
+    simulation.margin_impact,
+    profitSimulation.margin_impact,
+    recommendationRecord.margin_impact
+  );
+
+  return elasticityConfidence >= MIN_QUEUE_CONFIDENCE && marginSimulation !== null;
+}
+
 function hasPositiveDecisionMargin(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
   const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
   const beforeState = objectRecord(rowRecord.before_state ?? recommendation?.before_state);
   const afterState = objectRecord(rowRecord.after_state);
   const currentMetrics = objectRecord(rowRecord.current_metrics);
   const simulation = objectRecord(rowRecord.simulation ?? recommendation?.simulation);
+  const simulationProfit = objectRecord(simulation.profit_simulation);
   const currentMargin = firstNumberOrNull(
+    rowRecord.margin,
+    rowRecord.contribution_margin,
     beforeState.margin,
     currentMetrics.margin,
+    simulationProfit.contribution_margin,
+    recommendationRecord.margin,
+    recommendationRecord.contribution_margin,
     recommendation?.before_state?.margin
   );
   const predictedMargin = firstNumberOrNull(
     rowRecord.predicted_margin,
     afterState.margin,
-    simulation.predicted_margin
+    simulation.predicted_margin,
+    simulationProfit.contribution_margin,
+    rowRecord.margin,
+    rowRecord.contribution_margin,
+    recommendationRecord.margin,
+    recommendationRecord.contribution_margin
   );
 
   return (currentMargin ?? 0) > 0 && (predictedMargin ?? currentMargin ?? 0) > 0;
-}
-
-function hasEnoughDecisionInventory(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
-  const rowRecord = objectRecord(row);
-  const simulation = objectRecord(rowRecord.simulation ?? recommendation?.simulation);
-  const beforeState = objectRecord(rowRecord.before_state ?? recommendation?.before_state);
-  const currentInventory = firstNumberOrNull(
-    rowRecord.current_inventory,
-    simulation.current_inventory,
-    beforeState.inventory,
-    recommendation?.before_state?.inventory
-  );
-  const requiredInventory = firstNumberOrNull(
-    rowRecord.required_inventory,
-    simulation.required_inventory,
-    recommendation?.simulation?.required_inventory
-  );
-
-  if (currentInventory === null || requiredInventory === null) return true;
-  return currentInventory >= requiredInventory;
 }
 
 function decisionAttributionConfidence(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
@@ -2891,16 +3302,19 @@ function decisionAttributionConfidence(row: PortfolioDecisionRow, recommendation
   const confidenceBreakdown = objectRecord(rowRecord.confidence_breakdown ?? recommendation?.confidence_breakdown);
   const estimate = objectRecord(rowRecord.simulation_estimate ?? recommendation?.simulation_estimate);
   const estimateBreakdown = objectRecord(estimate.confidence_breakdown);
+  const simulation = objectRecord(rowRecord.simulation ?? recommendation?.simulation);
+  const simulationBreakdown = objectRecord(simulation.confidence_breakdown);
   const decisionConfidence = objectRecord(rowRecord.decision_confidence ?? recommendation?.decision_confidence);
   const signalQuality = objectRecord(decisionConfidence.signal_quality);
 
-  return firstNumberOrNull(
+  return normalizeConfidence(firstNumberOrNull(
     confidenceBreakdown.attribution_confidence,
     estimateBreakdown.attribution_confidence,
+    simulationBreakdown.attribution_confidence,
     signalQuality.attributionConfidence,
     recommendation?.confidence_breakdown?.attribution_confidence,
     rowRecord.attribution_confidence
-  ) ?? 0;
+  ));
 }
 
 function OptimizationDecisionRail({
@@ -2911,6 +3325,7 @@ function OptimizationDecisionRail({
   simulationHorizonDays,
   actionStatuses,
   acceptedAtByDecision,
+  analysisStats,
   locale,
   onSelect,
   onAccept,
@@ -2924,6 +3339,12 @@ function OptimizationDecisionRail({
   simulationHorizonDays: number;
   actionStatuses: Record<string, "pending" | "accepted" | "rejected">;
   acceptedAtByDecision: Record<string, string>;
+  analysisStats?: {
+    analyzedSkuCount: number;
+    evaluatedSkuCount: number;
+    identifiedOpportunityCount: number;
+    recommendedActionCount: number;
+  };
   locale: RendererLocale;
   onSelect: (row: PortfolioDecisionRow) => void;
   onAccept: (row: PortfolioDecisionRow) => void;
@@ -2995,6 +3416,13 @@ function OptimizationDecisionRail({
               {queueCountLabel}
             </span>
           </div>
+          {analysisStats ? (
+            <p className="mt-1 text-[11px] font-semibold text-emerald-50/75">
+              {isZh
+                ? `${numberFormat.format(analysisStats.analyzedSkuCount)} 个 SKU 已分析 · ${numberFormat.format(analysisStats.evaluatedSkuCount)} 个已评估 · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} 个机会 · ${numberFormat.format(analysisStats.recommendedActionCount)} 个推荐动作`
+                : `${numberFormat.format(analysisStats.analyzedSkuCount)} SKUs analyzed · ${numberFormat.format(analysisStats.evaluatedSkuCount)} evaluated · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} opportunities identified · ${numberFormat.format(analysisStats.recommendedActionCount)} recommended actions`}
+            </p>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-2">
             {optimizationGoalFilters.map((filter) => {
               const isSelected = selectedGoal === filter.goal;
@@ -3653,7 +4081,7 @@ function optimizationGoalForDecision(row: PortfolioDecisionRow, recommendation?:
   if (sourceAction === "STOP") {
     return { goal: "PORTFOLIO_HEALTH", goalLabel: "Portfolio Health", actionLabel: "Exit SKU" };
   }
-  if (backendUnifiedAction === "SCALE_ADS") {
+  if (backendUnifiedAction === "SCALE_ADS" || backendUnifiedAction === "VALIDATE_AND_SCALE" || sourceAction === "VALIDATE_AND_SCALE") {
     return { goal: "GROWTH", goalLabel: "Growth", actionLabel: "Scale Ads" };
   }
   if (backendUnifiedAction === "EXPAND_CHANNEL") {
@@ -3759,17 +4187,72 @@ function adsBudgetDeltaForDecision(row: PortfolioDecisionRow, recommendation: Po
   const rowWithSimulation = row as PortfolioDecisionRow & {
     simulation?: { recommended_ads_spend?: number; current_ads_spend?: number };
   };
+  const rowSimulationRecord = objectRecord(rowWithSimulation.simulation);
   const rowSimulationDelta = rowWithSimulation.simulation
     ? safeNumber(rowWithSimulation.simulation.recommended_ads_spend) - safeNumber(rowWithSimulation.simulation.current_ads_spend)
     : 0;
+  const rowSimulationCost = objectRecord(rowSimulationRecord.cost_simulation);
   const simulationDelta = recommendation
     ? safeNumber(recommendation.simulation?.recommended_ads_spend) - safeNumber(recommendation.simulation?.current_ads_spend)
     : rowSimulationDelta;
+  const recommendationSimulationRecord = objectRecord(recommendation?.simulation);
+  const recommendationSimulationCost = objectRecord(recommendationSimulationRecord.cost_simulation);
   const estimateDelta = row.simulation_estimate?.investment?.additional_ad_spend ?? 0;
+  const costSimulationDelta = firstNumberOrNull(
+    rowSimulationCost.additional_ad_spend,
+    recommendationSimulationCost.additional_ad_spend
+  ) ?? 0;
   const fallbackDelta = Math.max(50, Math.round(Math.abs(expectedProfit) * 0.24));
-  const value = Math.max(simulationDelta, estimateDelta, 0);
+  const value = Math.max(simulationDelta, estimateDelta, costSimulationDelta, 0);
 
   return value > 0 ? value : fallbackDelta;
+}
+
+function actualAdsBudgetDeltaForDecision(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {
+  const rowWithSimulation = row as PortfolioDecisionRow & {
+    simulation?: { recommended_ads_spend?: number; current_ads_spend?: number };
+  };
+  const rowRecord = objectRecord(row);
+  const recommendationRecord = objectRecord(recommendation);
+  const rowSimulationRecord = objectRecord(rowWithSimulation.simulation);
+  const recommendationSimulationRecord = objectRecord(recommendation?.simulation);
+  const rowSimulationCost = objectRecord(rowSimulationRecord.cost_simulation);
+  const recommendationSimulationCost = objectRecord(recommendationSimulationRecord.cost_simulation);
+  const rowEstimate = objectRecord(rowRecord.simulation_estimate);
+  const recommendationEstimate = objectRecord(recommendationRecord.simulation_estimate);
+  const rowInvestment = objectRecord(rowEstimate.investment);
+  const recommendationInvestment = objectRecord(recommendationEstimate.investment);
+  const rowSimulationDelta = rowWithSimulation.simulation
+    ? firstNumberOrNull(rowWithSimulation.simulation.recommended_ads_spend) !== null &&
+      firstNumberOrNull(rowWithSimulation.simulation.current_ads_spend) !== null
+      ? safeNumber(rowWithSimulation.simulation.recommended_ads_spend) - safeNumber(rowWithSimulation.simulation.current_ads_spend)
+      : 0
+    : 0;
+  const recommendationSimulationDelta = recommendation?.simulation &&
+    firstNumberOrNull(recommendation.simulation.recommended_ads_spend) !== null &&
+    firstNumberOrNull(recommendation.simulation.current_ads_spend) !== null
+    ? safeNumber(recommendation.simulation.recommended_ads_spend) - safeNumber(recommendation.simulation.current_ads_spend)
+    : 0;
+  const explicitDelta = firstNumberOrNull(
+    rowRecord.additional_ad_spend,
+    rowRecord.incremental_ad_spend,
+    rowRecord.ad_spend_delta,
+    rowRecord.ads_spend_delta,
+    rowRecord.budget_delta,
+    rowRecord.incremental_budget,
+    rowInvestment.additional_ad_spend,
+    rowInvestment.incremental_ad_spend,
+    rowSimulationCost.additional_ad_spend,
+    recommendationRecord.additional_ad_spend,
+    recommendationRecord.incremental_ad_spend,
+    recommendationRecord.ad_spend_delta,
+    recommendationRecord.ads_spend_delta,
+    recommendationInvestment.additional_ad_spend,
+    recommendationInvestment.incremental_ad_spend,
+    recommendationSimulationCost.additional_ad_spend
+  );
+
+  return Math.max(0, explicitDelta ?? rowSimulationDelta, recommendationSimulationDelta);
 }
 
 function budgetReallocationPlan(row: PortfolioDecisionRow, recommendation: PortfolioRow | undefined) {

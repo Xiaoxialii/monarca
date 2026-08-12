@@ -271,7 +271,7 @@ function isScaleAdsEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicTh
   if (sku.optimization_allowed === false) return false;
   if (sku.cogs_status === "MISSING") return false;
   const attributionConfidence = sku.attribution_confidence ?? sku.prediction_confidence ?? 0;
-  if (attributionConfidence < 0.65) return false;
+  if (attributionConfidence < 0.45) return false;
   if ((sku.cac_confidence ?? sku.customer_metric_confidence ?? "LOW") === "LOW") return false;
 
   const confidenceThreshold = thresholdProfile?.scale_ads_threshold.confidence ?? 0.6;
@@ -290,7 +290,7 @@ function isScaleAdsEligible(sku: PortfolioSkuInput, thresholdProfile?: DynamicTh
     coverageDays >= coverageThreshold &&
     (sku.prediction_confidence ?? 0.55) >= confidenceThreshold &&
     estimatedRoas >= marginalRoasThreshold &&
-    (sku.roas_confidence ?? "MEDIUM") !== "LOW" &&
+    ((sku.roas_confidence ?? "MEDIUM") !== "LOW" || attributionConfidence >= 0.45) &&
     stableDemand;
 }
 
@@ -298,7 +298,7 @@ function normalizedRoasForActionGenerator(rawRoas: number, spend: number, attrib
   if (!Number.isFinite(rawRoas) || rawRoas <= 0) return null;
   if (roasConfidence === "LOW") return null;
   if (spend < 25) return null;
-  if (attributionConfidence < 0.55) return null;
+  if (attributionConfidence < 0.45) return null;
   if (rawRoas > 20) return null;
   return rawRoas;
 }

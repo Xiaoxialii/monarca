@@ -60,6 +60,19 @@ function cacheNeedsOptimizationRefresh(payload: unknown) {
   );
 }
 
+function hasUsableOptimizationPayload(payload: Record<string, unknown>) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions)
+    ? optimization.skuDecisions
+    : Array.isArray(payload.skuDecisions)
+      ? payload.skuDecisions
+      : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return Object.keys(report).length > 0 || decisionRows.length > 0 || portfolioRows.length > 0;
+}
+
 function numericValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -78,9 +91,14 @@ function firstNumericValue(...values: unknown[]) {
 }
 
 function profitImpactValue(record: Record<string, unknown>) {
+  const simulation = asRecord(record.simulation);
+  const simulationProfit = asRecord(simulation.profit_simulation);
   const candidates = [
     record.profit_delta,
-    asRecord(record.simulation).profit_delta,
+    simulation.profit_delta,
+    simulationProfit.expected_profit_impact,
+    simulationProfit.incremental_profit,
+    simulationProfit.profit_delta,
     record.expected_profit_impact,
     record.expectedProfitImpact,
     record.estimatedProfitImpact
@@ -285,22 +303,46 @@ function queuedOptimizationResponse(input: {
   message: string;
   startedAt: number;
 }) {
+  const payload = input.payload ?? {};
+  const existingReport = asRecord(payload.decision_report);
+  const existingOptimization = asRecord(existingReport.sku_portfolio_optimization);
+  const existingSkuDecisions = Array.isArray(existingOptimization.skuDecisions)
+    ? existingOptimization.skuDecisions
+    : Array.isArray(payload.skuDecisions)
+      ? payload.skuDecisions
+      : [];
+  const existingRiskAlerts = Array.isArray(payload.riskAlerts)
+    ? payload.riskAlerts
+    : Array.isArray(existingReport.riskAlerts)
+      ? existingReport.riskAlerts
+      : [];
+  const existingExecutionPlan = Array.isArray(payload.executionPlan)
+    ? payload.executionPlan
+    : Array.isArray(existingReport.executionPlan)
+      ? existingReport.executionPlan
+      : [];
+  const hasExistingReport = Object.keys(existingReport).length > 0 || existingSkuDecisions.length > 0;
+
   return NextResponse.json({
-    ...(input.payload ?? {}),
+    ...payload,
     ok: true,
     state: "processing",
     status: input.status,
     latestSnapshot: false,
     message: input.message,
     jobId: input.jobId,
-    decision_report: null,
-    portfolioSummary: null,
-    allocationRecommendation: null,
-    skuDecisions: [],
-    riskAlerts: [],
-    executionPlan: [],
+    decision_report: hasExistingReport ? payload.decision_report : null,
+    portfolioSummary: hasExistingReport
+      ? payload.portfolioSummary ?? existingReport.portfolioSummary ?? existingOptimization.portfolioSummary ?? null
+      : null,
+    allocationRecommendation: hasExistingReport
+      ? payload.allocationRecommendation ?? existingReport.allocationRecommendation ?? null
+      : null,
+    skuDecisions: hasExistingReport ? existingSkuDecisions : [],
+    riskAlerts: hasExistingReport ? existingRiskAlerts : [],
+    executionPlan: hasExistingReport ? existingExecutionPlan : [],
     optimizationRun: {
-      ...asRecord(input.payload?.optimizationRun),
+      ...asRecord(payload.optimizationRun),
       optimization_run_id: input.jobId,
       current_step: input.currentStep ?? null
     },
@@ -410,6 +452,17 @@ async function liveDecisionReportResponse(input: {
 
 async function withOptimizationReadiness(workspaceId: string, payload: Record<string, unknown>) {
   const normalizedPayload = normalizeOptimizationProfitImpactPayload(payload);
+  const existingReadiness = asRecord(normalizedPayload.optimizationReadiness);
+  if (Object.keys(existingReadiness).length) {
+    return {
+      ...normalizedPayload,
+      optimizationReadiness: existingReadiness
+    };
+  }
+  if (hasUsableOptimizationPayload(normalizedPayload)) {
+    return normalizedPayload;
+  }
+
   const loaded = await loadEcommerceSalesDashboardData({
     workspaceId,
     decisionMode: "full"
@@ -893,12 +946,15 @@ export async function GET(request: Request) {
 function cachedOptimizationReportMissingOpsRows(payload: unknown) {
   const record = asRecord(payload);
   const report = asRecord(record.decision_report);
-  const breakdown = asRecord(report.sku_breakdown);
   const optimization = asRecord(report.sku_portfolio_optimization);
-  const topRevenueSkus = Array.isArray(breakdown.top_revenue_skus) ? breakdown.top_revenue_skus : [];
-  const topProfitSkus = Array.isArray(breakdown.top_profit_skus) ? breakdown.top_profit_skus : [];
   const decisionRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
   const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+  const rows = [...decisionRows, ...portfolioRows];
 
-  return (decisionRows.length > 0 || portfolioRows.length > 0) && topRevenueSkus.length === 0 && topProfitSkus.length === 0;
+  if (rows.length === 0) return false;
+
+  return !rows.some((row) => {
+    const item = asRecord(row);
+    return typeof item.sku === "string" || typeof item.skuId === "string";
+  });
 }

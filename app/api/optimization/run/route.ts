@@ -42,19 +42,22 @@ export async function POST(request: Request) {
 
   const portfolioOptimization = portfolioInput ? optimizeSkuPortfolio(portfolioInput) : null;
   const portfolioReport = portfolioOptimization ? generatePortfolioOptimizationReport(portfolioOptimization) : null;
-  const learnedPortfolioReport = portfolioReport
-    ? await applyDecisionLearningToDecisionReport(prisma, {
-      workspaceId: session.workspace.id,
-      content: {
-        decision_report: {
-          sku_portfolio_optimization: portfolioOptimization
+  let learnedOptimization = portfolioOptimization;
+  if (portfolioReport && portfolioOptimization) {
+    try {
+      const learnedPortfolioReport = await applyDecisionLearningToDecisionReport(prisma, {
+        workspaceId: session.workspace.id,
+        content: {
+          decision_report: {
+            sku_portfolio_optimization: portfolioOptimization
+          }
         }
-      }
-    })
-    : null;
-  const learnedOptimization = learnedPortfolioReport
-    ? ((learnedPortfolioReport.decision_report as Record<string, unknown>).sku_portfolio_optimization ?? portfolioOptimization)
-    : portfolioOptimization;
+      });
+      learnedOptimization = ((learnedPortfolioReport.decision_report as Record<string, unknown>).sku_portfolio_optimization ?? portfolioOptimization) as typeof portfolioOptimization;
+    } catch (error) {
+      console.warn("[optimization.run] skipped decision learning because the learning layer failed", error);
+    }
+  }
 
   return NextResponse.json({
     ok: true,

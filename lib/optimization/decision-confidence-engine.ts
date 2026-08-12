@@ -195,7 +195,7 @@ function validateRoasConfidence(input: {
   if (attribution >= 0.75 && input.spend >= 100) {
     return { raw_roas: input.rawRoas, normalized_roas: input.rawRoas, confidence: "HIGH" };
   }
-  if (attribution >= 0.55) {
+  if (attribution >= 0.45) {
     return { raw_roas: input.rawRoas, normalized_roas: input.rawRoas, confidence: "MEDIUM" };
   }
   return {
@@ -239,7 +239,7 @@ function collectWarnings(input: {
   if (input.inventory === "LOW" && (input.row.action === "REDUCE_INVENTORY" || input.row.action === "RESTOCK_AND_SCALE")) {
     warnings.push("Inventory action requires more reliable velocity history");
   }
-  if (input.sku.attribution_confidence !== undefined && input.sku.attribution_confidence < 0.65) {
+  if (input.sku.attribution_confidence !== undefined && input.sku.attribution_confidence < 0.45) {
     warnings.push("Attribution confidence below automatic action threshold");
   }
   return Array.from(new Set(warnings));

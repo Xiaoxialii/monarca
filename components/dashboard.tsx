@@ -17170,10 +17170,14 @@ function ReportsPage({
     void loadAnalysisReport();
   }, [loadAnalysisReport]);
 
-  const loadAnalysisDecisionReport = useCallback(async (mode: "sku" | "full" = "sku") => {
+  const loadAnalysisDecisionReport = useCallback(async (
+    mode: "sku" | "full" = "sku",
+    options: { showLoading?: boolean } = {}
+  ) => {
+    const showLoading = options.showLoading ?? true;
     const requestId = analysisDecisionReportRequestRef.current + 1;
     analysisDecisionReportRequestRef.current = requestId;
-    setIsLoadingAnalysisDecisionReport(true);
+    if (showLoading) setIsLoadingAnalysisDecisionReport(true);
     try {
       const modeQuery = mode === "sku" ? "mode=sku&" : "";
       const { response, payload } = await fetchReportJson<typeof analysisDecisionReportPayload>(
@@ -17203,7 +17207,7 @@ function ReportsPage({
       }
       return null;
     } finally {
-      if (analysisDecisionReportRequestRef.current === requestId) {
+      if (showLoading && analysisDecisionReportRequestRef.current === requestId) {
         setIsLoadingAnalysisDecisionReport(false);
       }
     }
@@ -17267,29 +17271,32 @@ function ReportsPage({
       setProfitOptimizationRunStatus("COMPLETED");
       setProfitOptimizationRunStep(profitOptimizationStatusMessage("COMPLETED", completedJob.currentStep, isZh));
       const completedSnapshotId = optimizationJobSnapshotId(completedJob);
-      let latestReport = await loadAnalysisDecisionReport("full");
-      for (
-        let attempt = 0;
-        attempt < 8 && (completedSnapshotId
-          ? optimizationDecisionReportSnapshotId(latestReport) !== completedSnapshotId
-          : optimizationDecisionReportRunId(latestReport) !== completedJob.id);
-        attempt += 1
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 750 : 1500));
-        latestReport = await loadAnalysisDecisionReport("full");
-      }
-      if (!latestReport?.ok) {
-        throw new Error(latestReport?.message || (isZh ? "优化完成，但最新决策报表刷新失败" : "Optimization completed, but the latest decision report could not be refreshed"));
-      }
-      const latestReportMatchesJob = completedSnapshotId
-        ? optimizationDecisionReportSnapshotId(latestReport) === completedSnapshotId
-        : optimizationDecisionReportRunId(latestReport) === completedJob.id;
-      if (!latestReportMatchesJob) {
-        throw new Error(isZh
-          ? "优化已完成，但页面尚未读到本次优化生成的最新报表，请稍后刷新。"
-          : "Optimization completed, but the latest report for this run is not available yet. Refresh shortly.");
-      }
       setStatusMessage(isZh ? "利润优化已完成，推荐已刷新。" : "Profit optimization completed and recommendations refreshed.");
+      void (async () => {
+        let latestReport = await loadAnalysisDecisionReport("full", { showLoading: false });
+        for (
+          let attempt = 0;
+          attempt < 8 && (completedSnapshotId
+            ? optimizationDecisionReportSnapshotId(latestReport) !== completedSnapshotId
+            : optimizationDecisionReportRunId(latestReport) !== completedJob.id);
+          attempt += 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 750 : 1500));
+          latestReport = await loadAnalysisDecisionReport("full", { showLoading: false });
+        }
+        if (!latestReport?.ok) {
+          setStatusMessage(latestReport?.message || (isZh ? "优化已完成，但最新决策报表刷新失败，请稍后刷新。" : "Optimization completed, but the latest decision report could not be refreshed. Refresh shortly."));
+          return;
+        }
+        const latestReportMatchesJob = completedSnapshotId
+          ? optimizationDecisionReportSnapshotId(latestReport) === completedSnapshotId
+          : optimizationDecisionReportRunId(latestReport) === completedJob.id;
+        if (!latestReportMatchesJob) {
+          setStatusMessage(isZh
+            ? "优化已完成，但页面尚未读到本次优化生成的最新报表，请稍后刷新。"
+            : "Optimization completed, but the latest report for this run is not available yet. Refresh shortly.");
+        }
+      })();
     } catch (error) {
       setHasStartedProfitOptimization(previousHasStartedProfitOptimization);
       setProfitOptimizationRunStatus("FAILED");

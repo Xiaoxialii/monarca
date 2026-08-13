@@ -9,6 +9,14 @@ import { publicAmazonError } from "@/lib/connectors/amazon/amazon-errors";
 import { normalizeAmazonRegion } from "@/lib/connectors/amazon/amazon-regions";
 import { normalizeMarketplaceIds } from "@/lib/connectors/amazon/amazon-marketplaces";
 
+function dashboardRedirect(request: Request, code: string) {
+  const url = new URL("/dashboard/import-data", request.url);
+  url.searchParams.set("amazon", "failed");
+  url.searchParams.set("code", code);
+
+  return NextResponse.redirect(url);
+}
+
 async function createAmazonConnectResult(request: Request) {
   const session = await syncCurrentClerkUser();
   if (!session) {
@@ -55,7 +63,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(result.oauthUrl);
   } catch (error) {
     const publicError = publicAmazonError(error);
-    return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
+    return dashboardRedirect(request, publicError.code);
   }
 }
 

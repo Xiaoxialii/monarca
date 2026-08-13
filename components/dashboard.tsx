@@ -6132,7 +6132,7 @@ function ImportDataSection({
   const searchParams = useSearchParams();
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [shopifyPermissionIssue, setShopifyPermissionIssue] = useState<ShopifyConnectorMessage | null>(null);
-  const connectorError = shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
+  const connectorError = amazonConnectorErrorMessage(searchParams, isZh) ?? shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
 
   useEffect(() => {
     let isActive = true;
@@ -6245,6 +6245,37 @@ function shopifyConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyUR
     missingPermissions: [],
     actionHref: null,
     actionLabel: ""
+  };
+}
+
+function amazonConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURLSearchParamsLike | null, isZh: boolean) {
+  if (searchParams?.get("amazon") !== "failed") return null;
+
+  const code = searchParams.get("code") ?? "unknown";
+  const missingEnv = code.startsWith("MISSING_AMAZON_") || code.startsWith("INVALID_AMAZON_");
+
+  if (missingEnv) {
+    return {
+      title: isZh ? "Amazon 连接尚未配置" : "Amazon connection is not configured",
+      message: isZh
+        ? `生产环境缺少 Amazon SP-API 应用凭证：${code}。请在 Vercel 配置 Amazon Seller Central / LWA / AWS 签名变量后重试。`
+        : `Production is missing Amazon SP-API app credentials: ${code}. Configure the Amazon Seller Central, LWA, and AWS signing variables in Vercel, then try again.`,
+      missingPermissions: isZh
+        ? ["AMAZON_SP_API_APP_ID", "AMAZON_LWA_CLIENT_ID", "AMAZON_LWA_CLIENT_SECRET", "AMAZON_AWS_ACCESS_KEY_ID", "AMAZON_AWS_SECRET_ACCESS_KEY"]
+        : ["AMAZON_SP_API_APP_ID", "AMAZON_LWA_CLIENT_ID", "AMAZON_LWA_CLIENT_SECRET", "AMAZON_AWS_ACCESS_KEY_ID", "AMAZON_AWS_SECRET_ACCESS_KEY"],
+      actionHref: "/dashboard/import-data/connect?source=Amazon",
+      actionLabel: isZh ? "返回 Amazon 连接" : "Back to Amazon Connection"
+    };
+  }
+
+  return {
+    title: isZh ? "Amazon 连接失败" : "Amazon connection failed",
+    message: isZh
+      ? `错误代码：${code}。请检查 Amazon 应用配置和授权状态后重试。`
+      : `Error code: ${code}. Check the Amazon app configuration and authorization status, then try again.`,
+    missingPermissions: [],
+    actionHref: "/dashboard/import-data/connect?source=Amazon",
+    actionLabel: isZh ? "重试 Amazon 连接" : "Retry Amazon Connection"
   };
 }
 

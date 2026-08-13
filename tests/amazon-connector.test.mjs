@@ -13,6 +13,7 @@ test("Amazon connector exposes official OAuth routes and never asks for Seller C
   const dashboard = read("components/dashboard.tsx");
 
   assert.match(connectRoute, /buildAmazonAuthorizationUrl/);
+  assert.match(connectRoute, /dashboardRedirect\(request,\s*publicError\.code\)/);
   assert.match(oauth, /sellerCentralAuthorizeUrl/);
   assert.match(oauth, /application_id/);
   assert.match(callbackRoute, /spapi_oauth_code/);
@@ -20,6 +21,7 @@ test("Amazon connector exposes official OAuth routes and never asks for Seller C
   assert.match(callbackRoute, /exchangeAmazonAuthorizationCode/);
   assert.match(dashboard, /Connect Amazon|连接 Amazon/);
   assert.match(dashboard, /lowerName\.includes\("amazon"\)[\s\S]*provider === "amazon"/);
+  assert.match(dashboard, /amazonConnectorErrorMessage/);
   assert.doesNotMatch(dashboard, /Seller Central password|amazon password|Amazon password/i);
 });
 

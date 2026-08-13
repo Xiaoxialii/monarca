@@ -6993,7 +6993,6 @@ function AvailableIntegrationsWorkspace({
       integrations: [
         { name: "Google Ads", description: isZh ? "搜索、购物广告和 ROAS" : "Search, shopping ads, and ROAS" },
         { name: "Meta Ads", description: isZh ? "花费、活动、表现" : "Spend, campaigns, performance" },
-        { name: "Google Ads", description: isZh ? "搜索和购物广告" : "Search and shopping ads" },
         { name: "TikTok Ads", description: isZh ? "内容投放表现" : "Creative and spend performance" }
       ]
     },

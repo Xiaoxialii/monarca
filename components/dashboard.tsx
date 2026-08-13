@@ -6625,6 +6625,7 @@ function resolveConnectorSourceName(name: string, copy: DashboardCopy) {
 
   if (lowerName.includes("meta")) return findSource((source) => source.provider === "meta_ads");
   if (lowerName.includes("shopify")) return findSource((source) => source.provider === "shopify");
+  if (lowerName.includes("amazon")) return findSource((source) => source.provider === "amazon");
   if (lowerName.includes("postgres")) return findSource((source) => source.provider === "postgresql");
   if (lowerName.includes("mysql")) return findSource((source) => source.provider === "mysql");
   if (lowerName.includes("excel") || lowerName.includes("csv")) {

@@ -19,6 +19,7 @@ test("Amazon connector exposes official OAuth routes and never asks for Seller C
   assert.match(callbackRoute, /selling_partner_id/);
   assert.match(callbackRoute, /exchangeAmazonAuthorizationCode/);
   assert.match(dashboard, /Connect Amazon|连接 Amazon/);
+  assert.match(dashboard, /lowerName\.includes\("amazon"\)[\s\S]*provider === "amazon"/);
   assert.doesNotMatch(dashboard, /Seller Central password|amazon password|Amazon password/i);
 });
 

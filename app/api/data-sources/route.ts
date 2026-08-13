@@ -462,7 +462,7 @@ export async function GET(request: Request) {
         ecommerceConnectorAccounts: {
           where: {
             provider: {
-              in: ["shopify", "amazon", "meta_ads"]
+              in: ["shopify", "amazon", "meta_ads", "google_ads"]
             }
           },
           select: {
@@ -580,7 +580,7 @@ export async function GET(request: Request) {
         ecommerceConnectorAccounts: {
           where: {
             provider: {
-              in: ["shopify", "amazon", "meta_ads"]
+              in: ["shopify", "amazon", "meta_ads", "google_ads"]
             }
           },
               select: {

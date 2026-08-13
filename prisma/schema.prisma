@@ -227,6 +227,7 @@ model Workspace {
   inviteLinks                 WorkspaceInviteLink[]
   oauthStates                 OAuthState[]
   ecommerceConnectorAccounts  EcommerceConnectorAccount[]
+  googleAdsConnections        GoogleAdsConnection[]
   ecommerceSyncRuns           EcommerceSyncRun[]
   ecommerceSyncArtifacts      EcommerceSyncArtifact[]
   semanticMappingMemories     SemanticMappingMemory[]
@@ -330,7 +331,29 @@ model DataSourceConnection {
   ecommerceConnectorAccounts EcommerceConnectorAccount[]
   ecommerceSyncRuns          EcommerceSyncRun[]
   ecommerceSyncArtifacts     EcommerceSyncArtifact[]
+  googleAdsConnections       GoogleAdsConnection[]
 
+  @@index([workspaceId, status])
+}
+
+model GoogleAdsConnection {
+  id                         String                @id @default(cuid())
+  workspaceId                String
+  dataSourceId               String?
+  customerId                 String
+  loginCustomerId            String?
+  encryptedRefreshToken      String
+  accessTokenLastRefreshedAt DateTime?
+  status                     String                @default("connected")
+  lastSyncedAt               DateTime?
+  syncCursor                 Json?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  workspace                  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource                 DataSourceConnection? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, customerId])
+  @@index([workspaceId, dataSourceId])
   @@index([workspaceId, status])
 }
 

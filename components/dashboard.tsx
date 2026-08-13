@@ -479,6 +479,7 @@ const dashboardCopy = {
         { name: "Shopify", provider: "shopify", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Amazon", provider: "amazon", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Stripe", provider: "stripe", type: "Revenue", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Google Ads", provider: "google_ads", type: "Advertising", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Meta Ads", provider: "meta_ads", type: "Advertising", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
       server: "Server",
@@ -1174,6 +1175,7 @@ const dashboardCopy = {
         { name: "Shopify", provider: "shopify", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Amazon", provider: "amazon", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Stripe", provider: "stripe", type: "收入系统", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Google Ads", provider: "google_ads", type: "广告平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Meta Ads", provider: "meta_ads", type: "广告平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
       server: "服务器",
@@ -1570,6 +1572,13 @@ type ConnectedSourceRow = {
     adAccountId?: string | null;
     adAccountName?: string | null;
     adAccountCurrency?: string | null;
+    customerId?: string | null;
+    customerName?: string | null;
+    loginCustomerId?: string | null;
+    currencyCode?: string | null;
+    timeZone?: string | null;
+    advertisingDataAvailable?: boolean | null;
+    skuAttributionAvailable?: boolean | null;
     sellerId?: string | null;
     sellerDisplay?: string | null;
     amazonRegion?: string | null;
@@ -4209,6 +4218,7 @@ function SettingsConnectedSourcesPanel({
   const [syncingShopifySourceId, setSyncingShopifySourceId] = useState<string | null>(null);
   const [syncingAmazonSourceId, setSyncingAmazonSourceId] = useState<string | null>(null);
   const [syncingMetaSourceId, setSyncingMetaSourceId] = useState<string | null>(null);
+  const [syncingGoogleAdsSourceId, setSyncingGoogleAdsSourceId] = useState<string | null>(null);
   const [savingShopifySyncSettingsSourceId, setSavingShopifySyncSettingsSourceId] = useState<string | null>(null);
   const [mappingOverrides, setMappingOverrides] = useState<Record<string, string>>({});
   const [mappingFeedback, setMappingFeedback] = useState<Record<string, {
@@ -4288,6 +4298,8 @@ function SettingsConnectedSourcesPanel({
         savingSyncSettings: "保存中",
         syncMetaAds: "同步 Meta Ads",
         syncingMetaAds: "同步中",
+        syncGoogleAds: "同步 Google Ads",
+        syncingGoogleAds: "同步中",
         recentScan: "最近扫描",
         noTables: "暂未读取到表结构",
         fieldNullable: "可为空",
@@ -4344,6 +4356,8 @@ function SettingsConnectedSourcesPanel({
         savingSyncSettings: "Saving",
         syncMetaAds: "Sync Meta Ads",
         syncingMetaAds: "Syncing",
+        syncGoogleAds: "Sync Google Ads",
+        syncingGoogleAds: "Syncing",
         recentScan: "Last scan",
         noTables: "No tables found yet",
         fieldNullable: "nullable",
@@ -4821,6 +4835,63 @@ function SettingsConnectedSourcesPanel({
     }
   };
 
+  const syncGoogleAdsData = async (sourceId: string) => {
+    setSyncingGoogleAdsSourceId(sourceId);
+
+    try {
+      const response = await fetch("/api/connectors/google-ads/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataSourceId: sourceId })
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        syncRunId?: string | null;
+        manifest?: {
+          manifest_key?: string | null;
+          row_counts?: {
+            ecommerce_ads?: number;
+          };
+          customer_id?: string | null;
+        };
+        manifestKey?: string | null;
+        rowCounts?: {
+          ecommerceAds?: number;
+        };
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "Google Ads 同步失败" : "Google Ads sync failed"));
+      }
+
+      setMetaSyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: true,
+          message: isZh ? "Google Ads 同步完成" : "Google Ads sync completed",
+          syncRunId: payload.syncRunId ?? null,
+          manifestKey: payload.manifestKey ?? payload.manifest?.manifest_key ?? null,
+          rows: payload.rowCounts?.ecommerceAds ?? payload.manifest?.row_counts?.ecommerce_ads ?? 0,
+          adAccountId: payload.manifest?.customer_id ?? null
+        }
+      }));
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "Google Ads 同步失败" : "Google Ads sync failed";
+
+      setMetaSyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: false,
+          message
+        }
+      }));
+    } finally {
+      setSyncingGoogleAdsSourceId(null);
+    }
+  };
+
   return (
     <div className="grid gap-4">
     <Card className="overflow-hidden bg-white shadow-sm">
@@ -4867,7 +4938,8 @@ function SettingsConnectedSourcesPanel({
               const isShopifySource = source.provider === "shopify";
               const isAmazonSource = source.provider === "amazon";
               const isMetaAdsSource = source.provider === "meta_ads";
-              const usesConnectorSync = isShopifySource || isAmazonSource || isMetaAdsSource;
+              const isGoogleAdsSource = source.provider === "google_ads";
+              const usesConnectorSync = isShopifySource || isAmazonSource || isMetaAdsSource || isGoogleAdsSource;
               const shopifyFetchResult = shopifyFetchResults[source.id];
               const shopifySyncResult = shopifySyncResults[source.id];
               const metaSyncResult = metaSyncResults[source.id];
@@ -4917,14 +4989,14 @@ function SettingsConnectedSourcesPanel({
                             {source.provider} · {sourceTypeLabel(copy, source)}
                           </span>
                           <span className="rounded-full bg-white px-2.5 py-1">
-                            {isShopifySource ? "Shop" : isAmazonSource ? "Seller" : isMetaAdsSource ? "Ad Account" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : isAmazonSource ? (source.config?.sellerDisplay ?? source.config?.sellerId ?? "—") : isMetaAdsSource ? (source.config?.adAccountId ?? "—") : (source.config?.host ?? "—")}
+                            {isShopifySource ? "Shop" : isAmazonSource ? "Seller" : isMetaAdsSource ? "Ad Account" : isGoogleAdsSource ? "Customer ID" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : isAmazonSource ? (source.config?.sellerDisplay ?? source.config?.sellerId ?? "—") : isMetaAdsSource ? (source.config?.adAccountId ?? "—") : isGoogleAdsSource ? (source.config?.customerId ?? "—") : (source.config?.host ?? "—")}
                           </span>
                           {isAmazonSource ? (
                           <span className="rounded-full bg-white px-2.5 py-1">
                             Marketplaces: {(source.config?.countries ?? source.config?.marketplaceIds ?? []).join(", ") || "—"}
                           </span>
                           ) : null}
-                          {!isShopifySource && !isAmazonSource && !isMetaAdsSource ? (
+                          {!isShopifySource && !isAmazonSource && !isMetaAdsSource && !isGoogleAdsSource ? (
                           <span className="rounded-full bg-white px-2.5 py-1">
                             {labels.database}: {source.config?.database ?? "—"}
                           </span>
@@ -5031,6 +5103,18 @@ function SettingsConnectedSourcesPanel({
                         >
                           <RefreshCw className={cn("size-4", syncingMetaSourceId === source.id && "animate-spin")} />
                           {syncingMetaSourceId === source.id ? labels.syncingMetaAds : labels.syncMetaAds}
+                        </Button>
+                      ) : null}
+                      {isGoogleAdsSource ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={syncingGoogleAdsSourceId === source.id}
+                          onClick={() => void syncGoogleAdsData(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", syncingGoogleAdsSourceId === source.id && "animate-spin")} />
+                          {syncingGoogleAdsSourceId === source.id ? labels.syncingGoogleAds : labels.syncGoogleAds}
                         </Button>
                       ) : null}
                       {!usesConnectorSync ? (
@@ -6132,7 +6216,7 @@ function ImportDataSection({
   const searchParams = useSearchParams();
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [shopifyPermissionIssue, setShopifyPermissionIssue] = useState<ShopifyConnectorMessage | null>(null);
-  const connectorError = amazonConnectorErrorMessage(searchParams, isZh) ?? shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
+  const connectorError = googleAdsConnectorErrorMessage(searchParams, isZh) ?? amazonConnectorErrorMessage(searchParams, isZh) ?? shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
 
   useEffect(() => {
     let isActive = true;
@@ -6279,6 +6363,45 @@ function amazonConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURL
   };
 }
 
+function googleAdsConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURLSearchParamsLike | null, isZh: boolean) {
+  if (searchParams?.get("google_ads") !== "failed") return null;
+
+  const code = searchParams.get("code") ?? "unknown";
+  const missingEnv = code.startsWith("MISSING_GOOGLE_ADS_") || code.startsWith("INVALID_GOOGLE_ADS_");
+
+  if (missingEnv) {
+    return {
+      title: isZh ? "Google Ads 连接尚未配置" : "Google Ads connection is not configured",
+      message: isZh
+        ? `生产环境缺少 Google Ads OAuth / developer token 配置：${code}。请在 Vercel 配置 Google Ads API 变量后重试。`
+        : `Production is missing Google Ads OAuth / developer token configuration: ${code}. Configure the Google Ads API variables in Vercel, then try again.`,
+      missingPermissions: ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_OAUTH_REDIRECT_URI", "GOOGLE_ADS_DEVELOPER_TOKEN"],
+      actionHref: "/dashboard/import-data/connect?source=Google%20Ads",
+      actionLabel: isZh ? "返回 Google Ads 连接" : "Back to Google Ads Connection"
+    };
+  }
+
+  if (code === "GOOGLE_ADS_ACCESS_EXPIRED") {
+    return {
+      title: isZh ? "Google Ads 授权已过期" : "Google Ads access expired",
+      message: isZh ? "请重新连接 Google Ads 账号以恢复自动同步。" : "Reconnect your Google Ads account to restore automatic sync.",
+      missingPermissions: [],
+      actionHref: "/api/connectors/google-ads/connect",
+      actionLabel: isZh ? "重新连接 Google Ads" : "Reconnect Google Ads"
+    };
+  }
+
+  return {
+    title: isZh ? "Google Ads 连接失败" : "Google Ads connection failed",
+    message: isZh
+      ? `错误代码：${code}。请检查 Google Ads API 配置、OAuth 权限和客户账号访问权限后重试。`
+      : `Error code: ${code}. Check Google Ads API configuration, OAuth permissions, and customer account access, then try again.`,
+    missingPermissions: [],
+    actionHref: "/dashboard/import-data/connect?source=Google%20Ads",
+    actionLabel: isZh ? "重试 Google Ads 连接" : "Retry Google Ads Connection"
+  };
+}
+
 function shopifyScopePermissionLabels(missingScopes: unknown, isZh: boolean) {
   const scopes = Array.isArray(missingScopes)
     ? missingScopes.filter((scope): scope is string => typeof scope === "string")
@@ -6344,6 +6467,7 @@ function inferBusinessSourceKey(source: ConnectedSourceRow) {
   ].filter(Boolean).join(" ").toLowerCase();
 
   if (value.includes("shopify")) return "shopify";
+  if (value.includes("google ads") || value.includes("google_ads")) return "google_ads";
   if (value.includes("meta") || value.includes("facebook") || value.includes("ad")) return "meta_ads";
   if (value.includes("amazon")) return "amazon";
   if (
@@ -6519,6 +6643,17 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       ]
     },
     {
+      id: "google_ads",
+      name: "Google Ads",
+      typeLabel: isZh ? "搜索广告" : "Advertising",
+      summaryLabel: isZh ? "广告系列、花费、转化和 ROAS" : "Campaigns, spend, conversions, and ROAS",
+      fallbackDatasets: [
+        { name: isZh ? "广告系列" : "Campaigns", rowsLabel: "ready" },
+        { name: isZh ? "关键词表现" : "Keyword performance", rowsLabel: "ready" },
+        { name: "ROAS", rowsLabel: "ready" }
+      ]
+    },
+    {
       id: "amazon",
       name: "Amazon",
       typeLabel: isZh ? "电商渠道" : "Marketplace",
@@ -6618,6 +6753,7 @@ function businessSourceIcon(sourceId: string) {
   if (sourceId === "shopify") return <ShoppingBag className="size-7" />;
   if (sourceId === "amazon") return <Package className="size-7" />;
   if (sourceId === "meta_ads") return <Megaphone className="size-7" />;
+  if (sourceId === "google_ads") return <Megaphone className="size-7" />;
   if (sourceId === "file") return <FileSpreadsheet className="size-7" />;
   if (sourceId === "inventory") return <Table2 className="size-5" />;
   if (sourceId === "database") return <Server className="size-7" />;
@@ -6630,6 +6766,7 @@ function integrationSourceIcon(name: string) {
     return <ShoppingBag className="size-4" />;
   }
   if (normalized.includes("amazon")) return <Package className="size-4" />;
+  if (normalized.includes("google ads")) return <Megaphone className="size-4" />;
   if (normalized.includes("ads")) return <Megaphone className="size-4" />;
   if (normalized.includes("excel") || normalized.includes("csv") || normalized.includes("sheets")) {
     return <FileSpreadsheet className="size-4" />;
@@ -6655,6 +6792,7 @@ function resolveConnectorSourceName(name: string, copy: DashboardCopy) {
     copy.connectors.sources.find(predicate)?.name ?? null;
 
   if (lowerName.includes("meta")) return findSource((source) => source.provider === "meta_ads");
+  if (lowerName.includes("google ads")) return findSource((source) => source.provider === "google_ads");
   if (lowerName.includes("shopify")) return findSource((source) => source.provider === "shopify");
   if (lowerName.includes("amazon")) return findSource((source) => source.provider === "amazon");
   if (lowerName.includes("postgres")) return findSource((source) => source.provider === "postgresql");
@@ -6853,6 +6991,7 @@ function AvailableIntegrationsWorkspace({
     {
       title: isZh ? "广告" : "Advertising",
       integrations: [
+        { name: "Google Ads", description: isZh ? "搜索、购物广告和 ROAS" : "Search, shopping ads, and ROAS" },
         { name: "Meta Ads", description: isZh ? "花费、活动、表现" : "Spend, campaigns, performance" },
         { name: "Google Ads", description: isZh ? "搜索和购物广告" : "Search and shopping ads" },
         { name: "TikTok Ads", description: isZh ? "内容投放表现" : "Creative and spend performance" }
@@ -7107,6 +7246,7 @@ function ConnectorPanel({
 	  const isShopifySource = selectedSource.provider === "shopify";
 	  const isAmazonSource = selectedSource.provider === "amazon";
 	  const isMetaAdsSource = selectedSource.provider === "meta_ads";
+	  const isGoogleAdsSource = selectedSource.provider === "google_ads";
 	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = resolveDatabaseConnectorType(selectedSource);
   const defaultDatabasePort = databaseType === "mysql" ? "3306" : "5432";
@@ -7156,6 +7296,11 @@ function ConnectorPanel({
 
 	      if (source.provider === "meta_ads") {
 	        window.location.href = "/api/connectors/meta/start";
+	        return;
+	      }
+
+	      if (source.provider === "google_ads") {
+	        window.location.href = "/api/connectors/google-ads/connect";
 	        return;
 	      }
 
@@ -7690,6 +7835,8 @@ function ConnectorPanel({
 	                            ? (isZh ? "连接 Amazon" : "Connect Amazon")
 	                          : isMetaAdsSource
 	                            ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
+	                          : isGoogleAdsSource
+	                            ? (isZh ? "连接 Google Ads" : "Connect Google Ads")
 	                          : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                      </p>
 	                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -7701,6 +7848,10 @@ function ConnectorPanel({
 	                            ? (isZh
 	                                ? "将跳转到 Meta OAuth 授权页面。授权成功后只保存加密 token、广告账户 ID 和连接元数据。"
 	                                : "This opens Meta OAuth. After authorization, Monarca stores only encrypted token, ad account ID, and connection metadata.")
+	                          : isGoogleAdsSource
+	                            ? (isZh
+	                                ? "将跳转到 Google OAuth 授权页面。授权成功后只保存加密 refresh token、客户 ID 和广告表现连接元数据。SKU 级归因不可用时不会生成 SKU 级投放建议。"
+	                                : "This opens Google OAuth. After authorization, Monarca stores only encrypted refresh token, customer ID, and ad performance metadata. SKU-level ad scaling is disabled when SKU attribution is unavailable.")
 	                          : isAmazonSource
 	                            ? (isZh
 	                                ? "将跳转到 Amazon Seller Central 官方授权页面。授权成功后只保存加密 refresh token、卖家 ID、marketplace 和连接元数据。"
@@ -7990,6 +8141,8 @@ function ConnectorPanel({
 		                      ? (isZh ? "连接 Amazon" : "Connect Amazon")
 		                    : isMetaAdsSource
 		                      ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
+		                    : isGoogleAdsSource
+		                      ? (isZh ? "连接 Google Ads" : "Connect Google Ads")
 	                    : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                  <ArrowRight />
 	                </Button>

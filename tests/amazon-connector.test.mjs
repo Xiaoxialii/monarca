@@ -64,7 +64,7 @@ test("Amazon participates in the shared scheduled connector job path", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const cronRoute = read("app/api/cron/shopify-sync/route.ts");
 
-  assert.match(scheduler, /provider:\s*\{\s*in:\s*\[SHOPIFY_PROVIDER,\s*AMAZON_PROVIDER\]/);
+  assert.match(scheduler, /provider:\s*\{\s*in:\s*\[SHOPIFY_PROVIDER,\s*AMAZON_PROVIDER,\s*GOOGLE_ADS_PROVIDER\]/);
   assert.match(scheduler, /payload:\s*\{[\s\S]*provider:\s*account\.provider[\s\S]*type:\s*"SYNC_CONNECTOR"/);
   assert.match(runner, /provider === AMAZON_PROVIDER[\s\S]*runAmazonProductionSync/);
   assert.match(runner, /provider,\s*[\s\S]*dataSourceId[\s\S]*connectorAccountId[\s\S]*shopDomain/);

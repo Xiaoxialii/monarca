@@ -1,6 +1,7 @@
 import { ConnectionStatus, Prisma, type PrismaClient } from "@prisma/client";
 import { ShopifyConnectorError, SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { AMAZON_PROVIDER, AmazonConnectorError, isAmazonAuthRevokedError } from "@/lib/connectors/amazon/amazon-errors";
+import { GOOGLE_ADS_PROVIDER, GoogleAdsConnectorError, isGoogleAdsAuthRevokedError } from "@/lib/connectors/google-ads/google-ads-errors";
 
 export const SHOPIFY_SYNC_INTERVAL_OPTIONS = [60, 180, 360, 720, 1440] as const;
 export const DEFAULT_SHOPIFY_SYNC_INTERVAL_MINUTES = 360;
@@ -101,7 +102,7 @@ export async function updateShopifySyncSettings(client: PrismaClient, input: {
     where: {
       workspaceId: input.workspaceId,
       dataSourceId: input.dataSourceId,
-      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER] },
+      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER] },
       dataSource: {
         workspaceId: input.workspaceId,
         isActive: true
@@ -176,7 +177,7 @@ export async function enqueueDueShopifySyncs(client: PrismaClient, input: {
 
   const dueAccounts = await client.ecommerceConnectorAccount.findMany({
     where: {
-      provider: SHOPIFY_PROVIDER,
+      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER] },
       status: "connected",
       autoSyncEnabled: true,
       dataSourceId: { not: null },
@@ -346,8 +347,13 @@ export async function markShopifyScheduledSyncFailure(client: PrismaClient, inpu
 }) {
   const provider = input.provider ?? SHOPIFY_PROVIDER;
   const message = input.error instanceof Error ? input.error.message : `${provider} scheduled sync failed.`;
-  const publicError = input.error instanceof ShopifyConnectorError || input.error instanceof AmazonConnectorError ? input.error : null;
+  const publicError = input.error instanceof ShopifyConnectorError ||
+    input.error instanceof AmazonConnectorError ||
+    input.error instanceof GoogleAdsConnectorError
+    ? input.error
+    : null;
   const authRevoked = isAmazonAuthRevokedError(input.error) ||
+    isGoogleAdsAuthRevokedError(input.error) ||
     publicError?.code === "SHOPIFY_TOKEN_INVALID" ||
     publicError?.code === "SHOPIFY_NEEDS_REAUTHORIZATION" ||
     publicError?.status === 401;
@@ -380,7 +386,7 @@ export async function markShopifyScheduledSyncFailure(client: PrismaClient, inpu
       })
     ]);
 
-    logShopifySync(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_AUTH_REVOKED" : "SHOPIFY_SYNC_AUTH_REVOKED", {
+    logShopifySync(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_AUTH_REVOKED" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_AUTH_REVOKED" : "SHOPIFY_SYNC_AUTH_REVOKED", {
       workspaceId: input.workspaceId,
       dataSourceId: input.dataSourceId,
       connectorAccountId: input.connectorAccountId,

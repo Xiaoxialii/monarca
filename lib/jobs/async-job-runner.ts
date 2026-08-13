@@ -13,6 +13,8 @@ import { SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { markShopifyScheduledSyncFailure } from "@/lib/ecommerce-connectors/shopify-sync-scheduler";
 import { AMAZON_PROVIDER } from "@/lib/connectors/amazon/amazon-errors";
 import { runAmazonProductionSync } from "@/lib/connectors/amazon/amazon-sync";
+import { GOOGLE_ADS_PROVIDER } from "@/lib/connectors/google-ads/google-ads-errors";
+import { runGoogleAdsProductionSync } from "@/lib/connectors/google-ads/google-ads-sync";
 import {
   collectDecisionExecutionMetric,
   evaluateDecisionOutcome
@@ -587,7 +589,7 @@ async function processConnectorSyncAsyncJob(
   const shopDomain = typeof input.payload.shopDomain === "string" ? input.payload.shopDomain : null;
   const trigger = input.payload.trigger === "scheduled" ? "scheduled" : "manual";
 
-  if (!provider || ![SHOPIFY_PROVIDER, AMAZON_PROVIDER].includes(provider) || !dataSourceId || !connectorAccountId || !shopDomain) {
+  if (!provider || ![SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER].includes(provider) || !dataSourceId || !connectorAccountId || !shopDomain) {
     throw new Error("Connector sync job payload is incomplete.");
   }
 
@@ -630,14 +632,22 @@ async function processConnectorSyncAsyncJob(
           trigger,
           force: false
         })
-      : await runShopifyProductionSync(client, {
-          workspaceId: input.workspaceId,
-          dataSourceId,
-          trigger,
-          force: false
-        });
+      : provider === GOOGLE_ADS_PROVIDER
+        ? await runGoogleAdsProductionSync(client, {
+            workspaceId: input.workspaceId,
+            dataSourceId,
+            trigger,
+            force: false
+          })
+        : await runShopifyProductionSync(client, {
+            workspaceId: input.workspaceId,
+            dataSourceId,
+            trigger,
+            force: false
+          });
+    const downstreamJobId = "downstreamJobId" in result ? result.downstreamJobId ?? null : null;
 
-    console.info(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_SUCCESS" : "SHOPIFY_SYNC_SUCCESS", {
+    console.info(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_SUCCESS" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_SUCCESS" : "SHOPIFY_SYNC_SUCCESS", {
       workspaceId: input.workspaceId,
       dataSourceId,
       connectorAccountId,
@@ -656,7 +666,7 @@ async function processConnectorSyncAsyncJob(
         connectorAccountId,
         shopDomain,
         syncRunId: result.syncRunId,
-        downstreamJobId: result.downstreamJobId ?? null
+        downstreamJobId
       },
       metadataJson: {
         trigger,
@@ -665,7 +675,7 @@ async function processConnectorSyncAsyncJob(
       }
     };
   } catch (error) {
-    console.error(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_FAILED" : "SHOPIFY_SYNC_FAILED", {
+    console.error(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_FAILED" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_FAILED" : "SHOPIFY_SYNC_FAILED", {
       workspaceId: input.workspaceId,
       dataSourceId,
       connectorAccountId,

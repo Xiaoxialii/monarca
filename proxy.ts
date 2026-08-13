@@ -23,6 +23,7 @@ function localeFromCountry(countryCode: string | null): Locale | null {
 
 export default clerkMiddleware(async (auth, request) => {
   const host = request.headers.get("host")?.toLowerCase();
+  const normalizedPathname = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
   const shouldCanonicalizeHost =
     process.env.NODE_ENV === "production" &&
     host === "monarcadata.com" &&
@@ -31,6 +32,13 @@ export default clerkMiddleware(async (auth, request) => {
   if (shouldCanonicalizeHost) {
     const url = request.nextUrl.clone();
     url.hostname = "www.monarcadata.com";
+    return NextResponse.redirect(url, 308);
+  }
+
+  if (normalizedPathname === "/privacy") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.search = "";
     return NextResponse.redirect(url, 308);
   }
 

@@ -66,6 +66,28 @@ const ADS_CONCEPTS = new Set<CanonicalConcept>(["ad_spend"]);
 
 const DATE_FIELDS = ["date", "day", "month", "report_date", "campaign_date", "event_date", "date_start", "insight_date"];
 
+const IDENTITY_FIELDS = [
+  "order_id",
+  "source_order_id",
+  "order_number",
+  "purchase_id",
+  "transaction_id",
+  "checkout_id",
+  "customer_id",
+  "source_customer_id",
+  "product_id",
+  "variant_id"
+];
+
+const IDENTITY_CONCEPTS = new Set<CanonicalConcept>([
+  "order_id",
+  "customer_id",
+  "product_id",
+  "sku"
+]);
+
+const STATUS_FIELDS = ["status", "order_status", "financial_status", "fulfillment_status", "fulfilment_status", "payment_status"];
+
 const CHANNEL_FIELDS = [
   "channel",
   "platform",
@@ -117,6 +139,14 @@ export function validateSemanticMapping(sourceField: string, predictedConcept: C
 
   if (matchesAny(normalized, REVENUE_FIELDS) && !REVENUE_CONCEPTS.has(predictedConcept)) {
     return reject(sourceField, predictedConcept, "revenue_field_must_map_to_revenue_concept");
+  }
+
+  if (matchesAny(normalized, IDENTITY_FIELDS) && !IDENTITY_CONCEPTS.has(predictedConcept)) {
+    return reject(sourceField, predictedConcept, "identifier_field_cannot_map_to_revenue");
+  }
+
+  if (matchesAny(normalized, STATUS_FIELDS) && predictedConcept !== "status") {
+    return reject(sourceField, predictedConcept, "status_field_must_map_to_status");
   }
 
   if (matchesAny(normalized, DATE_FIELDS) && predictedConcept !== "event_date" && predictedConcept !== "order_date") {

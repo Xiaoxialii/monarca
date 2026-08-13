@@ -113,6 +113,7 @@ export async function storeCanonicalSchemaSnapshot(input: {
     where: { workspaceId: input.workspaceId },
     _max: { version: true }
   }))._max.version ?? 0;
+  const canonicalVersion = canonicalSnapshotVersion(input.schemaJson);
 
   return input.prisma.schemaSnapshot.create({
     data: {
@@ -120,6 +121,9 @@ export async function storeCanonicalSchemaSnapshot(input: {
       dataSourceId: input.dataSourceId,
       version: nextVersion + 1,
       status: input.status ?? ConnectionStatus.CONNECTED,
+      schemaStatus: "READY",
+      canonicalStatus: canonicalVersion === ECOMMERCE_CANONICAL_SCHEMA_VERSION ? "READY" : "NOT_STARTED",
+      canonicalVersion,
       schemaJson: input.schemaJson as Prisma.InputJsonValue,
       qualityReport: input.qualityReport ?? Prisma.JsonNull
     }
@@ -194,6 +198,12 @@ function checksumByArtifact(artifacts: Record<string, CanonicalSnapshotArtifact>
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function canonicalSnapshotVersion(value: unknown) {
+  const object = objectValue(value);
+  const schemaVersion = object.schemaVersion ?? object.schema_version;
+  return typeof schemaVersion === "string" ? schemaVersion : null;
 }
 
 function canonicalColumns(tableName: string) {

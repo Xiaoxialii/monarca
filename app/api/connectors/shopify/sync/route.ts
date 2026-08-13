@@ -10,7 +10,8 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null) as { dataSourceId?: string | null } | null;
     const result = await runShopifyProductionSync(prisma, {
       workspaceId: session.workspace.id,
-      dataSourceId: body?.dataSourceId ?? null
+      dataSourceId: body?.dataSourceId ?? null,
+      force: true
     });
 
     return NextResponse.json(result);

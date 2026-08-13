@@ -18,7 +18,8 @@ Module._resolveFilename = function resolveAlias(request, parent, isMain, options
 const jiti = jitiFactory(process.cwd() + "/");
 const {
   buildCanonicalSnapshotJson,
-  isEcommerceCanonicalSchemaJson
+  isEcommerceCanonicalSchemaJson,
+  storeCanonicalSchemaSnapshot
 } = jiti("./lib/snapshot/canonical-snapshot-generator.ts");
 
 function dataset() {
@@ -103,4 +104,39 @@ test("canonical snapshot schema detection accepts both camel and snake schema ve
   assert.equal(isEcommerceCanonicalSchemaJson({ schemaVersion: "ecommerce_canonical_v1" }), true);
   assert.equal(isEcommerceCanonicalSchemaJson({ schema_version: "ecommerce_canonical_v1" }), true);
   assert.equal(isEcommerceCanonicalSchemaJson({ schemaVersion: "logistics_v1" }), false);
+});
+
+test("canonical snapshot storage marks canonical snapshots ready", async () => {
+  const snapshotJson = buildCanonicalSnapshotJson({
+    manifest: {
+      businessType: "ecommerce",
+      sourceProvider: "shopify"
+    },
+    artifacts: {
+      ecommerce_products: { artifactKey: "normalized/ecommerce_products.jsonl", checksum: "products-checksum", rowCount: 2 }
+    },
+    canonicalDataset: dataset()
+  });
+  let createPayload = null;
+  const prisma = {
+    schemaSnapshot: {
+      aggregate: async () => ({ _max: { version: 41 } }),
+      create: async (payload) => {
+        createPayload = payload;
+        return { id: "snapshot_42", ...payload.data };
+      }
+    }
+  };
+
+  await storeCanonicalSchemaSnapshot({
+    prisma,
+    workspaceId: "workspace_1",
+    dataSourceId: "source_1",
+    schemaJson: snapshotJson
+  });
+
+  assert.equal(createPayload.data.version, 42);
+  assert.equal(createPayload.data.schemaStatus, "READY");
+  assert.equal(createPayload.data.canonicalStatus, "READY");
+  assert.equal(createPayload.data.canonicalVersion, "ecommerce_canonical_v1");
 });

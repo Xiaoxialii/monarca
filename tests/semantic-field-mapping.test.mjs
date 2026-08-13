@@ -19,6 +19,7 @@ const jiti = jitiFactory(process.cwd() + "/");
 const { SelfLearningSemanticRuntime, InMemorySemanticMemoryStore } = jiti("./lib/semantic/index.ts");
 const { buildEcommerceSalesDashboardData } = jiti("./lib/dashboard/ecommerce-sales-dashboard-data.ts");
 const { validateOptimizationData } = jiti("./lib/optimization/optimization-data-contract.ts");
+const { buildSemanticMappingCache } = jiti("./lib/semantic/schema-mapping-cache.ts");
 
 async function run(rawData, platform = "meta_ads") {
   const runtime = new SelfLearningSemanticRuntime({ memory: new InMemorySemanticMemoryStore() });
@@ -88,6 +89,56 @@ test("mapping metadata preserves source columns and canonical fields", async () 
     mapping.mapping_confidence === 1
   ));
 });
+
+test("semantic mapping cache excludes canonical lineage system fields", () => {
+  const cache = buildSemanticMappingCache({
+    source: "schema_semantic_layer",
+    tables: [{
+      name: "ecommerce_products",
+      columns: [
+        { name: "data_source_id", semanticName: "revenue" },
+        { name: "source_provider", semanticName: "revenue" },
+        { name: "source_account_id", semanticName: "revenue" },
+        { name: "source_record_id", semanticName: "revenue" },
+        { name: "net_sales", semanticName: "revenue" }
+      ]
+    }],
+    semanticLayer: {
+      fields: [
+        { table: "ecommerce_products", field: "data_source_id", displayField: "data_source_id", semanticType: "revenue", confidence: 0.87 },
+        { table: "ecommerce_products", field: "source_provider", displayField: "source_provider", semanticType: "revenue", confidence: 0.87 },
+        { table: "ecommerce_products", field: "source_account_id", displayField: "source_account_id", semanticType: "revenue", confidence: 0.92 },
+        { table: "ecommerce_products", field: "source_record_id", displayField: "source_record_id", semanticType: "revenue", confidence: 0.87 },
+        { table: "ecommerce_products", field: "net_sales", displayField: "net_sales", semanticType: "revenue", confidence: 0.96 }
+      ]
+    }
+  });
+
+  assert.deepEqual(cache.field_mappings.map((mapping) => mapping.source_column), ["net_sales"]);
+  assert.equal(cache.field_mappings[0].canonical_field, "revenue");
+});
+
+test("Shopify order structure fields do not map to revenue", async () => {
+  const result = await run([{
+    source_order_id: "gid://shopify/Order/1",
+    customer_id: "gid://shopify/Customer/1",
+    order_date: "2026-08-13T00:00:00Z",
+    order_status: "open",
+    financial_status: "paid",
+    fulfillment_status: "fulfilled",
+    net_sales: 120
+  }], "shopify");
+  const byField = new Map(result.mappings.map((mapping) => [mapping.source_field || mapping.field, mapping]));
+
+  assert.equal(byField.get("source_order_id")?.canonical, "order_id");
+  assert.equal(byField.get("customer_id")?.canonical, "customer_id");
+  assert.equal(byField.get("order_date")?.canonical, "order_date");
+  assert.equal(byField.get("order_status")?.canonical, "status");
+  assert.equal(byField.get("financial_status")?.canonical, "status");
+  assert.equal(byField.get("fulfillment_status")?.canonical, "status");
+  assert.equal(byField.get("net_sales")?.canonical, "net_sales");
+});
+
 
 test("Meta Ads spend maps through canonical metrics and readiness without date blocking ad_spend", async () => {
   const result = await run([{

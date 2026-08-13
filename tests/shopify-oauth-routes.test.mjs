@@ -13,6 +13,7 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   const callbackRoute = read("app/api/connectors/shopify/callback/route.ts");
   const statusRoute = read("app/api/connectors/shopify/status/route.ts");
   const fetchRoute = read("app/api/connectors/shopify/fetch/route.ts");
+  const syncRoute = read("app/api/connectors/shopify/sync/route.ts");
   const graphQLClient = read("lib/ecommerce-connectors/providers/shopify-graphql.ts");
 
   assert.match(schema, /ECOMMERCE_PLATFORM/, "DataSourceType should include ecommerce platform sources");
@@ -79,6 +80,7 @@ test("Shopify OAuth routes and persistence use scoped state and encrypted token 
   assert.match(fetchRoute, /warnings/, "Fetch route should return protected data access warnings");
   assert.doesNotMatch(fetchRoute, /prisma\.\w+\.(create|update|upsert|delete)|R2|manifest|generateWorkspaceMetrics|report/i, "Fetch route must not write data, generate artifacts, metrics, or reports");
   assert.doesNotMatch(fetchRoute, /accessToken[^,\n]*NextResponse|encryptedAccessToken[^,\n]*NextResponse/, "Fetch route must not return tokens");
+  assert.match(syncRoute, /force:\s*true/, "Manual Shopify sync route should force a fresh sync instead of reusing a same-minute run");
 });
 
 test("Shopify scope migration supports reauthorization without uninstalling", () => {
@@ -95,6 +97,8 @@ test("Shopify scope migration supports reauthorization without uninstalling", ()
   assert.match(migration, /"grantedScopes" = COALESCE\("grantedScopes", "scopes"\)/, "Migration should backfill old granted scopes from existing scopes");
 
   assert.match(syncEngine, /missingConfiguredShopifyScopes\(requiredScopes, grantedScopes\)/, "Sync should compare current required scopes against merchant grants");
+  assert.match(syncEngine, /force\?:\s*boolean/, "Sync engine should support forced manual syncs");
+  assert.match(syncEngine, /!input\.force[\s\S]*existingRun/, "Sync engine should only reuse existing runs when force is not requested");
   assert.match(syncEngine, /scopeStatus[\s\S]*NEEDS_REAUTHORIZATION|SHOPIFY_NEEDS_REAUTHORIZATION/, "Sync should mark accounts that need reauthorization");
   assert.match(syncEngine, /lastErrorMessage: `Shopify permissions need update/, "Sync should store a user-actionable permission message");
 
@@ -108,4 +112,6 @@ test("Shopify scope migration supports reauthorization without uninstalling", ()
   assert.match(dashboard, /Shopify permissions need update/, "UI should show a user-friendly permission migration title");
   assert.match(dashboard, /Update Shopify Permissions/, "UI should provide a reconnect authorization action");
   assert.match(dashboard, /Orders[\s\S]*Products[\s\S]*Customer data/, "UI should show business-readable missing permissions");
+  assert.match(dashboard, /monarca-data-sources-updated/, "UI should refresh connected source metadata after connector sync");
+  assert.match(dashboard, /source\.lastSyncAt \?\? source\.schema\?\.scannedAt/, "Connected source cards should prefer connector lastSyncAt for last scan display");
 });

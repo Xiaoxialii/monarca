@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 
 export const SEMANTIC_MAPPING_CACHE_VERSION = "semantic_mapping_cache/v1";
 
@@ -92,6 +93,11 @@ export function buildSemanticMappingCache(input: CacheInput): SemanticMappingCac
   const fields = Array.isArray(asRecord(semanticLayer).fields)
     ? asRecord(semanticLayer).fields as Array<Record<string, unknown>>
     : [];
+  const mappableFields = fields.filter((field) => {
+    const sourceColumn = String(field.displayField ?? field.field ?? "");
+
+    return sourceColumn && !isCanonicalSystemField(sourceColumn);
+  });
 
   return {
     version: SEMANTIC_MAPPING_CACHE_VERSION,
@@ -100,7 +106,7 @@ export function buildSemanticMappingCache(input: CacheInput): SemanticMappingCac
     source: input.source ?? "schema_sync",
     status: "READY",
     semanticLayer,
-    field_mappings: fields.map((field) => ({
+    field_mappings: mappableFields.map((field) => ({
       source_table: String(field.table ?? ""),
       source_column: String(field.displayField ?? field.field ?? ""),
       canonical_field: String(field.semanticType ?? field.field ?? "unknown"),

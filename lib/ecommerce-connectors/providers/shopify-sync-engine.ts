@@ -30,7 +30,6 @@ import {
   buildCanonicalSnapshotJson,
   storeCanonicalSchemaSnapshot
 } from "@/lib/snapshot/canonical-snapshot-generator";
-import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
 import { buildCanonicalSku } from "@/lib/sku/sku-intelligence-engine";
 import type { CanonicalDataset } from "@/lib/semantic/types";
 
@@ -239,6 +238,8 @@ const CUSTOMERS_QUERY = `
 export async function runShopifyProductionSync(prisma: PrismaClient, input: {
   workspaceId: string;
   dataSourceId?: string | null;
+  force?: boolean;
+  trigger?: "initial" | "manual" | "scheduled";
 }) {
   const account = await prisma.ecommerceConnectorAccount.findFirst({
     where: {
@@ -325,7 +326,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
     }
   });
 
-  if (existingRun && (existingRun.status === "running" || existingRun.status === "success")) {
+  if (!input.force && existingRun && (existingRun.status === "running" || existingRun.status === "success")) {
     return {
       ok: true,
       reused: true,
@@ -575,9 +576,16 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
           finishedAt: new Date()
         }
       });
+      const successfulSyncTime = syncWindowEnd;
       await tx.ecommerceConnectorAccount.update({
         where: { id: account.id },
-        data: { lastSyncedAt: syncWindowEnd }
+        data: {
+          lastSyncedAt: successfulSyncTime,
+          ...(account.autoSyncEnabled
+            ? { nextSyncAt: new Date(successfulSyncTime.getTime() + account.syncIntervalMinutes * 60 * 1000) }
+            : { nextSyncAt: null }),
+          ...(input.trigger === "scheduled" ? { lastAutoSyncSuccessAt: successfulSyncTime, autoSyncFailureCount: 0 } : {})
+        }
       });
       const snapshot = await storeCanonicalSchemaSnapshot({
         prisma: tx,
@@ -658,21 +666,25 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       timeout: 60_000
     });
 
-    const downstreamJob = await createAsyncJob(prisma, {
-      workspaceId: input.workspaceId,
-      type: "CALCULATE_METRICS",
-      currentStep: "Queued after Shopify sync",
-      payload: {
-        dataSourceId: account.dataSourceId,
-        schemaSnapshotId: syncCommit.schemaSnapshotId,
-        syncRunId
-      } as Prisma.InputJsonValue
+    const downstreamJob = await prisma.asyncJob.create({
+      data: {
+        workspaceId: input.workspaceId,
+        type: "CALCULATE_METRICS",
+        status: "QUEUED",
+        progress: 0,
+        currentStep: "Queued after Shopify sync",
+        payload: {
+          dataSourceId: account.dataSourceId,
+          schemaSnapshotId: syncCommit.schemaSnapshotId,
+          syncRunId
+        } as Prisma.InputJsonValue
+      }
     }).catch((error) => {
       console.warn("Failed to create Shopify downstream metric job", error);
       return null;
     });
     if (downstreamJob?.id) {
-      void processJob(downstreamJob.id).catch((error) => {
+      void import("@/lib/jobs/async-job-runner").then(({ processJob }) => processJob(downstreamJob.id)).catch((error) => {
         console.warn("Failed to process Shopify downstream metric job", error);
       });
     }

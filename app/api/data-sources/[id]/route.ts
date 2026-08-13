@@ -189,10 +189,33 @@ export async function DELETE(
     const deactivatedMetricCount = await deactivateMetricsForDataSource(session.workspace.id, dataSource.id);
 
     if (permanent) {
-      await prisma.dataSourceConnection.delete({
-        where: {
-          id: dataSource.id
-        }
+      await prisma.$transaction(async (tx) => {
+        await tx.unifiedIngestionJob.deleteMany({
+          where: {
+            workspaceId: session.workspace.id,
+            dataSourceId: dataSource.id
+          }
+        });
+        await tx.reportRun.updateMany({
+          where: {
+            workspaceId: session.workspace.id,
+            primaryDataSourceId: dataSource.id
+          },
+          data: {
+            primaryDataSourceId: null
+          }
+        });
+        await tx.metricSnapshot.deleteMany({
+          where: {
+            workspaceId: session.workspace.id,
+            dataSourceId: dataSource.id
+          }
+        });
+        await tx.dataSourceConnection.delete({
+          where: {
+            id: dataSource.id
+          }
+        });
       });
       await clearWorkspaceReportCaches(prisma, session.workspace.id);
 

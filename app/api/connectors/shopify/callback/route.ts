@@ -2,6 +2,7 @@ import { ConnectionStatus, DataSourceType, Prisma } from "@prisma/client";
 import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runShopifyProductionSync } from "@/lib/ecommerce-connectors/providers/shopify-sync-engine";
+import { DEFAULT_SHOPIFY_SYNC_INTERVAL_MINUTES } from "@/lib/ecommerce-connectors/shopify-sync-scheduler";
 import {
   SHOPIFY_PROVIDER,
   currentRequiredShopifyScopes,
@@ -144,7 +145,9 @@ export async function GET(request: Request) {
           grantedScopes,
           requiredScopes,
           scopeStatus,
-          status: "connected"
+          status: "connected",
+          autoSyncEnabled: true,
+          syncIntervalMinutes: DEFAULT_SHOPIFY_SYNC_INTERVAL_MINUTES
         },
         update: {
           encryptedAccessToken,

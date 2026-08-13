@@ -8,6 +8,11 @@ import { prisma } from "@/lib/prisma";
 import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
+import { runShopifyProductionSync } from "@/lib/ecommerce-connectors/providers/shopify-sync-engine";
+import { SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { markShopifyScheduledSyncFailure } from "@/lib/ecommerce-connectors/shopify-sync-scheduler";
+import { AMAZON_PROVIDER } from "@/lib/connectors/amazon/amazon-errors";
+import { runAmazonProductionSync } from "@/lib/connectors/amazon/amazon-sync";
 import {
   collectDecisionExecutionMetric,
   evaluateDecisionOutcome
@@ -546,6 +551,8 @@ async function executeJobHandler(
   switch (input.type) {
     case "INGESTION":
       return processIngestionAsyncJob(client, input);
+    case "SYNC_CONNECTOR":
+      return processConnectorSyncAsyncJob(client, input);
     case "CALCULATE_METRICS":
       return processMetricCalculationAsyncJob(client, input);
     case "PROFIT_ANALYSIS":
@@ -558,11 +565,128 @@ async function executeJobHandler(
       return processDecisionEvaluatorJob(client, input);
     case "DECISION_LEARNING_UPDATER":
       return processDecisionLearningUpdaterJob(client, input);
-    case "SYNC_CONNECTOR":
     case "GENERATE_REPORT":
     case "GENERATE_INSIGHT":
     case "SIMULATION":
       throw new Error(`${input.type} handler is registered but has not been migrated to AsyncJob yet.`);
+  }
+}
+
+async function processConnectorSyncAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const provider = typeof input.payload.provider === "string" ? input.payload.provider : null;
+  const dataSourceId = typeof input.payload.dataSourceId === "string" ? input.payload.dataSourceId : null;
+  const connectorAccountId = typeof input.payload.connectorAccountId === "string" ? input.payload.connectorAccountId : null;
+  const shopDomain = typeof input.payload.shopDomain === "string" ? input.payload.shopDomain : null;
+  const trigger = input.payload.trigger === "scheduled" ? "scheduled" : "manual";
+
+  if (!provider || ![SHOPIFY_PROVIDER, AMAZON_PROVIDER].includes(provider) || !dataSourceId || !connectorAccountId || !shopDomain) {
+    throw new Error("Connector sync job payload is incomplete.");
+  }
+
+  const account = await client.ecommerceConnectorAccount.findFirst({
+    where: {
+      id: connectorAccountId,
+      workspaceId: input.workspaceId,
+      provider,
+      shopDomain,
+      dataSourceId,
+      dataSource: {
+        id: dataSourceId,
+        workspaceId: input.workspaceId,
+        isActive: true
+      }
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      dataSourceId: true,
+      shopDomain: true
+    }
+  });
+
+  if (!account) {
+    throw new Error(`${provider} connector account was not found for this workspace.`);
+  }
+
+  await input.setJobState({
+    progress: 20,
+    currentStep: `Running ${provider} sync`
+  });
+
+  const startedAt = Date.now();
+  try {
+    const result = provider === AMAZON_PROVIDER
+      ? await runAmazonProductionSync(client, {
+          workspaceId: input.workspaceId,
+          dataSourceId,
+          trigger,
+          force: false
+        })
+      : await runShopifyProductionSync(client, {
+          workspaceId: input.workspaceId,
+          dataSourceId,
+          trigger,
+          force: false
+        });
+
+    console.info(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_SUCCESS" : "SHOPIFY_SYNC_SUCCESS", {
+      workspaceId: input.workspaceId,
+      dataSourceId,
+      connectorAccountId,
+      shopDomain,
+      jobId: input.id,
+      runId: result.syncRunId,
+      durationMs: Date.now() - startedAt
+    });
+
+    return {
+      snapshotType: "CONNECTOR_SYNC",
+      snapshotVersion: `${provider}_sync_v1`,
+      dataReference: {
+        provider,
+        dataSourceId,
+        connectorAccountId,
+        shopDomain,
+        syncRunId: result.syncRunId,
+        downstreamJobId: result.downstreamJobId ?? null
+      },
+      metadataJson: {
+        trigger,
+        status: result.status,
+        reused: result.reused ?? false
+      }
+    };
+  } catch (error) {
+    console.error(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_FAILED" : "SHOPIFY_SYNC_FAILED", {
+      workspaceId: input.workspaceId,
+      dataSourceId,
+      connectorAccountId,
+      shopDomain,
+      jobId: input.id,
+      durationMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : `${provider} sync failed`
+    });
+
+    if (trigger === "scheduled") {
+      await markShopifyScheduledSyncFailure(client, {
+        workspaceId: input.workspaceId,
+        connectorAccountId,
+        dataSourceId,
+        shopDomain,
+        provider,
+        error
+      });
+    }
+
+    throw error;
   }
 }
 

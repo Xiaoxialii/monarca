@@ -370,6 +370,12 @@ model EcommerceConnectorAccount {
   scopeStatus          String                  @default("OK")
   status               String                  @default("connected")
   lastSyncedAt         DateTime?
+  autoSyncEnabled      Boolean                 @default(true)
+  syncIntervalMinutes  Int                     @default(360)
+  nextSyncAt           DateTime?
+  lastAutoSyncAttemptAt DateTime?
+  lastAutoSyncSuccessAt DateTime?
+  autoSyncFailureCount Int                     @default(0)
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
   workspace            Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

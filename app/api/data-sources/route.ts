@@ -4,6 +4,7 @@ import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-au
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
 import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
 import { recoverAsyncJobs } from "@/lib/jobs/async-job-runner";
@@ -370,7 +371,7 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
                         }).filter((candidate) => candidate.canonical_field)
                       : []
                   };
-                }).filter((mapping) => mapping.field)
+                }).filter((mapping) => mapping.field && !isCanonicalSystemField(mapping.field))
               : Object.entries(mappings ?? {}).map(([field, canonical]) => ({
                   field,
                   source_column: field,
@@ -381,7 +382,7 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
                   mapping_method: null,
                   requires_confirmation: false,
                   suggested_mappings: []
-                })),
+                })).filter((mapping) => mapping.field && !isCanonicalSystemField(mapping.field)),
             unknown_fields: Array.isArray(semantic?.unknown_fields)
               ? semantic.unknown_fields.filter((field): field is string => typeof field === "string")
               : []
@@ -457,7 +458,27 @@ export async function GET(request: Request) {
         connectedAt: true,
         lastSyncAt: true,
         createdAt: true,
-        updatedAt: true
+        updatedAt: true,
+        ecommerceConnectorAccounts: {
+          where: {
+            provider: {
+              in: ["shopify", "amazon", "meta_ads"]
+            }
+          },
+          select: {
+            id: true,
+            provider: true,
+            shopDomain: true,
+            autoSyncEnabled: true,
+            syncIntervalMinutes: true,
+            lastSyncedAt: true,
+            nextSyncAt: true,
+            lastAutoSyncAttemptAt: true,
+            lastAutoSyncSuccessAt: true,
+            autoSyncFailureCount: true
+          },
+          take: 1
+        }
       },
       orderBy: {
         createdAt: "desc"
@@ -555,7 +576,27 @@ export async function GET(request: Request) {
             connectedAt: true,
             lastSyncAt: true,
             createdAt: true,
-            updatedAt: true
+            updatedAt: true,
+        ecommerceConnectorAccounts: {
+          where: {
+            provider: {
+              in: ["shopify", "amazon", "meta_ads"]
+            }
+          },
+              select: {
+            id: true,
+            provider: true,
+            shopDomain: true,
+                autoSyncEnabled: true,
+                syncIntervalMinutes: true,
+                lastSyncedAt: true,
+                nextSyncAt: true,
+                lastAutoSyncAttemptAt: true,
+                lastAutoSyncSuccessAt: true,
+                autoSyncFailureCount: true
+              },
+              take: 1
+            }
           },
           orderBy: {
             updatedAt: "desc"
@@ -575,6 +616,7 @@ export async function GET(request: Request) {
         latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null
       });
       const latestIngestionJob = latestIngestionJobBySourceId.get(source.id) ?? null;
+      const connectorAccount = source.ecommerceConnectorAccounts?.[0] ?? null;
 
       return {
         id: source.id,
@@ -602,6 +644,19 @@ export async function GET(request: Request) {
         connectionMode: source.connectionMode,
         authMethod: source.authMethod,
         config: publicConfig(source.config),
+        syncSettings: connectorAccount
+          ? {
+              connectorAccountId: connectorAccount.id,
+              shopDomain: connectorAccount.shopDomain,
+              autoSyncEnabled: connectorAccount.autoSyncEnabled,
+              syncIntervalMinutes: connectorAccount.syncIntervalMinutes,
+              lastSyncedAt: connectorAccount.lastSyncedAt?.toISOString() ?? null,
+              nextSyncAt: connectorAccount.nextSyncAt?.toISOString() ?? null,
+              lastAutoSyncAttemptAt: connectorAccount.lastAutoSyncAttemptAt?.toISOString() ?? null,
+              lastAutoSyncSuccessAt: connectorAccount.lastAutoSyncSuccessAt?.toISOString() ?? null,
+              autoSyncFailureCount: connectorAccount.autoSyncFailureCount
+            }
+          : null,
         schema: schemaSummary(
           source.schemas,
           latestSnapshotBySourceId.get(source.id)?.schemaJson ?? null,

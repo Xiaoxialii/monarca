@@ -84,6 +84,7 @@ import {
 } from "@/lib/report-trend-guardrails.mjs";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
+import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 
 type DataSourceType = "oauth" | "credentials" | "file";
 type DataSourceAuthMode = "oauth" | "api_key" | "file_upload";
@@ -476,6 +477,7 @@ const dashboardCopy = {
         { name: "BigQuery", provider: "bigquery", type: "Data warehouse", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
         { name: "Google Analytics", provider: "google_analytics", type: "Analytics", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Shopify", provider: "shopify", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Amazon", provider: "amazon", type: "Ecommerce", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Stripe", provider: "stripe", type: "Revenue", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Meta Ads", provider: "meta_ads", type: "Advertising", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
@@ -1170,6 +1172,7 @@ const dashboardCopy = {
         { name: "BigQuery", provider: "bigquery", type: "数据仓库", kind: "warehouse", dataSourceType: "credentials", authMode: "api_key" },
         { name: "Google Analytics", provider: "google_analytics", type: "分析工具", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Shopify", provider: "shopify", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
+        { name: "Amazon", provider: "amazon", type: "电商平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Stripe", provider: "stripe", type: "收入系统", kind: "app", dataSourceType: "oauth", authMode: "oauth" },
         { name: "Meta Ads", provider: "meta_ads", type: "广告平台", kind: "app", dataSourceType: "oauth", authMode: "oauth" }
       ] satisfies DataSourceDefinition[],
@@ -1567,6 +1570,21 @@ type ConnectedSourceRow = {
     adAccountId?: string | null;
     adAccountName?: string | null;
     adAccountCurrency?: string | null;
+    sellerId?: string | null;
+    sellerDisplay?: string | null;
+    amazonRegion?: string | null;
+    marketplaceIds?: string[] | null;
+    countries?: string[] | null;
+  } | null;
+  syncSettings?: {
+    connectorAccountId?: string | null;
+    shopDomain?: string | null;
+    autoSyncEnabled: boolean;
+    syncIntervalMinutes: number;
+    lastSyncedAt?: string | null;
+    nextSyncAt?: string | null;
+    lastAutoSyncAttemptAt?: string | null;
+    lastAutoSyncSuccessAt?: string | null;
   } | null;
   schema?: {
     tableCount?: number | null;
@@ -1667,6 +1685,15 @@ const CANONICAL_MAPPING_OPTIONS = [
   "status",
   "currency",
   "unknown"
+] as const;
+
+const SHOPIFY_SYNC_FREQUENCY_OPTIONS = [
+  { value: "60", label: "Every 1 hour", zhLabel: "每 1 小时" },
+  { value: "180", label: "Every 3 hours", zhLabel: "每 3 小时" },
+  { value: "360", label: "Every 6 hours", zhLabel: "每 6 小时" },
+  { value: "720", label: "Every 12 hours", zhLabel: "每 12 小时" },
+  { value: "1440", label: "Every 24 hours", zhLabel: "每 24 小时" },
+  { value: "manual", label: "Manual only", zhLabel: "仅手动" }
 ] as const;
 type SettingsTab =
   | "basic"
@@ -1780,6 +1807,7 @@ let connectedSourcesUserIdCache: string | null = null;
 let analysisReportsPageDataCache: unknown = null;
 let reportsPageDataCache: unknown = null;
 const removedConnectedSourceIds = new Set<string>();
+const permanentlyDeletedSourceIds = new Set<string>();
 const CONNECTED_SOURCES_BROWSER_CACHE_PREFIX = "monarca.connectedSources.v2";
 const CONNECTED_SOURCES_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -1837,6 +1865,11 @@ function writeConnectedSourcesBrowserCache(sources: ConnectedSourceRow[], worksp
 function withoutLocallyRemovedSources(sources: ConnectedSourceRow[]) {
   if (removedConnectedSourceIds.size === 0) return sources;
   return sources.filter((source) => !removedConnectedSourceIds.has(source.id));
+}
+
+function withoutPermanentlyDeletedSources(sources: ConnectedSourceRow[]) {
+  if (permanentlyDeletedSourceIds.size === 0) return sources;
+  return sources.filter((source) => !permanentlyDeletedSourceIds.has(source.id));
 }
 
 function Sidebar({
@@ -3815,6 +3848,19 @@ function formatRelativeSourceDate(value: string | null | undefined, isZh: boolea
   return isZh ? `${days} 天前` : `${days} days ago`;
 }
 
+function formatSourceDateTime(value: string | null | undefined, isZh: boolean) {
+  if (!value) return isZh ? "暂无" : "None";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return isZh ? "暂无" : "None";
+
+  return new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function sourceTypeLabel(copy: DashboardCopy, source: ConnectedSourceRow) {
   const catalogSource = copy.connectors.sources.find(
     (item) => item.name === source.provider || item.name === source.name
@@ -4008,7 +4054,7 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
                 requires_confirmation: record.requires_confirmation === true,
                 suggested_mappings: Array.isArray(record.suggested_mappings) ? record.suggested_mappings : []
               };
-            }).filter((mapping) => mapping.field),
+            }).filter((mapping) => mapping.field && !isCanonicalSystemField(mapping.field)),
             unknown_fields: Array.isArray(semantic.unknown_fields)
               ? semantic.unknown_fields.filter((field): field is string => typeof field === "string")
               : []
@@ -4036,25 +4082,27 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
   const fieldTypes = new Map(fields.map((field) => [field.name, field.type ?? "unknown"]));
 
   if (details.length > 0) {
-    return details.map((mapping) => ({
-      field: mapping.source_column || mapping.field,
-      canonical: mapping.canonical_field || mapping.canonical || "unknown",
-      confidence: mapping.confidence ?? source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
-      source: mapping.source ?? "engine",
-      method: mapping.mapping_method ?? null,
-      requiresConfirmation: mapping.requires_confirmation === true,
-      suggestions: mapping.suggested_mappings ?? [],
-      type: fieldTypes.get(mapping.source_column || mapping.field) ?? "unknown"
-    }));
+    return details
+      .filter((mapping) => !isCanonicalSystemField(mapping.source_column || mapping.field))
+      .map((mapping) => ({
+        field: mapping.source_column || mapping.field,
+        canonical: canonicalConceptForReview(mapping.source_column || mapping.field, mapping.canonical_field || mapping.canonical || "unknown"),
+        confidence: mapping.confidence ?? source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
+        source: mapping.source ?? "engine",
+        method: mapping.mapping_method ?? null,
+        requiresConfirmation: mapping.requires_confirmation === true,
+        suggestions: mapping.suggested_mappings ?? [],
+        type: fieldTypes.get(mapping.source_column || mapping.field) ?? "unknown"
+      }));
   }
 
   const mappings = source.schema?.unifiedIngestion?.semantic?.mappings ?? {};
   const mappingEntries = Object.entries(mappings);
 
   if (mappingEntries.length > 0) {
-    return mappingEntries.map(([field, canonical]) => ({
+    return mappingEntries.filter(([field]) => !isCanonicalSystemField(field)).map(([field, canonical]) => ({
       field,
-      canonical: canonical || "unknown",
+      canonical: canonicalConceptForReview(field, canonical || "unknown"),
       confidence: source.schema?.unifiedIngestion?.semantic?.confidence ?? null,
       source: "engine",
       method: null,
@@ -4065,7 +4113,7 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
   }
 
   return (source.schema?.tables ?? []).flatMap((table) =>
-    table.columns.map((column) => {
+    table.columns.filter((column) => !isCanonicalSystemField(column.name)).map((column) => {
       const semanticName = column.semanticName && CANONICAL_MAPPING_OPTIONS.includes(column.semanticName as typeof CANONICAL_MAPPING_OPTIONS[number])
         ? column.semanticName
         : guessCanonicalConceptFromField(column.name);
@@ -4084,6 +4132,18 @@ function mappingRowsForSource(source: ConnectedSourceRow) {
   );
 }
 
+function canonicalConceptForReview(fieldName: string, current: string): typeof CANONICAL_MAPPING_OPTIONS[number] {
+  const deterministic = guessCanonicalConceptFromField(fieldName);
+
+  if ((current === "revenue" || current === "unknown") && deterministic !== "unknown" && deterministic !== current) {
+    return deterministic;
+  }
+
+  return CANONICAL_MAPPING_OPTIONS.includes(current as typeof CANONICAL_MAPPING_OPTIONS[number])
+    ? current as typeof CANONICAL_MAPPING_OPTIONS[number]
+    : deterministic;
+}
+
 function mappingConfidenceLabel(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return "—";
   const normalized = value > 1 ? value / 100 : value;
@@ -4094,6 +4154,10 @@ function mappingConfidenceLabel(value: number | null | undefined) {
 function guessCanonicalConceptFromField(fieldName: string): typeof CANONICAL_MAPPING_OPTIONS[number] {
   const normalized = fieldName.toLowerCase().replace(/[\s.-]+/g, "_");
 
+  if (normalized === "source_order_id" || normalized === "order_id" || normalized.endsWith("_order_id")) return "order_id";
+  if (normalized === "source_customer_id" || normalized === "customer_id" || normalized.endsWith("_customer_id")) return "customer_id";
+  if (normalized === "order_date" || normalized === "source_order_date" || (normalized.includes("order") && normalized.includes("date"))) return "order_date";
+  if (normalized === "order_status" || normalized === "financial_status" || normalized === "fulfillment_status" || normalized === "fulfilment_status" || normalized.endsWith("_status")) return "status";
   if (/(^|_)sku($|_)/.test(normalized)) return "sku";
   if (normalized.includes("campaign")) return "campaign_id";
   if (normalized.includes("adset")) return "adset_id";
@@ -4143,7 +4207,9 @@ function SettingsConnectedSourcesPanel({
   const [rescanningSourceId, setRescanningSourceId] = useState<string | null>(null);
   const [fetchingShopifySourceId, setFetchingShopifySourceId] = useState<string | null>(null);
   const [syncingShopifySourceId, setSyncingShopifySourceId] = useState<string | null>(null);
+  const [syncingAmazonSourceId, setSyncingAmazonSourceId] = useState<string | null>(null);
   const [syncingMetaSourceId, setSyncingMetaSourceId] = useState<string | null>(null);
+  const [savingShopifySyncSettingsSourceId, setSavingShopifySyncSettingsSourceId] = useState<string | null>(null);
   const [mappingOverrides, setMappingOverrides] = useState<Record<string, string>>({});
   const [mappingFeedback, setMappingFeedback] = useState<Record<string, {
     status: "saving" | "saved" | "error";
@@ -4205,12 +4271,21 @@ function SettingsConnectedSourcesPanel({
         auth: "认证",
         viewSchema: "查看结构",
         hideSchema: "收起结构",
-        rescan: "更新数据源",
-        rescanning: "更新中",
+        rescan: "同步数据源",
+        rescanning: "同步中",
         fetchShopify: "拉取 Shopify 数据",
         fetchingShopify: "拉取中",
         syncShopify: "同步 Shopify",
         syncingShopify: "同步中",
+        syncAmazon: "同步 Amazon",
+        syncingAmazon: "同步中",
+        syncSettings: "同步设置",
+        automaticSync: "自动同步",
+        syncFrequency: "同步频率",
+        lastSynced: "上次同步",
+        nextSync: "下次同步",
+        manualOnly: "仅手动",
+        savingSyncSettings: "保存中",
         syncMetaAds: "同步 Meta Ads",
         syncingMetaAds: "同步中",
         recentScan: "最近扫描",
@@ -4252,12 +4327,21 @@ function SettingsConnectedSourcesPanel({
         auth: "Auth",
         viewSchema: "View schema",
         hideSchema: "Hide schema",
-        rescan: "Update source",
-        rescanning: "Updating",
+        rescan: "Sync source",
+        rescanning: "Syncing",
         fetchShopify: "Fetch Shopify Data",
         fetchingShopify: "Fetching",
         syncShopify: "Sync Shopify",
         syncingShopify: "Syncing",
+        syncAmazon: "Sync Amazon",
+        syncingAmazon: "Syncing",
+        syncSettings: "Sync Settings",
+        automaticSync: "Automatic sync",
+        syncFrequency: "Sync frequency",
+        lastSynced: "Last synced",
+        nextSync: "Next sync",
+        manualOnly: "Manual only",
+        savingSyncSettings: "Saving",
         syncMetaAds: "Sync Meta Ads",
         syncingMetaAds: "Syncing",
         recentScan: "Last scan",
@@ -4414,7 +4498,12 @@ function SettingsConnectedSourcesPanel({
         setExpandedSourceIds((current) =>
           current.includes(sourceId) ? current : [...current, sourceId]
         );
+        window.dispatchEvent(new Event("monarca-data-sources-updated"));
+      } else {
+        window.alert(payload?.message || (isZh ? "同步数据源失败" : "Source sync failed"));
       }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : (isZh ? "同步数据源失败" : "Source sync failed"));
     } finally {
       setRescanningSourceId(null);
     }
@@ -4542,6 +4631,7 @@ function SettingsConnectedSourcesPanel({
           missingFields: payload.missingFields ?? []
         }
       }));
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
     } catch (error) {
       const message = error instanceof Error ? error.message : isZh ? "Shopify 同步失败" : "Shopify sync failed";
 
@@ -4554,6 +4644,122 @@ function SettingsConnectedSourcesPanel({
       }));
     } finally {
       setSyncingShopifySourceId(null);
+    }
+  };
+
+  const updateShopifySyncSettings = async (
+    source: ConnectedSourceRow,
+    nextSettings: { autoSyncEnabled: boolean; syncIntervalMinutes?: number | null }
+  ) => {
+    setSavingShopifySyncSettingsSourceId(source.id);
+
+    try {
+      const response = await fetch("/api/connectors/shopify/sync-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataSourceId: source.id,
+          ...nextSettings
+        })
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "同步设置保存失败" : "Failed to save sync settings"));
+      }
+
+      onUpdateConnectedSource({
+        ...source,
+        syncSettings: payload.syncSettings
+      });
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : (isZh ? "同步设置保存失败" : "Failed to save sync settings"));
+    } finally {
+      setSavingShopifySyncSettingsSourceId(null);
+    }
+  };
+
+  const updateAmazonSyncSettings = async (
+    source: ConnectedSourceRow,
+    nextSettings: { autoSyncEnabled: boolean; syncIntervalMinutes?: number | null }
+  ) => {
+    setSavingShopifySyncSettingsSourceId(source.id);
+
+    try {
+      const response = await fetch("/api/connectors/amazon/sync-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataSourceId: source.id,
+          ...nextSettings
+        })
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "同步设置保存失败" : "Failed to save sync settings"));
+      }
+
+      onUpdateConnectedSource({
+        ...source,
+        syncSettings: payload.syncSettings
+      });
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : (isZh ? "同步设置保存失败" : "Failed to save sync settings"));
+    } finally {
+      setSavingShopifySyncSettingsSourceId(null);
+    }
+  };
+
+  const syncAmazonData = async (sourceId: string) => {
+    setSyncingAmazonSourceId(sourceId);
+
+    try {
+      const response = await fetch("/api/connectors/amazon/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataSourceId: sourceId })
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        reused?: boolean;
+        syncRunId?: string | null;
+        manifestKey?: string | null;
+        status?: string | null;
+        message?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "Amazon 同步失败" : "Amazon sync failed"));
+      }
+
+      setShopifySyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: true,
+          message: payload.reused
+            ? (isZh ? "已复用现有 Amazon 同步结果" : "Reused existing Amazon sync")
+            : (isZh ? "Amazon 同步已完成" : "Amazon sync completed"),
+          syncRunId: payload.syncRunId ?? null,
+          manifestKey: payload.manifestKey ?? null,
+          dataMode: payload.status ?? null
+        }
+      }));
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : isZh ? "Amazon 同步失败" : "Amazon sync failed";
+
+      setShopifySyncResults((current) => ({
+        ...current,
+        [sourceId]: {
+          ok: false,
+          message
+        }
+      }));
+    } finally {
+      setSyncingAmazonSourceId(null);
     }
   };
 
@@ -4599,6 +4805,7 @@ function SettingsConnectedSourcesPanel({
           adAccountId: payload.adAccountId ?? payload.manifest?.ad_account_id ?? null
         }
       }));
+      window.dispatchEvent(new Event("monarca-data-sources-updated"));
     } catch (error) {
       const message = error instanceof Error ? error.message : isZh ? "Meta Ads 同步失败" : "Meta Ads sync failed";
 
@@ -4656,9 +4863,11 @@ function SettingsConnectedSourcesPanel({
             {connectedSources.map((source) => {
               const isExpanded = expandedSourceIds.includes(source.id);
               const tables = source.schema?.tables ?? [];
-              const scannedAt = source.schema?.scannedAt ?? source.lastSyncAt;
+              const scannedAt = source.lastSyncAt ?? source.schema?.scannedAt;
               const isShopifySource = source.provider === "shopify";
+              const isAmazonSource = source.provider === "amazon";
               const isMetaAdsSource = source.provider === "meta_ads";
+              const usesConnectorSync = isShopifySource || isAmazonSource || isMetaAdsSource;
               const shopifyFetchResult = shopifyFetchResults[source.id];
               const shopifySyncResult = shopifySyncResults[source.id];
               const metaSyncResult = metaSyncResults[source.id];
@@ -4669,6 +4878,11 @@ function SettingsConnectedSourcesPanel({
               const displayStatus = source.syncStatus || source.status;
               const statusActionLabel = sourceStatusActionLabel(source.statusAction, isZh);
               const shopDomain = source.config?.shopDomain;
+              const syncSettings = source.syncSettings;
+              const syncFrequencyValue = syncSettings?.autoSyncEnabled === false
+                ? "manual"
+                : String(syncSettings?.syncIntervalMinutes ?? 360);
+              const isSavingSyncSettings = savingShopifySyncSettingsSourceId === source.id;
               const statusActionHref = isShopifySource && source.statusAction === "UPDATE_PERMISSION" && shopDomain
                 ? `/api/connectors/shopify/start?shop=${encodeURIComponent(shopDomain)}`
                 : null;
@@ -4703,14 +4917,75 @@ function SettingsConnectedSourcesPanel({
                             {source.provider} · {sourceTypeLabel(copy, source)}
                           </span>
                           <span className="rounded-full bg-white px-2.5 py-1">
-                            {isShopifySource ? "Shop" : isMetaAdsSource ? "Ad Account" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : isMetaAdsSource ? (source.config?.adAccountId ?? "—") : (source.config?.host ?? "—")}
+                            {isShopifySource ? "Shop" : isAmazonSource ? "Seller" : isMetaAdsSource ? "Ad Account" : labels.host}: {isShopifySource ? (source.config?.shopDomain ?? "—") : isAmazonSource ? (source.config?.sellerDisplay ?? source.config?.sellerId ?? "—") : isMetaAdsSource ? (source.config?.adAccountId ?? "—") : (source.config?.host ?? "—")}
                           </span>
-                          {!isShopifySource && !isMetaAdsSource ? (
+                          {isAmazonSource ? (
+                          <span className="rounded-full bg-white px-2.5 py-1">
+                            Marketplaces: {(source.config?.countries ?? source.config?.marketplaceIds ?? []).join(", ") || "—"}
+                          </span>
+                          ) : null}
+                          {!isShopifySource && !isAmazonSource && !isMetaAdsSource ? (
                           <span className="rounded-full bg-white px-2.5 py-1">
                             {labels.database}: {source.config?.database ?? "—"}
                           </span>
                           ) : null}
                         </div>
+                        {isShopifySource || isAmazonSource ? (
+                          <div className="mt-4 rounded-md border bg-white p-3">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <p className="text-sm font-semibold text-slate-950">{labels.syncSettings}</p>
+                              {isSavingSyncSettings ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+                                  <RefreshCw className="size-3 animate-spin" />
+                                  {labels.savingSyncSettings}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(160px,220px)] md:items-end">
+                              <label className="flex items-center justify-between gap-3 rounded-md bg-secondary/40 px-3 py-2">
+                                <span className="text-sm font-medium text-slate-700">{labels.automaticSync}</span>
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-emerald-700"
+                                  checked={syncSettings?.autoSyncEnabled ?? true}
+                                  disabled={isSavingSyncSettings}
+                                  onChange={(event) => {
+                                    const enabled = event.target.checked;
+                                    void (isAmazonSource ? updateAmazonSyncSettings : updateShopifySyncSettings)(source, {
+                                      autoSyncEnabled: enabled,
+                                      syncIntervalMinutes: enabled ? (syncSettings?.syncIntervalMinutes ?? 360) : null
+                                    });
+                                  }}
+                                />
+                              </label>
+                              <label className="grid gap-1.5">
+                                <span className="text-xs font-semibold text-muted-foreground">{labels.syncFrequency}</span>
+                                <select
+                                  value={syncFrequencyValue}
+                                  disabled={isSavingSyncSettings}
+                                  onChange={(event) => {
+                                    const value = event.target.value;
+                                    void (isAmazonSource ? updateAmazonSyncSettings : updateShopifySyncSettings)(source, {
+                                      autoSyncEnabled: value !== "manual",
+                                      syncIntervalMinutes: value === "manual" ? null : Number(value)
+                                    });
+                                  }}
+                                  className="h-9 rounded-md border bg-background px-3 text-sm font-medium"
+                                >
+                                  {SHOPIFY_SYNC_FREQUENCY_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {isZh ? option.zhLabel : option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+                            <div className="mt-3 grid gap-2 text-xs font-medium text-muted-foreground sm:grid-cols-2">
+                              <p>{labels.lastSynced}: {formatSourceDateTime(syncSettings?.lastSyncedAt ?? source.lastSyncAt, isZh)}</p>
+                              <p>{labels.nextSync}: {syncSettings?.autoSyncEnabled === false ? labels.manualOnly : formatSourceDateTime(syncSettings?.nextSyncAt, isZh)}</p>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
@@ -4734,6 +5009,18 @@ function SettingsConnectedSourcesPanel({
                           {syncingShopifySourceId === source.id ? labels.syncingShopify : labels.syncShopify}
                         </Button>
                       ) : null}
+                      {isAmazonSource ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={syncingAmazonSourceId === source.id}
+                          onClick={() => void syncAmazonData(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", syncingAmazonSourceId === source.id && "animate-spin")} />
+                          {syncingAmazonSourceId === source.id ? labels.syncingAmazon : labels.syncAmazon}
+                        </Button>
+                      ) : null}
                       {isMetaAdsSource ? (
                         <Button
                           type="button"
@@ -4744,6 +5031,18 @@ function SettingsConnectedSourcesPanel({
                         >
                           <RefreshCw className={cn("size-4", syncingMetaSourceId === source.id && "animate-spin")} />
                           {syncingMetaSourceId === source.id ? labels.syncingMetaAds : labels.syncMetaAds}
+                        </Button>
+                      ) : null}
+                      {!usesConnectorSync ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={rescanningSourceId === source.id}
+                          onClick={() => void rescanSource(source.id)}
+                        >
+                          <RefreshCw className={cn("size-4", rescanningSourceId === source.id && "animate-spin")} />
+                          {rescanningSourceId === source.id ? labels.rescanning : labels.rescan}
                         </Button>
                       ) : null}
                       {isShopifySource ? (
@@ -4770,16 +5069,6 @@ function SettingsConnectedSourcesPanel({
 	                        ) : null}
 	                        {isLoadingSchema ? (isZh ? "读取结构" : "Loading schema") : isExpanded ? labels.hideSchema : labels.viewSchema}
 	                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={rescanningSourceId === source.id}
-                        onClick={() => void rescanSource(source.id)}
-                      >
-                        <RefreshCw className={cn("size-4", rescanningSourceId === source.id && "animate-spin")} />
-                        {rescanningSourceId === source.id ? labels.rescanning : labels.rescan}
-                      </Button>
                       <Button
                         type="button"
                         variant="outline"
@@ -6784,6 +7073,7 @@ function ConnectorPanel({
 	  const isFileSource = selectedSource.authMode === "file_upload";
 	  const isOAuthSource = selectedSource.authMode === "oauth";
 	  const isShopifySource = selectedSource.provider === "shopify";
+	  const isAmazonSource = selectedSource.provider === "amazon";
 	  const isMetaAdsSource = selectedSource.provider === "meta_ads";
 	  const isSqlLikeSource = selectedSource.kind === "database" || selectedSource.kind === "warehouse";
   const databaseType = resolveDatabaseConnectorType(selectedSource);
@@ -6834,6 +7124,11 @@ function ConnectorPanel({
 
 	      if (source.provider === "meta_ads") {
 	        window.location.href = "/api/connectors/meta/start";
+	        return;
+	      }
+
+	      if (source.provider === "amazon") {
+	        window.location.href = "/api/connectors/amazon/connect?region=na&marketplaceIds=ATVPDKIKX0DER";
 	        return;
 	      }
 
@@ -7359,6 +7654,8 @@ function ConnectorPanel({
 	                      <p className="text-sm font-semibold">
 	                        {isShopifySource
 	                          ? (isZh ? "连接 Shopify" : "Connect Shopify")
+	                          : isAmazonSource
+	                            ? (isZh ? "连接 Amazon" : "Connect Amazon")
 	                          : isMetaAdsSource
 	                            ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
 	                          : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
@@ -7372,6 +7669,10 @@ function ConnectorPanel({
 	                            ? (isZh
 	                                ? "将跳转到 Meta OAuth 授权页面。授权成功后只保存加密 token、广告账户 ID 和连接元数据。"
 	                                : "This opens Meta OAuth. After authorization, Monarca stores only encrypted token, ad account ID, and connection metadata.")
+	                          : isAmazonSource
+	                            ? (isZh
+	                                ? "将跳转到 Amazon Seller Central 官方授权页面。授权成功后只保存加密 refresh token、卖家 ID、marketplace 和连接元数据。"
+	                                : "This opens the official Amazon Seller Central authorization flow. Monarca stores only encrypted refresh token, seller ID, marketplaces, and connection metadata.")
 	                          : (isZh
 	                              ? "该数据源将通过 OAuth 授权连接，不需要在 Monarca 输入 API key。"
 	                              : "This source uses OAuth. You do not enter API keys in Monarca.")}
@@ -7651,10 +7952,12 @@ function ConnectorPanel({
             <div className="mt-3 grid gap-2">
 	              {isOAuthSource ? (
 	                <Button type="button" size="sm" onClick={() => connectDataSource(selectedSource)}>
-	                  {isShopifySource
-	                    ? (isZh ? "连接 Shopify" : "Connect Shopify")
-	                    : isMetaAdsSource
-	                      ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
+		                  {isShopifySource
+		                    ? (isZh ? "连接 Shopify" : "Connect Shopify")
+		                    : isAmazonSource
+		                      ? (isZh ? "连接 Amazon" : "Connect Amazon")
+		                    : isMetaAdsSource
+		                      ? (isZh ? "连接 Meta Ads" : "Connect Meta Ads")
 	                    : (isZh ? `连接 ${selectedSource.name}` : `Connect ${selectedSource.name}`)}
 	                  <ArrowRight />
 	                </Button>
@@ -18442,6 +18745,7 @@ export function Dashboard({
 
   const addConnectedSource = (source: ConnectedSourceRow) => {
     removedConnectedSourceIds.delete(source.id);
+    permanentlyDeletedSourceIds.delete(source.id);
     setConnectedSources((current) => {
       const next = current.some((item) => item.id === source.id) ? current : [source, ...current];
       connectedSourcesCache = next;
@@ -18511,6 +18815,7 @@ export function Dashboard({
 
   const restoreDeletedSource = (sourceId: string) => {
     removedConnectedSourceIds.delete(sourceId);
+    permanentlyDeletedSourceIds.delete(sourceId);
     const failureMessage = copy.connectors.title === "连接数据源"
       ? "恢复数据源失败，请确认当前账号有 Owner / Admin 权限后重试"
       : "Failed to restore data source. Confirm your account has Owner / Admin access and try again.";
@@ -18534,7 +18839,6 @@ export function Dashboard({
   };
 
   const permanentlyDeleteSource = (sourceId: string) => {
-    removedConnectedSourceIds.add(sourceId);
     const isZh = copy.connectors.title === "连接数据源";
     const confirmed = window.confirm(
       isZh
@@ -18544,6 +18848,8 @@ export function Dashboard({
 
     if (!confirmed) return;
 
+    removedConnectedSourceIds.add(sourceId);
+    permanentlyDeletedSourceIds.add(sourceId);
     const previousDeletedSources = deletedSources;
     const failureMessage = isZh
       ? "彻底删除数据源失败，请确认当前账号有 Owner / Admin 权限后重试"
@@ -18558,6 +18864,7 @@ export function Dashboard({
 
       if (!response.ok || !payload?.ok) {
         removedConnectedSourceIds.delete(sourceId);
+        permanentlyDeletedSourceIds.delete(sourceId);
         setDeletedSources(previousDeletedSources);
         window.alert(payload?.message || failureMessage);
         return;
@@ -18566,6 +18873,7 @@ export function Dashboard({
       window.dispatchEvent(new Event("monarca-data-sources-updated"));
     }).catch(() => {
       removedConnectedSourceIds.delete(sourceId);
+      permanentlyDeletedSourceIds.delete(sourceId);
       setDeletedSources(previousDeletedSources);
       window.alert(failureMessage);
     });
@@ -18602,7 +18910,9 @@ export function Dashboard({
         connectedSourcesCache = nextSources;
         writeConnectedSourcesBrowserCache(nextSources, nextWorkspaceId, nextUserId);
         setConnectedSources(nextSources);
-        setDeletedSources(Array.isArray(payload.deletedDataSources) ? payload.deletedDataSources as ConnectedSourceRow[] : []);
+        setDeletedSources(Array.isArray(payload.deletedDataSources)
+          ? withoutPermanentlyDeletedSources(payload.deletedDataSources as ConnectedSourceRow[])
+          : []);
       }
     } catch (error) {
       console.warn("[dashboard] Failed to load connected sources", error);

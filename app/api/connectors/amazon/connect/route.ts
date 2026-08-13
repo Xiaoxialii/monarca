@@ -1,0 +1,77 @@
+import { NextResponse } from "next/server";
+import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import {
+  buildAmazonAuthorizationUrl,
+  createAmazonOAuthState,
+  requiredAmazonEnv
+} from "@/lib/connectors/amazon/amazon-oauth";
+import { publicAmazonError } from "@/lib/connectors/amazon/amazon-errors";
+import { normalizeAmazonRegion } from "@/lib/connectors/amazon/amazon-regions";
+import { normalizeMarketplaceIds } from "@/lib/connectors/amazon/amazon-marketplaces";
+
+async function createAmazonConnectResult(request: Request) {
+  const session = await syncCurrentClerkUser();
+  if (!session) {
+    return {
+      error: NextResponse.json({ ok: false, code: "UNAUTHENTICATED", message: "Missing authenticated user." }, { status: 401 })
+    };
+  }
+  if (!session.workspace?.id) {
+    return {
+      error: NextResponse.json({ ok: false, code: "MISSING_WORKSPACE", message: "Missing current workspace." }, { status: 400 })
+    };
+  }
+
+  const url = new URL(request.url);
+  const region = normalizeAmazonRegion(url.searchParams.get("region"));
+  const marketplaceIds = normalizeMarketplaceIds(url.searchParams.get("marketplaceIds"), region);
+  const env = requiredAmazonEnv();
+  const state = await createAmazonOAuthState({
+    workspaceId: session.workspace.id,
+    userId: session.user.id,
+    redirectUri: env.redirectUri,
+    region,
+    marketplaceIds,
+    returnPath: "/dashboard/settings?section=data-sources"
+  });
+  const oauthUrl = buildAmazonAuthorizationUrl({
+    appId: env.appId,
+    stateToken: state.stateToken,
+    region
+  });
+
+  return {
+    oauthUrl,
+    workspaceId: session.workspace.id,
+    statePrefix: state.stateToken.slice(0, 6)
+  };
+}
+
+export async function GET(request: Request) {
+  try {
+    const result = await createAmazonConnectResult(request);
+    if ("error" in result) return result.error;
+
+    return NextResponse.redirect(result.oauthUrl);
+  } catch (error) {
+    const publicError = publicAmazonError(error);
+    return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const result = await createAmazonConnectResult(request);
+    if ("error" in result) return result.error;
+
+    return NextResponse.json({
+      ok: true,
+      url: result.oauthUrl.toString(),
+      statePrefix: result.statePrefix,
+      workspace_id: result.workspaceId
+    });
+  } catch (error) {
+    const publicError = publicAmazonError(error);
+    return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
+  }
+}

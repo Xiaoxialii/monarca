@@ -42,8 +42,8 @@ export const CanonicalFieldRegistry: CanonicalFieldRegistryEntry[] = [
   field("conversions", "advertising", "number", ["conversions", "purchases", "orders", "conversion_count"]),
   field("attribution_revenue", "advertising", "currency", ["attributed_revenue", "attribution_revenue", "purchase_value", "conversion_value", "revenue_attributed"]),
   field("event_date", "advertising", "datetime", ["ad_date", "event_date", "date", "date_start", "day", "month", "report_date", "campaign_date", "insight_date"]),
-  field("order_id", "orders", "string", ["order_id", "orderid", "order_number", "purchase_id", "transaction_id", "checkout_id"]),
-  field("order_date", "orders", "datetime", ["order_date", "transaction_date", "purchase_time", "paid_at", "processed_at", "created_at"]),
+  field("order_id", "orders", "string", ["order_id", "source_order_id", "orderid", "source_orderid", "order_number", "purchase_id", "transaction_id", "checkout_id"]),
+  field("order_date", "orders", "datetime", ["order_date", "source_order_date", "transaction_date", "purchase_time", "paid_at", "processed_at", "created_at"]),
   field("revenue", "orders", "currency", ["revenue", "sales", "gmv", "amount", "total", "subtotal", "paid"]),
   field("quantity", "orders", "number", ["quantity", "qty", "units", "unit_count", "item_count"]),
   field("sku", "product", "string", ["sku", "seller_sku", "variant_sku", "item_sku", "stock_keeping_unit", "product_code"]),
@@ -66,7 +66,9 @@ export const CanonicalFieldRegistry: CanonicalFieldRegistryEntry[] = [
   field("inventory_cost", "inventory", "currency", ["inventory_cost", "stock_value", "inventory_value"]),
   field("reorder_point", "inventory", "number", ["reorder_point", "reorder_level", "min_stock"]),
   field("warehouse_id", "inventory", "string", ["warehouse_id", "warehouse", "location_id", "fulfillment_center"]),
-  field("currency", "system", "string", ["currency", "currency_code", "iso_currency"])
+  field("currency", "system", "string", ["currency", "currency_code", "iso_currency"]),
+  field("customer_id", "system", "string", ["customer_id", "source_customer_id", "customerid", "shopify_customer_id"]),
+  field("status", "system", "string", ["status", "order_status", "financial_status", "fulfillment_status", "fulfilment_status", "payment_status"])
 ];
 
 export function registryCandidatesForField(field: RawFieldObservation): SemanticCandidate[] {

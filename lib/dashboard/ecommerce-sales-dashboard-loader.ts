@@ -80,40 +80,32 @@ export async function loadEcommerceSalesDashboardData(input: {
     message: string;
   }> = [];
 
-  const loadedSnapshots = await Promise.all(snapshots.map(async (snapshot) => {
-    const schemaJson = objectValue(snapshot.schemaJson);
-    const embeddedDashboard = dashboardSnapshotValue(schemaJson.dashboardSnapshot);
-    try {
-      return {
-        snapshot,
-        schemaJson,
-        embeddedDashboard,
-        dataset: await readCanonicalDatasetFromSnapshot(schemaJson),
-        error: null as unknown
-      };
-    } catch (error) {
-      return {
-        snapshot,
-        schemaJson,
-        embeddedDashboard,
-        dataset: null,
-        error
-      };
-    }
-  }));
+  const snapshotsBySource = new Map<string, typeof snapshots>();
+  for (const snapshot of snapshots) {
+    const sourceKey = snapshot.dataSourceId ?? snapshot.id;
+    snapshotsBySource.set(sourceKey, [...(snapshotsBySource.get(sourceKey) ?? []), snapshot]);
+  }
 
-  for (const loaded of loadedSnapshots) {
-    if (loaded.dataset) {
-      artifactDatasets.push(loaded.dataset);
-      continue;
-    }
+  for (const sourceSnapshots of snapshotsBySource.values()) {
+    for (const snapshot of sourceSnapshots) {
+      const schemaJson = objectValue(snapshot.schemaJson);
+      const embeddedDashboard = dashboardSnapshotValue(schemaJson.dashboardSnapshot);
+      try {
+        artifactDatasets.push(await readCanonicalDatasetFromSnapshot(schemaJson));
+        break;
+      } catch (error) {
+        if (embeddedDashboard) {
+          dashboardSnapshots.push(embeddedDashboard);
+          break;
+        }
 
-    if (loaded.embeddedDashboard) dashboardSnapshots.push(loaded.embeddedDashboard);
-    unavailableSnapshots.push({
-      snapshotId: loaded.snapshot.id,
-      dataSourceId: loaded.snapshot.dataSourceId,
-      message: readableArtifactError(loaded.error)
-    });
+        unavailableSnapshots.push({
+          snapshotId: snapshot.id,
+          dataSourceId: snapshot.dataSourceId,
+          message: readableArtifactError(error)
+        });
+      }
+    }
   }
 
   if (!artifactDatasets.length) {
@@ -268,18 +260,7 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
     ...(input.dataSourceId ? [input.workspaceId, input.dataSourceId] : [input.workspaceId])
   );
 
-  const latestBySource = new Map<string, typeof snapshots[number]>();
-
-  for (const snapshot of snapshots) {
-    if (!isEcommerceCanonicalSchemaJson(snapshot.schemaJson)) continue;
-
-    const sourceKey = snapshot.dataSourceId ?? snapshot.id;
-    if (!latestBySource.has(sourceKey)) {
-      latestBySource.set(sourceKey, snapshot);
-    }
-  }
-
-  return Array.from(latestBySource.values());
+  return snapshots.filter((snapshot) => isEcommerceCanonicalSchemaJson(snapshot.schemaJson));
 }
 
 function parseJsonl(input: string) {

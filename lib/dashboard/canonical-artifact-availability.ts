@@ -122,6 +122,8 @@ export async function canonicalArtifactAvailability(
     ...(input.dataSourceId ? [input.workspaceId, input.dataSourceId] : [input.workspaceId])
   );
 
+  let firstUnavailable: CanonicalArtifactAvailability | null = null;
+
   if (!snapshots.length) {
     return {
       available: false,
@@ -157,7 +159,7 @@ export async function canonicalArtifactAvailability(
       };
     } catch (error) {
       const reason = artifactFailureReason(error);
-      return {
+      firstUnavailable ??= {
         available: false,
         reason,
         message: artifactFailureMessage(reason, error),
@@ -165,10 +167,11 @@ export async function canonicalArtifactAvailability(
         dataSourceId: snapshot.dataSourceId,
         checkedArtifactKey
       };
+      continue;
     }
   }
 
-  return {
+  return firstUnavailable ?? {
     available: false,
     reason: "CANONICAL_ARTIFACT_KEY_MISSING",
     message: "READY canonical snapshots do not include readable artifact keys.",

@@ -1951,11 +1951,11 @@ function SkuPortfolioOptimizationPanel({
   const displayedOptimizedProfit = displayedCurrentProfit + displayedExpectedProfitGain;
   const displayedOptimizationAdSpend = shouldBlankOptimizationSummary
     ? 0
-    : displayedCurrentAdSpend + (solverAdditionalAdSpend ?? pendingDecisionRows.reduce((sum, row) => {
+    : displayedCurrentAdSpend + (pendingDecisionRows.length > 0 ? (solverAdditionalAdSpend ?? pendingDecisionRows.reduce((sum, row) => {
       const actionLabel = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
       return sum + Math.max(0, actualAdsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
-    }, 0));
+    }, 0)) : 0);
   const displayedOptimizationAdditionalAds = shouldBlankOptimizationSummary
     ? 0
     : Math.max(0, displayedOptimizationAdSpend - displayedCurrentAdSpend);

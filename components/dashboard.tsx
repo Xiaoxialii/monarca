@@ -17596,6 +17596,14 @@ function ReportsPage({
     message?: string;
     hasConnectedDataSource?: boolean;
     decision_report?: DecisionIntelligenceReportV1 | null;
+    generated_at?: string | null;
+    snapshot?: {
+      id?: string | null;
+      sourceDecisionSnapshotId?: string | null;
+      latestSnapshot?: boolean | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    } | null;
     optimizationReadiness?: OptimizationReadinessViewData | null;
     optimizationRun?: {
       completed_at?: string | null;
@@ -17904,6 +17912,9 @@ function ReportsPage({
   const optimizationLastUpdatedAt =
     analysisDecisionReportPayload?.optimizationRun?.completed_at
     ?? analysisDecisionReportPayload?.optimizationRun?.started_at
+    ?? analysisDecisionReportPayload?.generated_at
+    ?? analysisDecisionReportPayload?.snapshot?.updatedAt
+    ?? analysisDecisionReportPayload?.snapshot?.createdAt
     ?? null;
   const reportHeaderAction = (
     <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">

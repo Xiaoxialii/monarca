@@ -8,7 +8,7 @@ function read(path) {
 
 test("manual profit optimization button creates and polls an optimization job", () => {
   const dashboard = read("components/dashboard.tsx");
-  const startFunctionMatch = dashboard.match(/const startProfitOptimization = useCallback\(async \(\) => \{[\s\S]*?\n  \}, \[isZh, loadAnalysisDecisionReport\]\);/);
+  const startFunctionMatch = dashboard.match(/const startProfitOptimization = useCallback\(async \(\) => \{[\s\S]*?\n  \}, \[analysisDecisionReportPayload\?\.optimizationReadiness, hasStartedProfitOptimization, isZh, loadAnalysisDecisionReport\]\);/);
 
   assert.ok(startFunctionMatch, "startProfitOptimization should be an explicit callback");
   const startFunction = startFunctionMatch[0];
@@ -16,7 +16,7 @@ test("manual profit optimization button creates and polls an optimization job", 
   assert.match(startFunction, /"\/api\/dashboard\/ecommerce\/optimize"/);
   assert.match(startFunction, /method:\s*"POST"/);
   assert.match(startFunction, /waitForProfitOptimizationJob\(payload\.jobId/);
-  assert.match(startFunction, /await loadAnalysisDecisionReport\("full"\)/);
+  assert.match(startFunction, /await loadAnalysisDecisionReport\("full", \{ showLoading: false \}\)/);
   assert.match(startFunction, /optimizationDecisionReportRunId\(latestReport\) !== completedJob\.id/);
   assert.doesNotMatch(startFunction, /setHasStartedProfitOptimization\(true\);\s*await loadAnalysisDecisionReport\("full"\)/);
 });
@@ -55,7 +55,8 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
   assert.match(runner, /export async function enqueueSkuOptimizationJob/);
   assert.match(runner, /type:\s*"SKU_OPTIMIZATION"/);
   assert.match(runner, /in:\s*\["QUEUED", "PROCESSING", "PAUSED"\]/);
-  assert.match(runner, /if \(existing\.status === "QUEUED"\) return existing/);
+  assert.match(runner, /if \(existing\.status === "QUEUED"\) \{\s*if \(existing\.updatedAt >= queuedBeforeDate\(now\)\) return existing/);
+  assert.match(runner, /Failed - stale queued optimization job/);
   assert.match(runner, /if \(!isStaleSkuOptimizationJob\(existing, now\)\) return existing/);
 });
 
@@ -98,10 +99,35 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
   assert.match(artifactAvailability, /readR2ObjectText\(checkedArtifactKey\)/);
+  assert.match(artifactAvailability, /firstUnavailable \?\?=/);
+  assert.match(artifactAvailability, /continue;/);
   assert.match(artifactAvailability, /LOCAL_ARTIFACT_NOT_FOUND/);
   assert.match(artifactAvailability, /R2_CONFIGURATION_MISSING/);
-  assert.match(cache, /skipped unavailable overwrite of ready cache/);
-  assert.match(cache, /existing\?\.state === "ready" && split\.state === "unavailable"/);
+  assert.match(cache, /skipped unsafe overwrite of ready cache/);
+  assert.match(cache, /shouldRejectSnapshotOverwrite/);
+  assert.match(cache, /existingState:\s*existing\?\.state/);
+  assert.match(cache, /newState:\s*split\.state/);
+});
+
+test("dashboard loader skips unreadable canonical snapshots before falling back to older snapshots", () => {
+  const loader = read("lib/dashboard/ecommerce-sales-dashboard-loader.ts");
+
+  assert.match(loader, /const snapshotsBySource = new Map/);
+  assert.match(loader, /for \(const sourceSnapshots of snapshotsBySource\.values\(\)\)/);
+  assert.match(loader, /artifactDatasets\.push\(await readCanonicalDatasetFromSnapshot\(schemaJson\)\)/);
+  assert.match(loader, /readableArtifactError\(error\)/);
+  assert.doesNotMatch(loader, /const latestBySource = new Map/);
+});
+
+test("optimization summary does not add simulated ad spend when no recommendations are pending", () => {
+  const renderer = read("components/report-renderer-engine.tsx");
+  const dashboard = read("components/dashboard.tsx");
+
+  assert.match(renderer, /pendingDecisionRows\.length > 0 \? \(solverAdditionalAdSpend/);
+  assert.match(renderer, /: 0\);/);
+  assert.match(dashboard, /analysisDecisionReportPayload\?\.generated_at/);
+  assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.updatedAt/);
+  assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.createdAt/);
 });
 
 test("completed optimization jobs generate decision snapshots from internal data and refresh cache", () => {
@@ -127,7 +153,7 @@ test("new optimization snapshots include active decision context without excludi
   assert.match(generator, /active_decision_context_included/);
   assert.doesNotMatch(generator, /filterRowsByAcceptedSkus/);
   assert.doesNotMatch(generator, /accepted_optimization_actions_excluded/);
-  assert.match(generator, /total_opportunities: compactSkuDecisions\.length/);
+  assert.match(generator, /total_opportunities: optimization\.optimization_summary\.total_opportunities \?\? compactSkuDecisions\.length/);
   assert.match(generator, /total_expected_profit_gain: totalProfitImpact/);
 });
 
@@ -303,11 +329,11 @@ test("optimization header uses optimization run completion time", () => {
   const headerBlock = dashboard.match(/const reportHeaderAction = \([\s\S]*?\n  \);/);
 
   assert.ok(headerBlock, "report header action should exist");
-  assert.match(headerBlock[0], /optimizationRun\?\.completed_at/);
-  assert.match(headerBlock[0], /Optimized/);
-  assert.match(headerBlock[0], /Not optimized/);
+  assert.match(dashboard, /optimizationRun\?\.completed_at/);
+  assert.match(dashboard, /optimizationRun\?\.started_at/);
+  assert.match(dashboard, /analysisDecisionReportPayload\?\.generated_at/);
+  assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.updatedAt/);
   assert.doesNotMatch(headerBlock[0], /Data updated/);
-  assert.doesNotMatch(headerBlock[0], /generatedAt/);
 });
 
 test("optimization page loads latest decision report on initial render", () => {
@@ -325,16 +351,21 @@ test("optimization report cache preserves optimization run metadata", () => {
   assert.match(cache, /optimizationRun:\s*content\.optimizationRun/);
   assert.match(cache, /const optimizationRun = asRecord\(reportShell\.optimizationRun\)/);
   assert.match(cache, /optimizationRun:\s*Object\.keys\(optimizationRun\)\.length \? optimizationRun : null/);
-  assert.match(cache, /const queueRows = asArray\(cache\.queueRowsJson\)/);
+  assert.match(cache, /const queueRows = normalizeProfitImpactRows\(asArray\(cache\.queueRowsJson\)\)/);
   assert.match(cache, /skuDecisions:\s*queueRows/);
 });
 
 test("optimization accept and reject tolerate compact recommendations without simulation payload", () => {
   const renderer = read("components/report-renderer-engine.tsx");
+  const acceptFunction = renderer.match(/const acceptDecisionAction = async \(row: PortfolioDecisionRow\) => \{[\s\S]*?\n  \};/);
+  const rejectFunction = renderer.match(/const rejectDecisionAction = async \(row: PortfolioDecisionRow\) => \{[\s\S]*?\n  \};/);
 
-  assert.doesNotMatch(renderer, /recommendation\.simulation\.current_ads_spend/);
-  assert.doesNotMatch(renderer, /recommendation\.simulation\.predicted_revenue/);
-  assert.doesNotMatch(renderer, /recommendation\.simulation\.recommended_ads_spend/);
+  assert.ok(acceptFunction, "accept handler should exist");
+  assert.ok(rejectFunction, "reject handler should exist");
+  assert.doesNotMatch(acceptFunction[0], /recommendation\.simulation\.current_ads_spend/);
+  assert.doesNotMatch(acceptFunction[0], /recommendation\.simulation\.predicted_revenue/);
+  assert.doesNotMatch(acceptFunction[0], /recommendation\.simulation\.recommended_ads_spend/);
+  assert.doesNotMatch(rejectFunction[0], /recommendation\.simulation\.current_ads_spend/);
   assert.match(renderer, /recommendation\.simulation\?\.current_ads_spend/);
   assert.match(renderer, /recommendation\.simulation\?\.predicted_revenue/);
   assert.match(renderer, /recommendation\.simulation\?\.recommended_ads_spend/);
@@ -511,14 +542,15 @@ test("optimization portfolio controls stay visible and current portfolio uses po
   assert.ok(adSpendHelper, "current ad spend should be derived separately from added ad budget");
   assert.match(adSpendHelper[0], /total_ads_budget/);
   assert.match(renderer, /displayedCurrentAdSpend/);
-  assert.match(renderer, /Current Portfolio Profit/);
-  assert.match(renderer, /Current Ad Spend/);
-  assert.match(renderer, /!\s*isSkuOperationsOpen \? \(/);
-  assert.match(renderer, /SKU operating data/);
-  assert.match(renderer, /SKU optimization decision/);
-  assert.match(renderer, /flex min-h-0 min-w-0 flex-col gap-3/);
-  assert.match(renderer, /z-20 flex w-full shrink-0 flex-wrap items-center gap-2 rounded-full/);
-  assert.match(renderer, /min-h-0 min-w-0 flex-1 overflow-auto/);
+  assert.match(renderer, /Current Profit/);
+  assert.match(renderer, /Ad Spend/);
+  assert.match(renderer, /shouldShowOptimizationStarter/);
+  assert.match(renderer, /<OptimizationDecisionRail/);
+  assert.match(renderer, /<SelectedSkuOptimizationPanel/);
+  assert.match(renderer, /setIsDecisionPanelOpen\(\(open\) => !open\)/);
+  assert.match(renderer, /AI Decision Summary/);
+  assert.match(renderer, /Daily SKU Profit Optimization/);
+  assert.match(renderer, /min-h-0 flex-1 overflow-auto/);
   assert.doesNotMatch(renderer, /sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
   assert.match(renderer, /sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b/);
   assert.match(renderer, /xl:sticky xl:top-24 xl:h-full xl:max-h-full/);

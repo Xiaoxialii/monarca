@@ -6876,12 +6876,12 @@ function DataSourcesWorkspace({
 
   return (
     <div className="mx-auto mt-6 w-full max-w-[1180px] xl:mt-10">
-      <section className="rounded-[32px] border border-slate-200 bg-white/90 p-5 shadow-sm">
-        <h3 className="text-center text-xl font-semibold tracking-tight text-slate-950">
-          {isZh ? "Connect your commerce data in one click" : "Connect your commerce data in one click"}
-        </h3>
+      <h3 className="text-center text-xl font-semibold tracking-tight text-slate-950">
+        {isZh ? "Connect your commerce data in one click" : "Connect your commerce data in one click"}
+      </h3>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <section className="mt-5 rounded-[32px] border border-slate-200 bg-white/90 p-5 shadow-sm">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <button
             type="button"
             onClick={() => setIsConnectorPickerOpen(true)}

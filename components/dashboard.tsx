@@ -10074,26 +10074,6 @@ function reportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
   return range;
 }
 
-function analysisReportTimeRangeLabel(range: ReportTimeRange, locale: Locale) {
-  if (locale !== "zh") {
-    if (range === "TODAY") return "Daily analysis";
-    if (range === "7D") return "Weekly analysis";
-    if (range === "30D") return "Monthly analysis";
-    if (range === "12M") return "Annual analysis";
-    if (range === "ALL") return "All-time analysis";
-    if (range === "CUSTOM") return "Custom analysis";
-    return reportTimeRangeLabel(range, locale);
-  }
-
-  if (range === "TODAY") return "日报分析";
-  if (range === "7D") return "周报分析";
-  if (range === "30D") return "月报分析";
-  if (range === "12M") return "年度分析";
-  if (range === "ALL") return "全量分析";
-  if (range === "CUSTOM") return "自定义分析";
-  return reportTimeRangeLabel(range, locale);
-}
-
 function analysisReportModeForRange(range: ReportTimeRange) {
   if (range === "TODAY") return "daily_brief";
   if (range === "7D") return "weekly_report";
@@ -10571,116 +10551,6 @@ function optimizationDecisionReportSnapshotId(payload: ProfitOptimizationDecisio
   const sourceDecisionSnapshotId = typeof snapshot?.sourceDecisionSnapshotId === "string" ? snapshot.sourceDecisionSnapshotId.trim() : "";
   if (sourceDecisionSnapshotId) return sourceDecisionSnapshotId;
   return typeof snapshot?.id === "string" && snapshot.id.trim() ? snapshot.id.trim() : null;
-}
-
-function ReportDateRangeSelector({
-  selectedRange,
-  customStartDate,
-  customEndDate,
-  availableDateRange,
-  onRangeChange,
-  onCustomRangeChange,
-  locale = "zh",
-  labelVariant = "default"
-}: {
-  selectedRange: ReportTimeRange;
-  customStartDate?: string;
-  customEndDate?: string;
-  availableDateRange?: ReportAvailableDateRange | null;
-  onRangeChange: (range: ReportTimeRange) => void;
-  onCustomRangeChange?: (startDate: string, endDate: string) => void;
-  locale?: Locale;
-  labelVariant?: "default" | "analysis";
-}) {
-  const isZh = locale === "zh";
-  const [customDraftStartDate, setCustomDraftStartDate] = useState(customStartDate ?? "");
-  const [customDraftEndDate, setCustomDraftEndDate] = useState(customEndDate ?? "");
-  const availableStartDate = availableDateRange?.startDate ?? undefined;
-  const availableEndDate = availableDateRange?.endDate ?? availableDateRange?.latestDataDate ?? undefined;
-  const clampDate = useCallback((value: string) => {
-    if (availableStartDate && value < availableStartDate) return availableStartDate;
-    if (availableEndDate && value > availableEndDate) return availableEndDate;
-    return value;
-  }, [availableEndDate, availableStartDate]);
-  const customRangeStartValue = clampDate(customDraftStartDate || customStartDate || availableStartDate || "");
-  const customRangeEndValue = clampDate(customDraftEndDate || customEndDate || availableEndDate || "");
-
-  useEffect(() => {
-    if (selectedRange !== "CUSTOM") return;
-    setCustomDraftStartDate(customStartDate ?? availableStartDate ?? "");
-    setCustomDraftEndDate(customEndDate ?? availableEndDate ?? "");
-  }, [availableEndDate, availableStartDate, customEndDate, customStartDate, selectedRange]);
-
-  return (
-    <div className="flex flex-col items-end gap-2">
-      <div className="flex flex-wrap items-center gap-1 rounded-full border bg-secondary/30 p-1">
-        {reportTimeRangeOptions.map((range) => (
-          <button
-            key={range.value}
-            type="button"
-            onClick={() => onRangeChange(range.value)}
-            className={cn(
-              "rounded-full px-3 py-1.5 text-xs font-medium transition",
-              selectedRange === range.value
-                ? "bg-slate-900 text-white"
-                : "text-muted-foreground hover:bg-white"
-            )}
-          >
-            {labelVariant === "analysis"
-              ? analysisReportTimeRangeLabel(range.value, locale)
-              : reportTimeRangeLabel(range.value, locale)}
-          </button>
-        ))}
-      </div>
-      {selectedRange === "CUSTOM" ? (
-        <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-          <span className="text-muted-foreground">
-            {availableDateRange?.dateField
-              ? `${isZh ? "时间字段" : "Time field"}：${availableDateRange.dateField}`
-              : isZh ? "自定义区间" : "Custom range"}
-          </span>
-          <Input
-            type="date"
-            value={customRangeStartValue}
-            min={availableStartDate}
-            max={availableEndDate}
-            onChange={(event) => {
-              const nextStartDate = clampDate(event.target.value);
-              const nextEndDate = customRangeEndValue;
-              setCustomDraftStartDate(nextStartDate);
-              if (nextStartDate && nextEndDate && nextStartDate <= nextEndDate) {
-                onCustomRangeChange?.(nextStartDate, nextEndDate);
-              }
-            }}
-            className="h-8 w-36 text-xs"
-            aria-label={isZh ? "开始日期" : "Start date"}
-          />
-          <span className="text-muted-foreground">-</span>
-          <Input
-            type="date"
-            value={customRangeEndValue}
-            min={availableStartDate}
-            max={availableEndDate}
-            onChange={(event) => {
-              const nextStartDate = customRangeStartValue;
-              const nextEndDate = clampDate(event.target.value);
-              setCustomDraftEndDate(nextEndDate);
-              if (nextStartDate && nextEndDate && nextStartDate <= nextEndDate) {
-                onCustomRangeChange?.(nextStartDate, nextEndDate);
-              }
-            }}
-            className="h-8 w-36 text-xs"
-            aria-label={isZh ? "结束日期" : "End date"}
-          />
-          {availableStartDate && availableEndDate ? (
-            <span className="text-muted-foreground">
-              {availableStartDate} - {availableEndDate}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function parseReportTrendDate(value: string) {
@@ -18081,7 +17951,7 @@ function ReportPage({
   );
   const [isLoadingDecisionReport, setIsLoadingDecisionReport] = useState(false);
   const [decisionReportError, setDecisionReportError] = useState<string | null>(null);
-  const [decisionReportRange, setDecisionReportRange] = useState<SelectedReportDateRange>({ preset: "ALL" });
+  const decisionReportRange = useMemo<SelectedReportDateRange>(() => ({ preset: "ALL" }), []);
   const decisionReportIsReady = decisionReportPayload?.ok === true
     && decisionReportPayload.state === "ready"
     && Boolean(decisionReportPayload.decision_report);
@@ -18121,22 +17991,6 @@ function ReportPage({
     }
   }, [decisionReportRange, isLoadingConnectedSources, isZh]);
 
-  const handleDecisionReportRangeChange = useCallback((range: ReportTimeRange) => {
-    setDecisionReportRange((current) => ({
-      preset: range,
-      startDate: range === "CUSTOM" ? current.startDate : undefined,
-      endDate: range === "CUSTOM" ? current.endDate : undefined
-    }));
-  }, []);
-
-  const handleDecisionReportCustomRangeChange = useCallback((startDate: string, endDate: string) => {
-    setDecisionReportRange({
-      preset: "CUSTOM",
-      startDate,
-      endDate
-    });
-  }, []);
-
   useEffect(() => {
     if (!decisionReportIsRefreshing || isLoadingDecisionReport) return;
 
@@ -18167,18 +18021,6 @@ function ReportPage({
           <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
           {isLoadingDecisionReport ? (isZh ? "加载中..." : "Loading...") : (isZh ? "刷新报表" : "Refresh report")}
         </Button>
-      </div>
-
-      <div className="flex justify-end">
-        <ReportDateRangeSelector
-          selectedRange={decisionReportRange.preset}
-          customStartDate={decisionReportRange.startDate}
-          customEndDate={decisionReportRange.endDate}
-          onRangeChange={handleDecisionReportRangeChange}
-          onCustomRangeChange={handleDecisionReportCustomRangeChange}
-          locale={locale}
-          labelVariant="analysis"
-        />
       </div>
 
       {isLoadingConnectedSources ? (

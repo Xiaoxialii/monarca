@@ -1,6 +1,10 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { METRIC_SNAPSHOT_VERSION } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import {
+  currentDecisionSnapshotVersions,
+  METRIC_SNAPSHOT_VERSION
+} from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
+import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { processIngestionJob, retryableIngestionJobWhere } from "@/lib/ingestion/unified-ingestion-worker";
@@ -646,6 +650,35 @@ async function processConnectorSyncAsyncJob(
             force: false
           });
     const downstreamJobId = "downstreamJobId" in result ? result.downstreamJobId ?? null : null;
+    const optimizationRefresh = result.reused
+      ? {
+          jobId: null,
+          skipped: true,
+          reason: "sync_reused_existing_result"
+        }
+      : await enqueueOptimizationRefreshAfterConnectorSync(client, {
+          workspaceId: input.workspaceId,
+          provider,
+          dataSourceId,
+          connectorJobId: input.id
+        }).catch((error) => {
+          const message = error instanceof Error ? error.message : "Failed to queue optimization refresh after connector sync.";
+          console.warn("Connector sync succeeded but optimization refresh could not be queued", {
+            workspaceId: input.workspaceId,
+            provider,
+            dataSourceId,
+            connectorAccountId,
+            shopDomain,
+            connectorJobId: input.id,
+            message
+          });
+          return {
+            jobId: null,
+            skipped: true,
+            reason: "optimization_refresh_queue_failed",
+            errorMessage: message
+          };
+        });
 
     console.info(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_SUCCESS" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_SUCCESS" : "SHOPIFY_SYNC_SUCCESS", {
       workspaceId: input.workspaceId,
@@ -654,6 +687,9 @@ async function processConnectorSyncAsyncJob(
       shopDomain,
       jobId: input.id,
       runId: result.syncRunId,
+      optimizationRefreshJobId: optimizationRefresh.jobId,
+      optimizationRefreshSkipped: optimizationRefresh.skipped,
+      optimizationRefreshSkippedReason: optimizationRefresh.reason,
       durationMs: Date.now() - startedAt
     });
 
@@ -666,12 +702,14 @@ async function processConnectorSyncAsyncJob(
         connectorAccountId,
         shopDomain,
         syncRunId: result.syncRunId,
-        downstreamJobId
+        downstreamJobId,
+        optimizationRefreshJobId: optimizationRefresh.jobId
       },
       metadataJson: {
         trigger,
         status: result.status,
-        reused: result.reused ?? false
+        reused: result.reused ?? false,
+        optimizationRefresh
       }
     };
   } catch (error) {
@@ -698,6 +736,76 @@ async function processConnectorSyncAsyncJob(
 
     throw error;
   }
+}
+
+async function enqueueOptimizationRefreshAfterConnectorSync(
+  client: PrismaClient,
+  input: {
+    workspaceId: string;
+    provider: string;
+    dataSourceId: string;
+    connectorJobId: string;
+  }
+) {
+  const artifact = await canonicalArtifactAvailability(client, {
+    workspaceId: input.workspaceId
+  }).catch((error) => {
+    console.warn("Failed to check canonical artifact availability after connector sync", {
+      workspaceId: input.workspaceId,
+      provider: input.provider,
+      dataSourceId: input.dataSourceId,
+      connectorJobId: input.connectorJobId,
+      error
+    });
+    return null;
+  });
+
+  if (!artifact?.available) {
+    return {
+      jobId: null,
+      skipped: true,
+      reason: "canonical_artifact_unavailable",
+      artifactAvailability: artifact
+    };
+  }
+
+  const reason = `connector_sync:${input.provider}`;
+  const [versions, staleSummary] = await Promise.all([
+    currentDecisionSnapshotVersions(client, {
+      workspaceId: input.workspaceId
+    }),
+    markDashboardCachesStale(client, {
+      workspaceId: input.workspaceId,
+      reason
+    })
+  ]);
+
+  const job = await enqueueSkuOptimizationJob(client, {
+    workspaceId: input.workspaceId,
+    reason,
+    decisionMode: "full",
+    triggerDataSourceId: input.dataSourceId,
+    inputHash: versions.inputHash
+  });
+
+  void processJob(job.id, { client }).catch((error) => {
+    console.warn("Failed to process connector-triggered optimization job", {
+      workspaceId: input.workspaceId,
+      provider: input.provider,
+      dataSourceId: input.dataSourceId,
+      connectorJobId: input.connectorJobId,
+      optimizationJobId: job.id,
+      error
+    });
+  });
+
+  return {
+    jobId: job.id,
+    skipped: false,
+    reason,
+    staleSummary,
+    inputHash: versions.inputHash
+  };
 }
 
 function dateOnly(date: Date) {

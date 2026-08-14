@@ -364,6 +364,27 @@ test("optimization page loads latest decision report on initial render", () => {
   assert.match(dashboard, /setHasStartedProfitOptimization\(true\)/);
 });
 
+test("connector sync success automatically queues a stale-safe optimization refresh", () => {
+  const runner = read("lib/jobs/async-job-runner.ts");
+  const connectorHandler = runner.match(/async function processConnectorSyncAsyncJob\([\s\S]*?\n\}/);
+  const refreshHelper = runner.match(/async function enqueueOptimizationRefreshAfterConnectorSync\([\s\S]*?\n\}/);
+
+  assert.ok(connectorHandler, "connector sync handler should exist");
+  assert.ok(refreshHelper, "connector-triggered optimization helper should exist");
+  assert.match(runner, /markDashboardCachesStale/);
+  assert.match(runner, /enqueueSkuOptimizationJob/);
+  assert.match(connectorHandler[0], /result\.reused/);
+  assert.match(connectorHandler[0], /enqueueOptimizationRefreshAfterConnectorSync\(client/);
+  assert.match(connectorHandler[0], /optimization_refresh_queue_failed/);
+  assert.match(refreshHelper[0], /canonicalArtifactAvailability\(client/);
+  assert.match(refreshHelper[0], /reason = `connector_sync:\$\{input\.provider\}`/);
+  assert.match(refreshHelper[0], /markDashboardCachesStale\(client/);
+  assert.match(refreshHelper[0], /enqueueSkuOptimizationJob\(client/);
+  assert.match(refreshHelper[0], /decisionMode:\s*"full"/);
+  assert.match(refreshHelper[0], /triggerDataSourceId:\s*input\.dataSourceId/);
+  assert.match(refreshHelper[0], /void processJob\(job\.id, \{ client \}\)/);
+});
+
 test("optimization report cache preserves optimization run metadata", () => {
   const cache = read("lib/dashboard/optimization-report-cache.ts");
 

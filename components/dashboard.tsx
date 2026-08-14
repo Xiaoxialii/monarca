@@ -17951,11 +17951,11 @@ function ReportsPage({
 	    ?? analysisDecisionReportPayload?.snapshot?.createdAt
 	    ?? null;
   const metricsLastUpdatedAt = analysisDecisionReportPayload?.metrics?.generatedAt ?? analysisDecisionReportPayload?.generated_at ?? null;
-  const optimizationStateLabel = (() => {
-    if (refreshState?.status === "FAILED" || optimizationState?.status === "FAILED") {
-      return hasOptimizationSnapshot
-        ? (isZh ? "刷新失败，显示上次成功结果" : "Refresh failed, showing last successful result")
-        : (isZh ? "优化刷新失败" : "Optimization refresh failed");
+	  const optimizationStateLabel = (() => {
+	    if (refreshState?.status === "FAILED" || optimizationState?.status === "FAILED") {
+	      return hasOptimizationSnapshot
+	        ? (isZh ? "刷新失败，显示上次成功结果" : "Refresh failed, showing last successful result")
+	        : (isZh ? "优化刷新失败" : "Optimization refresh failed");
     }
     if (refreshState?.status === "QUEUED" || refreshState?.status === "RUNNING" || optimizationState?.status === "RUNNING") {
       return hasOptimizationSnapshot
@@ -17969,11 +17969,26 @@ function ReportsPage({
     }
     if (optimizationState?.status === "SUCCESS" && hasOptimizationSnapshot) {
       return isZh ? "优化就绪" : "Optimization Ready";
+	    }
+	    return isZh ? "暂无优化结果" : "No optimization available";
+	  })();
+  const optimizationStateShortLabel = (() => {
+    if (refreshState?.status === "FAILED" || optimizationState?.status === "FAILED") {
+      return isZh ? "失败" : "Failed";
     }
-    return isZh ? "暂无优化结果" : "No optimization available";
+    if (refreshState?.status === "QUEUED" || refreshState?.status === "RUNNING" || optimizationState?.status === "RUNNING") {
+      return isZh ? "更新中" : "Updating";
+    }
+    if (optimizationState?.status === "STALE") {
+      return isZh ? "过期" : "Stale";
+    }
+    if (optimizationState?.status === "SUCCESS" && hasOptimizationSnapshot) {
+      return isZh ? "就绪" : "Ready";
+    }
+    return isZh ? "暂无" : "Empty";
   })();
-  const optimizationBadgeClass = cn(
-    "rounded-full border px-2 py-1 text-[11px] font-bold uppercase tracking-wide",
+	  const optimizationBadgeClass = cn(
+	    "inline-flex max-w-full shrink-0 rounded-full border px-2 py-1 text-[11px] font-bold uppercase leading-none tracking-wide",
     refreshState?.status === "FAILED" || optimizationState?.status === "FAILED"
       ? "border-amber-200 bg-amber-50 text-amber-800"
       : refreshState?.status === "QUEUED" || refreshState?.status === "RUNNING" || optimizationState?.status === "RUNNING"
@@ -17989,25 +18004,27 @@ function ReportsPage({
     refreshState?.status === "QUEUED" ||
     refreshState?.status === "RUNNING" ||
     optimizationState?.status === "RUNNING";
-  const shouldShowOptimizationLoading =
-    isRunningProfitOptimization ||
-    (!hasOptimizationSnapshot && effectiveOptimizationStartedForReport && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight));
-	  const reportHeaderAction = (
-	    <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-semibold text-slate-500">
-        <span className={optimizationBadgeClass}>{optimizationStateLabel}</span>
-        {typeof optimizationState?.recommendationCount === "number" && hasOptimizationSnapshot ? (
-          <span>
-            {formatInteger(optimizationState.recommendationCount)} {isZh ? "个机会" : "opportunities"}
-          </span>
-        ) : null}
-	      <span>
-	        {isZh ? "上次优化" : "Last optimized"} {optimizationLastUpdatedAt ? formatReportDate(optimizationLastUpdatedAt) : "--"}
-	      </span>
-        <span>
-          {isZh ? "数据更新" : "Data updated"} {metricsLastUpdatedAt ? formatReportDate(metricsLastUpdatedAt) : "--"}
+	  const shouldShowOptimizationLoading =
+	    isRunningProfitOptimization ||
+	    (!hasOptimizationSnapshot && effectiveOptimizationStartedForReport && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight));
+		  const reportHeaderAction = (
+		    <div className="flex min-w-0 max-w-full flex-col items-end gap-1 text-right text-xs font-semibold text-slate-500">
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+          <span className={optimizationBadgeClass} title={optimizationStateLabel}>{optimizationStateShortLabel}</span>
+	        {typeof optimizationState?.recommendationCount === "number" && hasOptimizationSnapshot ? (
+	          <span className="whitespace-nowrap">
+	            {formatInteger(optimizationState.recommendationCount)} {isZh ? "个机会" : "opportunities"}
+	          </span>
+	        ) : null}
+        </div>
+		      <span className="max-w-full truncate">
+		        {isZh ? "优化" : "Optimized"} {optimizationLastUpdatedAt ? formatReportDate(optimizationLastUpdatedAt) : "--"}
+		      </span>
+        <span className="max-w-full truncate">
+          {isZh ? "数据" : "Data"} {metricsLastUpdatedAt ? formatReportDate(metricsLastUpdatedAt) : "--"}
         </span>
-	    </div>
-	  );
+		    </div>
+		  );
   const optimizationDecisionReport = useMemo(() => {
     const report = analysisDecisionReportPayload?.decision_report ?? null;
     const optimizationRun = analysisDecisionReportPayload?.optimizationRun ?? null;

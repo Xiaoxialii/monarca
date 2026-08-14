@@ -346,8 +346,10 @@ test("optimization header separates optimization and live metric timestamps", ()
   assert.match(dashboard, /optimizationRun\?\.completed_at/);
   assert.match(dashboard, /optimizationRun\?\.started_at/);
   assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.updatedAt/);
-  assert.match(headerBlock[0], /Last optimized/);
-  assert.match(headerBlock[0], /Data updated/);
+  assert.match(dashboard, /optimizationStateShortLabel/);
+  assert.match(headerBlock[0], /Optimized/);
+  assert.match(headerBlock[0], /Data/);
+  assert.match(headerBlock[0], /title=\{optimizationStateLabel\}/);
 });
 
 test("optimization page loads latest decision report on initial render", () => {

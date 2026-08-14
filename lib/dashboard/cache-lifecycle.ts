@@ -6,12 +6,14 @@ export async function markDashboardCachesStale(
   input: {
     workspaceId: string;
     reason: string;
+    invalidateOptimizationAssets?: boolean;
     now?: Date;
   }
 ) {
   const now = input.now ?? new Date();
   const staleTag = `stale:${input.reason}:${CANONICAL_PROFITABILITY_ENGINE_VERSION}:${now.toISOString()}`;
 
+  const shouldInvalidateOptimizationAssets = input.invalidateOptimizationAssets === true;
   const [reportMetricCaches, optimizationReportCaches, decisionSnapshots, reportSnapshots] = await Promise.all([
     prisma.reportMetricCache.updateMany({
       where: { workspaceId: input.workspaceId },
@@ -20,25 +22,39 @@ export async function markDashboardCachesStale(
         staleAt: now
       }
     }).catch(() => ({ count: 0 })),
-    prisma.optimizationReportCache.updateMany({
-      where: {
-        workspaceId: input.workspaceId,
-        state: { notIn: ["rebuilding", "REBUILDING"] }
-      },
-      data: {
-        state: "stale",
-        warning: staleTag
-      }
-    }).catch(() => ({ count: 0 })),
-    prisma.decisionSnapshot.updateMany({
-      where: {
-        workspaceId: input.workspaceId,
-        snapshotType: "optimization_report"
-      },
-      data: {
-        inputHash: staleTag
-      }
-    }).catch(() => ({ count: 0 })),
+    shouldInvalidateOptimizationAssets
+      ? prisma.optimizationReportCache.deleteMany({
+          where: {
+            workspaceId: input.workspaceId,
+            state: { notIn: ["rebuilding", "REBUILDING"] }
+          }
+        }).catch(() => ({ count: 0 }))
+      : prisma.optimizationReportCache.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            state: { notIn: ["rebuilding", "REBUILDING"] }
+          },
+          data: {
+            state: "stale",
+            warning: staleTag
+          }
+        }).catch(() => ({ count: 0 })),
+    shouldInvalidateOptimizationAssets
+      ? prisma.decisionSnapshot.deleteMany({
+          where: {
+            workspaceId: input.workspaceId,
+            snapshotType: "optimization_report"
+          }
+        }).catch(() => ({ count: 0 }))
+      : prisma.decisionSnapshot.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            snapshotType: "optimization_report"
+          },
+          data: {
+            inputHash: staleTag
+          }
+        }).catch(() => ({ count: 0 })),
     prisma.reportSnapshot.updateMany({
       where: { workspaceId: input.workspaceId },
       data: {
@@ -49,6 +65,7 @@ export async function markDashboardCachesStale(
 
   return {
     staleTag,
+    optimizationAssetsInvalidated: shouldInvalidateOptimizationAssets,
     reportMetricCaches: reportMetricCaches.count,
     optimizationReportCaches: optimizationReportCaches.count,
     decisionSnapshots: decisionSnapshots.count,

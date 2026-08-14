@@ -76,6 +76,7 @@ test("decision report route refreshes optimization caches only when canonical ar
   const route = read("app/api/dashboard/ecommerce/decision-report/route.ts");
   const artifactAvailability = read("lib/dashboard/canonical-artifact-availability.ts");
   const cache = read("lib/dashboard/optimization-report-cache.ts");
+  const cacheLifecycle = read("lib/dashboard/cache-lifecycle.ts");
 
   assert.match(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
@@ -94,16 +95,17 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
   assert.match(route, /state:\s*"processing"/);
   assert.match(route, /decision_report:\s*null/);
-  assert.match(route, /Optimization data is ready and a decision analysis refresh is running/);
+  assert.match(route, /New data invalidated the previous optimization snapshot/);
+  assert.match(route, /optimization_snapshot_invalidated/);
   assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
   assert.match(route, /const queued = jobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
   assert.match(route, /function processQueuedOptimizationJob/);
   assert.match(route, /if \(job\.status !== "QUEUED"\) return/);
   assert.match(route, /await processQueuedOptimizationJob\(job\)/);
   assert.match(route, /freshOptimizationCacheResponse/);
-  assert.match(route, /if \(!hasOptimizationRecommendationRows\(cachedPayload\)\) \{\s*const liveResponse = await liveDecisionReportResponse\(\{\s*workspaceId: session\.workspace\.id,\s*mode: decisionMode,\s*startedAt,\s*message: "Loaded current decision analysis because the cached optimization snapshot is stale\."/);
-  assert.match(route, /optimizationStatus:\s*"STALE"/);
-  assert.match(route, /fallbackReason:\s*`stale_decision_report_cache:\$\{freshness\.reason \?\? "unknown"\}`/);
+  assert.match(route, /optimizationStatus:\s*"PENDING"/);
+  assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_report_cache:\$\{freshness\.reason \?\? "unknown"\}`/);
+  assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_snapshot:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
@@ -118,6 +120,10 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(cache, /newState:\s*split\.state/);
   assert.doesNotMatch(cache, /stale cache skipped/);
   assert.doesNotMatch(cache, /return null;\s*\n\s*}\s*\n\s*return record;/);
+  assert.match(cacheLifecycle, /invalidateOptimizationAssets\?: boolean/);
+  assert.match(cacheLifecycle, /optimizationReportCache\.deleteMany/);
+  assert.match(cacheLifecycle, /decisionSnapshot\.deleteMany/);
+  assert.match(cacheLifecycle, /optimizationAssetsInvalidated/);
 });
 
 test("dashboard loader skips unreadable canonical snapshots before falling back to older snapshots", () => {
@@ -379,6 +385,7 @@ test("connector sync success automatically queues a stale-safe optimization refr
   assert.match(refreshHelper[0], /canonicalArtifactAvailability\(client/);
   assert.match(refreshHelper[0], /reason = `connector_sync:\$\{input\.provider\}`/);
   assert.match(refreshHelper[0], /markDashboardCachesStale\(client/);
+  assert.match(refreshHelper[0], /invalidateOptimizationAssets:\s*true/);
   assert.match(refreshHelper[0], /enqueueSkuOptimizationJob\(client/);
   assert.match(refreshHelper[0], /decisionMode:\s*"full"/);
   assert.match(refreshHelper[0], /triggerDataSourceId:\s*input\.dataSourceId/);

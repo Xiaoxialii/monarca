@@ -533,7 +533,7 @@ function queuedOptimizationResponse(input: {
     refreshJobId: input.jobId,
     refreshCurrentStep: input.currentStep ?? null,
     fallbackUsed: hasExistingReport,
-    fallbackReason: hasExistingReport ? "last_successful_optimization_snapshot" : null
+    fallbackReason: hasExistingReport ? "provided_optimization_payload" : null
   });
 }
 
@@ -813,11 +813,10 @@ export async function GET(request: Request) {
       return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        payload: cachedPayload,
         jobId: job.id,
         status: job.status,
         currentStep: job.currentStep,
-        message: "Optimization data is ready and a decision analysis refresh is running.",
+        message: "New data is available. Optimization refresh is running.",
         startedAt
       });
     }
@@ -868,30 +867,26 @@ export async function GET(request: Request) {
         mode: decisionMode,
         startedAt,
         payload: {
-          ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
           ok: true,
-          state: "stale",
-          status: "STALE",
+          state: "processing",
+          status: job.status,
           latestSnapshot: false,
-          message: "Optimization snapshot is missing SKU operating rows. A refresh job has been queued.",
+          message: "Optimization snapshot is invalid and a refresh job has been queued.",
           staleReason: "missing_ops_rows",
           jobId: job.id,
           snapshot: {
-            id: reportCache.id,
+            id: null,
             type: "OptimizationReportCache",
-            sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
-            createdAt: dateToIso(reportCache.createdAt),
-            updatedAt: dateToIso(reportCache.updatedAt),
-            stale: true
+            invalidated: true
           }
         },
-        optimizationStatus: "STALE",
-        optimizationSnapshotId: reportCache.id,
+        optimizationStatus: "PENDING",
+        optimizationSnapshotId: null,
         refreshStatus: explicitRefreshStatus(job.status),
         refreshJobId: job.id,
         refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: hasOptimizationRecommendationRows(cachedPayload),
-        fallbackReason: "incomplete_cached_optimization_rows"
+        fallbackUsed: false,
+        fallbackReason: "optimization_snapshot_invalidated"
       });
     }
 
@@ -955,32 +950,28 @@ export async function GET(request: Request) {
         mode: decisionMode,
         startedAt,
         payload: {
-          ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
           ok: true,
-          state: "stale",
-          status: "STALE",
+          state: "processing",
+          status: job.status,
           latestSnapshot: false,
-          message: "Optimization snapshot is stale. A refresh job has been queued.",
+          message: "New data invalidated the previous optimization snapshot. A refresh job has been queued.",
           staleReason: freshness.reason,
           jobId: job.id,
           currentVersions: freshness.current,
           snapshot: {
-            id: reportCache.id,
+            id: null,
             type: "OptimizationReportCache",
-            sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
-            createdAt: dateToIso(reportCache.createdAt),
-            updatedAt: dateToIso(reportCache.updatedAt),
-            stale: true
+            invalidated: true
           }
         },
         currentVersions: freshness.current,
-        optimizationStatus: "STALE",
-        optimizationSnapshotId: reportCache.id,
+        optimizationStatus: "PENDING",
+        optimizationSnapshotId: null,
         refreshStatus: explicitRefreshStatus(job.status),
         refreshJobId: job.id,
         refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: true,
-        fallbackReason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`
+        fallbackUsed: false,
+        fallbackReason: `optimization_snapshot_invalidated:${freshness.reason ?? "unknown"}`
       });
     }
 
@@ -1070,30 +1061,28 @@ export async function GET(request: Request) {
         mode: decisionMode,
         startedAt,
         payload: {
-          ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
           ok: true,
-          state: "stale",
-          status: "STALE",
+          state: "processing",
+          status: job.status,
           latestSnapshot: false,
-          message: "Optimization snapshot is stale. A refresh job has been queued.",
+          message: "New data invalidated the previous optimization snapshot. A refresh job has been queued.",
           staleReason: freshness.reason,
           jobId: job.id,
           currentVersions: freshness.current,
           snapshot: {
-            id: snapshot.id,
+            id: null,
             type: "DecisionSnapshot",
-            createdAt: dateToIso(snapshot.createdAt),
-            stale: true
+            invalidated: true
           }
         },
         currentVersions: freshness.current,
-        optimizationStatus: "STALE",
-        optimizationSnapshotId: snapshot.id,
+        optimizationStatus: "PENDING",
+        optimizationSnapshotId: null,
         refreshStatus: explicitRefreshStatus(job.status),
         refreshJobId: job.id,
         refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: true,
-        fallbackReason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`
+        fallbackUsed: false,
+        fallbackReason: `optimization_snapshot_invalidated:${freshness.reason ?? "unknown"}`
       });
     }
 
@@ -1164,7 +1153,7 @@ export async function GET(request: Request) {
       jobId: job.id,
       status: job.status,
       currentStep: job.currentStep,
-      message: "Optimization data is ready and a decision analysis refresh is running.",
+      message: "Optimization refresh is running.",
       startedAt
     });
   }

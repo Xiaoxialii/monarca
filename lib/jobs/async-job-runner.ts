@@ -776,7 +776,8 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
     }),
     markDashboardCachesStale(client, {
       workspaceId: input.workspaceId,
-      reason
+      reason,
+      invalidateOptimizationAssets: true
     })
   ]);
 

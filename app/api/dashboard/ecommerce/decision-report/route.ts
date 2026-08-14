@@ -86,6 +86,154 @@ function hasOptimizationRecommendationRows(payload: Record<string, unknown>) {
   return decisionRows.length > 0 || portfolioRows.length > 0;
 }
 
+function optimizationRecommendationCount(payload: Record<string, unknown>) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions)
+    ? optimization.skuDecisions
+    : Array.isArray(payload.skuDecisions)
+      ? payload.skuDecisions
+      : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+  const summary = asRecord(optimization.optimization_summary);
+  const summaryCount = firstNumericValue(
+    summary.queued_recommendation_count,
+    summary.selected_sku_count,
+    summary.total_opportunities
+  );
+
+  return Math.max(decisionRows.length, portfolioRows.length, summaryCount ?? 0);
+}
+
+type ExplicitOptimizationStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "STALE";
+type ExplicitRefreshStatus = "IDLE" | "QUEUED" | "RUNNING" | "FAILED";
+
+type DecisionReportContractInput = {
+  payload: Record<string, unknown>;
+  workspaceId: string;
+  mode: "full" | "sku";
+  metricsGeneratedAt?: string | null;
+  currentVersions?: {
+    canonicalSnapshotVersion?: string | null;
+    metricSnapshotVersion?: string | null;
+    optimizationVersion?: string | null;
+    inputHash?: string | null;
+  } | null;
+  optimizationSource?: "optimization_snapshot" | "none";
+  optimizationStatus?: ExplicitOptimizationStatus;
+  optimizationSnapshotId?: string | null;
+  optimizationGeneratedAt?: string | null;
+  optimizationCanonicalVersion?: string | null;
+  optimizationVersion?: string | null;
+  refreshStatus?: ExplicitRefreshStatus;
+  refreshJobId?: string | null;
+  refreshCurrentStep?: string | null;
+  refreshErrorCode?: string | null;
+  refreshErrorMessage?: string | null;
+  fallbackUsed?: boolean;
+  fallbackReason?: string | null;
+};
+
+function explicitRefreshStatus(status: string | null | undefined): ExplicitRefreshStatus {
+  if (status === "QUEUED") return "QUEUED";
+  if (status === "PROCESSING" || status === "PAUSED" || status === "RUNNING") return "RUNNING";
+  if (status === "FAILED" || status === "CANCELLED") return "FAILED";
+  return "IDLE";
+}
+
+function withDecisionReportContract(input: DecisionReportContractInput) {
+  const payload = input.payload;
+  const versions = asRecord(payload.decisionSnapshotVersions);
+  const snapshot = asRecord(payload.snapshot);
+  const recommendationCount = optimizationRecommendationCount(payload);
+  const optimizationSource = input.optimizationSource ?? (recommendationCount > 0 ? "optimization_snapshot" : "none");
+  const optimizationStatus = input.optimizationStatus ??
+    (optimizationSource === "optimization_snapshot" ? "SUCCESS" : "PENDING");
+  const generatedAt =
+    input.optimizationGeneratedAt ??
+    (typeof versions.generatedAt === "string" ? versions.generatedAt : null) ??
+    (typeof payload.generated_at === "string" ? payload.generated_at : null) ??
+    (typeof snapshot.updatedAt === "string" ? snapshot.updatedAt : null) ??
+    (typeof snapshot.createdAt === "string" ? snapshot.createdAt : null);
+  const canonicalVersion =
+    input.optimizationCanonicalVersion ??
+    (typeof versions.canonicalSnapshotVersion === "string" ? versions.canonicalSnapshotVersion : null) ??
+    (typeof versions.canonicalDataVersion === "string" ? versions.canonicalDataVersion : null);
+  const optimizationVersion =
+    input.optimizationVersion ??
+    (typeof versions.optimizationVersion === "string" ? versions.optimizationVersion : null) ??
+    (typeof versions.optimizationEngineVersion === "string" ? versions.optimizationEngineVersion : null);
+  const metricsGeneratedAt =
+    input.metricsGeneratedAt ??
+    (typeof payload.generated_at === "string" ? payload.generated_at : null);
+  const metricsCanonicalVersion =
+    input.currentVersions?.canonicalSnapshotVersion ??
+    canonicalVersion;
+
+  return {
+    ...payload,
+    metrics: {
+      source: "canonical_live",
+      generatedAt: metricsGeneratedAt,
+      canonicalVersion: metricsCanonicalVersion,
+      metricVersion: input.currentVersions?.metricSnapshotVersion ?? (typeof versions.metricSnapshotVersion === "string" ? versions.metricSnapshotVersion : null)
+    },
+    optimization: {
+      source: optimizationSource,
+      status: optimizationStatus,
+      snapshotId: input.optimizationSnapshotId ?? (typeof snapshot.id === "string" ? snapshot.id : null),
+      generatedAt,
+      canonicalVersion,
+      optimizationVersion,
+      recommendationCount
+    },
+    refresh: {
+      status: input.refreshStatus ?? "IDLE",
+      jobId: input.refreshJobId ?? null,
+      currentStep: input.refreshCurrentStep ?? null,
+      errorCode: input.refreshErrorCode ?? null,
+      errorMessage: input.refreshErrorMessage ?? null
+    },
+    fallback: {
+      used: input.fallbackUsed === true,
+      reason: input.fallbackReason ?? null
+    }
+  };
+}
+
+function logDecisionReportContract(body: Record<string, unknown>, input: { workspaceId: string; mode: string }) {
+  const metrics = asRecord(body.metrics);
+  const optimization = asRecord(body.optimization);
+  const refresh = asRecord(body.refresh);
+  const fallback = asRecord(body.fallback);
+  console.info("[decision-report] response_state", {
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    metricsSource: metrics.source ?? null,
+    optimizationSource: optimization.source ?? null,
+    snapshotId: optimization.snapshotId ?? null,
+    canonicalVersion: optimization.canonicalVersion ?? metrics.canonicalVersion ?? null,
+    optimizationVersion: optimization.optimizationVersion ?? null,
+    recommendationCount: optimization.recommendationCount ?? 0,
+    optimizationStatus: optimization.status ?? null,
+    refreshStatus: refresh.status ?? null,
+    fallbackUsed: fallback.used === true,
+    fallbackReason: fallback.reason ?? null
+  });
+}
+
+function decisionReportJson(input: DecisionReportContractInput & { startedAt: number }) {
+  const body = withDecisionReportContract({
+    ...input,
+    payload: {
+      ...input.payload,
+      performance: input.payload.performance ?? snapshotPerformance(input.startedAt, "snapshot")
+    }
+  });
+  logDecisionReportContract(body, { workspaceId: input.workspaceId, mode: input.mode });
+  return NextResponse.json(body);
+}
+
 function numericValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -240,6 +388,8 @@ async function optimizationRefreshAvailability(workspaceId: string) {
 }
 
 function unavailableCanonicalArtifactResponse(input: {
+  workspaceId: string;
+  mode: "full" | "sku";
   payload?: Record<string, unknown>;
   cacheId?: string | null;
   cacheCreatedAt?: Date | null;
@@ -248,28 +398,40 @@ function unavailableCanonicalArtifactResponse(input: {
   artifact: Awaited<ReturnType<typeof canonicalArtifactAvailability>> | null;
   startedAt: number;
 }) {
-  return NextResponse.json({
-    ...(input.payload ?? {}),
-    ok: true,
-    state: input.payload?.state ?? "unavailable",
-    status: "UNAVAILABLE",
-    latestSnapshot: Boolean(input.cacheId),
-    message: input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
-    refreshSkippedReason: "canonical_artifact_unavailable",
-    artifactAvailability: input.artifact,
-    jobId: null,
-    snapshot: input.cacheId
-      ? {
-        id: input.cacheId,
-        type: "OptimizationReportCache",
-        sourceDecisionSnapshotId: input.sourceDecisionSnapshotId ?? null,
-        createdAt: dateToIso(input.cacheCreatedAt),
-        updatedAt: dateToIso(input.cacheUpdatedAt),
-        latestSnapshot: true,
-        refreshSkipped: true
-      }
-      : null,
-    performance: snapshotPerformance(input.startedAt, "snapshot")
+  const payload = input.payload ?? {};
+  return decisionReportJson({
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    startedAt: input.startedAt,
+    payload: {
+      ...payload,
+      ok: true,
+      state: payload.state ?? "unavailable",
+      status: "UNAVAILABLE",
+      latestSnapshot: Boolean(input.cacheId),
+      message: input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
+      refreshSkippedReason: "canonical_artifact_unavailable",
+      artifactAvailability: input.artifact,
+      jobId: null,
+      snapshot: input.cacheId
+        ? {
+          id: input.cacheId,
+          type: "OptimizationReportCache",
+          sourceDecisionSnapshotId: input.sourceDecisionSnapshotId ?? null,
+          createdAt: dateToIso(input.cacheCreatedAt),
+          updatedAt: dateToIso(input.cacheUpdatedAt),
+          latestSnapshot: true,
+          refreshSkipped: true
+        }
+        : null
+    },
+    optimizationStatus: hasOptimizationRecommendationRows(payload) ? "FAILED" : "PENDING",
+    optimizationSnapshotId: input.cacheId ?? null,
+    refreshStatus: "FAILED",
+    refreshErrorCode: "ARTIFACT_UNAVAILABLE",
+    refreshErrorMessage: input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
+    fallbackUsed: hasOptimizationRecommendationRows(payload),
+    fallbackReason: "canonical_artifact_unavailable"
   });
 }
 
@@ -309,6 +471,8 @@ async function latestOptimizationJob(workspaceId: string) {
 }
 
 function queuedOptimizationResponse(input: {
+  workspaceId: string;
+  mode: "full" | "sku";
   payload?: Record<string, unknown>;
   jobId: string;
   status: string;
@@ -336,30 +500,40 @@ function queuedOptimizationResponse(input: {
       : [];
   const hasExistingReport = Object.keys(existingReport).length > 0 || existingSkuDecisions.length > 0;
 
-  return NextResponse.json({
-    ...payload,
-    ok: true,
-    state: "processing",
-    status: input.status,
-    latestSnapshot: false,
-    message: input.message,
-    jobId: input.jobId,
-    decision_report: hasExistingReport ? payload.decision_report : null,
-    portfolioSummary: hasExistingReport
-      ? payload.portfolioSummary ?? existingReport.portfolioSummary ?? existingOptimization.portfolioSummary ?? null
-      : null,
-    allocationRecommendation: hasExistingReport
-      ? payload.allocationRecommendation ?? existingReport.allocationRecommendation ?? null
-      : null,
-    skuDecisions: hasExistingReport ? existingSkuDecisions : [],
-    riskAlerts: hasExistingReport ? existingRiskAlerts : [],
-    executionPlan: hasExistingReport ? existingExecutionPlan : [],
-    optimizationRun: {
-      ...asRecord(payload.optimizationRun),
-      optimization_run_id: input.jobId,
-      current_step: input.currentStep ?? null
+  return decisionReportJson({
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    startedAt: input.startedAt,
+    payload: {
+      ...payload,
+      ok: true,
+      state: "processing",
+      status: input.status,
+      latestSnapshot: false,
+      message: input.message,
+      jobId: input.jobId,
+      decision_report: hasExistingReport ? payload.decision_report : null,
+      portfolioSummary: hasExistingReport
+        ? payload.portfolioSummary ?? existingReport.portfolioSummary ?? existingOptimization.portfolioSummary ?? null
+        : null,
+      allocationRecommendation: hasExistingReport
+        ? payload.allocationRecommendation ?? existingReport.allocationRecommendation ?? null
+        : null,
+      skuDecisions: hasExistingReport ? existingSkuDecisions : [],
+      riskAlerts: hasExistingReport ? existingRiskAlerts : [],
+      executionPlan: hasExistingReport ? existingExecutionPlan : [],
+      optimizationRun: {
+        ...asRecord(payload.optimizationRun),
+        optimization_run_id: input.jobId,
+        current_step: input.currentStep ?? null
+      }
     },
-    performance: snapshotPerformance(input.startedAt, "snapshot")
+    optimizationStatus: hasExistingReport ? "RUNNING" : "PENDING",
+    refreshStatus: explicitRefreshStatus(input.status),
+    refreshJobId: input.jobId,
+    refreshCurrentStep: input.currentStep ?? null,
+    fallbackUsed: hasExistingReport,
+    fallbackReason: hasExistingReport ? "last_successful_optimization_snapshot" : null
   });
 }
 
@@ -393,17 +567,24 @@ async function freshOptimizationCacheResponse(input: {
   const refreshedPayload = optimizationReportCachePayload(refreshedCache);
   if (cacheNeedsOptimizationRefresh(refreshedPayload)) return null;
 
-  return NextResponse.json({
-    ...await withOptimizationReadiness(input.workspaceId, refreshedPayload),
-    snapshot: {
-      id: refreshedCache.id,
-      type: "OptimizationReportCache",
-      sourceDecisionSnapshotId: refreshedCache.sourceDecisionSnapshotId,
-      createdAt: dateToIso(refreshedCache.createdAt),
-      updatedAt: dateToIso(refreshedCache.updatedAt),
-      latestSnapshot: true
+  return decisionReportJson({
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    startedAt: input.startedAt,
+    payload: {
+      ...await withOptimizationReadiness(input.workspaceId, refreshedPayload),
+      snapshot: {
+        id: refreshedCache.id,
+        type: "OptimizationReportCache",
+        sourceDecisionSnapshotId: refreshedCache.sourceDecisionSnapshotId,
+        createdAt: dateToIso(refreshedCache.createdAt),
+        updatedAt: dateToIso(refreshedCache.updatedAt),
+        latestSnapshot: true
+      }
     },
-    performance: snapshotPerformance(input.startedAt, "snapshot")
+    optimizationStatus: "SUCCESS",
+    optimizationSnapshotId: refreshedCache.id,
+    refreshStatus: "IDLE"
   });
 }
 
@@ -431,35 +612,44 @@ async function liveDecisionReportResponse(input: {
   const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
   const optimizationReadiness = validateOptimizationData(loaded.data);
 
-  return NextResponse.json({
-    ok: true,
-    state: "ready",
-    status: "READY",
-    latestSnapshot: false,
-    hasConnectedDataSource: true,
-    message: input.message ?? loaded.message ?? "Loaded current decision analysis from live canonical metrics.",
-    decision_report: decisionReport,
-    portfolioSummary: decisionReport.portfolioSummary ?? optimization.portfolioSummary ?? null,
-    allocationRecommendation: decisionReport.allocationRecommendation ?? optimization.allocationRecommendation ?? null,
-    skuDecisions: queueRows,
-    riskAlerts: Array.isArray(decisionReport.riskAlerts) ? decisionReport.riskAlerts : [],
-    executionPlan: Array.isArray(decisionReport.executionPlan) ? decisionReport.executionPlan : [],
-    generated_at: loaded.data?.metadata.computed_at ?? null,
-    source_platforms: loaded.data?.metadata.source_platforms ?? [],
-    lineage: loaded.lineage,
-    optimizationReadiness,
-    optimizationReadinessDebug: readinessDebug(loaded, "current_canonical_metrics"),
-    liveFallback: true,
-    snapshot: {
-      id: null,
-      type: "LiveDecisionReport",
-      latestSnapshot: false
+  return decisionReportJson({
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    startedAt: input.startedAt,
+    payload: {
+      ok: true,
+      state: "ready",
+      status: "READY",
+      latestSnapshot: false,
+      hasConnectedDataSource: true,
+      message: input.message ?? loaded.message ?? "Loaded current decision analysis from live canonical metrics.",
+      decision_report: decisionReport,
+      portfolioSummary: decisionReport.portfolioSummary ?? optimization.portfolioSummary ?? null,
+      allocationRecommendation: decisionReport.allocationRecommendation ?? optimization.allocationRecommendation ?? null,
+      skuDecisions: queueRows,
+      riskAlerts: Array.isArray(decisionReport.riskAlerts) ? decisionReport.riskAlerts : [],
+      executionPlan: Array.isArray(decisionReport.executionPlan) ? decisionReport.executionPlan : [],
+      generated_at: loaded.data?.metadata.computed_at ?? null,
+      source_platforms: loaded.data?.metadata.source_platforms ?? [],
+      lineage: loaded.lineage,
+      optimizationReadiness,
+      optimizationReadinessDebug: readinessDebug(loaded, "current_canonical_metrics"),
+      liveFallback: true,
+      snapshot: {
+        id: null,
+        type: "LiveDecisionReport",
+        latestSnapshot: false
+      },
+      debug: {
+        queueRows: queueRows.length,
+        portfolioRows: portfolioRows.length
+      }
     },
-    performance: snapshotPerformance(input.startedAt, "snapshot"),
-    debug: {
-      queueRows: queueRows.length,
-      portfolioRows: portfolioRows.length
-    }
+    optimizationSource: queueRows.length || portfolioRows.length ? "optimization_snapshot" : "none",
+    optimizationStatus: queueRows.length || portfolioRows.length ? "SUCCESS" : "PENDING",
+    refreshStatus: "IDLE",
+    fallbackUsed: true,
+    fallbackReason: "live_decision_report"
   });
 }
 
@@ -576,6 +766,8 @@ export async function GET(request: Request) {
       const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
       if (!refreshAvailability.canRefresh) {
         return unavailableCanonicalArtifactResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
           payload: cachedPayload,
           cacheId: reportCache.id,
           cacheCreatedAt: reportCache.createdAt,
@@ -586,13 +778,15 @@ export async function GET(request: Request) {
         });
       }
 
-      const liveResponse = await liveDecisionReportResponse({
-        workspaceId: session.workspace.id,
-        mode: decisionMode,
-        startedAt,
-        message: "Loaded current decision analysis while the optimization cache refreshes."
-      });
-      if (liveResponse) return liveResponse;
+      if (!hasOptimizationRecommendationRows(cachedPayload)) {
+        const liveResponse = await liveDecisionReportResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt,
+          message: "Loaded current decision analysis while the optimization cache refreshes."
+        });
+        if (liveResponse) return liveResponse;
+      }
 
       let job = await latestOptimizationJob(session.workspace.id);
 
@@ -617,6 +811,8 @@ export async function GET(request: Request) {
       }
 
       return queuedOptimizationResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
         payload: cachedPayload,
         jobId: job.id,
         status: job.status,
@@ -630,6 +826,8 @@ export async function GET(request: Request) {
       const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
       if (!refreshAvailability.canRefresh) {
         return unavailableCanonicalArtifactResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
           payload: cachedPayload,
           cacheId: reportCache.id,
           cacheCreatedAt: reportCache.createdAt,
@@ -665,24 +863,35 @@ export async function GET(request: Request) {
         if (freshResponse) return freshResponse;
       }
 
-      return NextResponse.json({
-        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
-        ok: true,
-        state: "stale",
-        status: "STALE",
-        latestSnapshot: false,
-        message: "Optimization snapshot is missing SKU operating rows. A refresh job has been queued.",
-        staleReason: "missing_ops_rows",
-        jobId: job.id,
-        snapshot: {
-          id: reportCache.id,
-          type: "OptimizationReportCache",
-          sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
-          createdAt: dateToIso(reportCache.createdAt),
-          updatedAt: dateToIso(reportCache.updatedAt),
-          stale: true
+      return decisionReportJson({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        payload: {
+          ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
+          ok: true,
+          state: "stale",
+          status: "STALE",
+          latestSnapshot: false,
+          message: "Optimization snapshot is missing SKU operating rows. A refresh job has been queued.",
+          staleReason: "missing_ops_rows",
+          jobId: job.id,
+          snapshot: {
+            id: reportCache.id,
+            type: "OptimizationReportCache",
+            sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
+            createdAt: dateToIso(reportCache.createdAt),
+            updatedAt: dateToIso(reportCache.updatedAt),
+            stale: true
+          }
         },
-        performance: snapshotPerformance(startedAt, "snapshot")
+        optimizationStatus: "STALE",
+        optimizationSnapshotId: reportCache.id,
+        refreshStatus: explicitRefreshStatus(job.status),
+        refreshJobId: job.id,
+        refreshCurrentStep: job.currentStep ?? null,
+        fallbackUsed: hasOptimizationRecommendationRows(cachedPayload),
+        fallbackReason: "incomplete_cached_optimization_rows"
       });
     }
 
@@ -702,6 +911,8 @@ export async function GET(request: Request) {
       const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
       if (!refreshAvailability.canRefresh) {
         return unavailableCanonicalArtifactResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
           payload: cachedPayload,
           cacheId: reportCache.id,
           cacheCreatedAt: reportCache.createdAt,
@@ -739,39 +950,58 @@ export async function GET(request: Request) {
         if (freshResponse) return freshResponse;
       }
 
-      return NextResponse.json({
-        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
-        ok: true,
-        state: "stale",
-        status: "STALE",
-        latestSnapshot: false,
-        message: "Optimization snapshot is stale. A refresh job has been queued.",
-        staleReason: freshness.reason,
-        jobId: job.id,
+      return decisionReportJson({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        payload: {
+          ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
+          ok: true,
+          state: "stale",
+          status: "STALE",
+          latestSnapshot: false,
+          message: "Optimization snapshot is stale. A refresh job has been queued.",
+          staleReason: freshness.reason,
+          jobId: job.id,
+          currentVersions: freshness.current,
+          snapshot: {
+            id: reportCache.id,
+            type: "OptimizationReportCache",
+            sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
+            createdAt: dateToIso(reportCache.createdAt),
+            updatedAt: dateToIso(reportCache.updatedAt),
+            stale: true
+          }
+        },
         currentVersions: freshness.current,
+        optimizationStatus: "STALE",
+        optimizationSnapshotId: reportCache.id,
+        refreshStatus: explicitRefreshStatus(job.status),
+        refreshJobId: job.id,
+        refreshCurrentStep: job.currentStep ?? null,
+        fallbackUsed: true,
+        fallbackReason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`
+      });
+    }
+
+    return decisionReportJson({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
+      startedAt,
+      payload: {
+        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
         snapshot: {
           id: reportCache.id,
           type: "OptimizationReportCache",
           sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           createdAt: dateToIso(reportCache.createdAt),
           updatedAt: dateToIso(reportCache.updatedAt),
-          stale: true
-        },
-        performance: snapshotPerformance(startedAt, "snapshot")
-      });
-    }
-
-    return NextResponse.json({
-      ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
-      snapshot: {
-        id: reportCache.id,
-        type: "OptimizationReportCache",
-        sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
-        createdAt: dateToIso(reportCache.createdAt),
-        updatedAt: dateToIso(reportCache.updatedAt),
-        latestSnapshot: true
+          latestSnapshot: true
+        }
       },
-      performance: snapshotPerformance(startedAt, "snapshot")
+      optimizationStatus: "SUCCESS",
+      optimizationSnapshotId: reportCache.id,
+      refreshStatus: "IDLE"
     });
   }
 
@@ -806,6 +1036,8 @@ export async function GET(request: Request) {
       const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
       if (!refreshAvailability.canRefresh) {
         return unavailableCanonicalArtifactResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
           payload: recommendationsJson,
           cacheId: snapshot.id,
           cacheCreatedAt: snapshot.createdAt,
@@ -833,42 +1065,64 @@ export async function GET(request: Request) {
         if (freshResponse) return freshResponse;
       }
 
-      return NextResponse.json({
-        ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
-        ok: true,
-        state: "stale",
-        status: "STALE",
-        latestSnapshot: false,
-        message: "Optimization snapshot is stale. A refresh job has been queued.",
-        staleReason: freshness.reason,
-        jobId: job.id,
+      return decisionReportJson({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        payload: {
+          ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
+          ok: true,
+          state: "stale",
+          status: "STALE",
+          latestSnapshot: false,
+          message: "Optimization snapshot is stale. A refresh job has been queued.",
+          staleReason: freshness.reason,
+          jobId: job.id,
+          currentVersions: freshness.current,
+          snapshot: {
+            id: snapshot.id,
+            type: "DecisionSnapshot",
+            createdAt: dateToIso(snapshot.createdAt),
+            stale: true
+          }
+        },
         currentVersions: freshness.current,
+        optimizationStatus: "STALE",
+        optimizationSnapshotId: snapshot.id,
+        refreshStatus: explicitRefreshStatus(job.status),
+        refreshJobId: job.id,
+        refreshCurrentStep: job.currentStep ?? null,
+        fallbackUsed: true,
+        fallbackReason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`
+      });
+    }
+
+    return decisionReportJson({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
+      startedAt,
+      payload: {
+        ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
         snapshot: {
           id: snapshot.id,
           type: "DecisionSnapshot",
           createdAt: dateToIso(snapshot.createdAt),
-          stale: true
-        },
-        performance: snapshotPerformance(startedAt, "snapshot")
-      });
-    }
-
-    return NextResponse.json({
-      ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
-      snapshot: {
-        id: snapshot.id,
-        type: "DecisionSnapshot",
-        createdAt: dateToIso(snapshot.createdAt),
-        latestSnapshot: true,
-        algorithmVersion: snapshot.algorithmVersion,
-        optimizationVersion: snapshot.optimizationVersion,
-        canonicalSnapshotVersion: snapshot.canonicalSnapshotVersion,
-        metricSnapshotVersion: snapshot.metricSnapshotVersion,
-        simulationVersion: snapshot.simulationVersion,
-        inputHash: snapshot.inputHash,
-        generatedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null
+          latestSnapshot: true,
+          algorithmVersion: snapshot.algorithmVersion,
+          optimizationVersion: snapshot.optimizationVersion,
+          canonicalSnapshotVersion: snapshot.canonicalSnapshotVersion,
+          metricSnapshotVersion: snapshot.metricSnapshotVersion,
+          simulationVersion: snapshot.simulationVersion,
+          inputHash: snapshot.inputHash,
+          generatedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null
+        }
       },
-      performance: snapshotPerformance(startedAt, "snapshot")
+      optimizationStatus: "SUCCESS",
+      optimizationSnapshotId: snapshot.id,
+      optimizationGeneratedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null,
+      optimizationCanonicalVersion: snapshot.canonicalSnapshotVersion,
+      optimizationVersion: snapshot.optimizationVersion,
+      refreshStatus: "IDLE"
     });
   }
 
@@ -905,6 +1159,8 @@ export async function GET(request: Request) {
     }
 
     return queuedOptimizationResponse({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
       jobId: job.id,
       status: job.status,
       currentStep: job.currentStep,
@@ -915,46 +1171,55 @@ export async function GET(request: Request) {
 
   if (refreshAvailability.artifact) {
     return unavailableCanonicalArtifactResponse({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
       artifact: refreshAvailability.artifact,
       startedAt
     });
   }
 
-  return NextResponse.json({
-    ok: true,
-    state: "empty",
-    hasConnectedDataSource: false,
-    message: OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE,
-    decision_report: null,
-    portfolioSummary: null,
-    allocationRecommendation: null,
-    skuDecisions: [],
-    riskAlerts: [],
-    executionPlan: [],
-    generated_at: null,
-    source_platforms: [],
-    lineage: null,
-    missingDataRequirements: [
-      "orders.order_id",
-      "orders.order_date",
-      "order_items.sku",
-      "order_items.quantity",
-      "order_items.revenue",
-      "products.sku_or_product_id",
-      "cost.unit_cost_or_cogs",
-      "cost.shipping_cost",
-      "cost.platform_fee",
-      "cost.payment_fee",
-      "refunds.order_id",
-      "refunds.refund_amount",
-      "ads.ad_spend",
-      "ads.sku_or_product_id",
-      "inventory.sku",
-      "inventory.inventory_on_hand",
-      "channel.channel_or_platform"
-    ],
-    warning: "DECISION_SNAPSHOT_MISS",
-    performance: snapshotPerformance(startedAt, "snapshot")
+  return decisionReportJson({
+    workspaceId: session.workspace.id,
+    mode: decisionMode,
+    startedAt,
+    payload: {
+      ok: true,
+      state: "empty",
+      hasConnectedDataSource: false,
+      message: OPTIMIZATION_DATA_REQUIREMENTS_MESSAGE,
+      decision_report: null,
+      portfolioSummary: null,
+      allocationRecommendation: null,
+      skuDecisions: [],
+      riskAlerts: [],
+      executionPlan: [],
+      generated_at: null,
+      source_platforms: [],
+      lineage: null,
+      missingDataRequirements: [
+        "orders.order_id",
+        "orders.order_date",
+        "order_items.sku",
+        "order_items.quantity",
+        "order_items.revenue",
+        "products.sku_or_product_id",
+        "cost.unit_cost_or_cogs",
+        "cost.shipping_cost",
+        "cost.platform_fee",
+        "cost.payment_fee",
+        "refunds.order_id",
+        "refunds.refund_amount",
+        "ads.ad_spend",
+        "ads.sku_or_product_id",
+        "inventory.sku",
+        "inventory.inventory_on_hand",
+        "channel.channel_or_platform"
+      ],
+      warning: "DECISION_SNAPSHOT_MISS"
+    },
+    optimizationSource: "none",
+    optimizationStatus: "PENDING",
+    refreshStatus: "IDLE"
   });
 }
 

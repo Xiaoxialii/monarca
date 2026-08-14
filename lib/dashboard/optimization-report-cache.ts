@@ -2,8 +2,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
 import {
   attachSnapshotIdentity,
-  currentDashboardSnapshotIdentity,
-  isSnapshotFresh,
   shouldRejectSnapshotOverwrite,
   type SnapshotIdentity
 } from "./snapshot-freshness";
@@ -310,22 +308,6 @@ export async function findOptimizationReportCache(
   });
 
   if (!record) return null;
-
-  const expected = await currentDashboardSnapshotIdentity(prisma, { workspaceId: input.workspaceId });
-  const freshness = isSnapshotFresh({
-    ...record,
-    ...asRecord(record.portfolioOptimizationJson),
-    ...asRecord(record.portfolioSummaryJson)
-  }, expected);
-  if (!freshness.isFresh) {
-    console.warn("[optimization-report-cache] stale cache skipped", {
-      workspace_id: input.workspaceId,
-      mode: input.mode,
-      cache_id: record.id,
-      reasons: freshness.reasons
-    });
-    return null;
-  }
 
   return record;
 }

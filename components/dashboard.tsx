@@ -17596,8 +17596,34 @@ function ReportsPage({
     message?: string;
     hasConnectedDataSource?: boolean;
     decision_report?: DecisionIntelligenceReportV1 | null;
-    generated_at?: string | null;
-    snapshot?: {
+	    generated_at?: string | null;
+    metrics?: {
+      source?: "canonical_live";
+      generatedAt?: string | null;
+      canonicalVersion?: string | null;
+      metricVersion?: string | null;
+    } | null;
+    optimization?: {
+      source?: "optimization_snapshot" | "none";
+      status?: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "STALE";
+      snapshotId?: string | null;
+      generatedAt?: string | null;
+      canonicalVersion?: string | null;
+      optimizationVersion?: string | null;
+      recommendationCount?: number | null;
+    } | null;
+    refresh?: {
+      status?: "IDLE" | "QUEUED" | "RUNNING" | "FAILED";
+      jobId?: string | null;
+      currentStep?: string | null;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+    } | null;
+    fallback?: {
+      used?: boolean;
+      reason?: string | null;
+    } | null;
+	    snapshot?: {
       id?: string | null;
       sourceDecisionSnapshotId?: string | null;
       latestSnapshot?: boolean | null;
@@ -17682,13 +17708,16 @@ function ReportsPage({
           ? "无法连接到 Monarca 优化服务，请刷新页面后重试。"
           : "Could not reach the Monarca optimization service. Refresh the page and try again."
       );
-      if (response.ok && payload?.ok) {
-        if (analysisDecisionReportRequestRef.current === requestId) {
-          setAnalysisDecisionReportPayload(payload);
-          if (payload.decision_report || payload.optimizationRun?.completed_at) {
-            setHasStartedProfitOptimization(true);
-          }
-        }
+	      if (response.ok && payload?.ok) {
+	        if (analysisDecisionReportRequestRef.current === requestId) {
+	          setAnalysisDecisionReportPayload(payload);
+          const hasOptimizationSnapshot =
+            payload.optimization?.source === "optimization_snapshot" &&
+            (payload.optimization?.recommendationCount ?? 0) > 0;
+	          if (hasOptimizationSnapshot || payload.optimizationRun?.completed_at) {
+	            setHasStartedProfitOptimization(true);
+	          }
+	        }
       }
       return payload;
     } catch (error) {
@@ -17909,20 +17938,76 @@ function ReportsPage({
 	    setSelectedAnalysisDateRange(nextRange);
 	  }, [analysisAvailableDateRange?.endDate, analysisAvailableDateRange?.latestDataDate, analysisAvailableDateRange?.startDate]);
 
-  const optimizationLastUpdatedAt =
-    analysisDecisionReportPayload?.optimizationRun?.completed_at
-    ?? analysisDecisionReportPayload?.optimizationRun?.started_at
-    ?? analysisDecisionReportPayload?.generated_at
-    ?? analysisDecisionReportPayload?.snapshot?.updatedAt
-    ?? analysisDecisionReportPayload?.snapshot?.createdAt
-    ?? null;
-  const reportHeaderAction = (
-    <div className="flex flex-wrap items-center justify-end gap-4 text-xs font-semibold text-slate-500">
-      <span>
-        {isZh ? "上次更新" : "Last updated"} {optimizationLastUpdatedAt ? formatReportDate(optimizationLastUpdatedAt) : "--"}
-      </span>
-    </div>
+  const optimizationState = analysisDecisionReportPayload?.optimization ?? null;
+  const refreshState = analysisDecisionReportPayload?.refresh ?? null;
+  const hasOptimizationSnapshot =
+    optimizationState?.source === "optimization_snapshot" &&
+    (optimizationState.recommendationCount ?? 0) > 0;
+	  const optimizationLastUpdatedAt =
+      optimizationState?.generatedAt
+	    ?? analysisDecisionReportPayload?.optimizationRun?.completed_at
+	    ?? analysisDecisionReportPayload?.optimizationRun?.started_at
+	    ?? analysisDecisionReportPayload?.snapshot?.updatedAt
+	    ?? analysisDecisionReportPayload?.snapshot?.createdAt
+	    ?? null;
+  const metricsLastUpdatedAt = analysisDecisionReportPayload?.metrics?.generatedAt ?? analysisDecisionReportPayload?.generated_at ?? null;
+  const optimizationStateLabel = (() => {
+    if (refreshState?.status === "FAILED" || optimizationState?.status === "FAILED") {
+      return hasOptimizationSnapshot
+        ? (isZh ? "刷新失败，显示上次成功结果" : "Refresh failed, showing last successful result")
+        : (isZh ? "优化刷新失败" : "Optimization refresh failed");
+    }
+    if (refreshState?.status === "QUEUED" || refreshState?.status === "RUNNING" || optimizationState?.status === "RUNNING") {
+      return hasOptimizationSnapshot
+        ? (isZh ? "检测到新数据，正在更新推荐" : "New data detected, updating recommendations")
+        : (isZh ? "正在生成优化推荐" : "Generating optimization recommendations");
+    }
+    if (optimizationState?.status === "STALE") {
+      return hasOptimizationSnapshot
+        ? (isZh ? "推荐已过期，显示上次成功结果" : "Recommendations stale, showing last successful result")
+        : (isZh ? "优化待刷新" : "Optimization refresh pending");
+    }
+    if (optimizationState?.status === "SUCCESS" && hasOptimizationSnapshot) {
+      return isZh ? "优化就绪" : "Optimization Ready";
+    }
+    return isZh ? "暂无优化结果" : "No optimization available";
+  })();
+  const optimizationBadgeClass = cn(
+    "rounded-full border px-2 py-1 text-[11px] font-bold uppercase tracking-wide",
+    refreshState?.status === "FAILED" || optimizationState?.status === "FAILED"
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : refreshState?.status === "QUEUED" || refreshState?.status === "RUNNING" || optimizationState?.status === "RUNNING"
+        ? "border-sky-200 bg-sky-50 text-sky-800"
+        : optimizationState?.status === "STALE"
+          ? "border-violet-200 bg-violet-50 text-violet-800"
+          : hasOptimizationSnapshot
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-slate-200 bg-slate-50 text-slate-600"
   );
+  const effectiveOptimizationStartedForReport = hasStartedProfitOptimization || hasOptimizationSnapshot;
+  const isOptimizationRefreshInFlight =
+    refreshState?.status === "QUEUED" ||
+    refreshState?.status === "RUNNING" ||
+    optimizationState?.status === "RUNNING";
+  const shouldShowOptimizationLoading =
+    isRunningProfitOptimization ||
+    (!hasOptimizationSnapshot && effectiveOptimizationStartedForReport && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight));
+	  const reportHeaderAction = (
+	    <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-semibold text-slate-500">
+        <span className={optimizationBadgeClass}>{optimizationStateLabel}</span>
+        {typeof optimizationState?.recommendationCount === "number" && hasOptimizationSnapshot ? (
+          <span>
+            {formatInteger(optimizationState.recommendationCount)} {isZh ? "个机会" : "opportunities"}
+          </span>
+        ) : null}
+	      <span>
+	        {isZh ? "上次优化" : "Last optimized"} {optimizationLastUpdatedAt ? formatReportDate(optimizationLastUpdatedAt) : "--"}
+	      </span>
+        <span>
+          {isZh ? "数据更新" : "Data updated"} {metricsLastUpdatedAt ? formatReportDate(metricsLastUpdatedAt) : "--"}
+        </span>
+	    </div>
+	  );
   const optimizationDecisionReport = useMemo(() => {
     const report = analysisDecisionReportPayload?.decision_report ?? null;
     const optimizationRun = analysisDecisionReportPayload?.optimizationRun ?? null;
@@ -17955,11 +18040,11 @@ function ReportsPage({
           <DecisionAnalysisEnginePanel
             report={optimizationDecisionReport}
             message={analysisDecisionReportPayload?.message}
-            locale={locale}
-            headerAction={reportHeaderAction}
-            optimizationStarted={hasStartedProfitOptimization}
-            onStartProfitOptimization={startProfitOptimization}
-            isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+	            locale={locale}
+	            headerAction={reportHeaderAction}
+	            optimizationStarted={effectiveOptimizationStartedForReport}
+	            onStartProfitOptimization={startProfitOptimization}
+	            isLoadingOptimization={shouldShowOptimizationLoading}
             optimizationRunStatus={profitOptimizationRunStatus}
             optimizationRunStep={profitOptimizationRunStep}
             showSkuTableEmptyState
@@ -17971,11 +18056,11 @@ function ReportsPage({
         <DecisionAnalysisEnginePanel
           report={optimizationDecisionReport}
           message={analysisDecisionReportPayload?.message}
-          locale={locale}
-          headerAction={reportHeaderAction}
-          optimizationStarted={hasStartedProfitOptimization}
-          onStartProfitOptimization={startProfitOptimization}
-          isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+	          locale={locale}
+	          headerAction={reportHeaderAction}
+	          optimizationStarted={effectiveOptimizationStartedForReport}
+	          onStartProfitOptimization={startProfitOptimization}
+	          isLoadingOptimization={shouldShowOptimizationLoading}
           optimizationRunStatus={profitOptimizationRunStatus}
           optimizationRunStep={profitOptimizationRunStep}
           showSkuTableEmptyState={shouldShowSkuTableEmptyState}
@@ -17987,11 +18072,11 @@ function ReportsPage({
 	          <DecisionAnalysisEnginePanel
 	            report={optimizationDecisionReport}
 	            message={analysisDecisionReportPayload?.message}
-		          locale={locale}
-              headerAction={reportHeaderAction}
-              optimizationStarted={hasStartedProfitOptimization}
-              onStartProfitOptimization={startProfitOptimization}
-              isLoadingOptimization={isRunningProfitOptimization || (hasStartedProfitOptimization && isLoadingAnalysisDecisionReport)}
+			          locale={locale}
+	              headerAction={reportHeaderAction}
+	              optimizationStarted={effectiveOptimizationStartedForReport}
+	              onStartProfitOptimization={startProfitOptimization}
+	              isLoadingOptimization={shouldShowOptimizationLoading}
               optimizationRunStatus={profitOptimizationRunStatus}
               optimizationRunStep={profitOptimizationRunStep}
               showSkuTableEmptyState={shouldShowSkuTableEmptyState}

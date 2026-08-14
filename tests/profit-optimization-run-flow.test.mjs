@@ -80,6 +80,11 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
   assert.match(route, /hasOptimizationRecommendationRows/);
+  assert.match(route, /withDecisionReportContract/);
+  assert.match(route, /metrics:\s*\{\s*source:\s*"canonical_live"/);
+  assert.match(route, /optimization:\s*\{\s*source:\s*optimizationSource/);
+  assert.match(route, /refresh:\s*\{\s*status:\s*input\.refreshStatus \?\? "IDLE"/);
+  assert.match(route, /console\.info\("\[decision-report\] response_state"/);
   assert.match(route, /hasReadyCanonicalSources/);
   assert.match(route, /canonicalArtifactAvailability/);
   assert.match(route, /optimizationRefreshAvailability/);
@@ -97,6 +102,8 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /await processQueuedOptimizationJob\(job\)/);
   assert.match(route, /freshOptimizationCacheResponse/);
   assert.match(route, /if \(!hasOptimizationRecommendationRows\(cachedPayload\)\) \{\s*const liveResponse = await liveDecisionReportResponse\(\{\s*workspaceId: session\.workspace\.id,\s*mode: decisionMode,\s*startedAt,\s*message: "Loaded current decision analysis because the cached optimization snapshot is stale\."/);
+  assert.match(route, /optimizationStatus:\s*"STALE"/);
+  assert.match(route, /fallbackReason:\s*`stale_decision_report_cache:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
@@ -109,6 +116,8 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(cache, /shouldRejectSnapshotOverwrite/);
   assert.match(cache, /existingState:\s*existing\?\.state/);
   assert.match(cache, /newState:\s*split\.state/);
+  assert.doesNotMatch(cache, /stale cache skipped/);
+  assert.doesNotMatch(cache, /return null;\s*\n\s*}\s*\n\s*return record;/);
 });
 
 test("dashboard loader skips unreadable canonical snapshots before falling back to older snapshots", () => {
@@ -326,16 +335,19 @@ test("optimization tracker does not fake measurement progress before elapsed obs
   assert.doesNotMatch(observationDaysFunction[0], /Math\.max\(1/);
 });
 
-test("optimization header uses optimization run completion time", () => {
+test("optimization header separates optimization and live metric timestamps", () => {
   const dashboard = read("components/dashboard.tsx");
   const headerBlock = dashboard.match(/const reportHeaderAction = \([\s\S]*?\n  \);/);
 
   assert.ok(headerBlock, "report header action should exist");
+  assert.match(dashboard, /const optimizationState = analysisDecisionReportPayload\?\.optimization/);
+  assert.match(dashboard, /const refreshState = analysisDecisionReportPayload\?\.refresh/);
+  assert.match(dashboard, /const metricsLastUpdatedAt = analysisDecisionReportPayload\?\.metrics\?\.generatedAt/);
   assert.match(dashboard, /optimizationRun\?\.completed_at/);
   assert.match(dashboard, /optimizationRun\?\.started_at/);
-  assert.match(dashboard, /analysisDecisionReportPayload\?\.generated_at/);
   assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.updatedAt/);
-  assert.doesNotMatch(headerBlock[0], /Data updated/);
+  assert.match(headerBlock[0], /Last optimized/);
+  assert.match(headerBlock[0], /Data updated/);
 });
 
 test("optimization page loads latest decision report on initial render", () => {
@@ -343,7 +355,9 @@ test("optimization page loads latest decision report on initial render", () => {
 
   assert.match(dashboard, /useState\(\(\) => hasConnectedDatabase\)/);
   assert.match(dashboard, /void loadAnalysisDecisionReport\("full"\)/);
-  assert.match(dashboard, /payload\.decision_report \|\| payload\.optimizationRun\?\.completed_at/);
+  assert.match(dashboard, /payload\.optimization\?\.source === "optimization_snapshot"/);
+  assert.match(dashboard, /\(payload\.optimization\?\.recommendationCount \?\? 0\) > 0/);
+  assert.doesNotMatch(dashboard, /payload\.decision_report \|\| payload\.optimizationRun\?\.completed_at/);
   assert.match(dashboard, /setHasStartedProfitOptimization\(true\)/);
 });
 

@@ -73,6 +73,19 @@ function hasUsableOptimizationPayload(payload: Record<string, unknown>) {
   return Object.keys(report).length > 0 || decisionRows.length > 0 || portfolioRows.length > 0;
 }
 
+function hasOptimizationRecommendationRows(payload: Record<string, unknown>) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions)
+    ? optimization.skuDecisions
+    : Array.isArray(payload.skuDecisions)
+      ? payload.skuDecisions
+      : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return decisionRows.length > 0 || portfolioRows.length > 0;
+}
+
 function numericValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -699,13 +712,15 @@ export async function GET(request: Request) {
         });
       }
 
-      const liveResponse = await liveDecisionReportResponse({
-        workspaceId: session.workspace.id,
-        mode: decisionMode,
-        startedAt,
-        message: "Loaded current decision analysis because the cached optimization snapshot is stale."
-      });
-      if (liveResponse) return liveResponse;
+      if (!hasOptimizationRecommendationRows(cachedPayload)) {
+        const liveResponse = await liveDecisionReportResponse({
+          workspaceId: session.workspace.id,
+          mode: decisionMode,
+          startedAt,
+          message: "Loaded current decision analysis because the cached optimization snapshot is stale."
+        });
+        if (liveResponse) return liveResponse;
+      }
 
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,

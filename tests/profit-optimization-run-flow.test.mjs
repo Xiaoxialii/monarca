@@ -79,6 +79,7 @@ test("decision report route refreshes optimization caches only when canonical ar
 
   assert.match(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
+  assert.match(route, /hasOptimizationRecommendationRows/);
   assert.match(route, /hasReadyCanonicalSources/);
   assert.match(route, /canonicalArtifactAvailability/);
   assert.match(route, /optimizationRefreshAvailability/);
@@ -95,6 +96,7 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /if \(job\.status !== "QUEUED"\) return/);
   assert.match(route, /await processQueuedOptimizationJob\(job\)/);
   assert.match(route, /freshOptimizationCacheResponse/);
+  assert.match(route, /if \(!hasOptimizationRecommendationRows\(cachedPayload\)\) \{\s*const liveResponse = await liveDecisionReportResponse\(\{\s*workspaceId: session\.workspace\.id,\s*mode: decisionMode,\s*startedAt,\s*message: "Loaded current decision analysis because the cached optimization snapshot is stale\."/);
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);

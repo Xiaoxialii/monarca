@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/shopify-sync",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/internal/jobs/process",
+      "schedule": "0 0 * * *"
     }
   ]
 }

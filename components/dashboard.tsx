@@ -100,13 +100,12 @@ type DataSourceDefinition = {
 
 const dashboardCopy = {
   en: {
-    navItems: [
-      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "Profit Optimization", href: "/optimization", target: "#reports", icon: BrainCircuit },
-      { label: "Optimization Tracker", href: "/dashboard/action-tracker", target: "#action-tracker", icon: Activity },
-      { label: "Launch Simulator", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
-      { label: "Operating Reports", href: "/dashboard/report", target: "#report", icon: FileText },
-      { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
+	    navItems: [
+	      { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+	      { label: "Profit Optimization", href: "/optimization", target: "#reports", icon: BrainCircuit },
+	      { label: "Launch Simulator", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
+	      { label: "Operating Reports", href: "/dashboard/report", target: "#report", icon: FileText },
+	      { label: "Settings", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
       { label: "Data Sources", href: "/dashboard/import-data", target: "#import-data", icon: Database }
@@ -810,13 +809,12 @@ const dashboardCopy = {
     }
   },
   zh: {
-    navItems: [
-      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-      { label: "利润优化", href: "/optimization", target: "#reports", icon: BrainCircuit },
-      { label: "Optimization Tracker", href: "/dashboard/action-tracker", target: "#action-tracker", icon: Activity },
-      { label: "产品发布", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
-      { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
-      { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
+	    navItems: [
+	      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
+	      { label: "利润优化", href: "/optimization", target: "#reports", icon: BrainCircuit },
+	      { label: "产品发布", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
+	      { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
+	      { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
     ],
     dataNavItems: [
       { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database }
@@ -1506,12 +1504,11 @@ type DashboardView =
   | "import-data-connect"
   | "metrics"
   | "schema"
-  | "reports"
-  | "launch-optimizer"
-  | "action-tracker"
-  | "report"
-  | "sales"
-  | "settings";
+	  | "reports"
+	  | "launch-optimizer"
+	  | "report"
+	  | "sales"
+	  | "settings";
 
 type EcommerceDashboardPayload = {
   data: EcommerceSalesDashboardData;
@@ -17831,9 +17828,9 @@ function ReportsPage({
     (!hasOptimizationSnapshot && effectiveOptimizationStartedForReport && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight));
   const optimizationHeaderUpdatedAt = optimizationLastUpdatedAt ?? metricsLastUpdatedAt ?? undefined;
   const reportHeaderAction = (
-    <div className="flex min-w-0 max-w-full items-center justify-end text-right text-xs font-semibold text-slate-500">
-      <span className="max-w-full truncate">
-        {isZh ? "上次更新" : "Last updated"} {optimizationHeaderUpdatedAt ? formatReportDate(optimizationHeaderUpdatedAt) : "--"}
+    <div className="flex shrink-0 items-center justify-end text-right text-xs font-bold tabular-nums text-slate-500">
+      <span className="whitespace-nowrap">
+        {optimizationHeaderUpdatedAt ? formatReportDate(optimizationHeaderUpdatedAt) : "--"}
       </span>
     </div>
   );
@@ -18054,695 +18051,6 @@ function ReportPage({
 
 }
 
-type DecisionImpactSummary = {
-  totalDecisionsGenerated: number;
-  acceptedDecisions: number;
-  completedActions: number;
-  estimatedProfitImpact: number;
-  realizedProfitImpact: number;
-  predictionAccuracy: number | null;
-};
-
-type DecisionImpactRow = {
-  id: string;
-  sku: string;
-  actionType?: string;
-  sourceAction?: string | null;
-  recommendedAction: string;
-  decisionDrivers: string[];
-  expectedImpact: number;
-  actualImpact: number | null;
-  status: string;
-  executionStatus: "NOT_STARTED" | "EXECUTING" | "COMPLETED";
-  measurementStatus: "NOT_STARTED" | "TRACKING" | "COMPLETED";
-  observationDays: number;
-  observationWindow: number;
-  evaluationStatus: "PENDING" | "EVALUATED";
-  confidence: number;
-  estimatedCompletion: string | null;
-  lifecycle: {
-    recommended: string;
-    accepted: string | null;
-    executing: string | null;
-    completed: string | null;
-    evaluated: string | null;
-  };
-  learning: string | null;
-};
-
-type DecisionImpactPayload = {
-  summary: DecisionImpactSummary;
-  activeDecisions: DecisionImpactRow[];
-  completedActions: DecisionImpactRow[];
-  outcomeAnalysis: Array<{
-    id: string;
-    sku: string;
-    decision: string;
-    predictedProfit: number;
-    realizedProfit: number;
-    impactRatio: number | null;
-    learning: string;
-  }>;
-  learningInsights: {
-    bestPerformingActions: Array<{ action: string; averageProfitLift: number; count: number }>;
-    mostReliableSignals: string[];
-  };
-};
-
-type DecisionOutcomeDetail = {
-  recommendation?: {
-    recommendationJson?: Record<string, unknown>;
-    expectedMetricsJson?: Record<string, unknown>;
-    evidenceJson?: Record<string, unknown>;
-    status?: string;
-  } | null;
-  baseline?: {
-    periodStart?: string;
-    periodEnd?: string;
-    metricsJson?: Record<string, unknown>;
-  } | null;
-  outcome?: {
-    status?: string;
-    actualMetricsJson?: Record<string, unknown>;
-    impactJson?: Record<string, unknown>;
-    accuracy?: number | null;
-    learningSignals?: unknown;
-  } | null;
-  executionMetrics?: Array<{
-    date?: string;
-    metricType?: string;
-    metricsJson?: Record<string, unknown>;
-  }>;
-  learnings?: Array<{
-    accuracyScore?: number;
-    learningJson?: unknown;
-    createdAt?: string;
-  }>;
-};
-
-function ActionTrackerPage({
-  locale
-}: {
-  locale: Locale;
-}) {
-  const isZh = locale === "zh";
-  const [payload, setPayload] = useState<DecisionImpactPayload | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedDecisionBucket, setSelectedDecisionBucket] = useState<"active" | "completed">("active");
-  const [selectedRunningTaskIndex, setSelectedRunningTaskIndex] = useState(0);
-  const [selectedDetailTask, setSelectedDetailTask] = useState<DecisionImpactRow | null>(null);
-  const [selectedDetail, setSelectedDetail] = useState<DecisionOutcomeDetail | null>(null);
-  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
-  const [emptyRefreshAttempt, setEmptyRefreshAttempt] = useState(0);
-
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
-
-    try {
-      const response = await fetch("/api/policy/actions", {
-        cache: "no-store",
-        signal: controller.signal
-      });
-      const data = await response.json().catch(() => null) as DecisionImpactPayload | null;
-
-      if (response.ok && data?.summary) {
-        setPayload(data);
-        if (data.activeDecisions.length + data.completedActions.length > 0) {
-          setEmptyRefreshAttempt(0);
-        }
-      } else {
-        setPayload(null);
-      }
-    } catch (error) {
-      console.warn("[action-tracker] Failed to load actions", error);
-      setPayload(null);
-    } finally {
-      window.clearTimeout(timeoutId);
-      setIsLoading(false);
-    }
-  }, []);
-
-  const openDecisionDetail = useCallback(async (task: DecisionImpactRow) => {
-    setSelectedDetailTask(task);
-    setSelectedDetail(null);
-    setIsLoadingDetail(true);
-    try {
-      const response = await fetch(`/api/decisions/${encodeURIComponent(task.id)}/outcome`, { cache: "no-store" });
-      const detail = await response.json().catch(() => null) as (DecisionOutcomeDetail & { ok?: boolean }) | null;
-      if (response.ok && detail?.ok) setSelectedDetail(detail);
-    } finally {
-      setIsLoadingDetail(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (isLoading || !payload?.summary || payload.activeDecisions.length + payload.completedActions.length > 0 || emptyRefreshAttempt >= 4) {
-      return;
-    }
-
-    const retryId = window.setTimeout(() => {
-      setEmptyRefreshAttempt((current) => current + 1);
-      void refresh();
-    }, 3000);
-
-    return () => window.clearTimeout(retryId);
-  }, [emptyRefreshAttempt, isLoading, payload, refresh]);
-
-  const activeDecisionCount = payload?.activeDecisions.length ?? 0;
-  const completedDecisionCount = payload?.completedActions.length ?? 0;
-  const shouldShowEmptyDecisionLoop = !isLoading && activeDecisionCount + completedDecisionCount === 0;
-  const shouldShowDecisionTrackerLoadingState = isLoading || shouldShowEmptyDecisionLoop;
-  const shouldShowDecisionTrackerLoadingLabel = isLoading;
-	  const activeExpectedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + row.expectedImpact, 0);
-	  const activeRealizedProfitImpact = (payload?.activeDecisions ?? []).reduce((sum, row) => sum + (row.actualImpact ?? 0), 0);
-	  const activeRealizationRate = activeExpectedProfitImpact > 0
-	    ? Math.round((activeRealizedProfitImpact / activeExpectedProfitImpact) * 100)
-	    : null;
-  const hasAcceptedDecisionData = activeDecisionCount + completedDecisionCount > 0;
-  const runningTasks = [...(payload?.activeDecisions ?? [])]
-    .sort((a, b) => decisionTaskProgress(a).percent - decisionTaskProgress(b).percent);
-  const runningTaskProgressNodes = runningTasks.reduce<Array<{ percent: number; taskIndexes: number[] }>>((nodes, task, index) => {
-    const percent = decisionTaskProgress(task).percent;
-    const existing = nodes.find((node) => node.percent === percent);
-    if (existing) {
-      existing.taskIndexes.push(index);
-    } else {
-      nodes.push({ percent, taskIndexes: [index] });
-    }
-    return nodes;
-  }, []);
-  const normalizedRunningTaskIndex = Math.min(selectedRunningTaskIndex, Math.max(0, runningTasks.length - 1));
-  const selectedRunningTaskNode = runningTaskProgressNodes.find((node) => node.taskIndexes.includes(normalizedRunningTaskIndex))
-    ?? runningTaskProgressNodes[0]
-    ?? null;
-  const selectedRunningTasks = selectedRunningTaskNode
-    ? selectedRunningTaskNode.taskIndexes.map((index) => runningTasks[index]).filter(Boolean)
-    : [];
-  const completedTasks = payload?.completedActions ?? [];
-
-  return (
-    <section id="action-tracker" className="dashboard-density flex min-w-0 max-w-full flex-col gap-5 scroll-mt-20">
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setSelectedDecisionBucket("active")}
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide transition",
-            selectedDecisionBucket === "active"
-              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
-              : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-emerald-700"
-          )}
-        >
-          {isZh ? `Active Strategies ${activeDecisionCount}` : `Active Strategies ${activeDecisionCount}`}
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelectedDecisionBucket("completed")}
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide transition",
-            selectedDecisionBucket === "completed"
-              ? "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
-              : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-800"
-          )}
-        >
-          {isZh ? `Completed Strategies ${completedDecisionCount}` : `Completed Strategies ${completedDecisionCount}`}
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-start gap-x-16 gap-y-6">
-        <DecisionTextMetric
-          label={isZh ? "Active Strategies" : "Active Strategies"}
-          value={formatInteger(activeDecisionCount)}
-          description={isZh ? "已接受或正在执行并等待效果验证的优化策略" : "Accepted or executing optimization strategies waiting for outcome validation"}
-        />
-        <DecisionTextMetric
-          label={isZh ? "预计利润影响" : "Expected Profit Impact"}
-          value={formatSignedMoney(activeExpectedProfitImpact)}
-          description={isZh ? "接受决策后预计应该产生的利润提升" : "Profit lift expected after accepted AI decisions"}
-        />
-	        <DecisionTextMetric
-	          label={isZh ? "已实现利润影响" : "Realized Profit Impact"}
-	          value={!hasAcceptedDecisionData ? "-" : activeRealizedProfitImpact ? `${formatSignedMoney(activeRealizedProfitImpact)} (${activeRealizationRate ?? 0}% Realized / Expected)` : (isZh ? "采集中" : "Collecting")}
-	          description={!hasAcceptedDecisionData
-              ? (isZh ? "还没有已接受的优化决策" : "No accepted optimization decisions yet")
-              : (isZh ? "当前 active decisions 已经产生的利润提升" : "Profit lift already realized by current active decisions")}
-	        />
-        <DecisionTextMetric
-          label={isZh ? "实现率" : "Realization Rate"}
-          value={activeRealizationRate == null ? "-" : `${activeRealizationRate}%`}
-          description={isZh ? "Realized Profit Impact ÷ Expected Profit Impact × 100" : "Realized Profit Impact ÷ Expected Profit Impact × 100"}
-        />
-      </div>
-
-      {shouldShowDecisionTrackerLoadingState ? (
-        <div className="grid min-h-[360px] place-items-center text-center">
-          <div className="grid gap-4">
-            <p className="text-3xl font-bold text-slate-950">
-              {isZh ? "追踪你的优化决策影响" : "Track the impact of your optimization decisions"}
-            </p>
-            {shouldShowDecisionTrackerLoadingLabel ? (
-              <p className="text-sm font-semibold text-slate-500">
-                {isZh ? "正在加载数据" : "Loading data"}
-              </p>
-            ) : shouldShowEmptyDecisionLoop ? (
-              <p className="text-sm font-semibold text-slate-500">
-                {isZh ? "还没有已接受的优化决策。" : "No accepted optimization decisions yet."}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {selectedDecisionBucket === "active" && runningTasks.length ? (
-        <div className="space-y-4">
-          <div className="w-full">
-            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wide text-slate-500">
-              <span>{isZh ? "任务进度" : "Task progress"}</span>
-            </div>
-            <div className="relative mt-8 h-20 pr-16">
-              <span className="absolute right-0 top-[-1.65rem] w-12 text-center text-xs font-bold text-slate-500">%</span>
-              <span className="absolute right-0 top-11 w-12 text-center text-xs font-bold text-slate-500">{isZh ? "任务" : "tasks"}</span>
-              <div className="absolute left-0 right-16 top-5 h-px bg-slate-200" />
-              {runningTaskProgressNodes.map((node, nodeIndex) => {
-                const isSelected = selectedRunningTaskNode?.taskIndexes[0] === node.taskIndexes[0];
-                const primaryTask = runningTasks[node.taskIndexes[0]];
-                const taskCount = node.taskIndexes.length;
-                const previousNode = runningTaskProgressNodes[nodeIndex - 1];
-                const isCloseToPrevious = previousNode ? node.percent - previousNode.percent < 8 : false;
-                const labelOffsetClass = isCloseToPrevious ? "-top-12" : "-top-8";
-                return (
-	                  <button
-	                    key={`${node.percent}-${node.taskIndexes.join("-")}`}
-	                    type="button"
-	                    onClick={() => setSelectedRunningTaskIndex(node.taskIndexes[0])}
-	                    className="absolute top-3 -translate-x-1/2 text-center"
-	                    style={{ left: `calc(${node.percent}% - ${(node.percent / 100) * 4}rem)` }}
-	                    aria-label={`${primaryTask?.sku ?? "Task"} ${node.percent} percent`}
-	                  >
-                    <span className={cn(
-                      "absolute left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm transition",
-                      labelOffsetClass,
-                      isSelected ? "bg-[#635bff] text-white" : "bg-white text-slate-500 ring-1 ring-slate-200"
-                    )}>
-                      {node.percent}
-                    </span>
-                    <span className={cn(
-                      "mx-auto block size-4 rounded-full ring-2 ring-white transition",
-                      isSelected ? "bg-[#079669] shadow-sm shadow-emerald-900/20" : "bg-slate-300 hover:bg-emerald-300"
-                    )} />
-                    <span className={cn(
-                      "mt-2 block whitespace-nowrap text-[10px] font-bold",
-                      isSelected ? "text-emerald-700" : "text-slate-400"
-                    )}>
-                      {taskCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <h2 className="mx-auto max-w-5xl text-xl font-bold text-slate-950">{isZh ? "进行中的任务" : "Active Tasks"}</h2>
-          {selectedRunningTasks.length ? (
-            <div className={cn(
-              "grid w-full gap-4",
-              selectedRunningTasks.length === 1 ? "max-w-2xl grid-cols-1" : "grid-cols-1 lg:grid-cols-2 xl:grid-cols-3"
-            )}>
-              {selectedRunningTasks.map((task) => {
-                const progress = decisionTaskProgress(task);
-                const observedImpactLabel = task.actualImpact == null
-                  ? (isZh ? "采集中..." : "Collecting data...")
-                  : formatSignedMoney(task.actualImpact);
-                return (
-	                  <div
-	                    key={task.id}
-	                    className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm shadow-slate-950/5"
-	                  >
-		                  <div className="flex flex-wrap items-start justify-between gap-4">
-		                    <div>
-		                      <p className="text-xl font-semibold text-slate-950">{task.sku}</p>
-		                      {task.recommendedAction.toUpperCase() !== "HOLD" ? (
-		                        <p className="mt-1.5 text-xs font-semibold text-slate-500">{task.recommendedAction}</p>
-		                      ) : null}
-		                    </div>
-		                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-		                      {decisionTaskStatusLabel(task, isZh)}
-		                    </span>
-		                  </div>
-	
-		                  <div className="mt-4 grid gap-3 text-xs font-semibold text-slate-600 sm:grid-cols-2">
-		                    <div className="rounded-xl bg-slate-50 p-2.5">
-		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "执行状态" : "Execution Status"}</p>
-		                      <p className="mt-1 font-semibold text-slate-950">{executionStatusLabel(task.executionStatus, isZh)}</p>
-		                    </div>
-		                    <div className="rounded-xl bg-slate-50 p-2.5">
-		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "影响衡量" : "Impact Measurement"}</p>
-		                      <p className="mt-1 font-semibold text-slate-950">
-	                        {progress.currentDay > 0
-                            ? (isZh ? `第 ${progress.currentDay} / ${progress.totalDays} 天` : `Day ${progress.currentDay} / ${progress.totalDays}`)
-                            : (isZh ? "等待测量数据" : "Waiting for measurement data")}
-	                      </p>
-	                    </div>
-	                  </div>
-
-		                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-		                    <div>
-		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "AI 预测" : "AI Prediction"}</p>
-		                      <p className="mt-1.5 text-xs font-semibold text-slate-500">{isZh ? "期待利润提升" : "Expected Profit Lift"}</p>
-		                      <p className="mt-1 text-xl font-semibold text-slate-950">{formatSignedMoney(task.expectedImpact)}</p>
-		                    </div>
-		                    <div>
-		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "当前结果" : "Current Result"}</p>
-		                      <p className="mt-1.5 text-xs font-semibold text-slate-500">{isZh ? "观察到的利润影响" : "Observed Profit Impact"}</p>
-		                      <p className="mt-1 text-xl font-semibold text-slate-950">{observedImpactLabel}</p>
-		                    </div>
-		                  </div>
-
-	                  <div className="mt-4">
-	                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-	                      <span>{isZh ? "衡量进度" : "Measurement Progress"}</span>
-	                      <span>{progress.percent}%</span>
-                    </div>
-	                    <div className="mt-2 h-2 rounded-full bg-slate-100">
-	                      <div className="h-full rounded-full bg-slate-950" style={{ width: `${progress.percent}%` }} />
-	                    </div>
-                  </div>
-
-		                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-		                    <div>
-		                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "预测置信度" : "Prediction Confidence"}</p>
-		                      <p className="mt-1 text-base font-semibold text-slate-950">{task.confidence}%</p>
-	                    </div>
-	                    <DecisionLifecycleMini task={task} isZh={isZh} />
-	                    <div className="text-right text-xs font-semibold text-slate-500">
-	                      <p>{isZh ? "接受时间" : "Accepted"}: {formatActionDate(task.lifecycle.accepted)}</p>
-	                      <p>{isZh ? "预计完成" : "Est. complete"}: {formatActionDate(task.estimatedCompletion)}</p>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void openDecisionDetail(task)}>
-                      {isZh ? "查看详情" : "View Details"}
-                    </Button>
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {selectedDecisionBucket === "completed" ? (
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-950">{isZh ? "已完成决策（历史学习）" : "Completed Decisions (Historical Learning)"}</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-500">
-              {isZh ? "这里展示 AI 做过什么，结果如何。" : "See what AI decided and how the outcome performed."}
-            </p>
-          </div>
-          {completedTasks.length ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-[760px] w-full text-left text-sm">
-                <thead className="border-b text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="py-3 pr-5">SKU</th>
-                    <th className="px-5 py-3">Action</th>
-                    <th className="px-5 py-3">Predicted</th>
-                    <th className="px-5 py-3">Actual</th>
-                    <th className="py-3 pl-5">Accuracy</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {completedTasks.map((task) => (
-                    <tr key={task.id}>
-                      <td className="py-4 pr-5 font-bold text-slate-950">{task.sku}</td>
-                      <td className="px-5 py-4 font-semibold text-slate-700">{task.recommendedAction}</td>
-                      <td className="px-5 py-4 font-bold text-emerald-700">{formatSignedMoney(task.expectedImpact)}</td>
-                      <td className="px-5 py-4 font-bold text-slate-950">{formatSignedMoney(task.actualImpact ?? 0)}</td>
-                      <td className="py-4 pl-5 font-bold text-slate-950">
-                        <div className="flex items-center justify-between gap-3">
-                          <span>{decisionAccuracy(task)}</span>
-                          <Button type="button" variant="outline" size="sm" onClick={() => void openDecisionDetail(task)}>
-                            {isZh ? "详情" : "Details"}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-sm font-semibold text-slate-500">{isZh ? "暂无已完成决策。" : "No completed decisions yet."}</p>
-          )}
-        </div>
-      ) : null}
-
-      {selectedDetailTask ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/20" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            className="absolute inset-0 cursor-default"
-            aria-label={isZh ? "关闭详情" : "Close details"}
-            onClick={() => {
-              setSelectedDetailTask(null);
-              setSelectedDetail(null);
-            }}
-          />
-          <div className="relative h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-                  {isZh ? "结果闭环" : "Outcome Loop"}
-                </p>
-                <h2 className="mt-2 text-2xl font-bold text-slate-950">{selectedDetailTask.recommendedAction}</h2>
-                <p className="mt-1 text-sm font-semibold text-slate-500">{selectedDetailTask.sku}</p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSelectedDetailTask(null);
-                  setSelectedDetail(null);
-                }}
-              >
-                {isZh ? "关闭" : "Close"}
-              </Button>
-            </div>
-
-            {isLoadingDetail ? (
-              <div className="mt-8 flex items-center gap-3 text-sm font-semibold text-slate-500">
-                <RefreshCw className="size-4 animate-spin" />
-                {isZh ? "正在读取真实结果" : "Loading real outcome"}
-              </div>
-            ) : (
-              <div className="mt-8 space-y-5">
-                <DecisionDetailMetricGrid
-                  isZh={isZh}
-                  expectedImpact={selectedDetailTask.expectedImpact}
-                  actualImpact={numberFromDetail(selectedDetail?.outcome?.impactJson, "incrementalProfit") ?? selectedDetailTask.actualImpact}
-                  accuracy={selectedDetail?.outcome?.accuracy ?? selectedDetail?.learnings?.[0]?.accuracyScore ?? null}
-                />
-                <DecisionDetailSection
-                  title={isZh ? "为什么 AI 推荐" : "Why AI Recommended This"}
-                  items={detailEntries(selectedDetail?.recommendation?.evidenceJson ?? selectedDetail?.recommendation?.recommendationJson)}
-                />
-                <DecisionDetailSection
-                  title={isZh ? "Baseline Snapshot" : "Baseline Snapshot"}
-                  items={detailEntries(selectedDetail?.baseline?.metricsJson)}
-                />
-                <DecisionDetailSection
-                  title={isZh ? "Actual Outcome" : "Actual Outcome"}
-                  items={detailEntries(selectedDetail?.outcome?.actualMetricsJson)}
-                />
-                <DecisionDetailSection
-                  title={isZh ? "Learning" : "Learning"}
-                  items={detailEntries(selectedDetail?.learnings?.[0]?.learningJson ?? selectedDetail?.outcome?.learningSignals)}
-                  emptyText={isZh ? "等待评估窗口和真实业务数据。" : "Waiting for the evaluation window and real business data."}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
-
-    </section>
-  );
-}
-
-function DecisionDetailMetricGrid({
-  isZh,
-  expectedImpact,
-  actualImpact,
-  accuracy
-}: {
-  isZh: boolean;
-  expectedImpact: number;
-  actualImpact: number | null;
-  accuracy: number | null;
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <div className="rounded-xl border border-slate-200 p-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Expected" : "Expected"}</p>
-        <p className="mt-2 text-xl font-bold text-emerald-700">{formatSignedMoney(expectedImpact)}</p>
-      </div>
-      <div className="rounded-xl border border-slate-200 p-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Actual" : "Actual"}</p>
-        <p className="mt-2 text-xl font-bold text-slate-950">{actualImpact == null ? "-" : formatSignedMoney(actualImpact)}</p>
-      </div>
-      <div className="rounded-xl border border-slate-200 p-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{isZh ? "Accuracy" : "Accuracy"}</p>
-        <p className="mt-2 text-xl font-bold text-slate-950">{accuracy == null ? "-" : `${Math.round(accuracy * 100)}%`}</p>
-      </div>
-    </div>
-  );
-}
-
-function DecisionDetailSection({
-  title,
-  items,
-  emptyText = "No data yet."
-}: {
-  title: string;
-  items: Array<{ label: string; value: string }>;
-  emptyText?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 p-4">
-      <h3 className="text-sm font-bold text-slate-950">{title}</h3>
-      {items.length ? (
-        <dl className="mt-3 grid gap-2 text-sm">
-          {items.slice(0, 8).map((item) => (
-            <div key={item.label} className="flex items-start justify-between gap-4">
-              <dt className="font-semibold text-slate-500">{humanizeDetailKey(item.label)}</dt>
-              <dd className="max-w-[60%] text-right font-bold text-slate-950">{item.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className="mt-3 text-sm font-semibold text-slate-500">{emptyText}</p>
-      )}
-    </div>
-  );
-}
-
-function DecisionTextMetric({ label, value, description }: { label: string; value: string; description?: string }) {
-  return (
-    <div className="max-w-[260px]">
-      <p className="text-sm font-bold text-slate-500">{label}</p>
-      <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
-      {description ? <p className="mt-2 text-xs font-semibold leading-snug text-slate-500">{description}</p> : null}
-    </div>
-  );
-}
-
-function DecisionLifecycleMini({ task, isZh }: { task: DecisionImpactRow; isZh: boolean }) {
-  return (
-    <div className="min-w-[160px] text-center text-xs font-semibold text-slate-500">
-      <p className="font-bold uppercase tracking-wide">{isZh ? "决策阶段" : "Decision Stage"}</p>
-      <p className="mt-1 text-slate-950">{decisionStageLabel(task, isZh)}</p>
-    </div>
-  );
-}
-
-function decisionStageLabel(task: DecisionImpactRow, isZh: boolean) {
-  if (task.status === "learned") return isZh ? "已学习" : "Learned";
-  if (task.evaluationStatus === "EVALUATED") return isZh ? "已评估" : "Evaluated";
-  if (task.measurementStatus === "TRACKING") return isZh ? "衡量影响中" : "Measuring Impact";
-  if (task.executionStatus === "EXECUTING") return isZh ? "执行中" : "Executing";
-  if (task.lifecycle.accepted) return isZh ? "已接受" : "Accepted";
-  return isZh ? "等待中" : "Pending";
-}
-
-function decisionTaskStatusLabel(task: DecisionImpactRow, isZh: boolean) {
-  if (task.status === "completed" || task.status === "learned") return isZh ? "已完成" : "Completed";
-  if (task.measurementStatus === "TRACKING") return isZh ? "衡量影响中" : "Measuring Impact";
-  if (task.executionStatus === "EXECUTING") return isZh ? "执行中" : "Executing";
-  if (task.lifecycle.accepted) return isZh ? "已接受" : "Accepted";
-  return isZh ? "等待中" : "Pending";
-}
-
-function executionStatusLabel(status: DecisionImpactRow["executionStatus"], isZh: boolean) {
-  if (status === "COMPLETED") return isZh ? "完成" : "Completed";
-  if (status === "EXECUTING") return isZh ? "执行中" : "Executing";
-  return isZh ? "未开始" : "Not Started";
-}
-
-function formatInteger(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatSignedMoney(value: number) {
-  const formatted = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Math.abs(value));
-  return value > 0 ? `+${formatted}` : formatted;
-}
-
-function formatActionDate(value: string | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
-}
-
-function decisionAccuracy(task: DecisionImpactRow) {
-  if (!task.expectedImpact || task.actualImpact == null) return "No Data";
-  return `${Math.round((Math.min(task.actualImpact, task.expectedImpact) / Math.max(1, task.expectedImpact)) * 100)}%`;
-}
-
-function detailEntries(value: unknown): Array<{ label: string; value: string }> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  return Object.entries(value as Record<string, unknown>)
-    .filter(([, entry]) => entry !== null && typeof entry !== "undefined")
-    .map(([label, entry]) => ({
-      label,
-      value: detailValue(entry)
-    }))
-    .filter((entry) => entry.value.length > 0);
-}
-
-function detailValue(value: unknown): string {
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "";
-    return Math.abs(value) >= 1000 ? formatInteger(value) : String(Math.round(value * 100) / 100);
-  }
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.slice(0, 3).map(detailValue).filter(Boolean).join(", ");
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>).slice(0, 3);
-    return entries.map(([key, entry]) => `${humanizeDetailKey(key)}: ${detailValue(entry)}`).filter(Boolean).join(" | ");
-  }
-  return "";
-}
-
-function numberFromDetail(value: unknown, key: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const raw = (value as Record<string, unknown>)[key];
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
-}
-
-function humanizeDetailKey(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function decisionTaskProgress(task: DecisionImpactRow) {
-  const totalDays = Math.max(1, task.observationWindow || 30);
-  const currentDay = Math.max(0, Math.min(totalDays, task.observationDays || 0));
-  return {
-    currentDay,
-    totalDays,
-    percent: Math.min(100, Math.max(0, Math.round((currentDay / totalDays) * 100)))
-  };
-}
-
 function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; placement?: "inline" | "sidebar" }) {
   const items = [
     { href: "#report-sku", label: isZh ? "SKU" : "SKU", icon: Table2 },
@@ -18816,13 +18124,11 @@ export function Dashboard({
         ? "#sales"
       : isReportsView
         ? "#reports"
-      : view === "launch-optimizer"
-          ? "#launch-optimizer"
-        : view === "action-tracker"
-          ? "#action-tracker"
-        : view === "settings"
-          ? "#settings"
-          : "#overview";
+	      : view === "launch-optimizer"
+	          ? "#launch-optimizer"
+	        : view === "settings"
+	          ? "#settings"
+	          : "#overview";
 
   const addConnectedSource = (source: ConnectedSourceRow) => {
     removedConnectedSourceIds.delete(source.id);
@@ -19140,21 +18446,15 @@ export function Dashboard({
               </div>
             ) : view === "launch-optimizer" ? (
               <div id="launch-optimizer" className="min-w-0 xl:col-start-1">
-                <NewProductLaunchOptimizer
-                  locale={getCopyLocale(locale)}
-                  hasConnectedData={hasOperationalConnectedSource}
-                  isLoadingConnectedData={isLoadingConnectedSources}
-                />
-              </div>
-            ) : view === "action-tracker" ? (
-              <div id="action-tracker" className="min-w-0 xl:col-start-1">
-                <ActionTrackerPage
-                  locale={getCopyLocale(locale)}
-                />
-              </div>
-            ) : view === "report" ? (
-              <div className="min-w-0 xl:col-start-1">
-                <ReportPage
+	                <NewProductLaunchOptimizer
+	                  locale={getCopyLocale(locale)}
+	                  hasConnectedData={hasOperationalConnectedSource}
+	                  isLoadingConnectedData={isLoadingConnectedSources}
+	                />
+	              </div>
+	            ) : view === "report" ? (
+	              <div className="min-w-0 xl:col-start-1">
+	                <ReportPage
                   locale={locale}
                   hasConnectedDatabase={hasOperationalConnectedSource}
                   isLoadingConnectedSources={isLoadingConnectedSources}

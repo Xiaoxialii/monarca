@@ -1,6 +1,5 @@
-import { Dashboard } from "@/components/dashboard";
-import { getRequestLocale } from "@/lib/server-locale";
+import { redirect } from "next/navigation";
 
-export default async function ActionTrackerPage() {
-  return <Dashboard view="action-tracker" defaultLocale={await getRequestLocale("en")} />;
+export default function RemovedActionTrackerPage() {
+  redirect("/optimization");
 }

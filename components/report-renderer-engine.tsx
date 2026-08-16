@@ -144,7 +144,6 @@ const compactCurrency = new Intl.NumberFormat("en-US", {
 const numberFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const ratioFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const percent = new Intl.NumberFormat("en-US", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const percentNoDecimal = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 const oneDecimal = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 type InventoryBreakdownRow = {
@@ -1858,10 +1857,11 @@ function SkuPortfolioOptimizationPanel({
   const [acceptedAtByDecision, setAcceptedAtByDecision] = useState<Record<string, string>>({});
   const [trackedOutcomeRows, setTrackedOutcomeRows] = useState<ActionOutcomeRow[]>(seedActionOutcomeRows);
   const [acceptedImpactSummary, setAcceptedImpactSummary] = useState<AcceptedImpactSummary | null>(null);
+  const [activeDecisionSummaries, setActiveDecisionSummaries] = useState<ActiveDecisionSummary[]>([]);
   const [actionPersistenceError, setActionPersistenceError] = useState<string | null>(null);
-  const [selectedOutcomeRow, setSelectedOutcomeRow] = useState<ActionOutcomeRow | null>(null);
   const [selectedDecisionRow, setSelectedDecisionRow] = useState<PortfolioDecisionRow | null>(null);
   const [isDecisionPanelOpen, setIsDecisionPanelOpen] = useState(false);
+  const [selectedPortfolioView, setSelectedPortfolioView] = useState<PortfolioSummaryView>("optimization");
   const [focusedOpsSku, setFocusedOpsSku] = useState<string | null>(null);
   const [isSkuOperationsOpen, setIsSkuOperationsOpen] = useState(() => !optimizationStarted || isLoadingOptimization);
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
@@ -1915,6 +1915,17 @@ function SkuPortfolioOptimizationPanel({
   const optimizationQueueRows = rankedOpportunityRows.slice(0, DEFAULT_OPTIMIZATION_QUEUE_LIMIT);
   const filteredDecisionRows = optimizationQueueRows.filter((row) => decisionFilterMatchesRow(row, decisionActionFilter));
   const acceptedDecisionRows = filteredDecisionRows.filter((row) => actionStatuses[decisionRowKey(row)] === "accepted");
+  const persistedAcceptedDecisionRows = activeDecisionSummaries
+    .map((activeDecision) => decisionRows.find((row) => {
+      if (row.skuId !== activeDecision.sku) return false;
+      const actionDisplay = actionDisplayForDecision(row, portfolioRowsBySku.get(row.skuId));
+      return !activeDecision.recommendedAction || actionDisplay.title === activeDecision.recommendedAction || row.action === activeDecision.recommendedAction;
+    }) ?? decisionRows.find((row) => row.skuId === activeDecision.sku))
+    .filter((row): row is PortfolioDecisionRow => Boolean(row));
+  const displayedAcceptedDecisionRows = uniquePortfolioDecisionRows([
+    ...acceptedDecisionRows,
+    ...persistedAcceptedDecisionRows
+  ]);
   const pendingDecisionRows = filteredDecisionRows.filter((row) => shouldShowInOptimizationQueue(row, actionStatuses));
   const shouldBlankOptimizationSummary = showSkuTableEmptyState && !hasOptimizationResultRows;
   const summaryRecord = objectRecord(summary);
@@ -1962,18 +1973,81 @@ function SkuPortfolioOptimizationPanel({
   const displayedAcceptedProfitGain = shouldBlankOptimizationSummary
     ? 0
     : acceptedImpactSummary?.expectedProfitImpact
-      ?? acceptedDecisionRows.reduce<number>((sum, row) => sum + profitImpactForDecision(row, portfolioRowsBySku.get(row.skuId)), 0);
+      ?? displayedAcceptedDecisionRows.reduce<number>((sum, row) => sum + profitImpactForDecision(row, portfolioRowsBySku.get(row.skuId)), 0);
   const displayedAcceptedLiftRate = displayedCurrentProfit > 0 ? displayedAcceptedProfitGain / displayedCurrentProfit : 0;
   const displayedAcceptedProjectedPortfolioProfit = displayedCurrentProfit + displayedAcceptedProfitGain;
   const displayedAcceptedAdditionalAds = shouldBlankOptimizationSummary
     ? 0
-    : acceptedDecisionRows.reduce((sum, row) => {
+    : displayedAcceptedDecisionRows.reduce((sum, row) => {
       const actionLabel = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
       if (actionLabel !== "Scale Ads" && actionLabel !== "Expand Channel") return sum;
       return sum + Math.max(0, actualAdsBudgetDeltaForDecision(row, portfolioRowsBySku.get(row.skuId)));
     }, 0);
-  const hasAcceptedOptimizationActions = (acceptedImpactSummary?.activeCount ?? acceptedDecisionRows.length) > 0;
-  const displayedAcceptedSkuCount = acceptedImpactSummary?.activeCount ?? acceptedDecisionRows.length;
+  const acceptedActualRows = activeDecisionSummaries.filter((row) => row.actualImpact !== null);
+  const displayedActualProfitLift = acceptedActualRows.length
+    ? acceptedActualRows.reduce((sum, row) => sum + (row.actualImpact ?? 0), 0)
+    : null;
+  const trackingRows = activeDecisionSummaries.filter((row) =>
+    row.measurementStatus === "TRACKING" ||
+    row.executionStatus === "EXECUTING" ||
+    row.status === "running"
+  );
+  const hasAwaitingImplementationActions = activeDecisionSummaries.some((row) =>
+    row.executionStatus === "NOT_STARTED" ||
+    row.status === "accepted"
+  );
+  const acceptedTrackingProgress = trackingRows.reduce((current, row) => {
+    if (row.observationDays <= current.days && current.window > 0) return current;
+    return {
+      days: row.observationDays,
+      window: row.observationWindow || 14
+    };
+  }, { days: 0, window: 14 });
+  const displayedActualProfitLiftLabel = displayedActualProfitLift !== null
+    ? signedCurrency(displayedActualProfitLift)
+    : trackingRows.length > 0
+      ? (isZh
+        ? `跟踪中 · ${numberFormat.format(acceptedTrackingProgress.days)} / ${numberFormat.format(acceptedTrackingProgress.window)} 天`
+        : `Tracking · ${numberFormat.format(acceptedTrackingProgress.days)} of ${numberFormat.format(acceptedTrackingProgress.window)} days`)
+      : hasAwaitingImplementationActions
+        ? (isZh ? "等待执行" : "Awaiting implementation")
+        : (isZh ? "暂不可用" : "Not available yet");
+  const actualProfitLiftMeta = displayedActualProfitLift !== null && acceptedActualRows.length > 0
+    ? (() => {
+      const confidenceValues = acceptedActualRows
+        .map((row) => row.confidence)
+        .filter((value): value is number => value !== null);
+      const avgConfidence = confidenceValues.length
+        ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+        : null;
+      const maxWindow = Math.max(...acceptedActualRows.map((row) => row.observationWindow || 0), 0);
+      return isZh
+        ? `${maxWindow ? `观察期 ${numberFormat.format(maxWindow)} 天` : "观察期已完成"}${avgConfidence !== null ? ` · 置信度 ${numberFormat.format(avgConfidence)}%` : ""}`
+        : `${maxWindow ? `${numberFormat.format(maxWindow)} day measurement` : "Measurement complete"}${avgConfidence !== null ? ` · ${numberFormat.format(avgConfidence)}% confidence` : ""}`;
+    })()
+    : null;
+  const acceptedStrategySummaries = uniqueActiveDecisionSummaries([
+    ...activeDecisionSummaries,
+    ...displayedAcceptedDecisionRows.map((row) => {
+      const recommendation = portfolioRowsBySku.get(row.skuId);
+      const actionDisplay = actionDisplayForDecision(row, recommendation);
+      return {
+        id: decisionRowKey(row),
+        sku: row.skuId,
+        recommendedAction: actionDisplay.title,
+        expectedImpact: profitImpactForDecision(row, recommendation),
+        actualImpact: null,
+        status: "accepted",
+        executionStatus: "NOT_STARTED",
+        measurementStatus: "NOT_STARTED",
+        observationDays: 0,
+        observationWindow: row.simulation_horizon?.days ?? simulationHorizonDays,
+        confidence: row.confidence ? Math.round(row.confidence * 100) : null
+      };
+    })
+  ]);
+  const hasAcceptedOptimizationActions = (acceptedImpactSummary?.activeCount ?? displayedAcceptedDecisionRows.length) > 0;
+  const displayedAcceptedSkuCount = acceptedImpactSummary?.activeCount ?? displayedAcceptedDecisionRows.length;
   const displayedPendingOptimizationCountLabel = numberFormat.format(displayedPendingOptimizationCount);
   const displayedPendingDecisionRows = shouldBlankOptimizationSummary ? [] : pendingDecisionRows;
   const summaryEligibleCandidateCount = firstNumberOrNull(summary.eligible_candidate_count, summaryRecord.eligibleCandidateCount);
@@ -1985,7 +2059,8 @@ function SkuPortfolioOptimizationPanel({
     identifiedOpportunityCount: shouldBlankOptimizationSummary ? 0 : summaryRankedOpportunityCount ?? rankedOpportunityRows.length,
     recommendedActionCount: shouldBlankOptimizationSummary ? 0 : summaryQueuedRecommendationCount ?? displayedPendingOptimizationCount
   };
-  const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && filteredDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
+  const selectableDecisionRows = selectedPortfolioView === "accepted" ? displayedAcceptedDecisionRows : filteredDecisionRows;
+  const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && selectableDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
   const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !effectiveOptimizationStarted || isResolvingOptimizationState);
@@ -2083,6 +2158,7 @@ function SkuPortfolioOptimizationPanel({
   useEffect(() => {
     if (!effectiveOptimizationStarted) {
       setAcceptedImpactSummary(null);
+      setActiveDecisionSummaries([]);
       return;
     }
     let cancelled = false;
@@ -2090,21 +2166,66 @@ function SkuPortfolioOptimizationPanel({
     async function loadAcceptedImpactSummary() {
       const response = await fetch("/api/policy/actions", { cache: "no-store" }).catch(() => null);
       if (!response?.ok) {
-        if (!cancelled) setAcceptedImpactSummary(null);
+        if (!cancelled) {
+          setAcceptedImpactSummary(null);
+          setActiveDecisionSummaries([]);
+        }
         return;
       }
 
       const payload = await response.json().catch(() => null) as {
-        activeDecisions?: Array<{ expectedImpact?: number | null }>;
+        activeDecisions?: Array<{
+          id?: string | null;
+          sku?: string | null;
+          recommendedAction?: string | null;
+          expectedImpact?: number | null;
+          actualImpact?: number | null;
+          status?: string | null;
+          executionStatus?: string | null;
+          measurementStatus?: string | null;
+          observationDays?: number | null;
+          observationWindow?: number | null;
+          confidence?: number | null;
+        }>;
+        completedActions?: Array<{
+          id?: string | null;
+          sku?: string | null;
+          recommendedAction?: string | null;
+          expectedImpact?: number | null;
+          actualImpact?: number | null;
+          status?: string | null;
+          executionStatus?: string | null;
+          measurementStatus?: string | null;
+          observationDays?: number | null;
+          observationWindow?: number | null;
+          confidence?: number | null;
+        }>;
       } | null;
       const activeDecisions = Array.isArray(payload?.activeDecisions) ? payload.activeDecisions : [];
-      const expectedProfitImpact = activeDecisions.reduce((sum, row) => sum + safeNumber(row.expectedImpact), 0);
+      const completedActions = Array.isArray(payload?.completedActions) ? payload.completedActions : [];
+      const acceptedRows = [...activeDecisions, ...completedActions];
+      const expectedProfitImpact = acceptedRows.reduce((sum, row) => sum + safeNumber(row.expectedImpact), 0);
 
       if (!cancelled) {
         setAcceptedImpactSummary({
-          activeCount: activeDecisions.length,
+          activeCount: acceptedRows.length,
           expectedProfitImpact
         });
+        setActiveDecisionSummaries(acceptedRows
+          .map((row) => ({
+            id: typeof row.id === "string" ? row.id : "",
+            sku: typeof row.sku === "string" ? row.sku : "",
+            recommendedAction: typeof row.recommendedAction === "string" ? row.recommendedAction : "",
+            expectedImpact: safeNumber(row.expectedImpact),
+            actualImpact: typeof row.actualImpact === "number" && Number.isFinite(row.actualImpact) ? row.actualImpact : null,
+            status: typeof row.status === "string" ? row.status : "",
+            executionStatus: typeof row.executionStatus === "string" ? row.executionStatus : "",
+            measurementStatus: typeof row.measurementStatus === "string" ? row.measurementStatus : "",
+            observationDays: safeNumber(row.observationDays),
+            observationWindow: safeNumber(row.observationWindow),
+            confidence: typeof row.confidence === "number" && Number.isFinite(row.confidence) ? row.confidence : null
+          }))
+          .filter((row) => row.sku));
       }
     }
 
@@ -2155,6 +2276,7 @@ function SkuPortfolioOptimizationPanel({
     });
     const acceptedAt = todayDateOnly();
     const acceptedImpactDelta = profitImpactForDecision(row, recommendation);
+    const acceptedActionDisplay = actionDisplayForDecision(row, recommendation);
     setActionStatuses((current) => ({ ...current, [key]: "accepted" }));
     setAcceptedAtByDecision((current) => ({ ...current, [key]: acceptedAt }));
     setAcceptedImpactSummary((current) => current
@@ -2163,6 +2285,25 @@ function SkuPortfolioOptimizationPanel({
         expectedProfitImpact: current.expectedProfitImpact + acceptedImpactDelta
       }
       : current);
+    setActiveDecisionSummaries((current) => {
+      if (current.some((item) => item.sku === row.skuId && item.recommendedAction === acceptedActionDisplay.title)) return current;
+      return [
+        ...current,
+        {
+          id: instanceKey,
+          sku: row.skuId,
+          recommendedAction: acceptedActionDisplay.title,
+          expectedImpact: acceptedImpactDelta,
+          actualImpact: null,
+          status: "accepted",
+          executionStatus: "NOT_STARTED",
+          measurementStatus: "NOT_STARTED",
+          observationDays: 0,
+          observationWindow: row.simulation_horizon?.days ?? simulationHorizonDays,
+          confidence: row.confidence ? Math.round(row.confidence * 100) : null
+        }
+      ];
+    });
 
     try {
       const response = await fetch("/api/actions/accept", {
@@ -2251,6 +2392,7 @@ function SkuPortfolioOptimizationPanel({
         delete next[key];
         return next;
       });
+      setActiveDecisionSummaries((current) => current.filter((item) => !(item.sku === row.skuId && item.recommendedAction === acceptedActionDisplay.title)));
     }
   };
 
@@ -2336,7 +2478,7 @@ function SkuPortfolioOptimizationPanel({
         className={cn(
           "grid gap-0 xl:h-[760px] xl:items-stretch",
           isDecisionPanelOpen
-            ? "xl:grid-cols-[300px_minmax(360px,420px)_minmax(0,1fr)]"
+            ? "xl:grid-cols-[300px_minmax(520px,0.9fr)_minmax(520px,1.1fr)]"
             : "xl:grid-cols-[300px_minmax(360px,1fr)_72px]"
         )}
       >
@@ -2356,7 +2498,20 @@ function SkuPortfolioOptimizationPanel({
 
             <div className="mt-4 -ml-2 w-[calc(100%+0.5rem)]">
               <div className="grid gap-2.5">
-                <div className="relative overflow-visible rounded-[24px] rounded-tr-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 shadow-sm shadow-emerald-950/5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPortfolioView("current");
+                    setSelectedDecisionRow(null);
+                    setIsDecisionPanelOpen(false);
+                    setFocusedOpsSku(null);
+                  }}
+                  className={cn(
+                    "relative overflow-visible rounded-[24px] rounded-tr-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-left shadow-sm shadow-emerald-950/5 transition hover:border-emerald-300 hover:bg-emerald-50",
+                    selectedPortfolioView === "current" && "ring-2 ring-emerald-500/50"
+                  )}
+                  aria-pressed={selectedPortfolioView === "current"}
+                >
                   <span className="absolute -top-3 left-8 size-6 rotate-45 border border-emerald-200 bg-emerald-50" aria-hidden="true" />
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                     {isZh ? "当前" : "Current"}
@@ -2387,9 +2542,23 @@ function SkuPortfolioOptimizationPanel({
                       </p>
                     </div>
                   </div>
-                </div>
+                </button>
 
-                <div className="relative overflow-visible rounded-[24px] rounded-bl-lg border border-sky-200 bg-sky-50/70 px-4 py-3 shadow-sm shadow-sky-950/5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPortfolioView("optimization");
+                    const nextSelection = displayedPendingDecisionRows[0] ?? null;
+                    setSelectedDecisionRow(nextSelection);
+                    setIsDecisionPanelOpen(false);
+                    setFocusedOpsSku(nextSelection?.skuId ?? null);
+                  }}
+                  className={cn(
+                    "relative overflow-visible rounded-[24px] rounded-bl-lg border border-sky-200 bg-sky-50/70 px-4 py-3 text-left shadow-sm shadow-sky-950/5 transition hover:border-sky-300 hover:bg-sky-50",
+                    selectedPortfolioView === "optimization" && "ring-2 ring-sky-500/50"
+                  )}
+                  aria-pressed={selectedPortfolioView === "optimization"}
+                >
                   <span className="absolute -top-3 right-10 size-6 rotate-45 border border-sky-200 bg-sky-50" aria-hidden="true" />
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                     {isZh ? "优化" : "Optimization"}
@@ -2428,9 +2597,23 @@ function SkuPortfolioOptimizationPanel({
                       </p>
                     </div>
                   </div>
-                </div>
+                </button>
 
-                <div className="relative overflow-visible rounded-[24px] rounded-br-lg border border-violet-200 bg-violet-50/70 px-4 py-3 shadow-sm shadow-violet-950/5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPortfolioView("accepted");
+                    const nextSelection = displayedAcceptedDecisionRows[0] ?? null;
+                    setSelectedDecisionRow(nextSelection);
+                    setIsDecisionPanelOpen(false);
+                    setFocusedOpsSku(nextSelection?.skuId ?? null);
+                  }}
+                  className={cn(
+                    "relative overflow-visible rounded-[24px] rounded-br-lg border border-violet-200 bg-violet-50/70 px-4 py-3 text-left shadow-sm shadow-violet-950/5 transition hover:border-violet-300 hover:bg-violet-50",
+                    selectedPortfolioView === "accepted" && "ring-2 ring-violet-500/50"
+                  )}
+                  aria-pressed={selectedPortfolioView === "accepted"}
+                >
                   <span className="absolute -top-3 left-1/2 size-6 -translate-x-1/2 rotate-45 border border-violet-200 bg-violet-50" aria-hidden="true" />
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                     {isZh ? "已接受" : "Accepted"}
@@ -2438,11 +2621,24 @@ function SkuPortfolioOptimizationPanel({
                   <div className="mt-3 grid gap-2">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "利润提升" : "Profit Lift"}
+                        {isZh ? "预期利润提升" : "Expected Profit Lift"}
                       </p>
                       <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
                         {signedCurrency(displayedAcceptedProfitGain)}
                       </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        {isZh ? "实际利润提升" : "Actual Profit Lift"}
+                      </p>
+                      <p className="mt-1 break-words text-base font-extrabold text-slate-950">
+                        {displayedActualProfitLiftLabel}
+                      </p>
+                      {actualProfitLiftMeta ? (
+                        <p className="mt-0.5 text-xs font-bold text-slate-500">
+                          {actualProfitLiftMeta}
+                        </p>
+                      ) : null}
                     </div>
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -2461,7 +2657,7 @@ function SkuPortfolioOptimizationPanel({
                       </p>
                     </div>
                   </div>
-                </div>
+                </button>
               </div>
             </div>
           </>
@@ -2494,6 +2690,16 @@ function SkuPortfolioOptimizationPanel({
                 </button>
               </div>
             </div>
+          ) : selectedPortfolioView === "current" ? (
+            <CurrentSkuRail
+              rows={shouldBlankOptimizationSummary ? [] : visibleSkuRows}
+              locale={locale}
+            />
+          ) : selectedPortfolioView === "accepted" ? (
+            <ActiveStrategiesRail
+              rows={shouldBlankOptimizationSummary ? [] : acceptedStrategySummaries}
+              locale={locale}
+            />
           ) : (
             <OptimizationDecisionRail
               rows={displayedPendingDecisionRows}
@@ -2509,6 +2715,7 @@ function SkuPortfolioOptimizationPanel({
               onAccept={(row) => void acceptDecisionAction(row)}
               onReject={(row) => void rejectDecisionAction(row)}
               showInlineDetail={false}
+              mode="pending"
             />
           )}
         </section>
@@ -2582,10 +2789,6 @@ function SkuPortfolioOptimizationPanel({
           ) : null}
         </section>
       </div>
-
-      {selectedOutcomeRow ? (
-        <ActionTrackingDrawer row={selectedOutcomeRow} locale={locale} onClose={() => setSelectedOutcomeRow(null)} />
-      ) : null}
     </div>
   );
 }
@@ -2617,10 +2820,152 @@ function EmptySkuProfitPortfolioTable({ locale, isLoadingData = false }: { local
   );
 }
 
+function CurrentSkuRail({ rows, locale }: { rows: SkuReportRow[]; locale: RendererLocale }) {
+  const isZh = locale === "zh";
+  const displayedRows = rows;
+
+  return (
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-base font-bold text-slate-950">{isZh ? "当前 SKU" : "Current SKUs"}</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+              {isZh
+                ? `${numberFormat.format(rows.length)} 个 SKU · 按收入排序`
+                : `${numberFormat.format(rows.length)} SKUs · ranked by revenue`}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+            {isZh ? `${numberFormat.format(displayedRows.length)} 个显示` : `${numberFormat.format(displayedRows.length)} shown`}
+          </span>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
+        {displayedRows.length ? displayedRows.map((row) => (
+          <div key={row.sku} className="grid gap-3 bg-white px-4 py-3 md:grid-cols-[minmax(130px,0.9fr)_repeat(3,minmax(90px,0.55fr))] md:items-center">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-950">{row.sku}</p>
+              <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+                {row.product_name || row.category || (isZh ? "当前组合 SKU" : "Current portfolio SKU")}
+              </p>
+            </div>
+            <SmallSkuMetric label={isZh ? "收入" : "Revenue"} value={currencyDecimal.format(row.revenue)} />
+            <SmallSkuMetric label={isZh ? "利润" : "Profit"} value={row.profit === null ? "--" : currencyDecimal.format(row.profit)} />
+            <SmallSkuMetric label={isZh ? "广告花费" : "Ad Spend"} value={row.ad_cost_allocated === null ? "--" : currencyDecimal.format(row.ad_cost_allocated)} />
+          </div>
+        )) : (
+          <div className="m-3 grid min-h-[92px] place-items-start rounded-lg bg-slate-50 p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
+            {isZh ? "当前没有可显示的 SKU。" : "No current SKUs to display."}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function ActiveStrategiesRail({ rows, locale }: { rows: ActiveDecisionSummary[]; locale: RendererLocale }) {
+  const isZh = locale === "zh";
+
+  return (
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-base font-bold text-slate-950">{isZh ? "已接受策略" : "Active Strategies"}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+            {isZh ? `${numberFormat.format(rows.length)} 个已接受` : `${numberFormat.format(rows.length)} accepted`}
+          </span>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
+        {rows.length ? rows.map((row) => {
+          const actualLabel = activeStrategyActualLabel(row, locale);
+          const confidenceLabel = row.confidence !== null
+            ? (isZh ? `置信度 ${numberFormat.format(row.confidence)}%` : `${numberFormat.format(row.confidence)}% confidence`)
+            : null;
+          return (
+            <div key={`${row.sku}:${row.recommendedAction}`} className="grid gap-3 bg-white px-4 py-3 md:grid-cols-[minmax(130px,0.9fr)_minmax(180px,1.1fr)_minmax(120px,0.7fr)_minmax(150px,0.8fr)] md:items-center">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-950">{row.sku}</p>
+                <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+                  {actionFilterDisplayLabel(row.recommendedAction, locale)}
+                </p>
+              </div>
+              <SmallSkuMetric
+                label={isZh ? "预期利润提升" : "Expected Profit Lift"}
+                value={signedCurrency(row.expectedImpact)}
+              />
+              <SmallSkuMetric
+                label={isZh ? "实际利润提升" : "Actual Profit Lift"}
+                value={actualLabel}
+              />
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isZh ? "测量状态" : "Measurement"}
+                </p>
+                <p className="mt-0.5 truncate text-sm font-bold text-slate-900">
+                  {activeStrategyMeasurementLabel(row, locale)}
+                </p>
+                {confidenceLabel ? (
+                  <p className="mt-0.5 truncate text-xs font-bold text-slate-500">{confidenceLabel}</p>
+                ) : null}
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="m-3 grid min-h-[92px] place-items-start rounded-lg bg-slate-50 p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
+            {isZh ? "当前没有已接受的 SKU。" : "No SKUs currently accepted."}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function activeStrategyActualLabel(row: ActiveDecisionSummary, locale: RendererLocale) {
+  if (row.actualImpact !== null) return signedCurrency(row.actualImpact);
+  if (row.measurementStatus === "TRACKING" || row.executionStatus === "EXECUTING" || row.status === "running") {
+    return locale === "zh"
+      ? `跟踪中 · ${numberFormat.format(row.observationDays)} / ${numberFormat.format(row.observationWindow || 14)} 天`
+      : `Tracking · ${numberFormat.format(row.observationDays)} of ${numberFormat.format(row.observationWindow || 14)} days`;
+  }
+  if (row.executionStatus === "NOT_STARTED" || row.status === "accepted") {
+    return locale === "zh" ? "等待执行" : "Awaiting implementation";
+  }
+  return locale === "zh" ? "暂不可用" : "Not available yet";
+}
+
+function activeStrategyMeasurementLabel(row: ActiveDecisionSummary, locale: RendererLocale) {
+  if (row.actualImpact !== null) {
+    return locale === "zh"
+      ? `${numberFormat.format(row.observationWindow || 14)} 天观察期`
+      : `${numberFormat.format(row.observationWindow || 14)} day period`;
+  }
+  if (row.measurementStatus === "TRACKING" || row.executionStatus === "EXECUTING" || row.status === "running") {
+    return locale === "zh" ? "跟踪中" : "Tracking";
+  }
+  if (row.executionStatus === "NOT_STARTED" || row.status === "accepted") {
+    return locale === "zh" ? "等待执行" : "Awaiting implementation";
+  }
+  return locale === "zh" ? "暂无数据" : "Not available yet";
+}
+
+function SmallSkuMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-bold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
 type PortfolioRow = DecisionIntelligenceReportV1["sku_portfolio_optimization"]["recommended_portfolio"][number];
 type PortfolioDecisionRow = DecisionIntelligenceReportV1["sku_portfolio_optimization"]["skuDecisions"][number];
 type PortfolioDecisionFilter = PortfolioDecisionRow["action"] | "INVENTORY_RISK" | "BUDGET_OPPORTUNITY" | "ALL";
 type OptimizationGoal = "GROWTH" | "PROFIT" | "INVENTORY" | "PORTFOLIO_HEALTH";
+type PortfolioSummaryView = "current" | "optimization" | "accepted";
 type DecisionActionDisplay = {
   title: string;
   icon: string;
@@ -2640,6 +2985,14 @@ type DecisionActionReasoning = {
   summary: string;
 };
 
+function goalFilterDisplayLabel(goal: OptimizationGoal, locale: RendererLocale = "en") {
+  const isZh = locale === "zh";
+  if (goal === "GROWTH") return isZh ? "增长" : "Growth";
+  if (goal === "PROFIT") return isZh ? "利润" : "Profit";
+  if (goal === "INVENTORY") return isZh ? "库存" : "Inventory";
+  return isZh ? "组合健康" : "Portfolio Health";
+}
+
 const optimizationGoalFilters: Array<{ goal: OptimizationGoal; label: string }> = [
   { goal: "GROWTH", label: "Growth" },
   { goal: "PROFIT", label: "Profit" },
@@ -2654,15 +3007,50 @@ const optimizationActionFilters: Record<OptimizationGoal, string[]> = {
   PORTFOLIO_HEALTH: ["Enrich Inputs", "Reduce Ad Waste", "Reallocate Budget", "Exit SKU"]
 };
 
-function goalFilterDisplayLabel(goal: OptimizationGoal) {
-  if (goal === "GROWTH") return "Growth";
-  if (goal === "PROFIT") return "Profit";
-  if (goal === "INVENTORY") return "Inventory";
-  return "Portfolio Health";
+function actionFilterDisplayLabel(action: string, locale: RendererLocale = "en") {
+  if (locale !== "zh") return action;
+  const labels: Record<string, string> = {
+    "Scale Ads": "扩大广告",
+    "Expand Channel": "拓展渠道",
+    "Increase Price": "提高价格",
+    "Decrease Price": "降低价格",
+    "Run Promotion": "测试促销",
+    "Restock Inventory": "补充库存",
+    "Clear Excess Inventory": "清理库存",
+    "Enrich Inputs": "补齐数据",
+    "Reduce Ad Waste": "减少广告浪费",
+    "Reallocate Budget": "重分配预算",
+    "Exit SKU": "退出 SKU",
+    "No Action Required": "无需操作"
+  };
+  return labels[action] ?? action;
 }
 
-function actionFilterDisplayLabel(action: string) {
-  return action;
+function localizeDecisionActionDisplay(display: DecisionActionDisplay, locale: RendererLocale): DecisionActionDisplay {
+  if (locale !== "zh") return display;
+  const title = actionFilterDisplayLabel(display.title, locale);
+  const categoryLabels: Record<string, string> = {
+    "Growth Optimization": "增长优化",
+    "Profit Optimization": "利润优化",
+    "Inventory Optimization": "库存优化",
+    "Portfolio Health": "组合健康"
+  };
+  let description = display.description;
+  const adsBudgetMatch = description.match(/^Increase advertising budget by (.+?) \/ (\d+) days$/);
+  if (adsBudgetMatch) {
+    description = `提高广告预算 ${adsBudgetMatch[1]} / ${adsBudgetMatch[2]} 天`;
+  } else if (description === "Launch new channel test") {
+    description = "启动新渠道测试";
+  } else if (description === "Current portfolio performance is optimal; AI will continue monitoring new signals.") {
+    description = "当前组合表现稳定，AI 将继续监控新信号。";
+  }
+
+  return {
+    ...display,
+    title,
+    category: categoryLabels[display.category] ?? display.category,
+    description
+  };
 }
 
 type ActionOutcomeStatus = "Pending" | "Accepted" | "Running" | "Completed" | "Rejected" | "Blocked";
@@ -2678,6 +3066,20 @@ type PersistedActionTrackingRecord = {
 type AcceptedImpactSummary = {
   activeCount: number;
   expectedProfitImpact: number;
+};
+
+type ActiveDecisionSummary = {
+  id: string;
+  sku: string;
+  recommendedAction: string;
+  expectedImpact: number;
+  actualImpact: number | null;
+  status: string;
+  executionStatus: string;
+  measurementStatus: string;
+  observationDays: number;
+  observationWindow: number;
+  confidence: number | null;
 };
 
 type ActionOutcomeRow = {
@@ -2777,6 +3179,34 @@ function shouldShowInOptimizationQueue(
 ) {
   const status = actionStatuses[decisionRowKey(row)];
   return status !== "accepted" && status !== "rejected";
+}
+
+function uniquePortfolioDecisionRows(rows: PortfolioDecisionRow[]) {
+  const seen = new Set<string>();
+  const uniqueRows: PortfolioDecisionRow[] = [];
+
+  for (const row of rows) {
+    const key = decisionRowKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
+}
+
+function uniqueActiveDecisionSummaries(rows: ActiveDecisionSummary[]) {
+  const seen = new Set<string>();
+  const uniqueRows: ActiveDecisionSummary[] = [];
+
+  for (const row of rows) {
+    const key = `${row.sku}:${row.recommendedAction}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  return uniqueRows;
 }
 
 function legacyActionMatchesDecisionRecommendation(
@@ -3330,7 +3760,8 @@ function OptimizationDecisionRail({
   onSelect,
   onAccept,
   onReject,
-  showInlineDetail = true
+  showInlineDetail = true,
+  mode = "pending"
 }: {
   rows: PortfolioDecisionRow[];
   selectedRow: PortfolioDecisionRow | null;
@@ -3350,8 +3781,10 @@ function OptimizationDecisionRail({
   onAccept: (row: PortfolioDecisionRow) => void;
   onReject: (row: PortfolioDecisionRow) => void;
   showInlineDetail?: boolean;
+  mode?: "pending" | "accepted";
 }) {
   const isZh = locale === "zh";
+  const isAcceptedMode = mode === "accepted";
   const [selectedGoal, setSelectedGoal] = useState<OptimizationGoal>("GROWTH");
   const [selectedGoalAction, setSelectedGoalAction] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(selectedRow ? decisionRowKey(selectedRow) : null);
@@ -3366,25 +3799,33 @@ function OptimizationDecisionRail({
     INVENTORY: 0,
     PORTFOLIO_HEALTH: 0
   }), [portfolioRowsBySku, rows]);
-  const displayedRows = selectedGoal
-    ? rows.filter((row) => {
-      const goal = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId));
-      return goal.goal === selectedGoal && (!selectedGoalAction || goal.actionLabel === selectedGoalAction);
-    })
-    : rows;
-  const goalRows = selectedGoal
-    ? rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === selectedGoal)
-    : rows;
-  const actionCounts = goalRows.reduce<Record<string, number>>((counts, row) => {
-    const label = optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).actionLabel;
-    counts[label] = (counts[label] ?? 0) + 1;
+  const goalRows = isAcceptedMode
+    ? rows
+    : rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === selectedGoal);
+  const actionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const recommendation = portfolioRowsBySku.get(row.skuId);
+      const actionTitle = actionDisplayForDecision(row, recommendation).title;
+      const goal = optimizationGoalForDecision(row, recommendation).goal;
+      if (!isAcceptedMode && goal !== selectedGoal) continue;
+      counts.set(actionTitle, (counts.get(actionTitle) ?? 0) + 1);
+    }
     return counts;
-  }, {});
+  }, [isAcceptedMode, portfolioRowsBySku, rows, selectedGoal]);
+  const displayedRows = isAcceptedMode
+    ? rows
+    : goalRows.filter((row) => {
+      if (!selectedGoalAction) return true;
+      return actionDisplayForDecision(row, portfolioRowsBySku.get(row.skuId)).title === selectedGoalAction;
+    });
   const queueCountLabel = displayedRows.length === rows.length
-    ? (isZh ? `待优化 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} pending`)
+    ? (isAcceptedMode
+      ? (isZh ? `已接受 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} accepted`)
+      : (isZh ? `待优化 ${numberFormat.format(rows.length)} 个` : `${numberFormat.format(rows.length)} pending`))
     : (isZh
-      ? `${numberFormat.format(displayedRows.length)} 个显示 / ${numberFormat.format(rows.length)} 个待优化`
-      : `${numberFormat.format(displayedRows.length)} shown / ${numberFormat.format(rows.length)} pending`);
+      ? `${numberFormat.format(displayedRows.length)} 个显示 / ${numberFormat.format(rows.length)} 个${isAcceptedMode ? "已接受" : "待优化"}`
+      : `${numberFormat.format(displayedRows.length)} shown / ${numberFormat.format(rows.length)} ${isAcceptedMode ? "accepted" : "pending"}`);
   const visibleSelectedKey = displayedRows.some((row) => decisionRowKey(row) === selectedRowKey)
     ? selectedRowKey
     : null;
@@ -3394,12 +3835,18 @@ function OptimizationDecisionRail({
   }, [selectedRow]);
 
   useEffect(() => {
-    if (hasManuallySelectedGoalRef.current || !rows.length || goalCounts[selectedGoal] > 0) return;
+    if (isAcceptedMode || hasManuallySelectedGoalRef.current || !rows.length || goalCounts[selectedGoal] > 0) return;
     const nextGoal = optimizationGoalFilters.find((filter) => goalCounts[filter.goal] > 0)?.goal;
     if (!nextGoal) return;
     setSelectedGoal(nextGoal);
     setSelectedGoalAction(null);
-  }, [goalCounts, rows.length, selectedGoal]);
+  }, [goalCounts, isAcceptedMode, rows.length, selectedGoal]);
+
+  useEffect(() => {
+    if (isAcceptedMode || !selectedGoalAction) return;
+    if ((actionCounts.get(selectedGoalAction) ?? 0) > 0) return;
+    setSelectedGoalAction(null);
+  }, [actionCounts, isAcceptedMode, selectedGoalAction]);
 
   const selectRow = (row: PortfolioDecisionRow) => {
     setSelectedRowKey(decisionRowKey(row));
@@ -3407,74 +3854,73 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg bg-emerald-50/70 p-0 xl:sticky xl:top-24 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 bg-emerald-50/95 p-2 pb-1 backdrop-blur">
-        <div className="rounded-lg bg-emerald-950 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="whitespace-nowrap text-base font-bold text-white">{isZh ? "优化队列" : "Optimization Queue"}</p>
-            <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 text-xs font-bold text-emerald-50 ring-1 ring-emerald-200/25">
-              {queueCountLabel}
-            </span>
-          </div>
-          {analysisStats ? (
-            <p className="mt-1 text-[11px] font-semibold text-emerald-50/75">
-              {isZh
-                ? `${numberFormat.format(analysisStats.analyzedSkuCount)} 个 SKU 已分析 · ${numberFormat.format(analysisStats.evaluatedSkuCount)} 个已评估 · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} 个机会 · ${numberFormat.format(analysisStats.recommendedActionCount)} 个推荐动作`
-                : `${numberFormat.format(analysisStats.analyzedSkuCount)} SKUs analyzed · ${numberFormat.format(analysisStats.evaluatedSkuCount)} evaluated · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} opportunities identified · ${numberFormat.format(analysisStats.recommendedActionCount)} recommended actions`}
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-base font-bold text-slate-950">
+              {isAcceptedMode
+                ? (isZh ? "已接受策略" : "Active Strategies")
+                : (isZh ? "优化队列" : "Optimization Queue")}
             </p>
-          ) : null}
-          <div className="mt-2 flex flex-wrap gap-2">
+            {!isAcceptedMode && analysisStats ? (
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                {isZh
+                  ? `${numberFormat.format(analysisStats.analyzedSkuCount)} 个 SKU 已分析 · ${numberFormat.format(analysisStats.evaluatedSkuCount)} 个已评估 · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} 个机会 · ${numberFormat.format(analysisStats.recommendedActionCount)} 个动作`
+                  : `${numberFormat.format(analysisStats.analyzedSkuCount)} SKUs analyzed · ${numberFormat.format(analysisStats.evaluatedSkuCount)} evaluated · ${numberFormat.format(analysisStats.identifiedOpportunityCount)} opportunities · ${numberFormat.format(analysisStats.recommendedActionCount)} actions`}
+              </p>
+            ) : null}
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+            {queueCountLabel}
+          </span>
+        </div>
+        {!isAcceptedMode ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {optimizationGoalFilters.map((filter) => {
               const isSelected = selectedGoal === filter.goal;
               return (
-              <button
-                key={filter.goal}
-                type="button"
-                onClick={() => {
-                  hasManuallySelectedGoalRef.current = true;
-                  if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
-                  setSelectedGoal(filter.goal);
-                }}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
-                  isSelected
-                    ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                    : "bg-emerald-300/10 text-emerald-50 ring-emerald-200/20 hover:bg-emerald-300/20"
-                )}
-                aria-pressed={isSelected}
-              >
-                {filter.label}
-              </button>
+                <button
+                  key={filter.goal}
+                  type="button"
+                  onClick={() => {
+                    hasManuallySelectedGoalRef.current = true;
+                    if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
+                    setSelectedGoal(filter.goal);
+                  }}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
+                    isSelected
+                      ? "bg-slate-950 text-white ring-slate-950"
+                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                  )}
+                  aria-pressed={isSelected}
+                >
+                  {goalFilterDisplayLabel(filter.goal, locale)}
+                </button>
               );
             })}
           </div>
-        </div>
-
-        <div className={cn(
-          "mt-2 flex min-h-[38px] flex-wrap content-start gap-2 px-1",
-          !selectedGoal && "invisible"
-        )}>
-          {selectedGoal
-            ? optimizationActionFilters[selectedGoal].map((action) => {
+        ) : null}
+        {!isAcceptedMode ? (
+          <div className="mt-3 flex min-h-[30px] flex-wrap content-start gap-1.5">
+            {optimizationActionFilters[selectedGoal].map((action) => {
               const isSelected = selectedGoalAction === action;
-              const count = actionCounts[action] ?? 0;
+              const count = actionCounts.get(action) ?? 0;
               return (
                 <button
                   key={action}
                   type="button"
-	                  onClick={() => {
-	                    const nextAction = selectedGoalAction === action ? null : action;
-	                    setSelectedGoalAction(nextAction);
-	                  }}
+                  onClick={() => setSelectedGoalAction((current) => current === action ? null : action)}
                   className={cn(
-                    "rounded-full px-3 py-1.5 text-xs font-bold transition ring-1",
+                    "rounded-full px-2.5 py-1 text-xs font-bold transition ring-1",
                     isSelected
-                      ? "bg-[#5747e8] text-white ring-[#5747e8]"
-                      : "bg-white text-emerald-900 ring-emerald-200 hover:bg-emerald-50"
+                      ? "bg-emerald-700 text-white ring-emerald-700"
+                      : "bg-emerald-50 text-emerald-800 ring-emerald-100 hover:bg-emerald-100"
                   )}
                   aria-pressed={isSelected}
                 >
-                  {actionFilterDisplayLabel(action)}
+                  {actionFilterDisplayLabel(action, locale)}
                   <span className={cn(
                     "ml-1 text-[10px]",
                     isSelected ? "text-white/80" : "text-emerald-700/70"
@@ -3483,11 +3929,11 @@ function OptimizationDecisionRail({
                   </span>
                 </button>
               );
-            })
-            : null}
-        </div>
+            })}
+          </div>
+        ) : null}
       </div>
-      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-scroll overscroll-contain px-1 pb-1 pr-4 [scrollbar-color:rgba(100,116,139,0.75)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500/75">
+      <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;
@@ -3495,17 +3941,17 @@ function OptimizationDecisionRail({
 	          const impact = profitImpactForDecision(row, recommendation);
 	          const status = actionStatuses[key] === "accepted" ? "accepted" : actionStatuses[key] === "rejected" ? "rejected" : "awaiting_decision";
 	          const goal = optimizationGoalForDecision(row, recommendation);
-	          const actionDisplay = actionDisplayForDecision(row, recommendation);
+		          const actionDisplay = localizeDecisionActionDisplay(actionDisplayForDecision(row, recommendation), locale);
             const previousDecisionStatus = previousDecisionActiveStatus(row);
 
           return (
             <div
               key={key}
               className={cn(
-                "rounded-lg border-2 bg-white transition",
+                "bg-white transition",
                 isSelected
-                  ? "border-blue-600 shadow-sm"
-                  : "border-transparent ring-1 ring-slate-100"
+                  ? "bg-slate-50"
+                  : "hover:bg-slate-50/70"
               )}
             >
               <div
@@ -3527,45 +3973,47 @@ function OptimizationDecisionRail({
                   }
                 }}
                 className={cn(
-                  "w-full select-none rounded-lg p-3 text-left transition hover:bg-emerald-50/50",
-                  isSelected && "bg-emerald-50"
+                  "w-full select-none px-4 py-3 text-left transition",
+                  isSelected && "shadow-[inset_3px_0_0_#0f766e]"
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="grid gap-3 lg:grid-cols-[minmax(130px,0.8fr)_minmax(220px,1.4fr)_auto] lg:items-center">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-950">{row.skuId}</p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal)} />
-	                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal, locale)} />
+		                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
                     </div>
                   </div>
-                  <span className="text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
-                </div>
-                <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
-	                  {actionDisplay.description}
-                </p>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  {previousDecisionStatus ? (
-                    <ActiveDecisionStatusBadge status={previousDecisionStatus} locale={locale} />
-                  ) : (
-                    <span />
-                  )}
-                  {status === "awaiting_decision" ? (
-                    <ActionDecisionButtons
-                      locale={locale}
-                      onAccept={(event) => {
-                        event?.stopPropagation();
-                        onAccept(row);
-                      }}
-                      onReject={(event) => {
-                        event?.stopPropagation();
-                        onReject(row);
-                      }}
-                      compact
-                    />
-                  ) : (
-                    <RecommendationStatusBadge status={status} locale={locale} />
-                  )}
+                  <div className="min-w-0">
+                    <p className="line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
+                      {actionDisplay.description}
+                    </p>
+                    {previousDecisionStatus ? (
+                      <div className="mt-1">
+                        <ActiveDecisionStatusBadge status={previousDecisionStatus} locale={locale} />
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 lg:justify-end">
+                    <span className="min-w-[76px] text-right text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
+                    {status === "awaiting_decision" && !isAcceptedMode ? (
+                      <ActionDecisionButtons
+                        locale={locale}
+                        onAccept={(event) => {
+                          event?.stopPropagation();
+                          onAccept(row);
+                        }}
+                        onReject={(event) => {
+                          event?.stopPropagation();
+                          onReject(row);
+                        }}
+                        compact
+                      />
+                    ) : (
+                      <RecommendationStatusBadge status={isAcceptedMode ? "accepted" : status} locale={locale} />
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -3585,10 +4033,10 @@ function OptimizationDecisionRail({
             </div>
           );
         }) : (
-          <div className="grid min-h-[92px] place-items-start rounded-lg bg-white p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
+          <div className="m-3 grid min-h-[92px] place-items-start rounded-lg bg-slate-50 p-4 text-sm font-medium text-slate-500 ring-1 ring-slate-100">
             {isZh
-              ? `${goalFilterDisplayLabel(selectedGoal)} 当前没有需要优化的 SKU。`
-              : `No ${goalFilterDisplayLabel(selectedGoal)} SKUs currently need optimization.`}
+              ? `当前没有${isAcceptedMode ? "已接受" : "需要优化"}的 SKU。`
+              : `No SKUs currently ${isAcceptedMode ? "accepted" : "need optimization"}.`}
           </div>
         )}
       </div>
@@ -5996,309 +6444,11 @@ function ActionLifecycleCard({
   );
 }
 
-function ActionOutcomeTracker({
-  rows,
-  locale,
-  onSelect,
-  variant = "full",
-  opportunities = rows.length,
-  recommendedActions = rows.length,
-  expectedProfitImpact = rows.reduce((sum, row) => sum + row.predictedProfitLift, 0),
-  currentProfit,
-  optimizedProfit,
-  actualProfitLift = rows.reduce((sum, row) => sum + (row.actualProfitLift ?? 0), 0),
-  liftRate
-}: {
-  rows: ActionOutcomeRow[];
-  locale: RendererLocale;
-  onSelect: (row: ActionOutcomeRow) => void;
-  variant?: "full" | "sidebar";
-  opportunities?: number;
-  recommendedActions?: number;
-  expectedProfitImpact?: number;
-  currentProfit?: number;
-  optimizedProfit?: number;
-  actualProfitLift?: number;
-  liftRate?: number;
-}) {
-  const isZh = locale === "zh";
-  const acceptedCount = rows.filter((row) => row.status !== "Rejected").length;
-  const runningCount = rows.filter((row) => row.status === "Running").length;
-  const completedRows = rows.filter((row) => row.status === "Completed" && row.actualProfitLift !== null);
-  const successRate = completedRows.length
-    ? completedRows.filter((row) => (row.actualProfitLift ?? 0) >= row.predictedProfitLift * 0.7).length / completedRows.length
-    : 0;
-  const averageError = completedRows.length
-    ? completedRows.reduce((sum, row) => sum + Math.abs((row.actualProfitLift ?? 0) - row.predictedProfitLift), 0) / completedRows.length
-    : 0;
-
-  if (variant === "sidebar") {
-    return (
-      <aside className="sticky bottom-0 right-0 top-auto z-20 max-h-[58vh] overflow-auto rounded-lg border bg-slate-50/95 p-4 shadow-xl backdrop-blur xl:top-3 xl:h-[calc(100vh-7rem)] xl:max-h-none">
-        <div className="rounded-lg bg-white p-3 ring-1 ring-slate-100">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-base font-bold text-slate-950">{isZh ? "AI Optimization Tracker" : "AI Optimization Tracker"}</p>
-              <p className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                <span className="size-2 rounded-full bg-emerald-500" />
-                {isZh ? "Optimizing / Running" : "Optimizing / Running"}
-              </p>
-            </div>
-            <Badge tone="success">{isZh ? "实时" : "Live"}</Badge>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-slate-500">
-            {isZh
-              ? `Monitoring ${numberFormat.format(opportunities)} optimization opportunities`
-              : `Monitoring ${numberFormat.format(opportunities)} optimization opportunities`}
-          </p>
-        </div>
-
-        <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "优化利润数据" : "Optimized Profit Data"}</p>
-          <div className="mt-3 grid gap-2">
-            {typeof optimizedProfit === "number" ? (
-              <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">{isZh ? "AI 优化后利润" : "AI Optimized Profit"}</p>
-                <p className="mt-1 text-xl font-bold text-emerald-950">{currencyDecimal.format(optimizedProfit)}</p>
-              </div>
-            ) : null}
-            <div className="grid grid-cols-2 gap-2">
-              {typeof currentProfit === "number" ? (
-                <SmallTrackerMetric label={isZh ? "当前利润" : "Current profit"} value={currencyDecimal.format(currentProfit)} />
-              ) : null}
-              <SmallTrackerMetric
-                label={isZh ? "预计提升" : "Expected lift"}
-                value={`${signedCurrency(expectedProfitImpact)}${typeof liftRate === "number" ? ` / ${percent.format(liftRate)}` : ""}`}
-              />
-              <SmallTrackerMetric label={isZh ? "实际累计提升" : "Actual lift"} value={signedCurrency(actualProfitLift)} />
-              <SmallTrackerMetric label={isZh ? "预测差距" : "Open lift"} value={signedCurrency(expectedProfitImpact - actualProfitLift)} />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI Status</p>
-          <div className="mt-3 grid gap-2 text-xs">
-            <div className="flex justify-between gap-3">
-              <span className="text-slate-500">{isZh ? "推荐动作" : "Recommended actions"}</span>
-              <span className="font-bold text-slate-950">{numberFormat.format(recommendedActions)}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-slate-500">{isZh ? "活跃实验" : "Active experiments"}</span>
-              <span className="font-bold text-slate-950">{numberFormat.format(runningCount)}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-slate-500">{isZh ? "预期利润影响" : "Expected profit impact"}</span>
-              <span className="font-bold text-emerald-700">{signedCurrency(expectedProfitImpact)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <SmallTrackerMetric label={isZh ? "已接受" : "Accepted"} value={numberFormat.format(acceptedCount)} />
-          <SmallTrackerMetric label={isZh ? "运行中" : "Running"} value={numberFormat.format(runningCount)} />
-          <SmallTrackerMetric label={isZh ? "完成" : "Done"} value={numberFormat.format(completedRows.length)} />
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {rows.map((row) => (
-            <button
-              type="button"
-              key={`${row.action}-${row.sku}-${row.acceptedAt}`}
-              onClick={() => onSelect(row)}
-              className="w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/40"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-slate-950">{row.sku}</p>
-                  <p className="mt-1 truncate text-xs font-semibold text-slate-500">Action: {actionIcon(row.action)} {row.action}</p>
-                </div>
-                <ActionStatusBadge status={row.status} />
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className="font-semibold uppercase tracking-wide text-slate-400">Prediction</p>
-                  <p className="mt-1 font-bold text-emerald-700">+{currencyDecimal.format(row.predictedProfitLift)}</p>
-                </div>
-                <div>
-                  <p className="font-semibold uppercase tracking-wide text-slate-400">Actual</p>
-                  <p className="mt-1 font-bold text-slate-900">{row.actualProfitLift === null ? "Pending" : `+${currencyDecimal.format(row.actualProfitLift)}`}</p>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className="font-semibold uppercase tracking-wide text-slate-400">Progress</p>
-                  <p className="mt-1 font-bold text-slate-900">{actionProgressLabel(row)}</p>
-                </div>
-                <div>
-                  <p className="font-semibold uppercase tracking-wide text-slate-400">Prediction Accuracy</p>
-                  <p className="mt-1 font-bold text-slate-900">{percentNoDecimal.format(predictionAccuracy(row))}</p>
-                </div>
-              </div>
-              <ActionTimeline status={row.status} />
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{isZh ? "学习反馈" : "Learning"}</p>
-          <div className="mt-2 grid gap-2 text-xs">
-            <div className="flex justify-between gap-3">
-              <span className="text-slate-500">{isZh ? "成功率" : "Success rate"}</span>
-              <span className="font-bold text-slate-950">{percent.format(successRate)}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-slate-500">{isZh ? "平均预测误差" : "Avg error"}</span>
-              <span className="font-bold text-slate-950">{currencyDecimal.format(averageError)}</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-    );
-  }
-
-  return (
-    <div className="mt-5 rounded-lg border bg-white p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-950">Action Outcome Tracker</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {isZh
-              ? "追踪已接受动作的预测结果、实际利润提升和学习反馈。"
-              : "Tracks accepted actions, predicted outcomes, actual profit lift, and learning feedback."}
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-right text-xs">
-          <SmallTrackerMetric label={isZh ? "已接受" : "Accepted"} value={numberFormat.format(acceptedCount)} />
-          <SmallTrackerMetric label={isZh ? "运行中" : "Running"} value={numberFormat.format(runningCount)} />
-          <SmallTrackerMetric label={isZh ? "已完成" : "Completed"} value={numberFormat.format(completedRows.length)} />
-        </div>
-      </div>
-
-      <div className="mt-4 overflow-auto rounded-lg border">
-        <table className="min-w-[860px] w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Action</th>
-              <th className="px-3 py-3">SKU</th>
-              <th className="px-3 py-3">Accepted At</th>
-              <th className="px-3 py-3">Window</th>
-              <th className="px-3 py-3">Predicted Profit Lift</th>
-              <th className="px-3 py-3">Actual Profit Lift</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3">{isZh ? "详情" : "Details"}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.map((row) => (
-              <tr key={`${row.action}-${row.sku}-${row.acceptedAt}`}>
-                <td className="px-3 py-3 font-medium text-slate-900">{row.action}</td>
-                <td className="px-3 py-3 font-semibold text-slate-900">{row.sku}</td>
-                <td className="px-3 py-3">{row.acceptedAt}</td>
-                <td className="px-3 py-3">{row.window}</td>
-                <td className="px-3 py-3 font-semibold text-emerald-700">+{currencyDecimal.format(row.predictedProfitLift)}</td>
-                <td className="px-3 py-3">{row.actualProfitLift === null ? "Pending" : `+${currencyDecimal.format(row.actualProfitLift)}`}</td>
-                <td className="px-3 py-3"><ActionStatusBadge status={row.status} /></td>
-                <td className="px-3 py-3">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(row)}
-                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                  >
-                    Track Result
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-4 rounded-lg bg-slate-50 p-3">
-        <p className="text-sm font-semibold text-slate-950">{isZh ? "Learning Summary" : "Learning Summary"}</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-4">
-          <SmallTrackerMetric label={isZh ? "本周接受动作数" : "Accepted this week"} value={numberFormat.format(acceptedCount)} />
-          <SmallTrackerMetric label={isZh ? "成功率" : "Success rate"} value={percent.format(successRate)} />
-          <SmallTrackerMetric label={isZh ? "平均预测误差" : "Avg prediction error"} value={currencyDecimal.format(averageError)} />
-          <SmallTrackerMetric label={isZh ? "最有效动作" : "Best action type"} value={isZh ? "增加广告" : "Increase Ads"} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SmallTrackerMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-white px-3 py-2 ring-1 ring-slate-100">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-bold text-slate-950">{value}</p>
-    </div>
-  );
-}
-
-function ActionStatusBadge({ status }: { status: ActionOutcomeStatus }) {
-  const tone = status === "Completed"
-    ? "success"
-    : status === "Running" || status === "Accepted"
-      ? "warning"
-      : status === "Rejected"
-        ? "neutral"
-        : "neutral";
-
-  return <Badge tone={tone}>{status}</Badge>;
-}
-
-function actionIcon(action: string) {
-  if (/ad|ads|scale|increase/i.test(action)) return "🚀";
-  if (/price/i.test(action)) return "↕";
-  if (/stock|inventory|restock/i.test(action)) return "▣";
-  return "•";
-}
-
-function actionProgressLabel(row: ActionOutcomeRow) {
-  if (row.status === "Completed") return "Day 30 / 30";
-  if (row.status === "Running") return "Day 3 / 30";
-  if (row.status === "Accepted") return "Day 1 / 30";
-  return "Pending";
-}
-
-function predictionAccuracy(row: ActionOutcomeRow) {
-  if (row.actualProfitLift === null || row.predictedProfitLift <= 0) return Math.max(0.5, Math.min(0.95, row.confidence));
-  const gapRatio = Math.abs(row.actualProfitLift - row.predictedProfitLift) / row.predictedProfitLift;
-  return Math.max(0, Math.min(1, 1 - gapRatio));
-}
-
-function ActionTimeline({ status }: { status: ActionOutcomeStatus }) {
-  const completed = status === "Completed";
-  const tracking = status === "Running" || completed;
-  const steps = [
-    { label: "AI recommendation accepted", state: "done" },
-    { label: "Budget updated", state: status === "Pending" ? "todo" : "done" },
-    { label: "Monitoring profit impact", state: tracking ? "active" : "todo" },
-    { label: "Final evaluation", state: completed ? "done" : "todo" }
-  ];
-
-  return (
-    <div className="mt-3 border-t border-slate-100 pt-3">
-      <div className="space-y-1.5">
-        {steps.map((step) => (
-          <div key={step.label} className="flex items-center gap-2 text-xs">
-            <span className={cn(
-              "grid size-4 shrink-0 place-items-center rounded-full text-[10px] font-bold",
-              step.state === "done" && "bg-emerald-100 text-emerald-700",
-              step.state === "active" && "bg-amber-100 text-amber-700",
-              step.state === "todo" && "bg-slate-100 text-slate-400"
-            )}>
-              {step.state === "done" ? "✓" : step.state === "active" ? "●" : "○"}
-            </span>
-            <span className={cn(
-              step.state === "todo" ? "text-slate-400" : "font-semibold text-slate-700"
-            )}>
-              {step.label}
-            </span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -6494,70 +6644,6 @@ function DecisionDetailDrawer({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ActionTrackingDrawer({ row, locale, onClose }: { row: ActionOutcomeRow; locale: RendererLocale; onClose: () => void }) {
-  const isZh = locale === "zh";
-  const actualLift = row.actualProfitLift ?? 0;
-  const gap = row.actualProfitLift === null ? null : actualLift - row.predictedProfitLift;
-  const progress = row.status === "Completed" ? 1 : row.status === "Running" ? 0.45 : 0.15;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/20" onClick={onClose}>
-      <div
-        className="ml-auto h-full w-full max-w-xl overflow-auto bg-white p-5 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-lg font-bold text-slate-950">{isZh ? "Action Tracking Detail" : "Action Tracking Detail"}</p>
-            <p className="mt-1 text-sm text-slate-500">{row.sku} · {row.action}</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md border px-3 py-1 text-sm font-semibold text-slate-600">Close</button>
-        </div>
-
-        <div className="mt-5 rounded-lg border p-4">
-          <p className="text-sm font-semibold text-slate-950">{isZh ? "Baseline vs Predicted vs Actual" : "Baseline vs Predicted vs Actual"}</p>
-          <div className="mt-3 grid gap-3">
-            <DiffRow label={isZh ? "Baseline profit" : "Baseline profit"} value={currencyDecimal.format(row.baselineProfit)} />
-            <DiffRow label={isZh ? "Predicted profit lift" : "Predicted profit lift"} value={`+${currencyDecimal.format(row.predictedProfitLift)}`} />
-            <DiffRow label={isZh ? "Actual profit lift" : "Actual profit lift"} value={row.actualProfitLift === null ? "Pending" : `+${currencyDecimal.format(row.actualProfitLift)}`} />
-            <DiffRow label={isZh ? "Prediction gap" : "Prediction gap"} value={gap === null ? "Pending" : signedCurrency(gap)} />
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border p-4">
-          <p className="text-sm font-semibold text-slate-950">{isZh ? "Progress" : "Progress"}</p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.round(progress * 100)}%` }} />
-          </div>
-          <div className="mt-3 grid gap-2 text-sm text-slate-700">
-            <DiffRow label="Accepted" value={row.acceptedAt} />
-            <DiffRow label="Observation window" value={row.window} />
-            <DiffRow label="Status" value={row.status} />
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-950">{isZh ? "Learning Notes" : "Learning Notes"}</p>
-          <p className="mt-2 text-sm leading-6 text-emerald-900">
-            {row.actualProfitLift === null
-              ? (isZh ? "观察窗口仍在运行，系统会持续对比实际利润和预测利润。" : "The observation window is still running. Actual profit will be compared with the prediction.")
-              : (isZh ? `该动作已产生 ${currencyDecimal.format(row.actualProfitLift)} 实际利润提升，用于更新后续推荐可信度。` : `This action produced ${currencyDecimal.format(row.actualProfitLift)} actual profit lift and will update future recommendation confidence.`)}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DiffRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-950">{value}</span>
     </div>
   );
 }

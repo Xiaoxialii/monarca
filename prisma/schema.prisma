@@ -317,6 +317,9 @@ model DataSourceConnection {
   status                     ConnectionStatus            @default(PENDING)
   connectionMode             String?
   authMethod                 String?
+  contentHash                String?
+  sourceFingerprint          String?
+  supersedesDataSourceId     String?
   config                     Json?
   schemas                    Json?
   lastErrorMessage           String?
@@ -334,6 +337,8 @@ model DataSourceConnection {
   googleAdsConnections       GoogleAdsConnection[]
 
   @@index([workspaceId, status])
+  @@index([workspaceId, contentHash])
+  @@index([workspaceId, sourceFingerprint])
 }
 
 model GoogleAdsConnection {
@@ -1127,27 +1132,33 @@ model AsyncJob {
   id              String     @id @default(cuid())
   workspaceId     String
   type            String
+  identity        String?
   status          String     @default("QUEUED")
   progress        Int        @default(0)
   currentStep     String?
   payload         Json?
   resultReference Json?
+  errorCode       String?
   errorMessage    String?
   retryCount      Int        @default(0)
   maxRetries      Int        @default(3)
   heartbeatAt     DateTime?
   lockedAt        DateTime?
   lockedBy        String?
+  leaseExpiresAt  DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
+  failedAt        DateTime?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   snapshots       Snapshot[]
 
   @@index([workspaceId, type, status])
+  @@index([workspaceId, type, identity, status])
   @@index([workspaceId, createdAt])
   @@index([status, heartbeatAt])
+  @@index([status, leaseExpiresAt])
   @@index([status, updatedAt])
 }
 

@@ -11,6 +11,7 @@ import {
 } from "@/lib/dashboard/optimization-report-cache";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
 import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
+import { optimizationReadiness, type OptimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import {
   enqueueSkuOptimizationJob,
@@ -132,6 +133,7 @@ type DecisionReportContractInput = {
   refreshErrorMessage?: string | null;
   fallbackUsed?: boolean;
   fallbackReason?: string | null;
+  readiness?: OptimizationReadiness | null;
 };
 
 function explicitRefreshStatus(status: string | null | undefined): ExplicitRefreshStatus {
@@ -172,6 +174,13 @@ function withDecisionReportContract(input: DecisionReportContractInput) {
 
   return {
     ...payload,
+    readiness: input.readiness ?? asRecord(payload.readiness),
+    canonical: {
+      snapshotId: input.readiness?.canonicalSnapshotId ?? null,
+      dataVersion: input.readiness?.dataVersion ?? input.currentVersions?.canonicalSnapshotVersion ?? null,
+      status: input.readiness?.latestObservedStatus?.canonicalStatus ?? null,
+      artifactStatus: input.readiness?.artifactStatus ?? "NOT_CHECKED"
+    },
     metrics: {
       source: "canonical_live",
       generatedAt: metricsGeneratedAt,
@@ -355,35 +364,20 @@ function normalizeOptimizationProfitImpactPayload(payload: Record<string, unknow
   };
 }
 
-async function hasReadyCanonicalSources(workspaceId: string) {
-  const readySnapshots = await prisma.schemaSnapshot.count({
-    where: {
-      workspaceId,
-      dataSourceId: { not: null },
-      canonicalStatus: "READY",
-      canonicalVersion: { not: null },
-      dataSource: {
-        isActive: true,
-        status: "CONNECTED"
-      }
-    }
-  });
-
-  return readySnapshots > 0;
-}
-
 async function optimizationRefreshAvailability(workspaceId: string) {
-  if (!await hasReadyCanonicalSources(workspaceId)) {
+  const readiness = await optimizationReadiness(prisma, { workspaceId });
+  if (!readiness.ready) {
     return {
       canRefresh: false,
-      artifact: null
+      artifact: readiness.artifact,
+      readiness
     };
   }
 
-  const artifact = await canonicalArtifactAvailability(prisma, { workspaceId });
   return {
-    canRefresh: artifact.available,
-    artifact
+    canRefresh: true,
+    artifact: readiness.artifact,
+    readiness
   };
 }
 
@@ -396,6 +390,7 @@ function unavailableCanonicalArtifactResponse(input: {
   cacheUpdatedAt?: Date | null;
   sourceDecisionSnapshotId?: string | null;
   artifact: Awaited<ReturnType<typeof canonicalArtifactAvailability>> | null;
+  readiness?: OptimizationReadiness | null;
   startedAt: number;
 }) {
   const payload = input.payload ?? {};
@@ -412,6 +407,7 @@ function unavailableCanonicalArtifactResponse(input: {
       message: input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
       refreshSkippedReason: "canonical_artifact_unavailable",
       artifactAvailability: input.artifact,
+      readiness: input.readiness ?? null,
       jobId: null,
       snapshot: input.cacheId
         ? {
@@ -428,8 +424,9 @@ function unavailableCanonicalArtifactResponse(input: {
     optimizationStatus: hasOptimizationRecommendationRows(payload) ? "FAILED" : "PENDING",
     optimizationSnapshotId: input.cacheId ?? null,
     refreshStatus: "FAILED",
-    refreshErrorCode: "ARTIFACT_UNAVAILABLE",
-    refreshErrorMessage: input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
+    refreshErrorCode: input.readiness?.code ?? "ARTIFACT_UNAVAILABLE",
+    refreshErrorMessage: input.readiness?.message ?? input.artifact?.message ?? "Canonical ecommerce artifacts are unavailable. Refresh skipped.",
+    readiness: input.readiness ?? null,
     fallbackUsed: hasOptimizationRecommendationRows(payload),
     fallbackReason: "canonical_artifact_unavailable"
   });
@@ -478,6 +475,7 @@ function queuedOptimizationResponse(input: {
   status: string;
   currentStep?: string | null;
   message: string;
+  readiness?: OptimizationReadiness | null;
   startedAt: number;
 }) {
   const payload = input.payload ?? {};
@@ -532,6 +530,7 @@ function queuedOptimizationResponse(input: {
     refreshStatus: explicitRefreshStatus(input.status),
     refreshJobId: input.jobId,
     refreshCurrentStep: input.currentStep ?? null,
+    readiness: input.readiness ?? null,
     fallbackUsed: hasExistingReport,
     fallbackReason: hasExistingReport ? "provided_optimization_payload" : null
   });
@@ -585,71 +584,6 @@ async function freshOptimizationCacheResponse(input: {
     optimizationStatus: "SUCCESS",
     optimizationSnapshotId: refreshedCache.id,
     refreshStatus: "IDLE"
-  });
-}
-
-async function liveDecisionReportResponse(input: {
-  workspaceId: string;
-  mode: "full" | "sku";
-  startedAt: number;
-  message?: string;
-}) {
-  const loaded = await loadEcommerceSalesDashboardData({
-    workspaceId: input.workspaceId,
-    decisionMode: input.mode
-  }).catch((error) => ({
-    state: "unavailable" as const,
-    message: error instanceof Error ? error.message : "Ecommerce decision report data is unavailable.",
-    data: null,
-    lineage: null
-  }));
-
-  const decisionReport = loaded.data?.decision_report ?? null;
-  if (loaded.state !== "ready" || !decisionReport) return null;
-
-  const optimization = asRecord(decisionReport.sku_portfolio_optimization);
-  const queueRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
-  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
-  const optimizationReadiness = validateOptimizationData(loaded.data);
-
-  return decisionReportJson({
-    workspaceId: input.workspaceId,
-    mode: input.mode,
-    startedAt: input.startedAt,
-    payload: {
-      ok: true,
-      state: "ready",
-      status: "READY",
-      latestSnapshot: false,
-      hasConnectedDataSource: true,
-      message: input.message ?? loaded.message ?? "Loaded current decision analysis from live canonical metrics.",
-      decision_report: decisionReport,
-      portfolioSummary: decisionReport.portfolioSummary ?? optimization.portfolioSummary ?? null,
-      allocationRecommendation: decisionReport.allocationRecommendation ?? optimization.allocationRecommendation ?? null,
-      skuDecisions: queueRows,
-      riskAlerts: Array.isArray(decisionReport.riskAlerts) ? decisionReport.riskAlerts : [],
-      executionPlan: Array.isArray(decisionReport.executionPlan) ? decisionReport.executionPlan : [],
-      generated_at: loaded.data?.metadata.computed_at ?? null,
-      source_platforms: loaded.data?.metadata.source_platforms ?? [],
-      lineage: loaded.lineage,
-      optimizationReadiness,
-      optimizationReadinessDebug: readinessDebug(loaded, "current_canonical_metrics"),
-      liveFallback: true,
-      snapshot: {
-        id: null,
-        type: "LiveDecisionReport",
-        latestSnapshot: false
-      },
-      debug: {
-        queueRows: queueRows.length,
-        portfolioRows: portfolioRows.length
-      }
-    },
-    optimizationSource: queueRows.length || portfolioRows.length ? "optimization_snapshot" : "none",
-    optimizationStatus: queueRows.length || portfolioRows.length ? "SUCCESS" : "PENDING",
-    refreshStatus: "IDLE",
-    fallbackUsed: true,
-    fallbackReason: "live_decision_report"
   });
 }
 
@@ -774,18 +708,9 @@ export async function GET(request: Request) {
           cacheUpdatedAt: reportCache.updatedAt,
           sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           artifact: refreshAvailability.artifact,
+          readiness: refreshAvailability.readiness,
           startedAt
         });
-      }
-
-      if (!hasOptimizationRecommendationRows(cachedPayload)) {
-        const liveResponse = await liveDecisionReportResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          startedAt,
-          message: "Loaded current decision analysis while the optimization cache refreshes."
-        });
-        if (liveResponse) return liveResponse;
       }
 
       let job = await latestOptimizationJob(session.workspace.id);
@@ -795,6 +720,7 @@ export async function GET(request: Request) {
           workspaceId: session.workspace.id,
           reason: `non_ready_decision_report_cache:${reportCache.state || "unknown"}`,
           decisionMode,
+          schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
           inputHash: reportCache.inputHash
         });
         job = queuedJob;
@@ -817,6 +743,7 @@ export async function GET(request: Request) {
         status: job.status,
         currentStep: job.currentStep,
         message: "New data is available. Optimization refresh is running.",
+        readiness: refreshAvailability.readiness,
         startedAt
       });
     }
@@ -833,22 +760,16 @@ export async function GET(request: Request) {
           cacheUpdatedAt: reportCache.updatedAt,
           sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           artifact: refreshAvailability.artifact,
+          readiness: refreshAvailability.readiness,
           startedAt
         });
       }
-
-      const liveResponse = await liveDecisionReportResponse({
-        workspaceId: session.workspace.id,
-        mode: decisionMode,
-        startedAt,
-        message: "Loaded current decision analysis because the cached optimization rows are incomplete."
-      });
-      if (liveResponse) return liveResponse;
 
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
         reason: "invalid_decision_report_cache:missing_ops_rows",
         decisionMode,
+        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
         inputHash: reportCache.inputHash
       });
 
@@ -914,24 +835,16 @@ export async function GET(request: Request) {
           cacheUpdatedAt: reportCache.updatedAt,
           sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           artifact: refreshAvailability.artifact,
+          readiness: refreshAvailability.readiness,
           startedAt
         });
-      }
-
-      if (!hasOptimizationRecommendationRows(cachedPayload)) {
-        const liveResponse = await liveDecisionReportResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          startedAt,
-          message: "Loaded current decision analysis because the cached optimization snapshot is stale."
-        });
-        if (liveResponse) return liveResponse;
       }
 
       const job = await enqueueSkuOptimizationJob(prisma, {
         workspaceId: session.workspace.id,
         reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
         decisionMode,
+        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
         inputHash: freshness.current.inputHash
       });
 
@@ -1035,6 +948,7 @@ export async function GET(request: Request) {
           cacheUpdatedAt: snapshot.createdAt,
           sourceDecisionSnapshotId: snapshot.id,
           artifact: refreshAvailability.artifact,
+          readiness: refreshAvailability.readiness,
           startedAt
         });
       }
@@ -1043,6 +957,7 @@ export async function GET(request: Request) {
         workspaceId: session.workspace.id,
         reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
         decisionMode,
+        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
         inputHash: freshness.current.inputHash
       });
 
@@ -1117,14 +1032,6 @@ export async function GET(request: Request) {
 
   const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
   if (refreshAvailability.canRefresh) {
-    const liveResponse = await liveDecisionReportResponse({
-      workspaceId: session.workspace.id,
-      mode: decisionMode,
-      startedAt,
-      message: "Loaded current decision analysis while the optimization cache refreshes."
-    });
-    if (liveResponse) return liveResponse;
-
     let job = await latestOptimizationJob(session.workspace.id);
 
     if (!job || !isPendingOptimizationStatus(job.status)) {
@@ -1132,6 +1039,7 @@ export async function GET(request: Request) {
         workspaceId: session.workspace.id,
         reason: "decision_snapshot_missing_with_ready_sources",
         decisionMode,
+        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
         inputHash: null
       });
       job = queuedJob;
@@ -1154,6 +1062,7 @@ export async function GET(request: Request) {
       status: job.status,
       currentStep: job.currentStep,
       message: "Optimization refresh is running.",
+      readiness: refreshAvailability.readiness,
       startedAt
     });
   }
@@ -1163,6 +1072,7 @@ export async function GET(request: Request) {
       workspaceId: session.workspace.id,
       mode: decisionMode,
       artifact: refreshAvailability.artifact,
+      readiness: refreshAvailability.readiness,
       startedAt
     });
   }

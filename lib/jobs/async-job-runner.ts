@@ -3,7 +3,6 @@ import {
   currentDecisionSnapshotVersions,
   METRIC_SNAPSHOT_VERSION
 } from "@/lib/dashboard/decision-snapshot-lifecycle";
-import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
 import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
 import { generateEcommerceDecisionSnapshots } from "@/lib/dashboard/decision-snapshot-generator";
 import { loadEcommerceSalesDashboardData } from "@/lib/dashboard/ecommerce-sales-dashboard-loader";
@@ -23,6 +22,7 @@ import {
   collectDecisionExecutionMetric,
   evaluateDecisionOutcome
 } from "@/lib/decision-outcome/closed-loop-service";
+import { optimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 
 export const ASYNC_JOB_TYPES = [
   "INGESTION",
@@ -50,12 +50,17 @@ export const ASYNC_JOB_STATUSES = [
 const ACTIVE_ASYNC_JOB_STATUSES = ["PROCESSING"] as const;
 const RESUMABLE_ASYNC_JOB_STATUSES = ["PROCESSING", "PAUSED"] as const;
 const DEFAULT_STALE_ASYNC_JOB_MS = 2 * 60 * 1000;
-const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 2 * 60 * 1000;
+const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 10 * 60 * 1000;
 const DEFAULT_QUEUED_ASYNC_JOB_MS = 2 * 60 * 1000;
+const DEFAULT_OPTIMIZATION_QUEUED_ASYNC_JOB_MS = 15 * 60 * 1000;
+const DEFAULT_OPTIMIZATION_MAX_EXECUTION_MS = 8 * 60 * 1000;
+const DEFAULT_ASYNC_JOB_LEASE_MS = 2 * 60 * 1000;
+const DEFAULT_ASYNC_JOB_WORKER_BATCH_SIZE = 3;
+const DEFAULT_ASYNC_JOB_EXECUTION_BUDGET_MS = 45 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const DEFAULT_MAX_RECOVERY_BATCH = 25;
 
-type AsyncJobType = typeof ASYNC_JOB_TYPES[number];
+export type AsyncJobType = typeof ASYNC_JOB_TYPES[number];
 type AsyncJobStatus = typeof ASYNC_JOB_STATUSES[number];
 
 type AsyncJobPayload = {
@@ -80,6 +85,16 @@ type JobHandlerResult = {
   }>;
 };
 
+type ProcessBatchResult = {
+  claimed: number;
+  completed: number;
+  failed: number;
+  retried: number;
+  skipped: number;
+  durationMs: number;
+  results: Array<Awaited<ReturnType<typeof processJob>>>;
+};
+
 function configuredDurationMs(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -96,12 +111,42 @@ export const QUEUED_ASYNC_JOB_MS = configuredDurationMs(
 );
 
 export const SKU_OPTIMIZATION_STALE_JOB_MS = configuredDurationMs(
-  process.env.SKU_OPTIMIZATION_JOB_STALE_MS,
+  process.env.OPTIMIZATION_HEARTBEAT_STALE_MS ?? process.env.SKU_OPTIMIZATION_JOB_STALE_MS,
   DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS
 );
 
+export const OPTIMIZATION_QUEUED_ASYNC_JOB_MS = configuredDurationMs(
+  process.env.OPTIMIZATION_QUEUED_STALE_MS,
+  DEFAULT_OPTIMIZATION_QUEUED_ASYNC_JOB_MS
+);
+
+export const OPTIMIZATION_MAX_EXECUTION_MS = configuredDurationMs(
+  process.env.OPTIMIZATION_MAX_EXECUTION_MS,
+  DEFAULT_OPTIMIZATION_MAX_EXECUTION_MS
+);
+
+export const ASYNC_JOB_LEASE_MS = configuredDurationMs(
+  process.env.ASYNC_JOB_LEASE_MS,
+  DEFAULT_ASYNC_JOB_LEASE_MS
+);
+
+export const ASYNC_JOB_WORKER_BATCH_SIZE = Math.max(
+  1,
+  Math.min(
+    Number.isFinite(Number(process.env.ASYNC_JOB_BATCH_SIZE))
+      ? Number(process.env.ASYNC_JOB_BATCH_SIZE)
+      : DEFAULT_ASYNC_JOB_WORKER_BATCH_SIZE,
+    10
+  )
+);
+
+export const ASYNC_JOB_EXECUTION_BUDGET_MS = configuredDurationMs(
+  process.env.ASYNC_JOB_EXECUTION_BUDGET_MS,
+  DEFAULT_ASYNC_JOB_EXECUTION_BUDGET_MS
+);
+
 const HEARTBEAT_INTERVAL_MS = configuredDurationMs(
-  process.env.ASYNC_JOB_HEARTBEAT_MS,
+  process.env.OPTIMIZATION_HEARTBEAT_INTERVAL_MS ?? process.env.ASYNC_JOB_HEARTBEAT_MS,
   DEFAULT_HEARTBEAT_INTERVAL_MS
 );
 
@@ -113,12 +158,27 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function errorCodeFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/CANONICAL_ARTIFACT_UNREADABLE/i.test(message)) return "CANONICAL_ARTIFACT_UNREADABLE";
+  if (/CANONICAL_ARTIFACT_KEY_MISSING/i.test(message)) return "CANONICAL_ARTIFACT_KEY_MISSING";
+  if (/NO_READY_CANONICAL_SNAPSHOT|No READY ecommerce canonical snapshot/i.test(message)) return "CANONICAL_NOT_READY";
+  if (/R2 storage is not configured|R2_CONFIGURATION_MISSING/i.test(message)) return "CANONICAL_ARTIFACT_UNREADABLE";
+  if (/specified key does not exist|NoSuchKey|not found|ENOENT/i.test(message)) return "CANONICAL_ARTIFACT_NOT_FOUND";
+  if (/database|prisma|P1001|connection/i.test(message)) return "DATABASE_UNAVAILABLE";
+  return "ASYNC_JOB_FAILED";
+}
+
 function staleBeforeDate(now = new Date()) {
   return new Date(now.getTime() - STALE_ASYNC_JOB_MS);
 }
 
 function queuedBeforeDate(now = new Date()) {
   return new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
+}
+
+function optimizationQueuedBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - OPTIMIZATION_QUEUED_ASYNC_JOB_MS);
 }
 
 function skuOptimizationStaleBeforeDate(now = new Date()) {
@@ -130,6 +190,16 @@ function staleQueuedJobWhere(now = new Date()) {
     status: "QUEUED",
     updatedAt: {
       lt: queuedBeforeDate(now)
+    }
+  };
+}
+
+function staleOptimizationQueuedJobWhere(now = new Date()) {
+  return {
+    status: "QUEUED",
+    type: "SKU_OPTIMIZATION",
+    updatedAt: {
+      lt: optimizationQueuedBeforeDate(now)
     }
   };
 }
@@ -148,6 +218,32 @@ function staleResumableJobWhere(now = new Date()) {
         }
       },
       {
+        heartbeatAt: null,
+        updatedAt: {
+          lt: staleBefore
+        }
+      }
+    ]
+  };
+}
+
+function staleSkuOptimizationResumableJobWhere(now = new Date()) {
+  const staleBefore = skuOptimizationStaleBeforeDate(now);
+  return {
+    type: "SKU_OPTIMIZATION",
+    status: {
+      in: [...RESUMABLE_ASYNC_JOB_STATUSES]
+    },
+    OR: [
+      { leaseExpiresAt: { lt: now } },
+      {
+        leaseExpiresAt: null,
+        heartbeatAt: {
+          lt: staleBefore
+        }
+      },
+      {
+        leaseExpiresAt: null,
         heartbeatAt: null,
         updatedAt: {
           lt: staleBefore
@@ -194,19 +290,23 @@ function isStaleSkuOptimizationJob(job: {
 function startHeartbeat(
   client: PrismaClient,
   jobId: string,
+  owner: string,
   getState: () => { currentStep: string | null; progress: number }
 ) {
   const interval = setInterval(() => {
+    const now = new Date();
     const state = getState();
     void client.asyncJob.updateMany({
       where: {
         id: jobId,
+        lockedBy: owner,
         status: {
           in: [...ACTIVE_ASYNC_JOB_STATUSES]
         }
       },
       data: {
-        heartbeatAt: new Date(),
+        heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + ASYNC_JOB_LEASE_MS),
         currentStep: state.currentStep,
         progress: state.progress
       }
@@ -222,6 +322,22 @@ function startHeartbeat(
   return () => clearInterval(interval);
 }
 
+async function jobLeaseStillOwned(client: PrismaClient, jobId: string, owner: string) {
+  const job = await client.asyncJob.findUnique({
+    where: { id: jobId },
+    select: {
+      status: true,
+      lockedBy: true,
+      leaseExpiresAt: true
+    }
+  });
+  return Boolean(
+    job?.status === "PROCESSING" &&
+    job.lockedBy === owner &&
+    (!job.leaseExpiresAt || job.leaseExpiresAt > new Date())
+  );
+}
+
 async function updateJob(
   client: PrismaClient,
   jobId: string,
@@ -229,16 +345,23 @@ async function updateJob(
     status?: AsyncJobStatus;
     progress?: number;
     currentStep?: string | null;
+    errorCode?: string | null;
     errorMessage?: string | null;
     resultReference?: Prisma.InputJsonValue;
     heartbeatAt?: Date | null;
     lockedAt?: Date | null;
     lockedBy?: string | null;
+    leaseExpiresAt?: Date | null;
     completedAt?: Date | null;
-  }
+    failedAt?: Date | null;
+  },
+  owner?: string
 ) {
   await client.asyncJob.updateMany({
-    where: { id: jobId },
+    where: {
+      id: jobId,
+      ...(owner ? { lockedBy: owner } : {})
+    },
     data: {
       ...data,
       heartbeatAt: data.heartbeatAt === undefined ? new Date() : data.heartbeatAt
@@ -251,6 +374,7 @@ export async function createAsyncJob(
   input: {
     workspaceId: string;
     type: AsyncJobType;
+    identity?: string | null;
     payload?: Prisma.InputJsonValue | null;
     maxRetries?: number;
     currentStep?: string;
@@ -260,6 +384,7 @@ export async function createAsyncJob(
     data: {
       workspaceId: input.workspaceId,
       type: input.type,
+      identity: input.identity ?? undefined,
       status: "QUEUED",
       progress: 0,
       currentStep: input.currentStep ?? "Queued",
@@ -267,6 +392,15 @@ export async function createAsyncJob(
       maxRetries: input.maxRetries ?? 3
     }
   });
+}
+
+function optimizationJobIdentity(input: {
+  decisionMode?: "full" | "sku" | null;
+  inputHash?: string | null;
+}) {
+  const mode = input.decisionMode ?? "all";
+  const inputHash = input.inputHash?.trim() || "no-input-hash";
+  return `optimization:${mode}:${inputHash}`;
 }
 
 export async function enqueueSkuOptimizationJob(
@@ -280,31 +414,34 @@ export async function enqueueSkuOptimizationJob(
     inputHash?: string | null;
   }
 ) {
+  const identity = optimizationJobIdentity(input);
   const existingJobs = await client.asyncJob.findMany({
     where: {
       workspaceId: input.workspaceId,
       type: "SKU_OPTIMIZATION",
-      status: {
-        in: ["QUEUED", "PROCESSING", "PAUSED"]
-      }
+      identity
     },
     select: {
       id: true,
       workspaceId: true,
       type: true,
+      identity: true,
       status: true,
       progress: true,
       currentStep: true,
       payload: true,
       resultReference: true,
+      errorCode: true,
       errorMessage: true,
       retryCount: true,
       maxRetries: true,
       heartbeatAt: true,
+      leaseExpiresAt: true,
       lockedAt: true,
       lockedBy: true,
       startedAt: true,
       completedAt: true,
+      failedAt: true,
       createdAt: true,
       updatedAt: true
     },
@@ -315,8 +452,10 @@ export async function enqueueSkuOptimizationJob(
 
   const now = new Date();
   for (const existing of existingJobs) {
+    if (existing.status === "COMPLETED") return existing;
+
     if (existing.status === "QUEUED") {
-      if (existing.updatedAt >= queuedBeforeDate(now)) return existing;
+      if (existing.updatedAt >= optimizationQueuedBeforeDate(now)) return existing;
 
       await client.asyncJob.updateMany({
         where: {
@@ -327,12 +466,15 @@ export async function enqueueSkuOptimizationJob(
           status: "FAILED",
           progress: 100,
           currentStep: "Failed - stale queued optimization job",
-          errorMessage: `Superseded because SKU optimization stayed queued for more than ${Math.round(QUEUED_ASYNC_JOB_MS / 60000)} minutes.`,
+          errorCode: "JOB_QUEUE_TIMEOUT",
+          errorMessage: `Superseded because SKU optimization stayed queued for more than ${Math.round(OPTIMIZATION_QUEUED_ASYNC_JOB_MS / 60000)} minutes.`,
           heartbeatAt: now,
           lockedAt: null,
           lockedBy: null,
+          leaseExpiresAt: null,
           retryCount: existing.maxRetries,
-          completedAt: now
+          completedAt: now,
+          failedAt: now
         }
       });
       continue;
@@ -351,28 +493,80 @@ export async function enqueueSkuOptimizationJob(
         status: "FAILED",
         progress: 100,
         currentStep: "Failed - stale optimization job heartbeat",
+        errorCode: "JOB_HEARTBEAT_TIMEOUT",
         errorMessage: `Superseded because SKU optimization heartbeat was stale for more than ${Math.round(SKU_OPTIMIZATION_STALE_JOB_MS / 60000)} minutes.`,
         heartbeatAt: now,
         lockedAt: null,
         lockedBy: null,
+        leaseExpiresAt: null,
         retryCount: existing.maxRetries,
-        completedAt: now
+        completedAt: now,
+        failedAt: now
       }
     });
+
+    continue;
   }
 
-  return createAsyncJob(client, {
-    workspaceId: input.workspaceId,
-    type: "SKU_OPTIMIZATION",
-    currentStep: "Queued for decision optimization",
-    payload: {
-      reason: input.reason ?? "manual_or_freshness_refresh",
-      decisionMode: input.decisionMode ?? null,
-      triggerDataSourceId: input.triggerDataSourceId ?? null,
-      schemaSnapshotId: input.schemaSnapshotId ?? null,
-      inputHash: input.inputHash ?? null
-    } as Prisma.InputJsonValue
-  });
+  const retryableFailed = existingJobs.find((job) => job.status === "FAILED" && job.retryCount < job.maxRetries);
+  if (retryableFailed) {
+    await client.asyncJob.update({
+      where: { id: retryableFailed.id },
+      data: {
+        status: "QUEUED",
+        progress: 0,
+        currentStep: "Queued for decision optimization retry",
+        errorCode: null,
+        errorMessage: null,
+        resultReference: Prisma.DbNull,
+        heartbeatAt: null,
+        lockedAt: null,
+        lockedBy: null,
+        leaseExpiresAt: null,
+        startedAt: null,
+        completedAt: null,
+        failedAt: null,
+        payload: {
+          reason: input.reason ?? "retry_optimization_refresh",
+          decisionMode: input.decisionMode ?? null,
+          triggerDataSourceId: input.triggerDataSourceId ?? null,
+          schemaSnapshotId: input.schemaSnapshotId ?? null,
+          inputHash: input.inputHash ?? null
+        } as Prisma.InputJsonValue
+      }
+    });
+    const retried = await client.asyncJob.findUnique({ where: { id: retryableFailed.id } });
+    if (retried) return retried;
+  }
+
+  try {
+    return await createAsyncJob(client, {
+      workspaceId: input.workspaceId,
+      type: "SKU_OPTIMIZATION",
+      identity,
+      currentStep: "Queued for decision optimization",
+      payload: {
+        reason: input.reason ?? "manual_or_freshness_refresh",
+        decisionMode: input.decisionMode ?? null,
+        triggerDataSourceId: input.triggerDataSourceId ?? null,
+        schemaSnapshotId: input.schemaSnapshotId ?? null,
+        inputHash: input.inputHash ?? null
+      } as Prisma.InputJsonValue
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await client.asyncJob.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          type: "SKU_OPTIMIZATION",
+          identity
+        },
+        orderBy: { createdAt: "desc" }
+      });
+      if (existing) return existing;
+    }
+    throw error;
+  }
 }
 
 export async function processJob(
@@ -384,19 +578,35 @@ export async function processJob(
   const previousJob = await client.asyncJob.findUnique({
     where: { id: jobId },
     select: {
+      type: true,
       status: true,
       retryCount: true,
-      maxRetries: true
+      maxRetries: true,
+      leaseExpiresAt: true
     }
   });
   const shouldIncrementRetryCount = Boolean(previousJob && previousJob.status !== "QUEUED");
+  const now = new Date();
+  const leaseExpiresAt = new Date(now.getTime() + ASYNC_JOB_LEASE_MS);
+  const resumableWhere = previousJob?.type === "SKU_OPTIMIZATION"
+    ? {
+      status: {
+        in: [...RESUMABLE_ASYNC_JOB_STATUSES]
+      },
+      OR: [
+        { leaseExpiresAt: { lt: now } },
+        { leaseExpiresAt: null, heartbeatAt: { lt: skuOptimizationStaleBeforeDate(now) } },
+        { leaseExpiresAt: null, heartbeatAt: null, updatedAt: { lt: skuOptimizationStaleBeforeDate(now) } }
+      ]
+    }
+    : staleResumableJobWhere(now);
 
   const lock = await client.asyncJob.updateMany({
     where: {
       id: jobId,
       OR: [
         { status: "QUEUED" },
-        staleResumableJobWhere(),
+        resumableWhere,
         {
           status: "FAILED",
           retryCount: {
@@ -409,15 +619,18 @@ export async function processJob(
       status: "PROCESSING",
       progress: 5,
       currentStep: "Starting job",
+      errorCode: null,
       errorMessage: null,
-      heartbeatAt: new Date(),
-      lockedAt: new Date(),
+      heartbeatAt: now,
+      lockedAt: now,
       lockedBy: owner,
+      leaseExpiresAt,
       retryCount: {
         increment: shouldIncrementRetryCount ? 1 : 0
       },
-      startedAt: new Date(),
-      completedAt: null
+      startedAt: previousJob?.status === "PROCESSING" ? undefined : now,
+      completedAt: null,
+      failedAt: null
     }
   });
 
@@ -438,7 +651,7 @@ export async function processJob(
   let currentStep: string | null = "Starting job";
   let currentProgress = 5;
   let heartbeatStopped = false;
-  const stopHeartbeat = startHeartbeat(client, jobId, () => ({
+  const stopHeartbeat = startHeartbeat(client, jobId, owner, () => ({
     currentStep,
     progress: currentProgress
   }));
@@ -454,7 +667,7 @@ export async function processJob(
     if (typeof data.progress === "number") {
       currentProgress = data.progress;
     }
-    await updateJob(client, jobId, data);
+    await updateJob(client, jobId, data, owner);
   };
 
   try {
@@ -476,6 +689,11 @@ export async function processJob(
     };
 
     if (result.snapshotType) {
+      const leaseStillOwned = await jobLeaseStillOwned(client, jobId, owner);
+      if (!leaseStillOwned) {
+        stopJobHeartbeat();
+        return { ok: false, skipped: true, reason: "Job lease was lost before result publication." };
+      }
       await client.snapshot.create({
         data: {
           workspaceId: job.workspaceId,
@@ -497,10 +715,13 @@ export async function processJob(
       heartbeatAt: new Date(),
       lockedAt: null,
       lockedBy: null,
+      leaseExpiresAt: null,
       completedAt: new Date(),
+      failedAt: null,
+      errorCode: null,
       errorMessage: null,
       resultReference: resultReference as Prisma.InputJsonValue
-    });
+    }, owner);
 
     const downstreamJobs = [];
     for (const nextJob of result.nextJobs ?? []) {
@@ -529,12 +750,15 @@ export async function processJob(
       status: "FAILED",
       progress: 100,
       currentStep: "Failed",
+      errorCode: errorCodeFromError(error),
       errorMessage: message,
       heartbeatAt: new Date(),
       lockedAt: null,
       lockedBy: null,
-      completedAt: new Date()
-    }).catch((jobError) => {
+      leaseExpiresAt: null,
+      completedAt: new Date(),
+      failedAt: new Date()
+    }, owner).catch((jobError) => {
       console.error("Failed to mark async job failure", jobError);
     });
 
@@ -542,6 +766,60 @@ export async function processJob(
   } finally {
     stopJobHeartbeat();
   }
+}
+
+export async function processAsyncJobBatch(options: {
+  client?: PrismaClient;
+  jobId?: string | null;
+  jobType?: AsyncJobType | null;
+  limit?: number;
+  budgetMs?: number;
+} = {}): Promise<ProcessBatchResult> {
+  const client = options.client ?? prisma;
+  const startedAt = Date.now();
+  const budgetMs = options.budgetMs ?? ASYNC_JOB_EXECUTION_BUDGET_MS;
+  const limit = Math.max(1, Math.min(options.limit ?? ASYNC_JOB_WORKER_BATCH_SIZE, 10));
+  const results: ProcessBatchResult["results"] = [];
+
+  const candidateJobs = options.jobId
+    ? await client.asyncJob.findMany({
+        where: { id: options.jobId },
+        select: { id: true },
+        take: 1
+      })
+    : await client.asyncJob.findMany({
+        where: {
+          status: "QUEUED",
+          ...(options.jobType ? { type: options.jobType } : {})
+        },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+        take: limit
+      });
+
+  for (const candidate of candidateJobs) {
+    if (Date.now() - startedAt > budgetMs - 5_000) break;
+    const result = await processJob(candidate.id, { client }).catch((error) => ({
+      ok: false,
+      jobId: candidate.id,
+      error: error instanceof Error ? error.message : "Async job processing failed."
+    }));
+    results.push(result);
+  }
+
+  const completed = results.filter((result) => result.ok).length;
+  const skipped = results.filter((result) => "skipped" in result && result.skipped).length;
+  const failed = results.length - completed - skipped;
+
+  return {
+    claimed: results.length - skipped,
+    completed,
+    failed,
+    retried: 0,
+    skipped,
+    durationMs: Date.now() - startedAt,
+    results
+  };
 }
 
 async function executeJobHandler(
@@ -747,10 +1025,10 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
     connectorJobId: string;
   }
 ) {
-  const artifact = await canonicalArtifactAvailability(client, {
+  const readiness = await optimizationReadiness(client, {
     workspaceId: input.workspaceId
   }).catch((error) => {
-    console.warn("Failed to check canonical artifact availability after connector sync", {
+    console.warn("Failed to check optimization readiness after connector sync", {
       workspaceId: input.workspaceId,
       provider: input.provider,
       dataSourceId: input.dataSourceId,
@@ -760,12 +1038,12 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
     return null;
   });
 
-  if (!artifact?.available) {
+  if (!readiness?.ready) {
     return {
       jobId: null,
       skipped: true,
-      reason: "canonical_artifact_unavailable",
-      artifactAvailability: artifact
+      reason: readiness?.code ?? "optimization_not_ready",
+      readiness
     };
   }
 
@@ -786,6 +1064,7 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
     reason,
     decisionMode: "full",
     triggerDataSourceId: input.dataSourceId,
+    schemaSnapshotId: readiness.canonicalSnapshotId,
     inputHash: versions.inputHash
   });
 
@@ -805,6 +1084,7 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
     skipped: false,
     reason,
     staleSummary,
+    readiness,
     inputHash: versions.inputHash
   };
 }
@@ -1102,11 +1382,12 @@ async function processSkuOptimizationAsyncJob(
     currentStep: "Checking canonical artifact availability"
   });
 
-  const artifact = await canonicalArtifactAvailability(client, {
+  const readiness = await optimizationReadiness(client, {
     workspaceId: input.workspaceId
   });
-  if (!artifact.available) {
-    throw new Error(`Canonical artifact unavailable: ${artifact.reason}. ${artifact.message}`);
+  if (!readiness.ready) {
+    const message = readiness.message ?? "Connected data is not ready for optimization.";
+    throw new Error(`${readiness.code ?? "CANONICAL_NOT_READY"}: ${message}`);
   }
 
   await input.setJobState({
@@ -1357,8 +1638,20 @@ export async function recoverAsyncJobs(
         notIn: ["COMPLETED", "CANCELLED"]
       },
       OR: [
-        staleQueuedJobWhere(),
-        staleResumableJobWhere(),
+        {
+          ...staleQueuedJobWhere(),
+          type: {
+            not: "SKU_OPTIMIZATION"
+          }
+        },
+        staleOptimizationQueuedJobWhere(),
+        {
+          ...staleResumableJobWhere(),
+          type: {
+            not: "SKU_OPTIMIZATION"
+          }
+        },
+        staleSkuOptimizationResumableJobWhere(),
         {
           status: "FAILED"
         }

@@ -149,7 +149,7 @@ const homepageCopy = {
       ],
       primaryCta: "Book consultation",
       secondaryCta: "View Demo",
-      trust: ["Profit diagnosis", "Scenario simulation", "Optimal decisions"]
+      trust: ["Profit diagnosis", "Scenario simulation", "At least 5% profit lift guaranteed"]
     },
     visual: {
       status: "Investigating",
@@ -405,7 +405,7 @@ const homepageCopy = {
       ],
       primaryCta: "预约咨询",
       secondaryCta: "查看 Demo",
-      trust: ["利润诊断", "方案模拟", "最优决策"]
+      trust: ["利润诊断", "方案模拟", "保证至少 5% 利润提升"]
     },
     visual: {
       status: "正在调查",

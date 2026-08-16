@@ -9,12 +9,16 @@ import {
 import { fileExtension } from "@/lib/file-upload-schema";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
-import { isWorkspaceUploadKey } from "@/lib/r2-storage";
+import { isWorkspaceUploadKey, readR2ObjectBuffer } from "@/lib/r2-storage";
 import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
+import {
+  findDuplicateUploadedDataSource,
+  uploadContentHash
+} from "@/lib/uploads/upload-dedupe";
 
 export const runtime = "nodejs";
 
@@ -151,6 +155,53 @@ export async function POST(request: Request) {
     const provider = isCsv ? "CSV" : "Excel";
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
     const uploadSource = isCsv ? "csv" : "excel";
+    const uploadedBuffer = await readR2ObjectBuffer(key);
+    if (uploadedBuffer.length <= 0) {
+      return NextResponse.json({ ok: false, message: "Uploaded file is empty or unavailable in R2 Storage. Please retry the upload." }, { status: 400 });
+    }
+    if (uploadedBuffer.length !== fileSize) {
+      return NextResponse.json(
+        { ok: false, message: "Uploaded file size does not match the completed upload request. Please retry the upload." },
+        { status: 400 }
+      );
+    }
+    const contentHash = uploadContentHash(uploadedBuffer);
+    const duplicateLookup = await findDuplicateUploadedDataSource(prisma, {
+      workspaceId: session.workspace.id,
+      fileName,
+      fileSize,
+      contentHash,
+      sourceType
+    });
+
+    if (duplicateLookup.duplicate) {
+      return NextResponse.json({
+        ok: true,
+        duplicate: true,
+        status: duplicateLookup.duplicate.status,
+        message: "This file has already been uploaded. Reusing the existing data source.",
+        dataSource: {
+          id: duplicateLookup.duplicate.id,
+          name: duplicateLookup.duplicate.name,
+          provider: duplicateLookup.duplicate.provider,
+          type: duplicateLookup.duplicate.type,
+          status: duplicateLookup.duplicate.status,
+          connectionMode: duplicateLookup.duplicate.connectionMode,
+          authMethod: duplicateLookup.duplicate.authMethod,
+          config: {
+            fileName,
+            fileSize,
+            extension,
+            contentHash,
+            duplicateOfDataSourceId: duplicateLookup.duplicate.id
+          },
+          schema: duplicateLookup.duplicate.schemas,
+          connectedAt: duplicateLookup.duplicate.connectedAt?.toISOString() ?? null,
+          lastSyncAt: duplicateLookup.duplicate.lastSyncAt?.toISOString() ?? null
+        }
+      });
+    }
+
     const unifiedIngestion = pendingUnifiedIngestionSummary({
       source: uploadSource,
       totalParsedRows: 0
@@ -178,11 +229,15 @@ export async function POST(request: Request) {
         status: ConnectionStatus.PENDING,
         connectionMode: "Upload",
         authMethod: "File",
+        contentHash,
+        sourceFingerprint: duplicateLookup.sourceFingerprint,
         config: {
           fileName,
           fileSize,
           mimeType,
           extension,
+          contentHash,
+          sourceFingerprint: duplicateLookup.sourceFingerprint,
           storageProvider: "r2",
           storageBucket: storage.bucket,
           storagePath: key,

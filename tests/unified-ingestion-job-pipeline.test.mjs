@@ -119,7 +119,10 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.doesNotMatch(runner, /\$transaction\(/);
 
   assert.match(statusRoute, /workspaceId:\s*session\.workspace\.id/);
+  assert.doesNotMatch(statusRoute, /processJob/);
+  assert.match(statusRoute, /recovery/);
   assert.match(retryRoute, /retryableAsyncJobWhere/);
+  assert.match(retryRoute, /status:\s*"QUEUED"/);
   assert.match(retryRoute, /processJob\(jobId\)/);
   assert.match(recoveryRoute, /recoverAsyncJobs/);
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);

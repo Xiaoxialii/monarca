@@ -15,6 +15,10 @@ import { FILE_UPLOAD_MAX_BYTES, FILE_UPLOAD_MAX_MB } from "@/lib/upload-limits";
 import { clearWorkspaceReportCaches } from "@/lib/report-cache-invalidation";
 import { createAsyncJob, processJob } from "@/lib/jobs/async-job-runner";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
+import {
+  findDuplicateUploadedDataSource,
+  uploadContentHash
+} from "@/lib/uploads/upload-dedupe";
 
 export const runtime = "nodejs";
 
@@ -117,6 +121,44 @@ export async function POST(request: Request) {
     const provider = isCsv ? "CSV" : "Excel";
     const sourceType = isCsv ? DataSourceType.CSV : DataSourceType.EXCEL;
     const uploadSource = isCsv ? "csv" : "excel";
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const contentHash = uploadContentHash(fileBuffer);
+    const duplicateLookup = await findDuplicateUploadedDataSource(prisma, {
+      workspaceId: session.workspace.id,
+      fileName: file.name,
+      fileSize: file.size,
+      contentHash,
+      sourceType
+    });
+
+    if (duplicateLookup.duplicate) {
+      return NextResponse.json({
+        ok: true,
+        duplicate: true,
+        status: duplicateLookup.duplicate.status,
+        message: "This file has already been uploaded. Reusing the existing data source.",
+        dataSource: {
+          id: duplicateLookup.duplicate.id,
+          name: duplicateLookup.duplicate.name,
+          provider: duplicateLookup.duplicate.provider,
+          type: duplicateLookup.duplicate.type,
+          status: duplicateLookup.duplicate.status,
+          connectionMode: duplicateLookup.duplicate.connectionMode,
+          authMethod: duplicateLookup.duplicate.authMethod,
+          config: {
+            fileName: file.name,
+            fileSize: file.size,
+            extension,
+            contentHash,
+            duplicateOfDataSourceId: duplicateLookup.duplicate.id
+          },
+          schema: duplicateLookup.duplicate.schemas,
+          connectedAt: duplicateLookup.duplicate.connectedAt?.toISOString() ?? null,
+          lastSyncAt: duplicateLookup.duplicate.lastSyncAt?.toISOString() ?? null
+        }
+      });
+    }
+
     const unifiedIngestion = pendingUnifiedIngestionSummary({
       source: uploadSource,
       totalParsedRows: 0
@@ -146,11 +188,15 @@ export async function POST(request: Request) {
         status: ConnectionStatus.PENDING,
         connectionMode: "Upload",
         authMethod: "File",
+        contentHash,
+        sourceFingerprint: duplicateLookup.sourceFingerprint,
         config: {
           fileName: file.name,
           fileSize: file.size,
           mimeType: file.type || null,
-          extension
+          extension,
+          contentHash,
+          sourceFingerprint: duplicateLookup.sourceFingerprint
         },
         schemas: publicSchemaPayload as Prisma.InputJsonValue,
         connectedAt: new Date(),
@@ -200,7 +246,7 @@ export async function POST(request: Request) {
     let storageWarning: string | null = null;
     const inlineStoredFile = file.size <= INLINE_UPLOAD_MAX_BYTES
       ? {
-        inlineFileBase64: Buffer.from(await file.arrayBuffer()).toString("base64"),
+        inlineFileBase64: fileBuffer.toString("base64"),
         inlineFileName: file.name,
         inlineMimeType: file.type || null,
         inlineFileSize: file.size
@@ -230,6 +276,8 @@ export async function POST(request: Request) {
             fileSize: file.size,
             mimeType: file.type || null,
             extension,
+            contentHash,
+            sourceFingerprint: duplicateLookup.sourceFingerprint,
             ...(inlineStoredFile ?? {}),
             storedFilePath: localStoredFile.path,
             storage: {
@@ -251,6 +299,8 @@ export async function POST(request: Request) {
             fileSize: file.size,
             mimeType: file.type || null,
             extension,
+            contentHash,
+            sourceFingerprint: duplicateLookup.sourceFingerprint,
             ...inlineStoredFile,
             storage: {
               provider: "inline-database"
@@ -323,6 +373,7 @@ export async function POST(request: Request) {
           fileName: file.name,
           fileSize: file.size,
           extension,
+          contentHash,
           storage: localStoredFile
             ? {
                 provider: localStoredFile.provider,

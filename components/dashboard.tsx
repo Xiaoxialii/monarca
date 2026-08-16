@@ -6450,6 +6450,7 @@ type BusinessSourceView = {
   statusLabel: string;
   syncProgress: number | null;
   lastSyncLabel: string;
+  tableCount: number;
   datasets: BusinessDatasetView[];
   summaryLabel: string;
   sourceRows: ConnectedSourceRow[];
@@ -6494,6 +6495,19 @@ function inferBusinessSourceKey(source: ConnectedSourceRow) {
 
 function businessDatasetRows(source: ConnectedSourceRow) {
   return source.schema?.unifiedIngestion?.totalParsedRows ?? source.schema?.unifiedIngestion?.sampledRows ?? 0;
+}
+
+function businessSourceTableCount(source: ConnectedSourceRow) {
+  const explicitCount = source.schema?.tableCount;
+  if (typeof explicitCount === "number" && Number.isFinite(explicitCount)) {
+    return Math.max(0, Math.round(explicitCount));
+  }
+
+  return Array.isArray(source.schema?.tables) ? source.schema.tables.length : 0;
+}
+
+function businessSourceGroupTableCount(rows: ConnectedSourceRow[]) {
+  return rows.reduce((sum, source) => sum + businessSourceTableCount(source), 0);
 }
 
 function formatBusinessNumber(value: number) {
@@ -6714,6 +6728,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       statusLabel: sourceStatusLabel(status, isZh),
       syncProgress: businessSourceSyncProgress(rows),
       lastSyncLabel: isZh ? "今天" : "Today",
+      tableCount: businessSourceGroupTableCount(rows),
       datasets: detectedDatasets.length > 0 ? detectedDatasets : definition.fallbackDatasets,
       sourceRows: rows
     }];
@@ -6735,6 +6750,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
       lastSyncLabel: source.lastSyncAt
         ? new Date(source.lastSyncAt).toLocaleDateString(isZh ? "zh-CN" : "en-US")
         : (isZh ? "今天" : "Today"),
+      tableCount: businessSourceGroupTableCount([source]),
       datasets: [{
         name: sourceName,
         rowsLabel: rowsCount > 0 ? `${formatBusinessNumber(rowsCount)} ${isZh ? "行" : "rows"}` : (isZh ? "已连接" : "connected")
@@ -6943,7 +6959,9 @@ function BusinessSourceProjectCard({
         </span>
       </div>
       <div className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-500">
-        <span>{source.datasets.length} {isZh ? "个数据集" : source.datasets.length === 1 ? "dataset" : "datasets"}</span>
+        <span>
+          {source.tableCount} {isZh ? "张表" : source.tableCount === 1 ? "table" : "tables"}
+        </span>
         <span className="size-1 rounded-full bg-slate-300" aria-hidden="true" />
         <span>{isZh ? "最近同步" : "Last sync"} {source.lastSyncLabel}</span>
       </div>

@@ -1,6 +1,9 @@
 import { WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { processJob, SKU_OPTIMIZATION_STALE_JOB_MS } from "@/lib/jobs/async-job-runner";
+import {
+  OPTIMIZATION_QUEUED_ASYNC_JOB_MS,
+  SKU_OPTIMIZATION_STALE_JOB_MS
+} from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
@@ -8,26 +11,28 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const QUEUED_JOB_RECOVERY_MS = 10 * 1000;
-
-function shouldKickOptimizationJob(job: {
+function optimizationRecoveryState(job: {
   type: string;
   status: string;
   updatedAt: Date;
   heartbeatAt: Date | null;
   startedAt: Date | null;
   lockedAt: Date | null;
+  leaseExpiresAt: Date | null;
 }) {
-  if (job.type !== "SKU_OPTIMIZATION") return false;
+  if (job.type !== "SKU_OPTIMIZATION") return { needed: false, reason: null };
 
   const now = Date.now();
   if (job.status === "QUEUED") {
-    return now - job.updatedAt.getTime() > QUEUED_JOB_RECOVERY_MS;
+    const stale = now - job.updatedAt.getTime() > OPTIMIZATION_QUEUED_ASYNC_JOB_MS;
+    return { needed: stale, reason: stale ? "JOB_QUEUE_TIMEOUT" : null };
   }
 
-  if (job.status !== "PROCESSING" && job.status !== "PAUSED") return false;
+  if (job.status !== "PROCESSING" && job.status !== "PAUSED") return { needed: false, reason: null };
+  if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() > now) return { needed: false, reason: null };
   const lastHeartbeat = job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt;
-  return now - lastHeartbeat.getTime() > SKU_OPTIMIZATION_STALE_JOB_MS;
+  const stale = now - lastHeartbeat.getTime() > SKU_OPTIMIZATION_STALE_JOB_MS;
+  return { needed: stale, reason: stale ? "JOB_HEARTBEAT_TIMEOUT" : null };
 }
 
 export async function GET(
@@ -48,13 +53,16 @@ export async function GET(
         status: true,
         progress: true,
         currentStep: true,
+        errorCode: true,
         errorMessage: true,
         retryCount: true,
         maxRetries: true,
         heartbeatAt: true,
         lockedAt: true,
+        leaseExpiresAt: true,
         startedAt: true,
         completedAt: true,
+        failedAt: true,
         createdAt: true,
         updatedAt: true,
         resultReference: true
@@ -65,15 +73,12 @@ export async function GET(
       return NextResponse.json({ ok: false, message: "Job not found." }, { status: 404 });
     }
 
-    if (shouldKickOptimizationJob(job)) {
-      void processJob(job.id).catch((error) => {
-        console.error("Failed to recover stale optimization job from polling", { jobId: job.id, error });
-      });
-    }
+    const recovery = optimizationRecoveryState(job);
 
     return NextResponse.json({
       ok: true,
-      job
+      job,
+      recovery
     });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);

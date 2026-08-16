@@ -40,6 +40,7 @@ const consultingCopy: Record<CopyLocale, {
   meetingTime: string;
   meetingTimePlaceholder: string;
   meetingTimeOption: string;
+  meetingTimeOptional: string;
   businessProblems: string;
   notes: string;
   optional: string;
@@ -89,6 +90,7 @@ const consultingCopy: Record<CopyLocale, {
     meetingTime: "Preferred meeting times",
     meetingTimePlaceholder: "Choose date and time",
     meetingTimeOption: "Option",
+    meetingTimeOptional: "video conference info added after booking",
     businessProblems: "Problems to solve",
     notes: "Additional context",
     optional: "Optional",
@@ -149,6 +151,7 @@ const consultingCopy: Record<CopyLocale, {
     meetingTime: "预约会议时间",
     meetingTimePlaceholder: "选择日期和时间",
     meetingTimeOption: "备选",
+    meetingTimeOptional: "预约后添加视频会议信息",
     businessProblems: "想解决的问题",
     notes: "补充说明",
     optional: "可选",
@@ -345,7 +348,7 @@ export function ConsultingPage() {
 
                 {!isDemoRequest ? (
                   <label className="grid gap-2">
-                    <FieldLabel label={copy.meetingTime} optional={copy.optional} />
+                    <FieldLabel label={copy.meetingTime} />
                     <div className="grid gap-2">
                       {[1, 2, 3].map((index) => (
                         <div
@@ -374,6 +377,7 @@ export function ConsultingPage() {
                         </div>
                       ))}
                     </div>
+                    <span className="text-xs font-normal text-slate-400">{copy.meetingTimeOptional}</span>
                   </label>
                 ) : null}
 

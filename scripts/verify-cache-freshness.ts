@@ -1,4 +1,3 @@
-// @ts-nocheck
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -6,14 +5,14 @@ import { PrismaPg } from "@prisma/adapter-pg";
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
-const EXPECTED = {
+const EXPECTED: Record<string, string> = {
   profitabilityEngineVersion: "v2.1-profitability-reconciliation",
   algorithmVersion: "decision-intelligence-v2.1",
   optimizationVersion: "sku-portfolio-optimizer-v2.5-cache-freshness-policy-v1",
   simulationVersion: "sku-portfolio-simulation-v2"
 };
 
-const args = new Map();
+const args = new Map<string, string>();
 for (const arg of process.argv.slice(2)) {
   const [key, ...rest] = arg.replace(/^--/, "").split("=");
   args.set(key, rest.join("=") || "true");
@@ -27,22 +26,22 @@ const prisma = new PrismaClient({
   log: ["error"]
 });
 
-function asRecord(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function asArray(value) {
+function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function firstString(...values) {
+function firstString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.length > 0) return value;
   }
   return null;
 }
 
-function identityOf(payload, row = {}) {
+function identityOf(payload: unknown, row: Record<string, unknown> = {}) {
   const record = asRecord(payload);
   const versions = asRecord(record.decisionSnapshotVersions);
   const identity = asRecord(record.calculationIdentity);
@@ -74,8 +73,8 @@ function identityOf(payload, row = {}) {
   };
 }
 
-function freshnessReasons(identity, checks = ["profitabilityEngineVersion"]) {
-  const reasons = [];
+function freshnessReasons(identity: Record<string, string | null>, checks = ["profitabilityEngineVersion"]) {
+  const reasons: Array<{ field: string; expected: string; found: string | null }> = [];
   for (const key of checks) {
     const expected = EXPECTED[key];
     if (expected && identity[key] !== expected) {

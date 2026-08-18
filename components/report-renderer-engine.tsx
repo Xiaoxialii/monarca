@@ -1882,7 +1882,8 @@ function SkuPortfolioOptimizationPanel({
     safeNumber(optimization.portfolioSummary?.totalProfitImpact) > 0;
   const effectiveOptimizationStarted = optimizationStarted || hasPersistedOptimizationResult;
   const hasLoadedPersistedActionStatuses = !effectiveOptimizationStarted || !decisionRows.length || loadedActionStatusHydrationKey === actionStatusHydrationKey;
-  const isResolvingOptimizationState = isLoadingOptimization || !hasLoadedPersistedActionStatuses;
+  const isHydratingActionStatuses = !hasLoadedPersistedActionStatuses;
+  const isResolvingOptimizationState = isLoadingOptimization;
   const optimizationStartLabel = isZh ? "运行利润优化" : "Run Profit Optimization";
   const optimizationLoadingLabel = optimizationRunStep
     ?? (optimizationRunStatus === "QUEUED"
@@ -2083,7 +2084,7 @@ function SkuPortfolioOptimizationPanel({
   }, [effectiveOptimizationStarted, isResolvingOptimizationState]);
 
   useEffect(() => {
-    if (!effectiveOptimizationStarted || isResolvingOptimizationState || selectedDecisionRow || !pendingDecisionRows.length) {
+    if (!effectiveOptimizationStarted || isLoadingOptimization || isHydratingActionStatuses || selectedDecisionRow || !pendingDecisionRows.length) {
       return;
     }
     const firstDecision = pendingDecisionRows[0];
@@ -2091,7 +2092,7 @@ function SkuPortfolioOptimizationPanel({
     setIsSkuOperationsOpen(false);
     setSkuChannel("all");
     setExpandedSku(firstDecision.skuId);
-  }, [effectiveOptimizationStarted, isResolvingOptimizationState, pendingDecisionRows, selectedDecisionRow]);
+  }, [effectiveOptimizationStarted, isHydratingActionStatuses, isLoadingOptimization, pendingDecisionRows, selectedDecisionRow]);
 
   useEffect(() => {
     if (!effectiveOptimizationStarted || !decisionRows.length) {

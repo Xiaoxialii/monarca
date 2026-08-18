@@ -107,7 +107,7 @@ const consultingCopy: Record<CopyLocale, {
     submit: "Submit request",
     submitting: "Submitting...",
     success:
-      "We’ve received your request and will contact you soon to better understand your business, data, and reporting needs.",
+      "We’ve received your request and will contact you soon.",
     submitAnother: "Submit another request",
     error: "Failed to submit request. Please try again.",
     trustTitle: "Not a generic AI summary, but business analysis grounded in your data",

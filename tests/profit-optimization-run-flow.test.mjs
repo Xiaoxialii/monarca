@@ -233,6 +233,17 @@ test("optimization queue selection opens the SKU decision panel by default", () 
   assert.match(defaultSelectionEffect[0], /setIsSkuOperationsOpen\(false\)/);
 });
 
+test("optimization queue rendering is not blocked by persisted action status hydration", () => {
+  const renderer = read("components/report-renderer-engine.tsx");
+  const resolvingState = renderer.match(/const isResolvingOptimizationState = [^\n]+/);
+  const hydrationState = renderer.match(/const isHydratingActionStatuses = [^\n]+/);
+
+  assert.ok(resolvingState, "optimization resolving state should be explicit");
+  assert.ok(hydrationState, "action status hydration should be tracked separately");
+  assert.match(resolvingState[0], /isLoadingOptimization/);
+  assert.doesNotMatch(resolvingState[0], /hasLoadedPersistedActionStatuses|isHydratingActionStatuses/);
+});
+
 test("optimization page loads accepted impact without running status refresh on page load", () => {
   const renderer = read("components/report-renderer-engine.tsx");
   const acceptedImpactEffect = renderer.match(/async function loadAcceptedImpactSummary\(\) \{[\s\S]*?\n    \}/);

@@ -87,6 +87,74 @@ function hasOptimizationRecommendationRows(payload: Record<string, unknown>) {
   return decisionRows.length > 0 || portfolioRows.length > 0;
 }
 
+async function restoreFreshOptimizationCacheStateIfNeeded(input: {
+  workspaceId: string;
+  reportCache: {
+    id: string;
+    state: string;
+    algorithmVersion: string | null;
+    optimizationVersion: string | null;
+    canonicalSnapshotVersion: string | null;
+    metricSnapshotVersion: string | null;
+    simulationVersion: string | null;
+    inputHash: string | null;
+  };
+  payload: Record<string, unknown>;
+}) {
+  const payload = input.payload;
+  const state = typeof payload.state === "string" ? payload.state : input.reportCache.state;
+  if (state === "ready" || !hasOptimizationRecommendationRows(payload)) {
+    return { payload, restored: false };
+  }
+
+  const freshness = await decisionSnapshotFreshness(prisma, {
+    workspaceId: input.workspaceId,
+    snapshot: {
+      algorithmVersion: input.reportCache.algorithmVersion,
+      optimizationVersion: input.reportCache.optimizationVersion,
+      canonicalSnapshotVersion: input.reportCache.canonicalSnapshotVersion,
+      metricSnapshotVersion: input.reportCache.metricSnapshotVersion,
+      simulationVersion: input.reportCache.simulationVersion,
+      inputHash: input.reportCache.inputHash
+    }
+  });
+
+  if (!freshness.isFresh) {
+    return { payload, restored: false, freshness };
+  }
+
+  await prisma.optimizationReportCache.updateMany({
+    where: {
+      id: input.reportCache.id,
+      workspaceId: input.workspaceId,
+      state: { not: "ready" }
+    },
+    data: {
+      state: "ready",
+      warning: null
+    }
+  });
+
+  console.info("[decision-report] restored_fresh_optimization_cache_state", {
+    workspaceId: input.workspaceId,
+    cacheId: input.reportCache.id,
+    previousState: state,
+    canonicalVersion: input.reportCache.canonicalSnapshotVersion,
+    optimizationVersion: input.reportCache.optimizationVersion,
+    inputHash: input.reportCache.inputHash
+  });
+
+  return {
+    payload: {
+      ...payload,
+      state: "ready",
+      warning: null
+    },
+    restored: true,
+    freshness
+  };
+}
+
 function optimizationRecommendationCount(payload: Record<string, unknown>) {
   const report = asRecord(payload.decision_report);
   const optimization = asRecord(report.sku_portfolio_optimization);
@@ -695,7 +763,14 @@ export async function GET(request: Request) {
   });
 
   if (reportCache) {
-    const cachedPayload = optimizationReportCachePayload(reportCache);
+    let cachedPayload: Record<string, unknown> = optimizationReportCachePayload(reportCache);
+    const restoredCache = await restoreFreshOptimizationCacheStateIfNeeded({
+      workspaceId: session.workspace.id,
+      reportCache,
+      payload: cachedPayload
+    });
+    cachedPayload = restoredCache.payload;
+
     if (cacheNeedsOptimizationRefresh(cachedPayload)) {
       const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
       if (!refreshAvailability.canRefresh) {

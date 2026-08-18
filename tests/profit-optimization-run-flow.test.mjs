@@ -47,6 +47,11 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
   assert.match(route, /optimizationReadiness\(prisma/);
   assert.match(route, /refreshSkippedReason:\s*readiness\.code \?\? "optimization_not_ready"/);
   assert.match(route, /status:\s*409/);
+  assert.match(route, /findOptimizationReportCache\(prisma/);
+  assert.match(route, /decisionSnapshotFreshness\(prisma/);
+  assert.match(route, /hasOptimizationRecommendationRows\(existingPayload\)/);
+  assert.match(route, /reusedCache:\s*true/);
+  assert.match(route, /Optimization already ready for the current data version/);
   assert.match(route, /enqueueSkuOptimizationJob\(prisma/);
   assert.match(route, /reason:\s*"manual_optimization_refresh"/);
   assert.match(route, /decisionMode:\s*"full"/);
@@ -67,11 +72,15 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
 
 test("optimization jobs use lease heartbeat and production stale recovery", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
+  const envExample = read(".env.example");
 
   assert.match(runner, /const DEFAULT_STALE_ASYNC_JOB_MS = 2 \* 60 \* 1000/);
-  assert.match(runner, /const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 10 \* 60 \* 1000/);
+  assert.match(runner, /const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 30 \* 60 \* 1000/);
   assert.match(runner, /const DEFAULT_OPTIMIZATION_QUEUED_ASYNC_JOB_MS = 15 \* 60 \* 1000/);
+  assert.match(runner, /const DEFAULT_OPTIMIZATION_MAX_EXECUTION_MS = 30 \* 60 \* 1000/);
   assert.match(runner, /OPTIMIZATION_HEARTBEAT_STALE_MS/);
+  assert.match(envExample, /OPTIMIZATION_HEARTBEAT_STALE_MS="1800000"/);
+  assert.match(envExample, /OPTIMIZATION_MAX_EXECUTION_MS="1800000"/);
   assert.match(runner, /OPTIMIZATION_QUEUED_STALE_MS/);
   assert.match(runner, /ASYNC_JOB_LEASE_MS/);
   assert.match(runner, /leaseExpiresAt/);
@@ -91,6 +100,8 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
   assert.match(route, /hasOptimizationRecommendationRows/);
+  assert.match(route, /restoreFreshOptimizationCacheStateIfNeeded/);
+  assert.match(route, /restored_fresh_optimization_cache_state/);
   assert.match(route, /withDecisionReportContract/);
   assert.match(route, /metrics:\s*\{\s*source:\s*"canonical_live"/);
   assert.match(route, /optimization:\s*\{\s*source:\s*optimizationSource/);

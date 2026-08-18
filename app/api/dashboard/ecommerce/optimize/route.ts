@@ -1,8 +1,15 @@
 import { WorkspaceRole } from "@prisma/client";
 import { after, NextResponse } from "next/server";
-import { currentDecisionSnapshotVersions } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import {
+  currentDecisionSnapshotVersions,
+  decisionSnapshotFreshness
+} from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { optimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
+import {
+  findOptimizationReportCache,
+  optimizationReportCachePayload
+} from "@/lib/dashboard/optimization-report-cache";
 import { enqueueSkuOptimizationJob, processJob } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -18,6 +25,19 @@ function optimizationQueueErrorMessage(error: unknown) {
     return "Optimization could not start because the database connection is unavailable.";
   }
   return message || "Failed to queue optimization refresh.";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function hasOptimizationRecommendationRows(payload: Record<string, unknown>) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
+  const decisionRows = Array.isArray(optimization.skuDecisions) ? optimization.skuDecisions : [];
+  const portfolioRows = Array.isArray(optimization.recommended_portfolio) ? optimization.recommended_portfolio : [];
+
+  return decisionRows.length > 0 || portfolioRows.length > 0;
 }
 
 export async function POST(request: Request) {
@@ -49,6 +69,62 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
+    const existingCache = await findOptimizationReportCache(prisma, {
+      workspaceId: session.workspace.id,
+      mode: "full"
+    });
+    if (existingCache) {
+      const existingPayload = optimizationReportCachePayload(existingCache);
+      const freshness = await decisionSnapshotFreshness(prisma, {
+        workspaceId: session.workspace.id,
+        snapshot: {
+          algorithmVersion: existingCache.algorithmVersion,
+          optimizationVersion: existingCache.optimizationVersion,
+          canonicalSnapshotVersion: existingCache.canonicalSnapshotVersion,
+          metricSnapshotVersion: existingCache.metricSnapshotVersion,
+          simulationVersion: existingCache.simulationVersion,
+          inputHash: existingCache.inputHash
+        }
+      });
+
+      if (freshness.isFresh && hasOptimizationRecommendationRows(existingPayload)) {
+        if (existingCache.state !== "ready") {
+          await prisma.optimizationReportCache.updateMany({
+            where: {
+              id: existingCache.id,
+              workspaceId: session.workspace.id,
+              state: { not: "ready" }
+            },
+            data: {
+              state: "ready",
+              warning: null
+            }
+          });
+        }
+
+        return NextResponse.json({
+          ok: true,
+          jobId: null,
+          status: "COMPLETED",
+          currentStep: "Optimization already ready for the current data version.",
+          error: null,
+          reusedCache: true,
+          versions,
+          readiness,
+          canonical: {
+            snapshotId: readiness.canonicalSnapshotId,
+            dataVersion: readiness.dataVersion,
+            status: "READY",
+            artifactStatus: readiness.artifactStatus
+          },
+          cacheLifecycle: {
+            state: "READY",
+            staleSummary: null
+          }
+        });
+      }
+    }
+
     const staleSummary = await markDashboardCachesStale(prisma, {
       workspaceId: session.workspace.id,
       reason: "manual_optimization_refresh"
@@ -60,10 +136,6 @@ export async function POST(request: Request) {
       decisionMode: "full",
       schemaSnapshotId: readiness.canonicalSnapshotId,
       inputHash: versions.inputHash
-    });
-
-    void processJob(job.id).catch((error) => {
-      console.error("Failed to start optimization job immediately", { jobId: job.id, error });
     });
 
     after(() => {

@@ -1707,7 +1707,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
               <span className="hidden lg:inline">{copy.hero.subheadline}</span>
             </p>
           ) : null}
-          <div className="mt-4 hidden flex-col gap-3 sm:flex-row sm:items-center sm:justify-center sm:gap-5 lg:flex">
+          <div className="mt-4 flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-5 lg:mt-5">
             {copy.hero.trust.map((item) => (
               <TrustItem key={item}>{item}</TrustItem>
             ))}

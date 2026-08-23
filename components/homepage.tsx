@@ -101,7 +101,7 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "AI Ecommerce Operations Agent",
+      eyebrow: "Ecommerce Growth Operator",
       headline: "AI-powered Global Ecommerce Operations",
       subheadline: "Connect your ecommerce business.We grow them globally.",
       teamLabel: "Monarca turns products, stores, and operating data into global growth actions",
@@ -353,8 +353,8 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "AI 电商运营智能体",
-      headline: "AI 驱动电商海外运营",
+      eyebrow: "电商海外增长运营",
+      headline: "AI 驱动电商海外增长运营",
       subheadline: "连接你的电商业务，开启全球增长",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
@@ -1047,7 +1047,7 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
       </div>
       <div className="mx-auto mt-14 max-w-5xl text-center lg:mt-20">
         <h3 className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-          {isZh ? "准备让你的产品走向全球？" : "Ready to take your products global?"}
+          {isZh ? "开始全球增长！" : "Ready for global growth?"}
         </h3>
         <Button asChild className="mt-6 h-14 rounded-full bg-slate-950 px-8 text-base font-semibold text-white hover:bg-slate-800 sm:h-16 sm:px-10 sm:text-lg">
           <Link href="/apply">
@@ -1581,12 +1581,12 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
             {isZh ? (
               <span className="block">
                 <span className="block text-slate-950">AI 驱动</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">电商海外运营</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">电商海外增长运营</span>
               </span>
             ) : (
               <span className="block">
                 <span className="block text-slate-950">AI-powered</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Global Ecommerce Operations</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Ecommerce Growth Operator</span>
               </span>
             )}
           </h1>

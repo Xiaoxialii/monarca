@@ -35,13 +35,6 @@ export default clerkMiddleware(async (auth, request) => {
     return NextResponse.redirect(url, 308);
   }
 
-  if (normalizedPathname === "/privacy") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.search = "";
-    return NextResponse.redirect(url, 308);
-  }
-
   const allowLocalDecisionReportFallback =
     process.env.ENABLE_LOCAL_ARTIFACT_STORE === "true" &&
     request.nextUrl.pathname === "/api/dashboard/ecommerce/decision-report";

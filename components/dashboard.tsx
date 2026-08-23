@@ -18024,10 +18024,7 @@ function ReportPage({
 
   return (
     <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
-      <div className="flex flex-col gap-3 px-1 pb-1 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <ReportSectionNav isZh={isZh} />
-        </div>
+      <div className="flex justify-end px-1 pb-1">
         <Button
           type="button"
           onClick={() => void loadDecisionReport()}
@@ -18038,31 +18035,38 @@ function ReportPage({
         </Button>
       </div>
 
-      {isLoadingConnectedSources ? (
-        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
-      ) : !effectiveHasConnectedDatabase && isLoadingDecisionReport ? (
-        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
-      ) : !effectiveHasConnectedDatabase && !decisionReportPayload && !decisionReportError ? (
-        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
-      ) : isLoadingDecisionReport && !decisionReportPayload ? (
-        <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
-      ) : decisionReportIsReady ? (
-        <ReportRendererEngine
-          report={decisionReportPayload?.decision_report ?? null}
-          message={decisionReportPayload?.message}
-          locale={locale}
-        />
-      ) : decisionReportError ? (
-        <Card className="border-rose-200 bg-rose-50 shadow-sm">
-          <CardContent className="p-5 text-sm font-medium text-rose-900">
-            {decisionReportError}
-          </CardContent>
-        </Card>
-      ) : shouldShowDecisionReportEmpty ? (
-        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
-      ) : (
-        <ReportRendererEngine report={null} showEmptyShell locale={locale} />
-      )}
+      <div className="grid min-h-0 flex-1 grid-cols-[132px_minmax(0,1fr)] gap-4 overflow-hidden max-lg:grid-cols-1">
+        <aside className="min-h-0 max-lg:overflow-x-auto lg:overflow-y-auto lg:pt-2">
+          <ReportSectionNav isZh={isZh} placement="sidebar" />
+        </aside>
+        <div className="min-w-0 overflow-hidden">
+          {isLoadingConnectedSources ? (
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+          ) : !effectiveHasConnectedDatabase && isLoadingDecisionReport ? (
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+          ) : !effectiveHasConnectedDatabase && !decisionReportPayload && !decisionReportError ? (
+            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+          ) : isLoadingDecisionReport && !decisionReportPayload ? (
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+          ) : decisionReportIsReady ? (
+            <ReportRendererEngine
+              report={decisionReportPayload?.decision_report ?? null}
+              message={decisionReportPayload?.message}
+              locale={locale}
+            />
+          ) : decisionReportError ? (
+            <Card className="border-rose-200 bg-rose-50 shadow-sm">
+              <CardContent className="p-5 text-sm font-medium text-rose-900">
+                {decisionReportError}
+              </CardContent>
+            </Card>
+          ) : shouldShowDecisionReportEmpty ? (
+            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+          ) : (
+            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+          )}
+        </div>
+      </div>
     </section>
   );
 
@@ -18082,7 +18086,7 @@ function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; place
     <nav
       className={cn(
         isSidebar
-          ? "ml-6 mt-1 grid gap-1 border-l border-slate-200 pl-3"
+          ? "flex gap-3 lg:grid lg:gap-4"
           : "mt-3 flex max-w-full gap-2 overflow-x-auto pb-1"
       )}
       aria-label={isZh ? "报表板块导航" : "Report section navigation"}
@@ -18094,7 +18098,7 @@ function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; place
           className={cn(
             "inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-emerald-800",
             isSidebar
-              ? "rounded-md px-2 py-1.5 hover:bg-emerald-50"
+              ? "px-1 py-2"
               : "rounded-full border bg-white px-3 py-1.5 shadow-sm hover:border-emerald-200 hover:bg-emerald-50"
           )}
         >

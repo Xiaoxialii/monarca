@@ -2664,9 +2664,9 @@ function SkuPortfolioOptimizationPanel({
           </>
         </section>
 
-        <section className="min-h-[520px] min-w-0 bg-[#f3f3f3] xl:h-full xl:overflow-hidden xl:border-r xl:border-slate-200">
+        <section className="min-h-[520px] min-w-0 bg-[#e7ebe8] xl:h-full xl:overflow-hidden xl:border-r xl:border-slate-200">
           {isResolvingOptimizationState ? (
-            <div className="grid h-[520px] place-items-center bg-[#f3f3f3] p-5 text-center">
+            <div className="grid h-[520px] place-items-center bg-[#e7ebe8] p-5 text-center">
               <div className="translate-y-12 space-y-3">
                 <RefreshCw className="mx-auto size-7 animate-spin text-slate-600" />
                 <p className="text-base font-semibold text-slate-600">
@@ -2675,7 +2675,7 @@ function SkuPortfolioOptimizationPanel({
               </div>
             </div>
           ) : shouldShowOptimizationStarter ? (
-            <div className="grid h-full min-h-[520px] place-items-center bg-[#f3f3f3] p-5 text-center">
+            <div className="grid h-full min-h-[520px] place-items-center bg-[#e7ebe8] p-5 text-center">
               <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
                 <p className="text-center text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                   {isZh ? "优化待运行" : "Ready to optimize"}
@@ -2727,7 +2727,7 @@ function SkuPortfolioOptimizationPanel({
         <section
           className={cn(
             "relative flex min-h-[96px] min-w-0 flex-col transition-colors xl:h-full xl:min-h-[520px] xl:overflow-hidden",
-            "bg-[#f3f3f3]"
+            "bg-[#e7ebe8]"
           )}
         >
           <button

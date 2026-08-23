@@ -164,10 +164,10 @@ export function NewProductLaunchOptimizer({
           </div>
         </aside>
 
-        <main className="min-w-0 overflow-y-auto">
+        <main className="min-w-0 overflow-y-auto bg-[#e7ebe8]">
           <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-6 pb-7 pt-12 lg:px-8">
             {mode === "import" && isLoadingConnectedData ? (
-              <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center text-center">
+              <div className="flex min-h-[calc(100vh-11rem)] items-center justify-center bg-[#e7ebe8] text-center">
                 <p className="text-sm font-semibold text-[#5747e8]">
                   {isZh ? "正在更新数据" : "Updating data"}
                 </p>

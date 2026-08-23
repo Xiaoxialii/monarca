@@ -138,9 +138,9 @@ const homepageCopy = {
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "Ecommerce Profit Optimization System",
-      headline: "AI Profit Optimization System",
-      subheadline: "Connect data. Execute optimal profit decisions",
+      eyebrow: "Ecommerce Growth & Operations Partner",
+      headline: "AI-enabled e-commerce operator",
+      subheadline: "Connect your store. We run and grow it",
       teamLabel: "Three-layer profit control that turns data changes into operating actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },
@@ -149,7 +149,7 @@ const homepageCopy = {
       ],
       primaryCta: "Book consultation",
       secondaryCta: "View Demo",
-      trust: ["Profit diagnosis", "Scenario simulation", "At least 5% profit lift guaranteed"]
+      trust: ["Full-service store operations", "AI-powered growth execution", "You keep ownership"]
     },
     visual: {
       status: "Investigating",
@@ -1696,8 +1696,8 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
               </span>
             ) : (
               <span className="block">
-                <span className="block text-slate-950">AI Profit Agent</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Profit Optimization</span>
+                <span className="block text-slate-950">AI-enabled</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">e-commerce operator</span>
               </span>
             )}
           </h1>

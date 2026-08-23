@@ -18023,7 +18023,7 @@ function ReportPage({
   }, [isLoadingConnectedSources, loadDecisionReport]);
 
   return (
-    <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-hidden scroll-mt-20 xl:h-full">
+    <section id="report" className="dashboard-density flex min-w-0 max-w-full flex-col gap-4 overflow-visible scroll-mt-20 xl:h-full">
       <div className="flex justify-end px-1 pb-1">
         <Button
           type="button"
@@ -18035,8 +18035,8 @@ function ReportPage({
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[132px_minmax(0,1fr)] gap-4 overflow-hidden max-lg:grid-cols-1">
-        <aside className="min-h-0 max-lg:overflow-x-auto lg:overflow-y-auto lg:pt-2">
+      <div className="grid min-h-0 flex-1 grid-cols-[132px_minmax(0,1fr)] gap-4 overflow-visible max-lg:grid-cols-1">
+        <aside className="min-h-0 max-lg:overflow-x-auto lg:sticky lg:top-24 lg:z-20 lg:max-h-[calc(100vh-7rem)] lg:self-start lg:overflow-y-auto lg:pt-2">
           <ReportSectionNav isZh={isZh} placement="sidebar" />
         </aside>
         <div className="min-w-0 overflow-hidden">

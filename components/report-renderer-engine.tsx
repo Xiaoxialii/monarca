@@ -3858,8 +3858,8 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white xl:sticky xl:top-24 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden bg-transparent xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-[#e7ebe8] px-3 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-base font-bold text-slate-950">
@@ -3937,7 +3937,7 @@ function OptimizationDecisionRail({
           </div>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
+      <div className="min-h-0 flex-1 divide-y divide-slate-200/70 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;
@@ -3952,10 +3952,10 @@ function OptimizationDecisionRail({
             <div
               key={key}
               className={cn(
-                "bg-white transition",
+                "bg-transparent transition",
                 isSelected
-                  ? "bg-slate-50"
-                  : "hover:bg-slate-50/70"
+                  ? "bg-white/45"
+                  : "hover:bg-white/30"
               )}
             >
               <div

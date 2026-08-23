@@ -82,7 +82,7 @@ const consultingCopy: Record<CopyLocale, {
       "How Monarca AI can help detect anomalies, find causes, and generate recommended actions"
     ],
     formTitle: "Submit request",
-    formText: "Leave your contact information and we’ll follow up to discuss your business, data, and business need.",
+    formText: "Leave your contact information and we’ll follow up to discuss your business needs.",
     name: "Name",
     email: "Email / WeChat",
     emailPlaceholder: "name@example.com or WeChat ID",
@@ -142,7 +142,7 @@ const consultingCopy: Record<CopyLocale, {
       "Monarca AI 可以如何帮助你发现异常、定位原因并生成行动建议"
     ],
     formTitle: "提交预约申请",
-    formText: "留下你的联系方式，我们会尽快与你沟通业务、数据和报告需求。",
+    formText: "留下你的联系方式，我们会尽快与你沟通业务需求。",
     name: "姓名",
     email: "邮箱 / 微信",
     emailPlaceholder: "邮箱或微信号",

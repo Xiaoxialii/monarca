@@ -79,12 +79,7 @@ const formCopy = {
       storeUrl: "https://...",
       businessDescription: "请简单介绍主要产品、目标市场、目前遇到的问题，以及希望优先拓展的海外渠道。"
     },
-    consent: (
-      <>
-        我确认所提交的信息真实有效，并同意 Monarca 为评估合作机会处理这些信息，并通过邮箱或微信与我联系。查看
-        <Link href="/privacy" className="font-semibold text-emerald-700 underline underline-offset-4">隐私政策</Link>。
-      </>
-    ),
+    consent: "我确认所提交的信息真实有效，并同意 Monarca 为评估合作机会处理这些信息，并通过邮箱或微信与我联系。",
     submit: "提交合作申请",
     submitting: "提交中",
     submitError: "申请提交失败，请检查信息后重试。",
@@ -121,12 +116,7 @@ const formCopy = {
       storeUrl: "https://...",
       businessDescription: "Briefly describe your main products, target markets, current challenges, and priority overseas channels."
     },
-    consent: (
-      <>
-        I confirm that the information submitted is accurate, and agree that Monarca may process it to evaluate partnership opportunities and contact me by email or WeChat. View the{" "}
-        <Link href="/privacy" className="font-semibold text-emerald-700 underline underline-offset-4">Privacy Policy</Link>.
-      </>
-    ),
+    consent: "I confirm that the information submitted is accurate, and agree that Monarca may process it to evaluate partnership opportunities and contact me by email or WeChat.",
     submit: "Submit Partnership Application",
     submitting: "Submitting",
     submitError: "Submission failed. Please check the form and try again.",

@@ -103,7 +103,7 @@ const homepageCopy = {
     hero: {
       eyebrow: "AI Ecommerce Operations Agent",
       headline: "AI-powered Global Ecommerce Operations",
-      subheadline: "Connect your products. We grow them globally.",
+      subheadline: "Connect your ecommerce business.We grow them globally.",
       teamLabel: "Monarca turns products, stores, and operating data into global growth actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },
@@ -355,7 +355,7 @@ const homepageCopy = {
     hero: {
       eyebrow: "AI 电商运营智能体",
       headline: "AI 驱动电商海外运营",
-      subheadline: "接入你的产品，卖向全球、增长更多",
+      subheadline: "连接你的电商业务，开启全球增长",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
         { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
@@ -841,8 +841,8 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         </p>
         <p className="text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
-            ? "你负责好产品，我们负责把它卖向全球、卖成爆品"
-            : "You focus on great products. We sell them globally and turn them into bestsellers."}
+            ? "你打造产品与品牌，我们负责把它卖向全球、卖成爆品"
+            : "You build the business. We sell them globally and turn them into bestsellers."}
         </p>
       </div>
       <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "合作方式" : "How we work together"}</p>

@@ -135,6 +135,9 @@ function validWechat(value: string) {
 function normalizeUrl(value: unknown) {
   const raw = nullableText(value, 1000);
   if (!raw) return { value: null, valid: true };
+  if (["无", "沒有", "没有", "none", "n/a", "na", "not available"].includes(raw.toLowerCase())) {
+    return { value: null, valid: true, intentionallyEmpty: true };
+  }
 
   try {
     const url = new URL(raw);
@@ -143,9 +146,9 @@ function normalizeUrl(value: unknown) {
     }
 
     url.hash = "";
-    return { value: url.toString(), valid: true };
+    return { value: url.toString(), valid: true, intentionallyEmpty: false };
   } catch {
-    return { value: null, valid: false };
+    return { value: null, valid: false, intentionallyEmpty: false };
   }
 }
 
@@ -215,7 +218,7 @@ export function validateStorePartnershipApplication(input: StorePartnershipAppli
 
   if (!url.valid) {
     fieldErrors.storeOrProductUrl = "请输入有效的 HTTP/HTTPS 网页链接。";
-  } else if (!url.value) {
+  } else if (!url.value && !url.intentionallyEmpty) {
     fieldErrors.storeOrProductUrl = "请填写店铺或产品链接。";
   }
 

@@ -72,7 +72,7 @@ const formCopy = {
     },
     help: {
       contact: "填写邮箱或微信号，Monarca 将通过其中一种方式与你联系。",
-      storeUrl: "支持 Shopify、Amazon、TikTok Shop、Walmart、eBay、淘宝、天猫、京东、拼多多、独立站或公开产品介绍链接。请勿提交店铺密码或任何登录凭证。"
+      storeUrl: "支持 Shopify、Amazon、TikTok Shop、Walmart、eBay、淘宝、天猫、京东、拼多多、独立站或公开产品介绍链接。如暂无链接，请填写“无”。请勿提交店铺密码或任何登录凭证。"
     },
     placeholder: {
       select: "请选择",
@@ -114,7 +114,7 @@ const formCopy = {
     },
     help: {
       contact: "Enter your email or WeChat. Monarca will contact you through one of these channels.",
-      storeUrl: "Supports Shopify, Amazon, TikTok Shop, Walmart, eBay, Taobao, Tmall, JD, Pinduoduo, independent sites, or public product pages. Do not submit store passwords or login credentials."
+      storeUrl: "Supports Shopify, Amazon, TikTok Shop, Walmart, eBay, Taobao, Tmall, JD, Pinduoduo, independent sites, or public product pages. If you do not have a link, enter \"None\". Do not submit store passwords or login credentials."
     },
     placeholder: {
       select: "Select",

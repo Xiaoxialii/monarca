@@ -61,6 +61,16 @@ test("partnership application requires a store or product URL", () => {
   assert.match(result.fieldErrors.storeOrProductUrl, /请填写/);
 });
 
+test("partnership application accepts explicit no-link values", () => {
+  const result = validateStorePartnershipApplication({
+    ...validInput,
+    storeOrProductUrl: "无"
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.storeOrProductUrl, null);
+});
+
 test("partnership application rejects unsafe and invalid URLs", () => {
   const result = validateStorePartnershipApplication({
     ...validInput,

@@ -192,7 +192,8 @@ test("decision report API reuses dashboard data loader and returns decision_repo
   assert.match(source, /findOptimizationReportCache/);
   assert.match(source, /findLatestDecisionSnapshot/);
   assert.match(source, /decisionSnapshotFreshness/);
-  assert.match(source, /enqueueSkuOptimizationJob/);
+  assert.match(source, /manualOptimizationRequiredResponse/);
+  assert.doesNotMatch(source, /enqueueSkuOptimizationJob/);
   assert.match(source, /cachedOptimizationReportMissingOpsRows/);
   assert.match(source, /decision_report/);
   assert.doesNotMatch(source, /composeReport|computeCanonicalEcommerceMetrics|ShopifyGraphQL|GraphQL|access_token/);

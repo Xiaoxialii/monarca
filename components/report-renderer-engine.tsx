@@ -2676,18 +2676,21 @@ function SkuPortfolioOptimizationPanel({
             </div>
           ) : shouldShowOptimizationStarter ? (
             <div className="grid h-full min-h-[520px] place-items-center bg-[#f3f3f3] p-5 text-center">
-              <div className="space-y-5">
-                <p className="text-lg font-bold text-slate-950">{optimizationStartLabel}</p>
+              <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
+                <p className="text-center text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                  {isZh ? "优化待运行" : "Ready to optimize"}
+                </p>
                 <button
                   type="button"
                   onClick={() => {
                     setIsSkuOperationsOpen(true);
                     void onStartProfitOptimization?.();
                   }}
-                  className="inline-grid size-12 place-items-center rounded-lg bg-emerald-950 text-white shadow-sm shadow-emerald-950/20 transition hover:bg-emerald-900"
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-extrabold text-white shadow-sm shadow-slate-950/15 transition hover:bg-emerald-950"
                   aria-label={isZh ? "打开 AI 利润优化任务表" : "Open AI profit optimization tasks"}
                 >
-                  <ChevronRight className="size-6" />
+                  <span>{isZh ? "运行优化" : "Run optimization"}</span>
+                  <ChevronRight className="size-4" />
                 </button>
               </div>
             </div>
@@ -3916,15 +3919,15 @@ function OptimizationDecisionRail({
                   className={cn(
                     "rounded-full px-2.5 py-1 text-xs font-bold transition ring-1",
                     isSelected
-                      ? "bg-emerald-700 text-white ring-emerald-700"
-                      : "bg-emerald-50 text-emerald-800 ring-emerald-100 hover:bg-emerald-100"
+                      ? "bg-slate-950 text-white ring-slate-950"
+                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
                   )}
                   aria-pressed={isSelected}
                 >
                   {actionFilterDisplayLabel(action, locale)}
                   <span className={cn(
                     "ml-1 text-[10px]",
-                    isSelected ? "text-white/80" : "text-emerald-700/70"
+                    isSelected ? "text-white/80" : "text-slate-500"
                   )}>
                     {numberFormat.format(count)}
                   </span>
@@ -3978,7 +3981,7 @@ function OptimizationDecisionRail({
                   isSelected && "shadow-[inset_3px_0_0_#0f766e]"
                 )}
               >
-                <div className="grid gap-3 lg:grid-cols-[minmax(130px,0.8fr)_minmax(220px,1.4fr)_auto] lg:items-center">
+                <div className="grid gap-3 lg:grid-cols-[minmax(108px,0.7fr)_minmax(168px,1fr)_minmax(122px,auto)] lg:items-center">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-950">{row.skuId}</p>
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -3996,8 +3999,8 @@ function OptimizationDecisionRail({
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3 lg:justify-end">
-                    <span className="min-w-[76px] text-right text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 lg:flex-col lg:items-end lg:justify-center">
+                    <span className="min-w-[64px] text-right text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
                     {status === "awaiting_decision" && !isAcceptedMode ? (
                       <ActionDecisionButtons
                         locale={locale}
@@ -4358,13 +4361,7 @@ function DecisionBadge({ action, locale }: { action: "SCALE" | "REDUCE" | "OPTIM
 function OptimizationGoalBadge({ goal, label }: { goal: OptimizationGoal; label: string }) {
   return (
     <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
-        goal === "GROWTH" && "bg-emerald-100 text-emerald-800",
-        goal === "PROFIT" && "bg-amber-100 text-amber-800",
-        goal === "INVENTORY" && "bg-sky-100 text-sky-800",
-        goal === "PORTFOLIO_HEALTH" && "bg-rose-100 text-rose-800"
-      )}
+      className="inline-flex px-0.5 py-0.5 text-[11px] font-bold text-slate-600"
     >
       {label}
     </span>
@@ -4374,13 +4371,7 @@ function OptimizationGoalBadge({ goal, label }: { goal: OptimizationGoal; label:
 function OptimizationActionBadge({ goal, label }: { goal: OptimizationGoal; label: string }) {
   return (
     <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
-        goal === "GROWTH" && "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100",
-        goal === "PROFIT" && "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
-        goal === "INVENTORY" && "bg-sky-50 text-sky-700 ring-1 ring-sky-100",
-        goal === "PORTFOLIO_HEALTH" && "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
-      )}
+      className="inline-flex px-0.5 py-0.5 text-[11px] font-bold text-slate-500"
     >
       {label}
     </span>
@@ -5307,14 +5298,14 @@ function SelectedSkuOptimizationPanel({
             />
             <DecisionSummaryRow label="Decision Status" value={decision.decision_status} />
           </div>
-          <div className="mt-4 rounded-lg bg-emerald-50/70 p-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">Decision Context</p>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Decision Context</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg bg-white/80 p-3 ring-1 ring-emerald-100">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Optimization Goal</p>
                 <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.optimization_goal}</p>
               </div>
-              <div className="rounded-lg bg-white/80 p-3 ring-1 ring-emerald-100">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Recommended Action</p>
                 <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.action}</p>
                 <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{decision.action_description}</p>
@@ -5322,7 +5313,7 @@ function SelectedSkuOptimizationPanel({
             </div>
             <p className="mt-3 text-sm font-bold text-slate-950">Why AI Selected This Decision</p>
             <p className="mt-1 text-xs font-bold text-slate-700">{decision.reasoning.title}</p>
-            <div className="mt-3 rounded-md bg-white/70 p-2 text-xs font-semibold text-slate-600 ring-1 ring-emerald-100">
+            <div className="mt-3 rounded-md border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-600">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold text-slate-950">Decision Trace</span>
                 <span>{decisionTrace?.originalAction ?? "UNKNOWN"} → {decisionTrace?.finalAction ?? decision.action}</span>
@@ -5339,9 +5330,9 @@ function SelectedSkuOptimizationPanel({
             </div>
             <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700">
               {reasoningReasons.map((item) => (
-                <div key={item.signal} className="rounded-md bg-white/70 p-2">
+                <div key={item.signal} className="rounded-md border border-slate-200 bg-white p-2">
                   <span className="inline-flex items-center gap-2 text-slate-950">
-                    <span className="text-emerald-700">✓</span>
+                    <span className="text-slate-500">✓</span>
                     {item.signal}
                   </span>
                   <div className="mt-1 grid gap-0.5 pl-5 text-xs font-semibold text-slate-600">
@@ -5351,7 +5342,7 @@ function SelectedSkuOptimizationPanel({
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs font-semibold leading-5 text-emerald-900">{decision.reasoning.summary}</p>
+            <p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{decision.reasoning.summary}</p>
           </div>
         </div>
       </div>
@@ -5464,7 +5455,7 @@ type SkuDecisionObject = {
 
 function DecisionSummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
       <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
       <span className={cn("text-right text-sm font-bold", strong ? "text-emerald-700" : "text-slate-950")}>{value}</span>
     </div>
@@ -5475,7 +5466,7 @@ function DecisionProfitComparisonTable({ decision, horizonDays }: { decision: Sk
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <table className="w-full text-left text-xs">
-        <thead className="bg-slate-50 text-slate-500">
+        <thead className="bg-white text-slate-500">
           <tr>
             <th className="px-3 py-2 font-bold uppercase tracking-wide">Metric</th>
             <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">Current Plan</th>
@@ -6510,7 +6501,7 @@ function ActionDecisionButtons({
   const isZh = locale === "zh";
 
   return (
-    <div className={cn("flex gap-2", compact ? "min-w-[132px]" : "mt-3 w-full")}>
+    <div className={cn("flex gap-2", compact ? "min-w-[116px]" : "mt-3 w-full")}>
       <button
         type="button"
         onClick={(event) => onReject(event)}

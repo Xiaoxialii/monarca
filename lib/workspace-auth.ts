@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { WorkspaceRole } from "@prisma/client";
 import { getCurrentWorkspaceContext } from "@/lib/current-workspace-context";
+import { PRODUCT_ACCESS_REQUIRED_CODE, productAccessErrorPayload } from "@/lib/product-access";
 import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 export { WorkspaceAuthError };
@@ -35,11 +36,15 @@ export async function requireWorkspaceRole(allowedRoles: WorkspaceRole[], reques
 
 export function workspaceAuthErrorResponse(error: unknown) {
   if (error instanceof WorkspaceAuthError) {
+    if (error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return NextResponse.json(productAccessErrorPayload(), { status: 403 });
+    }
+
     return NextResponse.json(
       {
         error: error.message,
         message: error.message,
-        code: error.status === 409 ? "USER_WORKSPACE_CONFLICT" : undefined
+        code: error.code ?? (error.status === 409 ? "USER_WORKSPACE_CONFLICT" : undefined)
       },
       { status: error.status }
     );

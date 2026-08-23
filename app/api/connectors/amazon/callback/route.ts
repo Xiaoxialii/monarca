@@ -10,6 +10,8 @@ import {
 } from "@/lib/connectors/amazon/amazon-oauth";
 import { AMAZON_PROVIDER, publicAmazonError } from "@/lib/connectors/amazon/amazon-errors";
 import { runInitialAmazonSync } from "@/lib/connectors/amazon/amazon-sync";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUserId } from "@/lib/product-access";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string) {
   const url = new URL("/dashboard/settings", request.url);
@@ -90,6 +92,7 @@ export async function GET(request: Request) {
 
     const env = requiredAmazonEnv();
     const state = await verifyAndConsumeAmazonOAuthState(stateToken);
+    await assertProductAccessForUserId(state.userId);
     const token = await exchangeAmazonAuthorizationCode({
       code,
       clientId: env.clientId,
@@ -215,6 +218,10 @@ export async function GET(request: Request) {
 
     return dashboardRedirect(request, "connected");
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, "failed", PRODUCT_ACCESS_REQUIRED_CODE);
+    }
+
     const publicError = publicAmazonError(error);
     if (publicError.status >= 500) {
       return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });

@@ -133,8 +133,7 @@ const consultingCopy: Record<CopyLocale, {
     ],
     heroTitle: "预约商业咨询",
     heroSubtitle: "",
-    heroNote:
-      "适合希望自动化日报、周报、月经营分析，并减少人工整理数据和制作报告的团队。",
+    heroNote: "",
     clarifyTitle: "这次咨询可以帮你明确什么？",
     clarifyItems: [
       "你的业务数据目前适合接入哪些数据源",

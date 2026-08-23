@@ -17,6 +17,8 @@ import {
   verifyAndConsumeOAuthState,
   verifyShopifyCallbackHmac
 } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUserId } from "@/lib/product-access";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string, shopDomain?: string) {
   const url = new URL("/dashboard/import-data", request.url);
@@ -98,9 +100,12 @@ async function runInitialShopifySync(input: {
 }
 
 export async function GET(request: Request) {
+  let shopDomainForRedirect: string | undefined;
+
   try {
     const url = new URL(request.url);
     const shopDomain = normalizeShopDomain(url.searchParams.get("shop"));
+    shopDomainForRedirect = shopDomain;
     const code = url.searchParams.get("code");
     const stateToken = url.searchParams.get("state");
     const { clientId, clientSecret } = requiredShopifyEnv();
@@ -116,6 +121,7 @@ export async function GET(request: Request) {
       provider: SHOPIFY_PROVIDER,
       shopDomain
     });
+    await assertProductAccessForUserId(state.userId);
     const token = await exchangeShopifyCodeForToken({
       shopDomain,
       code,
@@ -253,6 +259,10 @@ export async function GET(request: Request) {
 
     return dashboardRedirect(request, "connected");
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, "failed", PRODUCT_ACCESS_REQUIRED_CODE, shopDomainForRedirect);
+    }
+
     const publicError = publicShopifyError(error);
     if (publicError.status >= 500) {
       return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });

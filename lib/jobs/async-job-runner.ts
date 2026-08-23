@@ -1,6 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
-  currentDecisionSnapshotVersions,
   METRIC_SNAPSHOT_VERSION
 } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import { markDashboardCachesStale } from "@/lib/dashboard/cache-lifecycle";
@@ -934,14 +933,14 @@ async function processConnectorSyncAsyncJob(
           skipped: true,
           reason: "sync_reused_existing_result"
         }
-      : await enqueueOptimizationRefreshAfterConnectorSync(client, {
+      : await markOptimizationRefreshRequiredAfterConnectorSync(client, {
           workspaceId: input.workspaceId,
           provider,
           dataSourceId,
           connectorJobId: input.id
         }).catch((error) => {
-          const message = error instanceof Error ? error.message : "Failed to queue optimization refresh after connector sync.";
-          console.warn("Connector sync succeeded but optimization refresh could not be queued", {
+          const message = error instanceof Error ? error.message : "Failed to mark optimization refresh after connector sync.";
+          console.warn("Connector sync succeeded but optimization refresh state could not be marked", {
             workspaceId: input.workspaceId,
             provider,
             dataSourceId,
@@ -953,7 +952,7 @@ async function processConnectorSyncAsyncJob(
           return {
             jobId: null,
             skipped: true,
-            reason: "optimization_refresh_queue_failed",
+            reason: "optimization_refresh_mark_failed",
             errorMessage: message
           };
         });
@@ -1016,7 +1015,7 @@ async function processConnectorSyncAsyncJob(
   }
 }
 
-async function enqueueOptimizationRefreshAfterConnectorSync(
+async function markOptimizationRefreshRequiredAfterConnectorSync(
   client: PrismaClient,
   input: {
     workspaceId: string;
@@ -1048,44 +1047,19 @@ async function enqueueOptimizationRefreshAfterConnectorSync(
   }
 
   const reason = `connector_sync:${input.provider}`;
-  const [versions, staleSummary] = await Promise.all([
-    currentDecisionSnapshotVersions(client, {
-      workspaceId: input.workspaceId
-    }),
-    markDashboardCachesStale(client, {
-      workspaceId: input.workspaceId,
-      reason,
-      invalidateOptimizationAssets: true
-    })
-  ]);
-
-  const job = await enqueueSkuOptimizationJob(client, {
+  const staleSummary = await markDashboardCachesStale(client, {
     workspaceId: input.workspaceId,
     reason,
-    decisionMode: "full",
-    triggerDataSourceId: input.dataSourceId,
-    schemaSnapshotId: readiness.canonicalSnapshotId,
-    inputHash: versions.inputHash
-  });
-
-  void processJob(job.id, { client }).catch((error) => {
-    console.warn("Failed to process connector-triggered optimization job", {
-      workspaceId: input.workspaceId,
-      provider: input.provider,
-      dataSourceId: input.dataSourceId,
-      connectorJobId: input.connectorJobId,
-      optimizationJobId: job.id,
-      error
-    });
+    invalidateOptimizationAssets: true
   });
 
   return {
-    jobId: job.id,
-    skipped: false,
+    jobId: null,
+    skipped: true,
     reason,
     staleSummary,
     readiness,
-    inputHash: versions.inputHash
+    manualOptimizationRequired: true
   };
 }
 

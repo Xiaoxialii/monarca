@@ -8,6 +8,8 @@ import {
 import { publicAmazonError } from "@/lib/connectors/amazon/amazon-errors";
 import { normalizeAmazonRegion } from "@/lib/connectors/amazon/amazon-regions";
 import { normalizeMarketplaceIds } from "@/lib/connectors/amazon/amazon-marketplaces";
+import { assertProductAccessForUser } from "@/lib/product-access";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 function dashboardRedirect(request: Request, code: string) {
   const url = new URL("/dashboard/import-data", request.url);
@@ -29,6 +31,7 @@ async function createAmazonConnectResult(request: Request) {
       error: NextResponse.json({ ok: false, code: "MISSING_WORKSPACE", message: "Missing current workspace." }, { status: 400 })
     };
   }
+  await assertProductAccessForUser(session.user);
 
   const url = new URL(request.url);
   const region = normalizeAmazonRegion(url.searchParams.get("region"));
@@ -62,6 +65,8 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(result.oauthUrl);
   } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const publicError = publicAmazonError(error);
     return dashboardRedirect(request, publicError.code);
   }
@@ -79,6 +84,8 @@ export async function POST(request: Request) {
       workspace_id: result.workspaceId
     });
   } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const publicError = publicAmazonError(error);
     return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
   }

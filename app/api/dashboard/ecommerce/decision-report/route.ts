@@ -14,8 +14,6 @@ import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifac
 import { optimizationReadiness, type OptimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import {
-  enqueueSkuOptimizationJob,
-  processJob,
   recoverAsyncJobs,
   SKU_OPTIMIZATION_STALE_JOB_MS
 } from "@/lib/jobs/async-job-runner";
@@ -513,6 +511,7 @@ async function latestOptimizationJob(workspaceId: string) {
       id: true,
       status: true,
       currentStep: true,
+      payload: true,
       heartbeatAt: true,
       startedAt: true,
       lockedAt: true,
@@ -524,12 +523,13 @@ async function latestOptimizationJob(workspaceId: string) {
     },
     take: 10
   });
+  const manualJobs = jobs.filter((job) => asRecord(job.payload).reason === "manual_optimization_refresh");
 
-  const queued = jobs.find((job) => job.status === "QUEUED");
+  const queued = manualJobs.find((job) => job.status === "QUEUED");
   if (queued) return queued;
 
   const staleBefore = new Date(Date.now() - SKU_OPTIMIZATION_STALE_JOB_MS);
-  return jobs.find((job) => {
+  return manualJobs.find((job) => {
     const heartbeat = job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt ?? job.createdAt;
     return heartbeat >= staleBefore;
   }) ?? null;
@@ -604,54 +604,51 @@ function queuedOptimizationResponse(input: {
   });
 }
 
-async function processQueuedOptimizationJob(job: { id: string; status: string }): Promise<Awaited<ReturnType<typeof processJob>> | null> {
-  if (job.status !== "QUEUED") return null;
-
-  after(() => {
-    void processJob(job.id).then((result) => {
-      if (!result.ok && !result.skipped) {
-        console.error("Failed to process queued decision report optimization job", result);
-      }
-    }).catch((error) => {
-      console.error("Failed to process queued decision report optimization job", { jobId: job.id, error });
-    });
-  });
-
-  return null;
-}
-
-async function freshOptimizationCacheResponse(input: {
+function manualOptimizationRequiredResponse(input: {
   workspaceId: string;
   mode: "full" | "sku";
   startedAt: number;
+  message: string;
+  reason: string;
+  readiness?: OptimizationReadiness | null;
+  currentVersions?: DecisionReportContractInput["currentVersions"];
+  snapshotType?: string;
 }) {
-  const refreshedCache = await findOptimizationReportCache(prisma, {
-    workspaceId: input.workspaceId,
-    mode: input.mode
-  });
-  if (!refreshedCache) return null;
-
-  const refreshedPayload = optimizationReportCachePayload(refreshedCache);
-  if (cacheNeedsOptimizationRefresh(refreshedPayload)) return null;
-
   return decisionReportJson({
     workspaceId: input.workspaceId,
     mode: input.mode,
     startedAt: input.startedAt,
     payload: {
-      ...await withOptimizationReadiness(input.workspaceId, refreshedPayload),
+      ok: true,
+      state: "ready_to_optimize",
+      status: "READY_TO_OPTIMIZE",
+      latestSnapshot: false,
+      message: input.message,
+      staleReason: input.reason,
+      jobId: null,
+      currentVersions: input.currentVersions ?? null,
+      decision_report: null,
+      portfolioSummary: null,
+      allocationRecommendation: null,
+      skuDecisions: [],
+      riskAlerts: [],
+      executionPlan: [],
       snapshot: {
-        id: refreshedCache.id,
-        type: "OptimizationReportCache",
-        sourceDecisionSnapshotId: refreshedCache.sourceDecisionSnapshotId,
-        createdAt: dateToIso(refreshedCache.createdAt),
-        updatedAt: dateToIso(refreshedCache.updatedAt),
-        latestSnapshot: true
+        id: null,
+        type: input.snapshotType ?? "OptimizationReportCache",
+        invalidated: true
       }
     },
-    optimizationStatus: "SUCCESS",
-    optimizationSnapshotId: refreshedCache.id,
-    refreshStatus: "IDLE"
+    currentVersions: input.currentVersions ?? null,
+    optimizationSource: "none",
+    optimizationStatus: "PENDING",
+    optimizationSnapshotId: null,
+    refreshStatus: "IDLE",
+    refreshJobId: null,
+    refreshCurrentStep: null,
+    readiness: input.readiness ?? null,
+    fallbackUsed: false,
+    fallbackReason: input.reason
   });
 }
 
@@ -788,27 +785,21 @@ export async function GET(request: Request) {
         });
       }
 
-      let job = await latestOptimizationJob(session.workspace.id);
+      const job = await latestOptimizationJob(session.workspace.id);
 
       if (!job || !isPendingOptimizationStatus(job.status)) {
-        const queuedJob = await enqueueSkuOptimizationJob(prisma, {
-          workspaceId: session.workspace.id,
-          reason: `non_ready_decision_report_cache:${reportCache.state || "unknown"}`,
-          decisionMode,
-          schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
-          inputHash: reportCache.inputHash
-        });
-        job = queuedJob;
-
-      }
-      const processed = await processQueuedOptimizationJob(job);
-      if (processed?.ok) {
-        const freshResponse = await freshOptimizationCacheResponse({
+        return manualOptimizationRequiredResponse({
           workspaceId: session.workspace.id,
           mode: decisionMode,
-          startedAt
+          startedAt,
+          message: "New data is available. Run optimization to generate current recommendations.",
+          reason: `non_ready_decision_report_cache:${reportCache.state || "unknown"}`,
+          readiness: refreshAvailability.readiness,
+          currentVersions: {
+            canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null,
+            inputHash: reportCache.inputHash
+          }
         });
-        if (freshResponse) return freshResponse;
       }
 
       return queuedOptimizationResponse({
@@ -840,49 +831,31 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await enqueueSkuOptimizationJob(prisma, {
-        workspaceId: session.workspace.id,
-        reason: "invalid_decision_report_cache:missing_ops_rows",
-        decisionMode,
-        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
-        inputHash: reportCache.inputHash
-      });
-
-      const processed = await processQueuedOptimizationJob(job);
-      if (processed?.ok) {
-        const freshResponse = await freshOptimizationCacheResponse({
+      const job = await latestOptimizationJob(session.workspace.id);
+      if (job && isPendingOptimizationStatus(job.status)) {
+        return queuedOptimizationResponse({
           workspaceId: session.workspace.id,
           mode: decisionMode,
+          jobId: job.id,
+          status: job.status,
+          currentStep: job.currentStep,
+          message: "Optimization refresh is running.",
+          readiness: refreshAvailability.readiness,
           startedAt
         });
-        if (freshResponse) return freshResponse;
       }
 
-      return decisionReportJson({
+      return manualOptimizationRequiredResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
         startedAt,
-        payload: {
-          ok: true,
-          state: "processing",
-          status: job.status,
-          latestSnapshot: false,
-          message: "Optimization snapshot is invalid and a refresh job has been queued.",
-          staleReason: "missing_ops_rows",
-          jobId: job.id,
-          snapshot: {
-            id: null,
-            type: "OptimizationReportCache",
-            invalidated: true
-          }
-        },
-        optimizationStatus: "PENDING",
-        optimizationSnapshotId: null,
-        refreshStatus: explicitRefreshStatus(job.status),
-        refreshJobId: job.id,
-        refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: false,
-        fallbackReason: "optimization_snapshot_invalidated"
+        message: "Optimization snapshot is invalid. Run optimization to generate current recommendations.",
+        reason: "invalid_decision_report_cache:missing_ops_rows",
+        readiness: refreshAvailability.readiness,
+        currentVersions: {
+          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null,
+          inputHash: reportCache.inputHash
+        }
       });
     }
 
@@ -915,51 +888,29 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await enqueueSkuOptimizationJob(prisma, {
-        workspaceId: session.workspace.id,
-        reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
-        decisionMode,
-        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
-        inputHash: freshness.current.inputHash
-      });
-
-      const processed = await processQueuedOptimizationJob(job);
-      if (processed?.ok) {
-        const freshResponse = await freshOptimizationCacheResponse({
+      const job = await latestOptimizationJob(session.workspace.id);
+      if (job && isPendingOptimizationStatus(job.status)) {
+        return queuedOptimizationResponse({
           workspaceId: session.workspace.id,
           mode: decisionMode,
+          jobId: job.id,
+          status: job.status,
+          currentStep: job.currentStep,
+          message: "New data is available. Optimization refresh is running.",
+          readiness: refreshAvailability.readiness,
           startedAt
         });
-        if (freshResponse) return freshResponse;
       }
 
-      return decisionReportJson({
+      return manualOptimizationRequiredResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
         startedAt,
-        payload: {
-          ok: true,
-          state: "processing",
-          status: job.status,
-          latestSnapshot: false,
-          message: "New data invalidated the previous optimization snapshot. A refresh job has been queued.",
-          staleReason: freshness.reason,
-          jobId: job.id,
-          currentVersions: freshness.current,
-          snapshot: {
-            id: null,
-            type: "OptimizationReportCache",
-            invalidated: true
-          }
-        },
+        message: "New data invalidated the previous optimization snapshot. Run optimization to generate current recommendations.",
+        reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
+        readiness: refreshAvailability.readiness,
         currentVersions: freshness.current,
-        optimizationStatus: "PENDING",
-        optimizationSnapshotId: null,
-        refreshStatus: explicitRefreshStatus(job.status),
-        refreshJobId: job.id,
-        refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: false,
-        fallbackReason: `optimization_snapshot_invalidated:${freshness.reason ?? "unknown"}`
+        snapshotType: "OptimizationReportCache"
       });
     }
 
@@ -1028,51 +979,30 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await enqueueSkuOptimizationJob(prisma, {
-        workspaceId: session.workspace.id,
-        reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
-        decisionMode,
-        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
-        inputHash: freshness.current.inputHash
-      });
-
-      const processed = await processQueuedOptimizationJob(job);
-      if (processed?.ok) {
-        const freshResponse = await freshOptimizationCacheResponse({
+      const job = await latestOptimizationJob(session.workspace.id);
+      if (job && isPendingOptimizationStatus(job.status)) {
+        return queuedOptimizationResponse({
           workspaceId: session.workspace.id,
           mode: decisionMode,
+          payload: recommendationsJson,
+          jobId: job.id,
+          status: job.status,
+          currentStep: job.currentStep,
+          message: "New data is available. Optimization refresh is running.",
+          readiness: refreshAvailability.readiness,
           startedAt
         });
-        if (freshResponse) return freshResponse;
       }
 
-      return decisionReportJson({
+      return manualOptimizationRequiredResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
         startedAt,
-        payload: {
-          ok: true,
-          state: "processing",
-          status: job.status,
-          latestSnapshot: false,
-          message: "New data invalidated the previous optimization snapshot. A refresh job has been queued.",
-          staleReason: freshness.reason,
-          jobId: job.id,
-          currentVersions: freshness.current,
-          snapshot: {
-            id: null,
-            type: "DecisionSnapshot",
-            invalidated: true
-          }
-        },
+        message: "New data invalidated the previous optimization snapshot. Run optimization to generate current recommendations.",
+        reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
+        readiness: refreshAvailability.readiness,
         currentVersions: freshness.current,
-        optimizationStatus: "PENDING",
-        optimizationSnapshotId: null,
-        refreshStatus: explicitRefreshStatus(job.status),
-        refreshJobId: job.id,
-        refreshCurrentStep: job.currentStep ?? null,
-        fallbackUsed: false,
-        fallbackReason: `optimization_snapshot_invalidated:${freshness.reason ?? "unknown"}`
+        snapshotType: "DecisionSnapshot"
       });
     }
 
@@ -1107,38 +1037,32 @@ export async function GET(request: Request) {
 
   const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
   if (refreshAvailability.canRefresh) {
-    let job = await latestOptimizationJob(session.workspace.id);
+    const job = await latestOptimizationJob(session.workspace.id);
 
-    if (!job || !isPendingOptimizationStatus(job.status)) {
-      const queuedJob = await enqueueSkuOptimizationJob(prisma, {
-        workspaceId: session.workspace.id,
-        reason: "decision_snapshot_missing_with_ready_sources",
-        decisionMode,
-        schemaSnapshotId: refreshAvailability.readiness?.canonicalSnapshotId ?? null,
-        inputHash: null
-      });
-      job = queuedJob;
-
-    }
-    const processed = await processQueuedOptimizationJob(job);
-    if (processed?.ok) {
-      const freshResponse = await freshOptimizationCacheResponse({
+    if (job && isPendingOptimizationStatus(job.status)) {
+      return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
+        jobId: job.id,
+        status: job.status,
+        currentStep: job.currentStep,
+        message: "Optimization refresh is running.",
+        readiness: refreshAvailability.readiness,
         startedAt
       });
-      if (freshResponse) return freshResponse;
     }
 
-    return queuedOptimizationResponse({
+    return manualOptimizationRequiredResponse({
       workspaceId: session.workspace.id,
       mode: decisionMode,
-      jobId: job.id,
-      status: job.status,
-      currentStep: job.currentStep,
-      message: "Optimization refresh is running.",
+      startedAt,
+      message: "Connected data is ready. Run optimization to generate recommendations.",
+      reason: "decision_snapshot_missing_with_ready_sources",
       readiness: refreshAvailability.readiness,
-      startedAt
+      currentVersions: {
+        canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null
+      },
+      snapshotType: "DecisionSnapshot"
     });
   }
 

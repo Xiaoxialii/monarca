@@ -10,6 +10,8 @@ import {
   requiredMetaEnv,
   verifyAndConsumeMetaOAuthState
 } from "@/lib/ads/meta/meta-oauth";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUserId } from "@/lib/product-access";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string) {
   const url = new URL("/dashboard/import-data", request.url);
@@ -54,6 +56,7 @@ export async function GET(request: Request) {
 
     const { clientId, clientSecret, redirectUri, scopes } = requiredMetaEnv();
     const state = await verifyAndConsumeMetaOAuthState(stateToken);
+    await assertProductAccessForUserId(state.userId);
     const token = await exchangeMetaCodeForToken({
       code,
       clientId,
@@ -166,6 +169,10 @@ export async function GET(request: Request) {
 
     return dashboardRedirect(request, "connected");
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, "failed", PRODUCT_ACCESS_REQUIRED_CODE);
+    }
+
     const publicError = publicMetaError(error);
     if (publicError.status >= 500) {
       return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });

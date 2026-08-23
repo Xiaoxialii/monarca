@@ -1,23 +1,18 @@
 import { NextResponse } from "next/server";
-import { getCurrentWorkspaceContext } from "@/lib/current-workspace-context";
-import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { syncCurrentClerkUserIdentity } from "@/lib/clerk-user-sync";
 
 export async function POST(request: Request) {
-  const result = await getCurrentWorkspaceContext(request).catch((error) => {
-    const authResponse = workspaceAuthErrorResponse(error);
-    if (authResponse) return authResponse;
-    throw error;
-  });
+  void request;
+  const result = await syncCurrentClerkUserIdentity();
 
   if (!result) {
     return NextResponse.json({ synced: false }, { status: 401 });
   }
 
-  if (result instanceof NextResponse) return result;
-
   return NextResponse.json({
     synced: true,
     userId: result.user.id,
-    workspaceId: result.workspace.id
+    workspaceId: result.workspace?.id ?? null,
+    productAccessEnabled: result.user.productAccessEnabled === true
   });
 }

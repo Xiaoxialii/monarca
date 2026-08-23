@@ -112,25 +112,27 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /optimizationRefreshAvailability/);
   assert.match(route, /refreshSkippedReason:\s*"canonical_artifact_unavailable"/);
   assert.match(route, /latestOptimizationJob/);
+  assert.match(route, /manualOptimizationRequiredResponse/);
+  assert.match(route, /status:\s*"READY_TO_OPTIMIZE"/);
   assert.match(route, /non_ready_decision_report_cache/);
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
-  assert.match(route, /state:\s*"processing"/);
+  assert.match(route, /state:\s*"ready_to_optimize"/);
   assert.match(route, /decision_report:\s*null/);
   assert.match(route, /New data invalidated the previous optimization snapshot/);
-  assert.match(route, /optimization_snapshot_invalidated/);
+  assert.match(route, /stale_decision_snapshot/);
   assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
-  assert.match(route, /const queued = jobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
-  assert.match(route, /function processQueuedOptimizationJob/);
-  assert.match(route, /if \(job\.status !== "QUEUED"\) return/);
-  assert.match(route, /await processQueuedOptimizationJob\(job\)/);
+  assert.match(route, /const manualJobs = jobs\.filter\(\(job\) => asRecord\(job\.payload\)\.reason === "manual_optimization_refresh"\)/);
+  assert.match(route, /const queued = manualJobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
+  assert.doesNotMatch(route, /enqueueSkuOptimizationJob/);
+  assert.doesNotMatch(route, /processQueuedOptimizationJob/);
+  assert.doesNotMatch(route, /processJob\(job\.id\)/);
   assert.doesNotMatch(route, /liveDecisionReportResponse/);
-  assert.match(route, /freshOptimizationCacheResponse/);
+  assert.doesNotMatch(route, /freshOptimizationCacheResponse/);
   assert.match(route, /optimizationStatus:\s*"PENDING"/);
   assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_report_cache:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_snapshot:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
-  assert.match(route, /after\(\(\) => \{\s*void processJob\(job\.id\)/);
   assert.match(artifactAvailability, /readR2ObjectText\(checkedArtifactKey\)/);
   assert.match(artifactAvailability, /firstUnavailable \?\?=/);
   assert.match(artifactAvailability, /continue;/);
@@ -396,27 +398,26 @@ test("optimization page loads latest decision report on initial render", () => {
   assert.match(dashboard, /setHasStartedProfitOptimization\(true\)/);
 });
 
-test("connector sync success automatically queues a stale-safe optimization refresh", () => {
+test("connector sync success marks optimization stale without automatically queueing refresh", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const connectorHandler = runner.match(/async function processConnectorSyncAsyncJob\([\s\S]*?\n\}/);
-  const refreshHelper = runner.match(/async function enqueueOptimizationRefreshAfterConnectorSync\([\s\S]*?\n\}/);
+  const refreshHelper = runner.match(/async function markOptimizationRefreshRequiredAfterConnectorSync\([\s\S]*?\n\}/);
 
   assert.ok(connectorHandler, "connector sync handler should exist");
-  assert.ok(refreshHelper, "connector-triggered optimization helper should exist");
+  assert.ok(refreshHelper, "connector-triggered stale marker should exist");
   assert.match(runner, /markDashboardCachesStale/);
   assert.match(runner, /enqueueSkuOptimizationJob/);
   assert.match(connectorHandler[0], /result\.reused/);
-  assert.match(connectorHandler[0], /enqueueOptimizationRefreshAfterConnectorSync\(client/);
-  assert.match(connectorHandler[0], /optimization_refresh_queue_failed/);
+  assert.match(connectorHandler[0], /markOptimizationRefreshRequiredAfterConnectorSync\(client/);
+  assert.match(connectorHandler[0], /optimization_refresh_mark_failed/);
   assert.match(refreshHelper[0], /optimizationReadiness\(client/);
   assert.match(refreshHelper[0], /optimization_not_ready/);
   assert.match(refreshHelper[0], /reason = `connector_sync:\$\{input\.provider\}`/);
   assert.match(refreshHelper[0], /markDashboardCachesStale\(client/);
   assert.match(refreshHelper[0], /invalidateOptimizationAssets:\s*true/);
-  assert.match(refreshHelper[0], /enqueueSkuOptimizationJob\(client/);
-  assert.match(refreshHelper[0], /decisionMode:\s*"full"/);
-  assert.match(refreshHelper[0], /triggerDataSourceId:\s*input\.dataSourceId/);
-  assert.match(refreshHelper[0], /void processJob\(job\.id, \{ client \}\)/);
+  assert.match(refreshHelper[0], /manualOptimizationRequired:\s*true/);
+  assert.doesNotMatch(refreshHelper[0], /enqueueSkuOptimizationJob\(client/);
+  assert.doesNotMatch(refreshHelper[0], /processJob\(job\.id/);
 });
 
 test("optimization report cache preserves optimization run metadata", () => {
@@ -630,6 +631,9 @@ test("optimization portfolio controls stay visible and current portfolio uses po
   assert.match(renderer, /xl:sticky xl:top-24 xl:h-full xl:max-h-full/);
   assert.match(renderer, /sticky top-0 z-20 border-b border-slate-200 bg-white\/95/);
   assert.match(renderer, /xl:overflow-hidden/);
+  assert.match(renderer, /lg:grid-cols-\[minmax\(108px,0\.7fr\)_minmax\(168px,1fr\)_minmax\(122px,auto\)\]/);
+  assert.match(renderer, /lg:flex-col lg:items-end lg:justify-center/);
+  assert.match(renderer, /compact \? "min-w-\[116px\]"/);
   assert.match(renderer, /All channels/);
 });
 

@@ -18404,6 +18404,8 @@ export function Dashboard({
     return <div className="h-screen bg-background" />;
   }
 
+  const isImportDataView = view === "import-data" || view === "import-data-connect";
+
   return (
     <div className="flex h-screen overflow-hidden" lang={getHtmlLang(locale)}>
       <Sidebar
@@ -18413,14 +18415,14 @@ export function Dashboard({
       />
       <div className="min-w-0 flex h-full flex-1 flex-col overflow-hidden">
         <Header copy={copy} activeTarget={activeTarget} locale={locale} onLocaleChange={setLocale} />
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={cn("min-h-0 flex-1 overflow-y-auto", isImportDataView && "bg-[#e7ebe8]")}>
           <main
             className={cn(
               "mx-auto grid min-h-full max-w-[1500px] gap-4 px-4 lg:px-6 xl:grid-cols-1 xl:items-start",
               isReportsView ? "py-3" : "py-5"
             )}
           >
-            {view === "import-data" || view === "import-data-connect" ? (
+            {isImportDataView ? (
               <div className="min-w-0 xl:col-start-1">
                 <ImportDataSection
                   copy={copy}

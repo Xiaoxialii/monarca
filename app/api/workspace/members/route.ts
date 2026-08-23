@@ -1,7 +1,9 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { assertProductAccessForUser } from "@/lib/product-access";
 import { prisma } from "@/lib/prisma";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import {
   canInviteAndManage,
   canInviteRole,
@@ -50,6 +52,13 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  try {
+    await assertProductAccessForUser(session.user);
+  } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
+  }
 
   const members = await prisma.workspaceMember.findMany({
     where: {
@@ -88,6 +97,13 @@ export async function POST(request: Request) {
 
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    await assertProductAccessForUser(session.user);
+  } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+    throw error;
   }
 
   if (!canInviteAndManage(session.membership.role)) {

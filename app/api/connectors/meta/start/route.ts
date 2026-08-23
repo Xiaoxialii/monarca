@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { buildMetaOAuthUrl, createMetaOAuthState, publicMetaError, requiredMetaEnv } from "@/lib/ads/meta/meta-oauth";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
+import { assertProductAccessForUser } from "@/lib/product-access";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 async function createMetaStartResult() {
   const session = await syncCurrentClerkUser();
@@ -14,6 +16,7 @@ async function createMetaStartResult() {
       error: NextResponse.json({ ok: false, code: "MISSING_WORKSPACE", message: "Missing current workspace." }, { status: 400 })
     };
   }
+  await assertProductAccessForUser(session.user);
 
   const { clientId, redirectUri, scopes } = requiredMetaEnv();
   const state = await createMetaOAuthState({
@@ -43,6 +46,8 @@ export async function GET() {
 
     return NextResponse.redirect(result.oauthUrl);
   } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const publicError = publicMetaError(error);
     return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
   }
@@ -60,6 +65,8 @@ export async function POST() {
       workspace_id: result.workspaceId
     });
   } catch (error) {
+    const authResponse = workspaceAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const publicError = publicMetaError(error);
     return NextResponse.json({ ok: false, code: publicError.code, message: publicError.message }, { status: publicError.status });
   }

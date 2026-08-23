@@ -15,6 +15,8 @@ import {
 } from "@/lib/connectors/google-ads/google-ads-oauth";
 import { runInitialGoogleAdsSync } from "@/lib/connectors/google-ads/google-ads-sync";
 import { encryptConnectorToken } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUser, assertProductAccessForUserId } from "@/lib/product-access";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string) {
   const url = new URL("/dashboard/import-data", request.url);
@@ -94,6 +96,9 @@ export async function GET(request: Request) {
 
     return dashboardRedirect(request, "connected");
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, "failed", PRODUCT_ACCESS_REQUIRED_CODE);
+    }
     const publicError = publicGoogleAdsError(error);
     if (publicError.status >= 500) {
       return dashboardRedirect(request, "failed", publicError.code);
@@ -112,6 +117,7 @@ async function connectRealGoogleAds(request: Request, url: URL) {
 
   const env = requiredGoogleAdsEnv();
   const state = await verifyAndConsumeGoogleAdsOAuthState(stateToken);
+  await assertProductAccessForUserId(state.userId);
   const token = await exchangeGoogleAdsAuthorizationCode({
     code,
     clientId: env.clientId,
@@ -147,6 +153,7 @@ async function connectMockGoogleAds() {
   if (!session?.workspace?.id) {
     throw new Error("Missing authenticated workspace.");
   }
+  await assertProductAccessForUser(session.user);
 
   return persistGoogleAdsConnection(prisma, {
     workspaceId: session.workspace.id,

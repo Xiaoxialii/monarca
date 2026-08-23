@@ -3,10 +3,7 @@
 import {
   ArrowLeft,
   CheckCircle2,
-  Clock3,
-  MessageSquareText,
   Send,
-  ShieldCheck
 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
@@ -206,7 +203,7 @@ export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }
           </Button>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+        <section className="mx-auto max-w-3xl">
           <div className="space-y-5">
             <div className="rounded-3xl border border-emerald-100 bg-white/72 p-7 shadow-sm sm:p-8">
               <Badge className="mb-4 border-emerald-700/20 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
@@ -304,42 +301,6 @@ export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }
               </CardContent>
             </Card>
           </div>
-
-          <aside className="space-y-5">
-            <div className="grid gap-3">
-              {[
-                { icon: Clock3, title: copy.responseTitle, text: copy.responseText },
-                { icon: ShieldCheck, title: copy.secureTitle, text: copy.secureText },
-                { icon: MessageSquareText, title: copy.contextTitle, text: copy.contextText }
-              ].map((item) => (
-                <Card key={item.title} className="border-slate-200/80 bg-white/84 shadow-sm">
-                  <CardContent className="flex gap-3 p-4">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-800">
-                      <item.icon className="size-4" />
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold">{item.title}</p>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            <Card className="border-slate-200/80 bg-white/84 shadow-sm">
-              <CardHeader className="px-5 py-4">
-                <CardTitle className="text-base">{copy.quickTitle}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 px-5 pb-5">
-                {copy.quickItems.map((item) => (
-                  <div key={item.title} className="rounded-xl border bg-background p-4">
-                    <p className="text-sm font-semibold">{item.title}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </aside>
         </section>
       </div>
     </main>

@@ -180,6 +180,32 @@ enum WorkspaceMemberStatus {
   REMOVED
 }
 
+enum StorePartnershipApplicationStatus {
+  NEW
+  UNDER_REVIEW
+  QUALIFIED
+  CONTACTED
+  ACCEPTED
+  REJECTED
+  ARCHIVED
+}
+
+enum StorePartnershipBusinessStage {
+  OVERSEAS_STORE
+  DOMESTIC_READY_OVERSEAS
+  FACTORY_OR_SUPPLIER
+  OVERSEAS_EXPANDING_CHANNELS
+  OTHER
+}
+
+enum StorePartnershipFulfillmentCapability {
+  OVERSEAS_WAREHOUSE
+  DOMESTIC_DIRECT_SHIPPING
+  THIRD_PARTY_CROSS_BORDER_LOGISTICS
+  NEED_MONARCA_SUPPORT
+  UNSURE_DISCUSS
+}
+
 model User {
   id                  String             @id @default(cuid())
   clerkUserId         String             @unique
@@ -1347,4 +1373,31 @@ model ConsultingRequest {
   @@index([createdAt])
   @@index([status, createdAt])
   @@index([email])
+}
+
+model StorePartnershipApplication {
+  id                    String                                @id @default(cuid())
+  name                  String
+  email                 String?
+  wechat                String?
+  businessStage         StorePartnershipBusinessStage
+  storeOrProductUrl     String?
+  salesChannels         Json
+  otherSalesChannel     String?
+  fulfillmentCapability StorePartnershipFulfillmentCapability
+  requestedServices     Json
+  otherRequestedService String?
+  businessDescription   String?
+  consentAccepted       Boolean
+  status                StorePartnershipApplicationStatus     @default(NEW)
+  source                String                                @default("PUBLIC_APPLICATION_PAGE")
+  submittedAt           DateTime                              @default(now())
+  createdAt             DateTime                              @default(now())
+  updatedAt             DateTime                              @updatedAt
+
+  @@index([submittedAt])
+  @@index([status, submittedAt])
+  @@index([businessStage, submittedAt])
+  @@index([email, submittedAt])
+  @@index([wechat, submittedAt])
 }

@@ -20,10 +20,9 @@ import {
   X,
   Zap
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,45 +81,9 @@ const featureMeta = [
 
 const useCaseIcons = [ShoppingBag, Rocket, UsersRound];
 const useCaseAvatars = [
-  { face: "EC", role: "Ecommerce", className: "from-emerald-100 via-white to-lime-100 text-emerald-900" },
-  { face: "EX", role: "Executive", className: "from-sky-100 via-white to-indigo-100 text-sky-900" },
-  { face: "OP", role: "Operations", className: "from-amber-100 via-white to-rose-100 text-amber-900" }
-];
-const useCaseThemes = [
-  {
-    card: "bg-gradient-to-br from-emerald-50 via-white to-lime-50 ring-emerald-100/80",
-    icon: "bg-emerald-100/70 text-emerald-800 ring-emerald-200/70",
-    pill: "bg-emerald-100/75 text-emerald-800 ring-emerald-200/70",
-    line: "border-emerald-300",
-    action: "bg-emerald-50/85 text-emerald-950 ring-emerald-100"
-  },
-  {
-    card: "bg-gradient-to-br from-sky-50 via-white to-indigo-50 ring-sky-100/80",
-    icon: "bg-sky-100/75 text-sky-800 ring-sky-200/70",
-    pill: "bg-sky-100/75 text-sky-800 ring-sky-200/70",
-    line: "border-sky-300",
-    action: "bg-sky-50/85 text-sky-950 ring-sky-100"
-  },
-  {
-    card: "bg-gradient-to-br from-amber-50 via-white to-rose-50 ring-amber-100/80",
-    icon: "bg-amber-100/75 text-amber-800 ring-amber-200/70",
-    pill: "bg-amber-100/75 text-amber-800 ring-amber-200/70",
-    line: "border-amber-300",
-    action: "bg-amber-50/85 text-amber-950 ring-amber-100"
-  }
-];
-
-const useCaseLayout = [
-  "lg:w-[35%] lg:-translate-y-1 lg:-rotate-[0.8deg]",
-  "lg:w-[31%] lg:translate-y-8 lg:rotate-[0.7deg]",
-  "lg:w-[34%] lg:translate-y-2 lg:-rotate-[0.35deg]"
-];
-
-const personaAvatarStyles = [
-  "from-emerald-200 via-teal-100 to-white text-emerald-950 ring-emerald-100",
-  "from-amber-200 via-orange-100 to-white text-amber-950 ring-amber-100",
-  "from-sky-200 via-indigo-100 to-white text-sky-950 ring-sky-100",
-  "from-rose-200 via-pink-100 to-white text-rose-950 ring-rose-100"
+  { face: "CP", role: "MANUFACTURER", className: "from-emerald-100 via-white to-lime-100 text-emerald-900" },
+  { face: "SB", role: "SHOPIFY BRAND", className: "from-sky-100 via-white to-indigo-100 text-sky-900" },
+  { face: "MR", role: "MULTI-CHANNEL", className: "from-amber-100 via-white to-rose-100 text-amber-900" }
 ];
 
 const homepageCopy = {
@@ -130,26 +93,26 @@ const homepageCopy = {
     logo: "Monarca AI",
     nav: [
       { label: "Sources", href: "#sources" },
-      { label: "Profit Optimization", href: "#investigations" },
-      { label: "Alerts", href: "#alerts" }
+      { label: "Operations System", href: "#investigations" },
+      { label: "User Stories", href: "#use-cases" }
     ],
     auth: {
       login: "Log in",
       getStarted: "Get started"
     },
     hero: {
-      eyebrow: "Ecommerce Growth & Operations Partner",
-      headline: "AI-enabled e-commerce operator",
-      subheadline: "Connect your store. We run and grow it",
-      teamLabel: "Three-layer profit control that turns data changes into operating actions",
+      eyebrow: "AI Ecommerce Operations Agent",
+      headline: "AI-powered Global Ecommerce Operations",
+      subheadline: "Connect your products. We grow them globally.",
+      teamLabel: "Monarca turns products, stores, and operating data into global growth actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },
         { role: "Spot risk and loss faster", text: "Detect profit drops, inefficient spend, inventory risk, and operating anomalies before they create avoidable loss." },
         { role: "Output optimal operating decisions", text: "Recommend what to adjust next based on budget, inventory, and gross-margin constraints." }
       ],
       primaryCta: "Book consultation",
-      secondaryCta: "View Demo",
-      trust: ["Full-service store operations", "AI-powered growth execution", "You keep ownership"]
+      secondaryCta: "Submit Your Products or Store",
+      trust: ["You keep brand ownership", "Full-service operations", "Profit-growth oriented"]
     },
     visual: {
       status: "Investigating",
@@ -178,62 +141,58 @@ const homepageCopy = {
       title: "",
       cards: [
         {
-          title: "Build Your Profit Intelligence Layer",
-          text: "Connect ecommerce, advertising, inventory, and operational data into a unified view of your business and SKU-level profitability."
+          title: "Submit Products or Store",
+          text: "Submit your products, store, and supply chain information."
         },
         {
-          title: "Understand What Drives Profit",
-          text: "Analyze products, customers, channels, costs, and operational constraints to identify what is truly driving or hurting profitability."
+          title: "Get Overseas Operations Plan",
+          text: "Define target markets, sales channels, product mix, pricing, ads, creators, and inventory plan."
         },
         {
-          title: "Simulate Tens of Thousands of Strategies",
-          text: "Evaluate tens of thousands of possible business scenarios across advertising spend, inventory allocation, pricing, and SKU portfolio decisions to find the most profitable path."
-        },
-        {
-          title: "Execute & Optimize Continuously",
-          text: "Receive AI-powered recommendations with expected profit impact, track real-world outcomes, and continuously improve decisions through a closed-loop system."
+          title: "Monarca Executes Operations",
+          text: "Monarca handles listing, product pages, ads, creator marketing, inventory optimization, and profit tracking."
         }
       ]
     },
     useCases: {
-      title: "How different teams use Monarca AI",
+      title: "User Stories",
       subtitle: "",
       consultTitle: "Want to see what profit opportunities your data can reveal?",
       consultText: "",
       consultCta: "Book consultation",
       cards: [
         {
-          title: "Ecommerce team",
+          title: "Consumer product manufacturers",
           persona:
-            "Monarca AI helps us see which SKUs are truly profitable, which ads are wasting budget, and which inventory is creating risk.",
+            "Monarca helps us take mature products and supply chain advantages overseas, making entry into the U.S. market clearer and more efficient.",
           scene: "",
-          insight: "Monarca AI identifies the real profit sources directly.",
-          action: "Know faster which products are worth scaling.",
-          roles: ["🛒 Ecommerce Operator", "🚀 Growth Analyst"]
+          insight: "",
+          action: "Overseas channel expansion",
+          roles: []
         },
         {
-          title: "Executive team",
+          title: "Shopify brands",
           persona:
-            "Monarca AI turns scattered operating data into profit decisions, so we quickly know where we are making money, where we are losing money, and what to do next.",
+            "Monarca works like our overseas operations partner, helping us find growth opportunities and expand effective sales channels.",
           scene: "",
-          insight: "Monarca AI automatically turns complex changes into key points.",
-          action: "The team completes reviews and decisions faster.",
-          roles: ["👔 Executive", "📊 Business Analyst"]
+          insight: "",
+          action: "Sales revenue growth",
+          roles: []
         },
         {
-          title: "Operations team",
+          title: "Multi-channel retailers",
           persona:
-            "Sales, ads, inventory, and costs change every day, but it is hard to know what to handle first. Monarca AI diagnoses profit anomalies, simulates options, and outputs the best execution action.",
+            "Monarca helps us focus beyond GMV, improving actual profit while growing revenue.",
           scene: "",
-          insight: "Monarca AI locates anomalies and ranks priorities first.",
-          action: "Then it turns the issue into a clear executable task.",
-          roles: ["👤 Ops Operator", "⚠ Risk Controller"]
+          insight: "",
+          action: "Profit performance improvement",
+          roles: []
         }
       ]
     },
     system: {
       eyebrow: "Why teams need it",
-      title: "Growth teams have dashboards. Profit teams need a control system",
+      title: "Use the systems your revenue team already uses",
       points: [
         {
           title: "Metrics move constantly",
@@ -250,7 +209,7 @@ const homepageCopy = {
       ]
     },
     investigation: {
-      sectionTitle: "AI Profit Optimization Syetem",
+      sectionTitle: "Monarca AI Operations System",
       sectionSubtitle: "",
       eyebrow: "",
       title: "Revenue dropped 12.4%",
@@ -295,9 +254,9 @@ const homepageCopy = {
     },
     pricing: {
       eyebrow: "Pricing",
-      title: "AI profit optimization pricing",
+      title: "Ecommerce operations partnership pricing",
       intro:
-        "Monarca is not a dashboard tool. It is an AI profit optimization system built to identify, simulate, and track measurable ecommerce profit decisions.",
+        "Monarca is not a dashboard tool. It is an ecommerce operations system built to plan, execute, and measure global store growth.",
       plans: [
         {
           name: "Starter",
@@ -377,7 +336,7 @@ const homepageCopy = {
     },
     integrations: {
       eyebrow: "Supported integrations",
-      title: "Connect the systems your revenue team already trusts"
+      title: "Use the systems your revenue team already uses"
     }
   },
   zh: {
@@ -394,9 +353,9 @@ const homepageCopy = {
       getStarted: "开始使用"
     },
     hero: {
-      eyebrow: "电商利润优化系统",
-      headline: "AI Profit Optimization System",
-      subheadline: "连接数据，执行最优利润决策",
+      eyebrow: "AI 电商运营智能体",
+      headline: "AI 驱动电商海外运营",
+      subheadline: "接入你的产品，卖向全球、增长更多",
       teamLabel: "三层利润控制，把数据变化转成经营动作",
       team: [
         { role: "更早发现增长机会", text: "识别高潜力信号、异常变化和关键增长机会，帮助团队更早把握业务窗口。" },
@@ -404,8 +363,8 @@ const homepageCopy = {
         { role: "输出最优经营决策", text: "基于预算、库存和毛利约束，给出下一步应该调整什么以及预期利润影响。" }
       ],
       primaryCta: "预约咨询",
-      secondaryCta: "查看 Demo",
-      trust: ["利润诊断", "方案模拟", "保证至少 5% 利润提升"]
+      secondaryCta: "提交产品或店铺",
+      trust: ["保留品牌所有权", "全流程运营", "利润增长导向"]
     },
     visual: {
       status: "正在调查",
@@ -434,61 +393,57 @@ const homepageCopy = {
       title: "",
       cards: [
         {
-          title: "连接分散数据",
-          text: "连接 Excel、数据库和业务系统，进入统一的利润控制系统"
+          title: "申请运营合作",
+          text: "提交产品、店铺和是否有供应链信息。"
         },
         {
-          title: "发现增长机会",
-          text: "拆解收入、利润、广告、库存和 SKU 表现，定位真正影响利润的因素"
+          title: "制定增长计划",
+          text: "确定目标市场、渠道、定价、广告、达人和库存策略。"
         },
         {
-          title: "生成最优决策",
-          text: "围绕预算、库存、渠道和 SKU，输出带预期利润影响的经营动作"
-        },
-        {
-          title: "追踪行动效果",
-          text: "持续监控行动后的指标变化，形成数据驱动的经营闭环"
+          title: "Monarca执行运营",
+          text: "我们负责落地执行，持续追踪销售表现并优化利润。"
         }
       ]
     },
     useCases: {
-      title: "不同团队如何使用 Monarca AI",
-      subtitle: "从日常经营问题出发，把分散数据转化为可执行的经营判断。",
+      title: "用户故事",
+      subtitle: "",
       consultTitle: "想知道你的数据里有哪些利润机会？",
       consultText: "",
       consultCta: "预约咨询",
       cards: [
         {
-          title: "电商团队",
+          title: "消费品制造商",
           persona:
-            "Monarca AI 帮我们看清哪些 SKU 真正赚钱、哪些广告在浪费预算、哪些库存正在形成风险。",
+            "Monarca帮助我们把成熟产品和供应链带向海外，让进入美国市场变得更清晰、更高效。",
           scene: "",
-          insight: "Monarca AI 直接识别真实利润来源。",
-          action: "更快知道哪些产品值得放大。",
-          roles: ["Ecommerce Operator", "Growth Analyst"]
+          insight: "",
+          action: "海外渠道拓展",
+          roles: []
         },
         {
-          title: "增长团队",
+          title: "Shopify品牌",
           persona:
-            "Monarca AI 把流量、转化、复购和毛利放在一起判断，而不是只看 GMV 或 ROAS。",
+            "Monarca像我们的海外运营合作伙伴，帮助我们找到增长机会并扩大有效销售渠道。",
           scene: "",
-          insight: "Monarca AI 判断增长是否真正带来利润。",
-          action: "避免把预算投向低质量增长。",
-          roles: ["Growth Lead", "Performance Marketer"]
+          insight: "",
+          action: "销售收入增长",
+          roles: []
         },
         {
-          title: "管理层",
+          title: "多渠道零售商",
           persona:
-            "Monarca AI 帮我们把复杂经营数据转化成每日可执行的决策摘要。",
+            "Monarca让我们不再只关注GMV，而是在增长收入的同时持续改善实际利润。",
           scene: "",
-          insight: "Monarca AI 解释业务变化背后的利润影响。",
-          action: "更快决定该补货、控投放还是调整价格。",
-          roles: ["Executive", "Business Analyst"]
+          insight: "",
+          action: "利润表现改善",
+          roles: []
         }
       ]
     },
     investigation: {
-      sectionTitle: "利润优化系统",
+      sectionTitle: "Monarca 运营系统",
       sectionSubtitle: "",
       eyebrow: "",
       title: "收入下降 12.4%",
@@ -534,7 +489,7 @@ const homepageCopy = {
     pricing: {
       eyebrow: "价格",
       title: "面向电商利润优化的三档方案",
-      intro: "Monarca 不是 dashboard 工具，而是一套 AI 利润优化系统，用来识别、模拟并追踪可衡量的电商利润决策。",
+      intro: "Monarca 不是 dashboard 工具，而是一套 AI 电商运营系统，用来识别、模拟并追踪可衡量的电商利润决策。",
       plans: [
         {
           name: "Starter",
@@ -611,7 +566,7 @@ const homepageCopy = {
     },
     integrations: {
       eyebrow: "支持的数据集成",
-      title: "连接收入团队已经在使用的系统"
+      title: "使用收入团队已经在使用的系统"
     }
   }
 } as const;
@@ -633,24 +588,6 @@ function TrustItem({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
-}
-
-function normalizeRoleName(role: string) {
-  return role.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-}
-
-function roleInitials(role: string) {
-  const normalized = normalizeRoleName(role);
-  const words = normalized.split(/\s+/).filter(Boolean);
-
-  if (words.length === 0) {
-    return "AI";
-  }
-
-  return words
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase())
-    .join("");
 }
 
 const businessCaseSignals = [
@@ -879,7 +816,7 @@ function MobileNavDrawer({
 }
 
 function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
-  const isZh = copy.cards[0]?.title === "连接分散数据";
+  const isZh = copy.cards[0]?.title === "申请运营合作";
   const scrollingCards = [...copy.cards, ...copy.cards];
 
   return (
@@ -900,15 +837,15 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
       ) : null}
       <div className="mx-auto mb-12 max-w-4xl px-1 py-8 text-center sm:mb-14 sm:py-10">
         <p className="mb-4 text-xl font-semibold leading-tight tracking-normal text-slate-400 sm:text-2xl lg:text-3xl">
-          {isZh ? "Monarca 连接电商与经营数据。" : "Monarca connects ecommerce and operational data."}
+          {isZh ? "Monarca 连接你的产品、店铺。" : "Monarca connects your products and stores."}
         </p>
         <p className="text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
-            ? "分析 SKU 级利润表现，并模拟数万种经营场景，执行利润最大化行动"
-            : "Analyze SKU-level profit performance, simulate tens of thousands of operating scenarios, and execute profit-maximizing actions."}
+            ? "你负责好产品，我们负责把它卖向全球、卖成爆品"
+            : "You focus on great products. We sell them globally and turn them into bestsellers."}
         </p>
       </div>
-      <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "工作方式" : "How it works"}</p>
+      <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "合作方式" : "How we work together"}</p>
       <div className="feature-card-marquee -mx-5 overflow-x-auto px-5 [scrollbar-width:none] sm:-mx-8 sm:px-8 [&::-webkit-scrollbar]:hidden">
         <div className="overflow-hidden rounded-[34px] shadow-[0_18px_60px_rgba(15,23,42,0.06)]">
           <div className="feature-card-track flex gap-0">
@@ -968,10 +905,13 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
         <div className="relative flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200 sm:text-sm">
-              {isZh ? "实时 SKU 组合优化" : "Live SKU portfolio optimizing"}
+              {isZh ? "实时店铺运营" : "LIVE STORE OPERATIONS"}
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-emerald-50 ring-1 ring-white/20 sm:text-sm">
+              {isZh ? "管理10000+ SKUs" : "Managing 10,000+ SKUs"}
+            </span>
             <span className="rounded-full bg-emerald-300/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 ring-1 ring-emerald-200/25 sm:text-sm">
               {isZh ? "利润提升 +18.4%" : "Profit lift +18.4%"}
             </span>
@@ -1029,18 +969,27 @@ function SkuSimulationScene({ isZh }: { isZh: boolean }) {
 }
 
 function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
-  const isZh = copy.title === "不同团队如何使用 Monarca AI";
-  const labels = {
-    team: isZh ? "团队角色" : "Team act"
-  };
+  const isZh = copy.cards[0]?.title === "消费品制造商";
+  const cardStyles = [
+    "bg-gradient-to-br from-emerald-50 via-white to-lime-50 ring-emerald-100/80",
+    "bg-gradient-to-br from-sky-50 via-white to-indigo-50 ring-sky-100/80",
+    "bg-gradient-to-br from-amber-50 via-white to-rose-50 ring-amber-100/80"
+  ];
+  const pillStyles = [
+    "bg-emerald-100/75 text-emerald-800 ring-emerald-200/70",
+    "bg-sky-100/75 text-sky-800 ring-sky-200/70",
+    "bg-amber-100/75 text-amber-800 ring-amber-200/70"
+  ];
+  const cardLayout = [
+    "lg:w-[35%] lg:-translate-y-1 lg:-rotate-[0.8deg]",
+    "lg:w-[31%] lg:translate-y-8 lg:rotate-[0.7deg]",
+    "lg:w-[34%] lg:translate-y-2 lg:-rotate-[0.35deg]"
+  ];
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-12">
-      <div className="mb-6 max-w-3xl">
-        <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-          {isZh ? "AI Operating Stories" : "AI operating stories"}
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
+      <div className="mb-7 max-w-3xl">
+        <h2 className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
           {copy.title}
         </h2>
         {copy.subtitle ? (
@@ -1048,103 +997,62 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-5">
-        {copy.cards.map((card, index) => {
-          const Icon = useCaseIcons[index];
-          const avatar = useCaseAvatars[index];
-          const theme = useCaseThemes[index];
-
-          return (
-            <article
-              key={card.title}
-              className={cn(
-                "group relative flex min-w-0 flex-col overflow-visible rounded-[28px] p-4 shadow-[0_16px_48px_rgba(15,23,42,0.05)] ring-1 transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_64px_rgba(15,23,42,0.08)] lg:min-h-[270px]",
-                theme.card,
-                useCaseLayout[index]
-              )}
-            >
-              <div className={cn("absolute left-8 top-[-9px] size-5 rotate-45 ring-1", theme.card)} />
-              <div className="pointer-events-none absolute right-5 top-5 size-16 rounded-full bg-white/35 blur-2xl" />
-              <div className="relative flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className={cn("relative grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br text-xs font-bold shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 ring-white/80", avatar.className)}>
-                    {avatar.face}
-                    <span className="absolute -right-0.5 bottom-1 size-2.5 rounded-full border-2 border-white bg-emerald-500" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{avatar.role}</p>
-                    <span className={cn("mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1", theme.pill)}>
-                      {card.title}
-                    </span>
-                  </div>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-5">
+        {copy.cards.map((card, index) => (
+          <article
+            key={card.title}
+            className={cn(
+              "group relative flex min-w-0 flex-col overflow-visible rounded-[28px] p-4 shadow-[0_16px_48px_rgba(15,23,42,0.05)] ring-1 transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_64px_rgba(15,23,42,0.08)] lg:min-h-[300px]",
+              cardStyles[index],
+              cardLayout[index]
+            )}
+          >
+            <div className={cn("absolute left-8 top-[-9px] size-5 rotate-45 ring-1", cardStyles[index])} />
+            <div className="relative flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={cn("relative grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br text-xs font-bold shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 ring-white/80", useCaseAvatars[index].className)}>
+                  {useCaseAvatars[index].face}
+                  <span className="absolute -right-0.5 bottom-1 size-2.5 rounded-full border-2 border-white bg-emerald-500" />
                 </div>
-                <div className={cn("hidden size-8 shrink-0 place-items-center rounded-2xl ring-1 transition sm:grid", theme.icon)}>
-                  <Icon className="size-3.5" />
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{useCaseAvatars[index].role}</p>
+                  <span className={cn("mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1", pillStyles[index])}>
+                    {card.title}
+                  </span>
                 </div>
               </div>
-
-              <div className="relative mt-5 rounded-[22px] bg-white/55 px-4 py-4 ring-1 ring-white/70">
-                <blockquote className="text-[0.95rem] font-medium leading-7 tracking-normal text-slate-800 sm:text-[0.98rem]">
-                  <span className="mr-1 text-xl font-semibold leading-none text-emerald-700/35">“</span>
-                  {card.persona}
-                  <span className="ml-1 text-xl font-semibold leading-none text-emerald-700/35">”</span>
-                </blockquote>
+              <div className="hidden size-8 shrink-0 place-items-center rounded-2xl bg-white/60 text-slate-700 ring-1 ring-white/80 transition sm:grid">
+                {(() => {
+                  const Icon = useCaseIcons[index];
+                  return <Icon className="size-3.5" />;
+                })()}
               </div>
+            </div>
 
-              <div className="relative mt-auto pt-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{labels.team}</p>
-                <div className="mt-2 rounded-2xl bg-white/58 p-2.5 ring-1 ring-white/80">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex -space-x-2">
-                      {card.roles.map((role, roleIndex) => (
-                        <div
-                          key={`${role}-avatar`}
-                          className={cn(
-                            "relative grid size-8 place-items-center rounded-full bg-gradient-to-br text-[10px] font-semibold shadow-[0_8px_20px_rgba(15,23,42,0.08)] ring-2 ring-white",
-                            personaAvatarStyles[(index + roleIndex) % personaAvatarStyles.length]
-                          )}
-                          title={normalizeRoleName(role)}
-                        >
-                          {roleInitials(role)}
-                          <span className="absolute -right-0.5 bottom-0 size-2.5 rounded-full border-2 border-white bg-emerald-500" />
-                        </div>
-                      ))}
-                    </div>
-                    <span className="rounded-full bg-slate-950/5 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-                      {isZh ? "协作中" : "active"}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid gap-1.5">
-                    {card.roles.map((role, roleIndex) => (
-                      <div key={role} className="flex items-center gap-2 rounded-xl bg-white/62 px-2 py-1.5 ring-1 ring-slate-900/[0.04]">
-                        <span
-                          className={cn(
-                            "grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br text-[9px] font-semibold ring-1",
-                            personaAvatarStyles[(index + roleIndex) % personaAvatarStyles.length]
-                          )}
-                        >
-                          {roleInitials(role)}
-                        </span>
-                        <span className="min-w-0 truncate text-xs font-medium text-slate-700">
-                          {normalizeRoleName(role)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            <div className="relative mt-5 rounded-[22px] bg-white/55 px-4 py-4 ring-1 ring-white/70">
+              <blockquote className="text-sm font-medium leading-7 tracking-normal text-slate-800 sm:text-[0.92rem]">
+                <span className="mr-1 text-xl font-semibold leading-none text-emerald-700/35">“</span>
+                {card.persona}
+                <span className="ml-1 text-xl font-semibold leading-none text-emerald-700/35">”</span>
+              </blockquote>
+            </div>
+
+            <div className="relative mt-auto pt-4">
+              <div className="rounded-2xl bg-white/58 p-3 text-sm font-semibold text-slate-950 ring-1 ring-white/80">
+                {card.action}
               </div>
-            </article>
-          );
-        })}
+            </div>
+          </article>
+        ))}
       </div>
-
-      <div className="mx-auto mt-12 max-w-3xl text-center lg:mt-20">
-        <h3 className="text-lg font-semibold tracking-normal text-slate-950">{copy.consultTitle}</h3>
-        {copy.consultText ? <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">{copy.consultText}</p> : null}
-        <Button asChild className="mt-4 h-11 w-full rounded-full bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 sm:w-auto">
-          <Link href="/consulting">
-            {copy.consultCta}
-            <ArrowRight />
+      <div className="mx-auto mt-14 max-w-5xl text-center lg:mt-20">
+        <h3 className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
+          {isZh ? "准备让你的产品走向全球？" : "Ready to take your products global?"}
+        </h3>
+        <Button asChild className="mt-6 h-14 rounded-full bg-slate-950 px-8 text-base font-semibold text-white hover:bg-slate-800 sm:h-16 sm:px-10 sm:text-lg">
+          <Link href="/apply">
+            {isZh ? "提交产品或店铺" : "Submit Your Products or Store"}
+            <ArrowRight className="size-5" />
           </Link>
         </Button>
       </div>
@@ -1162,71 +1070,93 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
         : "The system identified a high-profit growth opportunity: it simulates the best operating moves and turns them into action."
     },
     diagnosis: {
-      label: isZh ? "机会识别" : "Opportunity detected",
+      label: isZh ? "增长机会" : "Growth opportunity",
       title: isZh
-        ? "利润驱动因素：高毛利 SKU 需求上升、复购效率改善、Amazon 库存可承接放量"
-        : "Profit drivers: high-margin SKU demand is rising, repeat efficiency improved, and Amazon inventory can absorb scale",
+        ? "美国市场需求增长，产品具备高毛利与达人传播潜力"
+        : "Growing U.S. demand, strong margin potential, and a clear fit for creator-led growth",
       text: isZh
-        ? "机会来自广告效率、复购质量和高毛利 SKU 供给之间的正向联动。"
-        : "The opportunity comes from the positive interaction between ad efficiency, repeat quality, and high-margin SKU supply."
+        ? "Monarca综合分析市场需求、竞品、定价、内容趋势、广告成本和供应能力。"
+        : "Monarca analyzes market demand, competition, pricing, content trends, customer acquisition costs, and supply capacity."
     },
     evidence: [
-      { metric: "Meta CAC", before: "18%", after: "12%", note: isZh ? "释放 SKU 利润率" : "unlocks SKU margin", tone: "down" },
-      { metric: "Shopify Retention W2", before: isZh ? "稳定" : "stable", after: "+9%", note: isZh ? "提升 LTV" : "improves LTV", tone: "up" },
-      { metric: "Amazon SKU supply", before: isZh ? "受限" : "limited", after: isZh ? "充足" : "healthy", note: isZh ? "支持利润放大" : "supports profit scaling", tone: "up" }
+      { metric: isZh ? "市场需求" : "Market Demand", before: isZh ? "美国搜索需求" : "U.S. search demand", after: "+18%", note: isZh ? "需求正在增长" : "Demand is growing", tone: "up" },
+      { metric: isZh ? "内容机会" : "Content Opportunity", before: isZh ? "同类达人内容互动率" : "Similar creator content engagement", after: "+26%", note: isZh ? "具备内容传播潜力" : "Strong creator-led growth potential", tone: "up" },
+      { metric: isZh ? "供应能力" : "Supply Capacity", before: isZh ? "可支持首批" : "Initial inventory capacity:", after: isZh ? "1,700件" : "1,700 units", note: isZh ? "满足首轮测试" : "Ready for market testing", tone: "up" }
     ],
     decisions: isZh
       ? ["降低低 ROI 渠道投放", "优化获客结构", "复查 Week 2 留存路径"]
       : ["Reduce low-ROI channel spend", "Optimize acquisition mix", "Review Week 2 retention path"]
   };
   const aiOps = isZh
-    ? ["读取 Amazon / Shopify / Ads 利润链路", "模拟利润放大方案", "确认库存和毛利空间", "计算 SKU 级净利润提升", "优化跨渠道增长分配"]
-    : ["Reading Amazon / Shopify / Ads profit paths", "Simulating profit scaling scenarios", "Confirming inventory and margin headroom", "Computing SKU-level profit lift", "Optimizing cross-channel growth allocation"];
+    ? ["分析海外市场需求", "对比竞品与价格", "识别高潜产品", "评估广告获客成本", "分析达人内容趋势", "检查库存与供应能力"]
+    : ["Analyze overseas demand", "Benchmark competitors and pricing", "Identify high-potential products", "Estimate customer acquisition costs", "Analyze creator content trends", "Validate inventory and supply capacity"];
   const processSteps = isZh
-    ? ["数据", "理解", "模拟", "优化", "执行", "衡量", "学习", "优化"]
-    : ["DATA", "UNDERSTAND", "SIMULATE", "OPTIMIZE", "EXECUTE", "MEASURE", "LEARN", "OPTIMIZE"];
+    ? ["商品接入", "市场诊断", "运营规划", "执行增长", "效果衡量", "持续优化"]
+    : ["PRODUCT INTAKE", "MARKET DIAGNOSIS", "OPERATIONS PLANNING", "GROWTH EXECUTION", "PROFIT MEASUREMENT", "CONTINUOUS OPTIMIZATION"];
   const simulations = isZh
     ? [
-        { name: "维持当前投放结构", impact: "0%", detail: "利润继续受 CAC 与库存约束压缩" },
-        { name: "将 18% 预算迁移到高毛利 SKU", impact: "+18.4%", detail: "提升 Shopify + Amazon 可控净利" },
-        { name: "放大高复购受众", impact: "+6.1%", detail: "增加高质量点击，扩大利润率上行空间" }
+        { name: "小规模市场测试", impact: "+3.2%", detail: "预计净利润提升" },
+        { name: "广告与达人联合增长", impact: "+18.4%", detail: "预计净利润提升" },
+        { name: "快速铺量增长", impact: "+7.1%", detail: "预计净利润提升" }
       ]
     : [
-        { name: "Keep current spend mix", impact: "0%", detail: "Profit remains compressed by CAC and inventory constraints" },
-        { name: "Move 18% budget to high-margin SKUs", impact: "+18.4%", detail: "Improves Shopify + Amazon controllable net profit" },
-        { name: "Scale high-repeat audiences", impact: "+6.1%", detail: "Adds higher-quality clicks and expands margin upside" }
+        { name: "Controlled Market Test", impact: "+3.2%", detail: "Projected net profit lift" },
+        { name: "Paid Ads + Creator-Led Growth", impact: "+18.4%", detail: "Projected net profit lift · Recommended" },
+        { name: "Rapid Channel Expansion", impact: "+7.1%", detail: "Projected net profit lift" }
       ];
+  const simulationOps = isZh
+    ? ["模拟定价方案", "预测广告转化", "匹配目标达人", "计算备货数量", "评估现金投入", "预测净利润"]
+    : ["Simulate pricing", "Forecast conversion", "Match target creators", "Calculate inventory requirements", "Estimate required capital", "Forecast net profit"];
   const bestDecision = {
-    title: isZh ? "最优策略：预算迁移 + 高毛利 SKU 供给保护" : "Best strategy: budget migration + high-margin SKU supply protection",
+    title: isZh ? "执行方案：广告与达人联合增长" : "Recommended Plan: Paid Ads + Creator-Led Growth",
     impact: "+18.4%",
-    confidence: "86%",
-    constraints: isZh ? ["预算上限", "库存约束", "毛利底线"] : ["Budget cap", "Inventory constraint", "Margin floor"],
+    budget: "$12,000",
+    payback: isZh ? "45天" : "45 days",
     actions: isZh
       ? [
-          "从低 ROAS 广告组迁移 18% 预算到 SKU_01306 / SKU_01126",
-          "TikTok 高复购人群加预算，扩大正向 ROAS",
-          "Shopify 保留高毛利变体库存，优先承接新增付费流量",
-          "Amazon 只放大库存充足且净利率高于 28% 的 SKU"
+          "完成Amazon与Shopify商品上架",
+          "优化英文标题、图片和产品详情页",
+          "匹配并联系20位目标达人",
+          "启动Meta与Google Ads测试",
+          "安排首批1,700件海外备货",
+          "根据实际利润自动调整预算"
         ]
       : [
-          "Move 18% budget from low-ROAS ad sets to SKU_01306 / SKU_01126",
-          "Increase TikTok budget for high-repeat audiences with positive ROAS",
-          "Reserve Shopify inventory for high-margin variants receiving incremental paid traffic",
-          "Scale only Amazon SKUs with enough inventory and net margin above 28%"
+          "Launch products on Amazon and Shopify",
+          "Optimize English titles, images, and product pages",
+          "Match and contact 20 target creators",
+          "Launch Meta and Google Ads tests",
+          "Allocate 1,700 units to initial overseas inventory",
+          "Adjust budgets within approved limits based on actual profit"
         ]
   };
   const channels = isZh
     ? [
-        { name: "Amazon", decision: "+12% 预算", impact: "高毛利 SKU" },
-        { name: "Shopify", decision: "保护库存", impact: "承接转化" },
-        { name: "Meta Ads", decision: "+18% 高效投放", impact: "扩大转化" },
-        { name: "TikTok", decision: "放大高复购人群", impact: "提升利润率" }
+        { name: "Amazon", decision: "商品上架", impact: "Listing优化中" },
+        { name: "Creator Marketing", decision: "匹配20位达人", impact: "8位已回复" },
+        { name: "Meta & Google Ads", decision: "$3,000测试预算", impact: "投放进行中" },
+        { name: "Inventory", decision: "首批1,700件", impact: "补货点已设置" }
       ]
     : [
-        { name: "Amazon", decision: "+12% budget", impact: "High-margin SKUs" },
-        { name: "Shopify", decision: "Protect inventory", impact: "Capture conversion" },
-        { name: "Meta Ads", decision: "+18% efficient spend", impact: "Expand conversion" },
-        { name: "TikTok", decision: "Scale repeat audiences", impact: "Lift margin" }
+        { name: "Amazon", decision: "Product launch", impact: "Listing optimization in progress" },
+        { name: "Creator Marketing", decision: "20 creators matched", impact: "8 replies received" },
+        { name: "Meta & Google Ads", decision: "$3,000 test budget", impact: "Campaigns running" },
+        { name: "Inventory", decision: "1,700 initial units", impact: "Reorder point configured" }
+      ];
+  const growthMetrics = isZh
+    ? [
+        { label: "实际销售额", value: "$38.6K" },
+        { label: "实际净利润", value: "$9.4K" },
+        { label: "广告ROAS", value: "4.2x" },
+        { label: "达人销售贡献", value: "31%" },
+        { label: "库存周转", value: "37天" }
+      ]
+    : [
+        { label: "Actual Sales", value: "$38.6K" },
+        { label: "Actual Net Profit", value: "$9.4K" },
+        { label: "Ad ROAS", value: "4.2×" },
+        { label: "Creator Revenue Contribution", value: "31%" },
+        { label: "Inventory Turnover Period", value: "37 days" }
       ];
 
   return (
@@ -1240,8 +1170,6 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
         </h2>
       </div>
 
-      <DataSourcePreviewSection isZh={isZh} />
-
       <div className="overflow-hidden rounded-[30px] bg-white p-3 shadow-[0_24px_80px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.06] sm:p-6">
         <div className="relative mx-auto max-w-5xl overflow-hidden">
           <div className="absolute bottom-4 left-4 top-5 w-px bg-gradient-to-b from-emerald-200 via-sky-200 to-emerald-200 sm:left-5" />
@@ -1253,31 +1181,24 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
               </div>
               <div className="grid min-w-0 gap-3 sm:grid-cols-[13rem_1fr] sm:items-center">
                 <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
-                  {isZh ? "利润优化链路" : "Profit Control Flow"}
+                  {isZh ? "Monarca 运营流程" : "Monarca Operations Flow"}
                 </p>
                 <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {processSteps.map((step, index) => (
-                      <div key={`${step}-${index}`} className="flex items-center gap-2">
+                      <div key={`${step}-${index}`} className="flex shrink-0 items-center gap-2">
                         <div
                           className={cn(
-                            "min-w-[6.8rem] rounded-2xl px-3 py-2 text-center text-[0.65rem] font-bold tracking-[0.12em] ring-1 sm:min-w-[7.4rem]",
-                            index >= 6
+                            "min-w-[6.2rem] rounded-2xl px-3 py-2 text-center text-[0.65rem] font-bold tracking-[0.08em] ring-1 sm:min-w-[7rem]",
+                            index >= 3
                               ? "bg-[#0f5f49] text-emerald-50 ring-[#0f5f49]"
                               : "bg-emerald-50 text-emerald-800 ring-emerald-100"
                           )}
                         >
                           {step}
                         </div>
-                        {index < processSteps.length ? (
-                          <span
-                            className={cn(
-                              "text-sm font-black leading-none",
-                              index === processSteps.length - 1 ? "text-emerald-800" : "text-slate-400"
-                            )}
-                          >
-                            {index === processSteps.length - 1 ? "↺" : "→"}
-                          </span>
+                        {index < processSteps.length - 1 ? (
+                          <span className="text-sm font-black leading-none text-slate-400">→</span>
                         ) : null}
                       </div>
                     ))}
@@ -1291,7 +1212,7 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
                 <BrainCircuit className="size-4" />
               </div>
               <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
-                {isZh ? "理解" : "UNDERSTAND"}
+                {isZh ? "市场与商品诊断" : "Market & Product Diagnosis"}
               </p>
               <div className="min-w-0 overflow-hidden rounded-[24px] bg-slate-50/90 p-3 ring-1 ring-slate-900/[0.05] sm:p-4">
                 <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{flow.diagnosis.label}</span>
@@ -1311,19 +1232,14 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
 
             <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
               <p className="text-sm font-semibold leading-tight tracking-normal text-slate-950 sm:text-base">
-                {isZh ? "跨渠道驱动因素" : "Cross-Channel Drivers"}
+                {isZh ? "市场机会信号" : "Market Opportunity Signals"}
               </p>
               <div className="min-w-0 rounded-[24px] bg-white p-3 ring-1 ring-slate-900/[0.06] sm:p-4">
                 <div className="grid gap-2 sm:grid-cols-3">
                   {flow.evidence.map((item) => (
                     <div key={item.metric} className="min-w-0 rounded-2xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-900/[0.04]">
                       <p className="text-xs font-semibold text-slate-500">{item.metric}</p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
-                        <span>{item.before}</span>
-                        <ArrowRight className="size-3.5 text-slate-400" />
-                        <span className="text-emerald-700">{item.after}</span>
-                        <span className="text-emerald-700">{item.tone === "up" ? "↑" : "↓"}</span>
-                      </div>
+                      <p className="mt-1.5 text-sm font-semibold text-slate-900">{item.before} <span className="text-emerald-700">{item.after}</span></p>
                       <p className="mt-1 text-xs leading-5 text-slate-500">{item.note}</p>
                     </div>
                   ))}
@@ -1337,10 +1253,10 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
-                  {isZh ? "模拟层" : "Simulation Layer"}
+                  {isZh ? "运营方案规划" : "Operations Planning"}
                 </p>
                 <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-100">
-                  {isZh ? "滚动模拟中" : "Simulation running"}
+                  {isZh ? "方案评估中" : "Evaluating Scenarios"}
                 </span>
               </div>
               <div className="min-w-0 overflow-hidden rounded-[24px] bg-indigo-50/70 p-3 ring-1 ring-indigo-100 sm:p-4">
@@ -1355,7 +1271,7 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
                 </div>
                 <div className="mt-3 overflow-hidden rounded-2xl bg-white/80 px-3 py-2 ring-1 ring-indigo-100">
                   <div className="ai-ops-track flex gap-2">
-                    {[...aiOps, ...aiOps].map((item, index) => (
+                    {[...simulationOps, ...simulationOps].map((item, index) => (
                       <span key={`simulation-${item}-${index}`} className="shrink-0 whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
                         {item}
                       </span>
@@ -1371,26 +1287,26 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
-                  {isZh ? "优化层 · 最优决策" : "Optimization Layer · Best Decision"}
+                  {isZh ? "执行层 · 海外运营" : "Execution Layer · Overseas Operations"}
                 </p>
                 <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-100">
-                  {isZh ? "预期利润 +18.4%" : "Expected profit +18.4%"}
+                  {isZh ? "示例运营方案" : "Projected Net Profit Lift"}
                 </span>
               </div>
               <div className="min-w-0 rounded-[24px] bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-800 p-3 text-white ring-1 ring-emerald-700/70 shadow-[0_18px_60px_rgba(6,78,59,0.18)] sm:p-4">
                 <h3 className="break-words text-base font-semibold leading-7 text-white sm:text-lg">{bestDecision.title}</h3>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "利润影响" : "Profit impact"}</p>
+                    <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-100/85 sm:text-sm">{isZh ? "预计净利润提升" : "Projected Net Profit Lift"}</p>
                     <p className="mt-1 text-2xl font-semibold text-emerald-100">{bestDecision.impact}</p>
                   </div>
                   <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "置信度" : "Confidence"}</p>
-                    <p className="mt-1 text-2xl font-semibold text-white">{bestDecision.confidence}</p>
+                    <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-100/85 sm:text-sm">{isZh ? "首轮运营预算" : "Initial Operations Budget"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-white">{bestDecision.budget}</p>
                   </div>
                   <div className="rounded-2xl bg-white/8 px-3 py-2 ring-1 ring-emerald-200/18">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/85 sm:text-sm">{isZh ? "约束" : "Constraints"}</p>
-                    <p className="mt-1 text-sm font-semibold leading-6 text-emerald-50">{bestDecision.constraints.join(" / ")}</p>
+                    <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-100/85 sm:text-sm">{isZh ? "预估回收周期" : "Estimated Payback Period"}</p>
+                    <p className="mt-1 text-2xl font-semibold text-white">{bestDecision.payback}</p>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1410,6 +1326,45 @@ function InvestigationPreview({ copy, isZh }: { copy: HomeCopy["investigation"];
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <div className="relative grid min-w-0 gap-3 pl-11 sm:pl-14">
+              <div className="absolute left-0 top-1 grid size-9 place-items-center rounded-2xl bg-cyan-50 text-cyan-700 ring-1 ring-cyan-100 sm:size-10">
+                <BarChart3 className="size-4" />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="border-l-2 border-slate-200 pl-4 font-serif text-2xl font-medium leading-tight tracking-normal text-slate-400 sm:text-3xl">
+                  {isZh ? "增长追踪 · 持续优化" : "Growth Tracking · Continuous Optimization"}
+                </p>
+                <span className="rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-800 ring-1 ring-cyan-100">
+                  {isZh ? "衡量实际利润" : "45-Day Performance"}
+                </span>
+              </div>
+              <div className="min-w-0 rounded-[24px] bg-cyan-50/70 p-3 ring-1 ring-cyan-100 sm:p-4">
+                <div className="grid gap-2 sm:grid-cols-5">
+                  {growthMetrics.map((metric) => (
+                    <div key={metric.label} className="rounded-2xl bg-white px-3 py-3 ring-1 ring-cyan-100">
+                      <p className="text-xs font-semibold text-slate-500">{metric.label}</p>
+                      <p className="mt-2 text-xl font-semibold text-slate-950">{metric.value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-white px-4 py-3 ring-1 ring-cyan-100">
+                    <p className="text-xs font-semibold text-slate-500">Projected Net Profit Lift</p>
+                    <p className="mt-1 text-2xl font-semibold text-emerald-700">+18.4%</p>
+                  </div>
+                  <div className="rounded-2xl bg-white px-4 py-3 ring-1 ring-cyan-100">
+                    <p className="text-xs font-semibold text-slate-500">Actual Net Profit Lift</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-950">+16.9%</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm font-medium leading-6 text-slate-600">
+                  {isZh
+                    ? "理解产品和市场 → 规划海外运营方案 → 直接执行 → 衡量实际利润 → 持续学习优化"
+                    : "Understand the opportunity → build the plan → execute across channels → measure actual profit → continuously improve"}
+                </p>
               </div>
             </div>
           </div>
@@ -1470,11 +1425,11 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
       <section id="pricing" className="mt-10 bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 px-5 py-14 text-white sm:px-8 sm:py-16">
         <div className="mx-auto flex max-w-7xl flex-col items-center gap-5 text-center">
           <p className="max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
-            {isZh ? "连接你的电商、广告和库存数据，开始执行最优利润决策。" : "Connect your commerce, ads, and inventory data to generate optimal profit decisions."}
+            {isZh ? "提交你的产品或店铺，Monarca开始海外增长" : "Submit your products or store. Monarca starts overseas growth."}
           </p>
           <Button asChild className="h-12 w-full rounded-full bg-white px-8 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 sm:w-auto">
-            <Link href="/sign-up">
-              {isZh ? "开始" : "Start"}
+            <Link href="/apply">
+              {isZh ? "申请运营合作" : "Apply for Operations Partnership"}
               <ArrowRight />
             </Link>
           </Button>
@@ -1486,72 +1441,6 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
         </div>
       </footer>
     </>
-  );
-}
-
-function DataSourcePreviewSection({ isZh }: { isZh: boolean }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video) {
-      video.playbackRate = 0.5;
-      video.play().catch(() => {
-        // Mobile browsers can defer autoplay until the video is visible.
-      });
-    }
-  }, []);
-
-  return (
-    <div className="mx-auto mb-10 mt-10 grid max-w-7xl gap-8 lg:grid-cols-[0.62fr_1.18fr] lg:items-center">
-      <div>
-        <h2 className="text-left text-xl font-semibold leading-tight tracking-normal text-slate-500 sm:text-3xl">
-          <span className="block">{isZh ? "第一步，" : "First, connect your"}</span>
-          <span className="block">{isZh ? "一键连接你的电商数据" : "commerce data in one click"}</span>
-        </h2>
-        <p className="mt-5 max-w-xl text-left text-base font-medium leading-7 text-slate-950 sm:text-lg sm:leading-8">
-          {isZh
-            ? "分析每个 SKU 的真实盈利能力，模拟不同增长策略，帮助企业找到最优产品组合、广告投入和库存配置，实现利润最大化。"
-            : "Analyze SKU-level profitability, simulate different growth strategies, and help businesses identify the optimal product mix, advertising allocation, and inventory strategy to maximize profit."}
-        </p>
-      </div>
-      <div className="lg:flex lg:justify-end">
-        <div className="w-full max-w-[760px] overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_70px_rgba(15,23,42,0.06)] sm:p-3">
-          <Image
-            className="block aspect-video w-full rounded-[20px] bg-slate-100 object-cover md:hidden"
-            src="/commerce-data-preview-poster.png"
-            alt="Commerce data connection preview"
-            width={1200}
-            height={675}
-            sizes="(max-width: 767px) 100vw, 760px"
-          />
-          <video
-            ref={videoRef}
-            className="hidden aspect-video w-full rounded-[20px] bg-slate-100 object-cover md:block"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            poster="/commerce-data-preview-poster.png"
-            onClick={(event) => {
-              event.currentTarget.playbackRate = 0.5;
-              event.currentTarget.play().catch(() => {
-                // The poster remains visible if mobile autoplay is blocked.
-              });
-            }}
-            onCanPlay={(event) => {
-              event.currentTarget.playbackRate = 0.5;
-              event.currentTarget.play().catch(() => {
-                // Keep the first loaded frame visible if autoplay is delayed.
-              });
-            }}
-          >
-            <source src="/commerce-data-preview.mp4" type="video/mp4" />
-          </video>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1623,7 +1512,7 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
                 </Link>
               </Button>
               <Button asChild variant="outline" className="h-10 rounded-full border-slate-200 bg-white/70 px-5 text-sm text-slate-950 hover:bg-white">
-                <Link href="/consulting?intent=demo">
+                <Link href="/apply">
                   {copy.hero.secondaryCta}
                   <ArrowRight className="size-4" />
                 </Link>
@@ -1691,13 +1580,13 @@ export function Homepage({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
           >
             {isZh ? (
               <span className="block">
-                <span className="block text-slate-950">AI Profit Agent</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">利润优化</span>
+                <span className="block text-slate-950">AI 驱动</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">电商海外运营</span>
               </span>
             ) : (
               <span className="block">
-                <span className="block text-slate-950">AI-enabled</span>
-                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">e-commerce operator</span>
+                <span className="block text-slate-950">AI-powered</span>
+                <span className="hero-title-shimmer block whitespace-normal break-words [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">Global Ecommerce Operations</span>
               </span>
             )}
           </h1>

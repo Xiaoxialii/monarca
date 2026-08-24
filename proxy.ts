@@ -23,7 +23,6 @@ function localeFromCountry(countryCode: string | null): Locale | null {
 
 export default clerkMiddleware(async (auth, request) => {
   const host = request.headers.get("host")?.toLowerCase();
-  const normalizedPathname = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
   const shouldCanonicalizeHost =
     process.env.NODE_ENV === "production" &&
     host === "monarcadata.com" &&

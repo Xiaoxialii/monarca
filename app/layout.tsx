@@ -5,8 +5,8 @@ import { getRequestHtmlLang } from "@/lib/server-locale";
 import "./globals.css";
 
 const siteDescription =
-  "Monarca AI is an AI decision system that helps ecommerce businesses optimize SKU profitability, advertising spend, and inventory decisions to maximize profit.";
-const siteTitle = "Monarca AI | AI Profit Optimization for Ecommerce";
+  "Monarca is an AI-powered ecommerce growth operator that manages advertising, creator marketing, and inventory to help brands grow globally and profitably.";
+const siteTitle = "Monarca AI | AI Agent for Global Ecommerce Growth";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.monarcadata.com"),
@@ -19,11 +19,11 @@ export const metadata: Metadata = {
     "monarca",
     "Monarca",
     "Monarca AI",
-    "ecommerce profit optimization",
-    "SKU portfolio optimization",
-    "advertising spend optimization",
-    "inventory decision system",
-    "AI decision system"
+    "ecommerce growth operator",
+    "global ecommerce growth",
+    "creator marketing operations",
+    "ecommerce advertising management",
+    "inventory operations"
   ],
   alternates: {
     canonical: "/"

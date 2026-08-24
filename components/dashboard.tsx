@@ -57,6 +57,7 @@ import {
 } from "recharts";
 import { AuthControls } from "@/components/auth-shell";
 import { BrandLogo } from "@/components/brand-logo";
+import { DashboardErrorBoundary } from "@/components/dashboard-error-boundary";
 import { EcommerceSalesDashboard } from "@/components/ecommerce-sales-dashboard";
 import { NewProductLaunchOptimizer } from "@/components/new-product-launch-optimizer";
 import { DecisionAnalysisEnginePanel, ReportRendererEngine } from "@/components/report-renderer-engine";
@@ -18461,12 +18462,14 @@ export function Dashboard({
               </div>
             ) : view === "reports" ? (
               <div className="flex min-h-0 min-w-0 flex-col xl:col-start-1">
-                <ReportsPage
-                  copy={copy}
-                  locale={locale}
-                  hasConnectedDatabase={hasOperationalConnectedSource}
-                  isLoadingConnectedSources={isLoadingConnectedSources}
-                />
+                <DashboardErrorBoundary locale={locale}>
+                  <ReportsPage
+                    copy={copy}
+                    locale={locale}
+                    hasConnectedDatabase={hasOperationalConnectedSource}
+                    isLoadingConnectedSources={isLoadingConnectedSources}
+                  />
+                </DashboardErrorBoundary>
               </div>
             ) : view === "launch-optimizer" ? (
               <div id="launch-optimizer" className="min-w-0 xl:col-start-1">

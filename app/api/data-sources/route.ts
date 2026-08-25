@@ -7,7 +7,7 @@ import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopi
 import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
-import { QUEUED_ASYNC_JOB_MS, recoverAsyncJobs, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -158,16 +158,88 @@ function connectorJobStatusRank(job: {
 
 async function recoverStaleDataSourceJobs(workspaceId: string) {
   try {
-    const [ingestionRecovery, asyncRecovery] = await Promise.all([
+    const now = new Date();
+    const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
+    const staleQueuedBefore = new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
+    const staleSyncRunBefore = new Date(now.getTime() - Math.max(STALE_ASYNC_JOB_MS, 10 * 60 * 1000));
+    const [ingestionRecovery, staleConnectorJobs, staleConnectorRuns] = await Promise.all([
       recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
-      recoverAsyncJobs({ workspaceId, limit: 5 })
+      prisma.asyncJob.updateMany({
+        where: {
+          workspaceId,
+          type: "SYNC_CONNECTOR",
+          status: {
+            in: ["QUEUED", "PROCESSING", "PAUSED"]
+          },
+          OR: [
+            {
+              status: "QUEUED",
+              updatedAt: {
+                lt: staleQueuedBefore
+              }
+            },
+            {
+              status: {
+                in: ["PROCESSING", "PAUSED"]
+              },
+              OR: [
+                {
+                  leaseExpiresAt: {
+                    lt: now
+                  }
+                },
+                {
+                  leaseExpiresAt: null,
+                  heartbeatAt: {
+                    lt: staleHeartbeatBefore
+                  }
+                },
+                {
+                  leaseExpiresAt: null,
+                  heartbeatAt: null,
+                  updatedAt: {
+                    lt: staleHeartbeatBefore
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        data: {
+          status: "FAILED",
+          progress: 100,
+          currentStep: "Failed - stale connector sync job",
+          errorCode: "CONNECTOR_SYNC_STALE_JOB",
+          errorMessage: "Connector sync stopped before completion. Retry sync to resume processing.",
+          heartbeatAt: now,
+          lockedAt: null,
+          lockedBy: null,
+          leaseExpiresAt: null,
+          completedAt: now,
+          failedAt: now
+        }
+      }),
+      prisma.ecommerceSyncRun.updateMany({
+        where: {
+          workspaceId,
+          status: "running",
+          startedAt: {
+            lt: staleSyncRunBefore
+          }
+        },
+        data: {
+          status: "failed",
+          errorMessage: "Connector sync run stopped before completion. Retry sync to resume processing.",
+          finishedAt: now
+        }
+      })
     ]);
     if (
       ingestionRecovery.attempted ||
       ingestionRecovery.timedOut ||
       ingestionRecovery.exhausted ||
-      asyncRecovery.attempted ||
-      asyncRecovery.bridgedIngestionJobs
+      staleConnectorJobs.count ||
+      staleConnectorRuns.count
     ) {
       console.info("[data-sources] recovered stale jobs", {
         workspaceId,
@@ -175,9 +247,8 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
         ingestionRecovered: ingestionRecovery.recovered,
         ingestionTimedOut: ingestionRecovery.timedOut,
         ingestionExhausted: ingestionRecovery.exhausted,
-        asyncAttempted: asyncRecovery.attempted,
-        asyncRecovered: asyncRecovery.recovered,
-        bridgedIngestionJobs: asyncRecovery.bridgedIngestionJobs
+        staleConnectorJobs: staleConnectorJobs.count,
+        staleConnectorRuns: staleConnectorRuns.count
       });
     }
   } catch (error) {

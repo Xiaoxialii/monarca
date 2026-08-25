@@ -2,8 +2,8 @@ import type { CanonicalMappedRecord } from "@/lib/semantic/mapper/canonical-sche
 
 const DEFAULT_META_API_VERSION = "v20.0";
 const META_GRAPH_BASE = "https://graph.facebook.com";
-const DEFAULT_META_FETCH_TIMEOUT_MS = 15_000;
-const DEFAULT_META_FETCH_RETRIES = 2;
+const DEFAULT_META_FETCH_TIMEOUT_MS = 10_000;
+const DEFAULT_META_FETCH_RETRIES = 1;
 
 export type MetaAdsInsight = {
   campaign_id?: string;
@@ -213,6 +213,7 @@ export class MetaAdsConnector {
         });
         if (response.status === 429 || response.status >= 500) {
           if (attempt < this.retries) {
+            clearTimeout(timeout);
             await delay(backoffMs(attempt));
             continue;
           }

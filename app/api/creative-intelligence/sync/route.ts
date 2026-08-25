@@ -5,6 +5,10 @@ import { runMetaAdsProductionSync } from "@/lib/ads/meta/meta-sync-engine";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);

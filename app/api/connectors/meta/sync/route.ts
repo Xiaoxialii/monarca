@@ -4,6 +4,10 @@ import { publicMetaError } from "@/lib/ads/meta/meta-oauth";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspace();

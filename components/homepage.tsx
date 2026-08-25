@@ -1425,7 +1425,7 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
       <section id="pricing" className="mt-10 bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-700 px-5 py-14 text-white sm:px-8 sm:py-16">
         <div className="mx-auto flex max-w-7xl flex-col items-center gap-5 text-center">
           <p className="max-w-2xl text-sm leading-6 text-emerald-50/80 sm:text-base">
-            {isZh ? "提交你的产品或店铺，Monarca开始海外增长" : "Submit your products or store. Monarca starts overseas growth."}
+            {isZh ? "提交你的产品或店铺，Monarca开始海外增长" : "Submit your products or store. Monarca starts optimizing growth."}
           </p>
           <Button asChild className="h-12 w-full rounded-full bg-white px-8 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 sm:w-auto">
             <Link href="/apply">

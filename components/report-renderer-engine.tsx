@@ -3,17 +3,27 @@
 import {
   AlertTriangle,
   BadgeDollarSign,
+  BadgePercent,
   BarChart3,
   ChevronDown,
   ChevronRight,
+  CircleOff,
+  Database,
+  DollarSign,
+  GitBranch,
   LineChart as LineChartIcon,
   Megaphone,
+  Menu,
+  PackagePlus,
   PackageSearch,
+  PackageX,
+  Plus,
   RefreshCw,
   Search,
   ShoppingCart,
   TrendingUp,
-  Users
+  Users,
+  Wallet
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
@@ -27,6 +37,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import { BrandLogo } from "@/components/brand-logo";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isRevenueChannel, normalizeRevenueChannel, revenueChannelOrNull } from "@/lib/channels/revenue-channel";
 import type { DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
@@ -867,13 +878,18 @@ function OperatingReportEmptyShell({ locale, showLoadingData = false }: { locale
   return (
     <div id="report-sku" className="grid min-h-[520px] w-full place-items-center bg-transparent px-6 text-center scroll-mt-24">
       <div className="grid gap-4">
-        <p className="max-w-5xl text-4xl font-bold leading-tight tracking-tight text-slate-950 sm:text-6xl">
-          {isZh ? "连接你的数据，追踪实时利润" : "Connect your data to track real-time profit"}
-        </p>
         {showLoadingData ? (
-          <p className="text-sm font-semibold text-slate-500">
-            {isZh ? "正在加载数据" : "Loading data"}
-          </p>
+          <div className="w-[min(90vw,480px)] rounded-[20px] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/70">
+            <p className="mb-4 text-center text-sm font-extrabold tracking-[0.18em] text-emerald-700">
+              {isZh ? "追踪经营数据" : "Track operating data"}
+            </p>
+            <button
+              type="button"
+              className="inline-flex h-14 w-full items-center justify-center rounded-[14px] bg-slate-950 px-8 text-base font-extrabold text-white shadow-sm transition hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+            >
+              {isZh ? "开始" : "Start"}
+            </button>
+          </div>
         ) : null}
       </div>
       <span id="report-ads" className="sr-only" />
@@ -1708,7 +1724,7 @@ export function DecisionAnalysisEnginePanel({
     if (showSkuTableEmptyState || isLoadingData || isLoadingOptimization || optimizationStarted) {
       const emptyReport = createEmptyOptimizationPanelReport();
       return (
-        <section className="min-w-0 scroll-mt-24">
+        <section className="h-full min-h-0 min-w-0 scroll-mt-24">
           <SkuPortfolioOptimizationPanel
             report={emptyReport}
             locale={locale}
@@ -1738,7 +1754,7 @@ export function DecisionAnalysisEnginePanel({
   }
 
   return (
-    <section className="min-w-0 scroll-mt-24">
+    <section className="h-full min-h-0 min-w-0 scroll-mt-24">
       <SkuPortfolioOptimizationPanel
         report={report}
         locale={locale}
@@ -2064,6 +2080,7 @@ function SkuPortfolioOptimizationPanel({
   const selectedDecision = !shouldBlankOptimizationSummary && selectedDecisionRow && selectableDecisionRows.some((row) => decisionRowKey(row) === decisionRowKey(selectedDecisionRow))
     ? selectedDecisionRow
     : null;
+  const selectedOptimizationDecision = selectedPortfolioView === "optimization" ? selectedDecision : null;
   const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !effectiveOptimizationStarted || isResolvingOptimizationState);
 
   useEffect(() => {
@@ -2466,9 +2483,29 @@ function SkuPortfolioOptimizationPanel({
     setExpandedSku(null);
     setSkuChannel(value);
   };
+  const sidebarMetricItems = selectedPortfolioView === "current"
+    ? [
+      { label: isZh ? "当前利润" : "Current Profit", value: currencyDecimal.format(displayedCurrentProfit) },
+      { label: isZh ? "广告花费" : "Ad Spend", value: currencyDecimal.format(displayedCurrentAdSpend) },
+      { label: isZh ? "SKU 总数" : "Total SKU", value: `${numberFormat.format(displayedCurrentSkuCount)} SKUs` }
+    ]
+    : selectedPortfolioView === "optimization"
+      ? [
+        { label: isZh ? "优化后利润" : "Optimized Profit", value: currencyDecimal.format(displayedOptimizedProfit) },
+        { label: isZh ? "预期利润提升" : "Expected Gain", value: formatSignedPercentText(displayedLiftRate) },
+        { label: isZh ? "优化 SKU 数量" : "Optimized SKUs", value: `${displayedPendingOptimizationCountLabel} SKUs` },
+        { label: isZh ? "优化后广告花费" : "Optimized Ad Spend", value: currencyDecimal.format(displayedOptimizationAdSpend) },
+        { label: isZh ? "新增投入" : "Additional Investment", value: currencyDecimal.format(displayedOptimizationAdditionalAds) }
+      ]
+      : [
+        { label: isZh ? "预期利润提升" : "Expected Profit Lift", value: signedCurrency(displayedAcceptedProfitGain) },
+        { label: isZh ? "实际利润提升" : "Actual Profit Lift", value: displayedActualProfitLiftLabel },
+        { label: isZh ? "SKU 数量" : "SKU Count", value: `${numberFormat.format(displayedAcceptedSkuCount)} SKUs` },
+        { label: isZh ? "新增广告投入" : "Additional Ad Spend", value: signedCurrency(displayedAcceptedAdditionalAds) }
+      ];
 
   return (
-    <div className="space-y-4 bg-transparent">
+    <div className="h-full min-h-0 bg-transparent">
       {actionPersistenceError ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
           {actionPersistenceError}
@@ -2477,30 +2514,56 @@ function SkuPortfolioOptimizationPanel({
 
       <div
         className={cn(
-          "grid gap-0 xl:h-[760px] xl:items-stretch",
+          "relative grid min-h-[560px] overflow-hidden rounded-[18px] border border-slate-200 bg-[#f7f8f7] shadow-sm xl:h-full xl:min-h-0 xl:items-stretch",
           isDecisionPanelOpen
-            ? "xl:grid-cols-[300px_minmax(520px,0.9fr)_minmax(520px,1.1fr)]"
-            : "xl:grid-cols-[300px_minmax(360px,1fr)_72px]"
+            ? "xl:grid-cols-[300px_minmax(460px,0.72fr)_minmax(720px,1.28fr)]"
+            : "xl:grid-cols-[300px_minmax(620px,1fr)_64px]"
         )}
       >
-        <section className="flex min-h-[520px] min-w-0 flex-col bg-transparent px-3 py-5 xl:h-full xl:overflow-hidden xl:border-r xl:border-slate-200">
-          <>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 whitespace-nowrap text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">
-                <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]" />
-                {isZh ? "实时组合监控" : "Live Portfolio Monitor"}
+        <section className="relative flex min-h-[520px] min-w-0 flex-col bg-[#eef0f2] xl:h-full xl:min-h-0 xl:overflow-hidden xl:border-r xl:border-slate-200">
+          <div className="border-b border-slate-200 bg-[#f8f9f9] px-4 py-3">
+            {headerAction ? (
+              <div className="text-xs font-semibold text-slate-500">
+                {headerAction}
               </div>
-              {headerAction ?? (
-                <span className="text-xs font-semibold text-slate-500">
-                  {isZh ? "实时更新" : "Live update"}
-                </span>
-              )}
-            </div>
+            ) : null}
+          </div>
 
-            <div className="mt-4 -ml-2 w-[calc(100%+0.5rem)]">
-              <div className="grid gap-2.5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-0 py-2">
+            <div className="grid gap-0">
+                <div className="border-l-4 border-transparent px-4 py-3">
+                  <div className="rounded-[14px] border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="grid grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-3">
+                      <span className="grid size-10 place-items-center rounded-full bg-white text-slate-700 ring-1 ring-slate-200">
+                        <BrandLogo compact label="Monarca AI" className="h-7 w-7 opacity-80" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-bold text-slate-950">
+                          {isZh ? "关键指标监控" : "Key Metrics Monitor"}
+                        </p>
+                        <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+                          Monarca AI
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {isZh ? "置顶" : "Pinned"}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-1.5">
+                      {sidebarMetricItems.map((item) => (
+                        <div key={item.label} className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 truncate text-xs font-bold text-slate-500">{item.label}</span>
+                          <span className="shrink-0 text-right text-sm font-extrabold text-slate-950">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
+                  title={isZh
+                    ? `当前利润 ${currencyDecimal.format(displayedCurrentProfit)}，广告花费 ${currencyDecimal.format(displayedCurrentAdSpend)}，SKU ${numberFormat.format(displayedCurrentSkuCount)}`
+                    : `Current profit ${currencyDecimal.format(displayedCurrentProfit)}, ad spend ${currencyDecimal.format(displayedCurrentAdSpend)}, ${numberFormat.format(displayedCurrentSkuCount)} SKUs`}
                   onClick={() => {
                     setSelectedPortfolioView("current");
                     setSelectedDecisionRow(null);
@@ -2508,45 +2571,36 @@ function SkuPortfolioOptimizationPanel({
                     setFocusedOpsSku(null);
                   }}
                   className={cn(
-                    "relative overflow-visible rounded-[24px] rounded-tr-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-left shadow-sm shadow-emerald-950/5 transition hover:border-emerald-300 hover:bg-emerald-50",
-                    selectedPortfolioView === "current" && "ring-2 ring-emerald-500/50"
+                    "grid min-h-[78px] grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-3 border-l-4 border-transparent px-4 py-2.5 text-left transition hover:bg-white/70",
+                    selectedPortfolioView === "current" && "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-500"
                   )}
                   aria-pressed={selectedPortfolioView === "current"}
                 >
-                  <span className="absolute -top-3 left-8 size-6 rotate-45 border border-emerald-200 bg-emerald-50" aria-hidden="true" />
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
-                    {isZh ? "当前" : "Current"}
-                  </p>
-                  <div className="mt-3 grid gap-2">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "当前利润" : "Current Profit"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedCurrentProfit)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "广告花费" : "Ad Spend"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedCurrentAdSpend)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "SKU 总数" : "Total SKU"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {numberFormat.format(displayedCurrentSkuCount)} SKUs
-                      </p>
-                    </div>
+                  <span className={cn(
+                    "grid size-10 place-items-center rounded-full bg-white text-sm font-extrabold text-slate-950 ring-1 ring-slate-200",
+                    selectedPortfolioView === "current" && "text-emerald-700"
+                  )}>
+                    {isZh ? "实" : "L"}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-bold">{isZh ? "实时组合监控" : "Live Portfolio Monitor"}</p>
+                    <p className={cn(
+                      "mt-1 truncate text-xs font-semibold text-slate-500",
+                      selectedPortfolioView === "current" && "text-white/75"
+                    )}>
+                      {numberFormat.format(displayedCurrentSkuCount)} SKUs · {currencyWhole.format(displayedCurrentAdSpend)}
+                    </p>
                   </div>
+                  <span className={cn("text-xs font-semibold text-slate-400", selectedPortfolioView === "current" && "text-white/70")}>
+                    {isZh ? "当前" : "Now"}
+                  </span>
                 </button>
 
                 <button
                   type="button"
+                  title={isZh
+                    ? `优化后利润 ${currencyWhole.format(displayedOptimizedProfit)}，新增广告投入 ${currencyWhole.format(displayedOptimizationAdditionalAds)}`
+                    : `Optimized profit ${currencyWhole.format(displayedOptimizedProfit)}, additional ad spend ${currencyWhole.format(displayedOptimizationAdditionalAds)}`}
                   onClick={() => {
                     setSelectedPortfolioView("optimization");
                     const nextSelection = displayedPendingDecisionRows[0] ?? null;
@@ -2555,127 +2609,94 @@ function SkuPortfolioOptimizationPanel({
                     setFocusedOpsSku(nextSelection?.skuId ?? null);
                   }}
                   className={cn(
-                    "relative overflow-visible rounded-[24px] rounded-bl-lg border border-sky-200 bg-sky-50/70 px-4 py-3 text-left shadow-sm shadow-sky-950/5 transition hover:border-sky-300 hover:bg-sky-50",
-                    selectedPortfolioView === "optimization" && "ring-2 ring-sky-500/50"
+                    "grid min-h-[78px] grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-3 border-l-4 border-transparent px-4 py-2.5 text-left transition hover:bg-white/70",
+                    selectedPortfolioView === "optimization" && "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-500"
                   )}
                   aria-pressed={selectedPortfolioView === "optimization"}
                 >
-                  <span className="absolute -top-3 right-10 size-6 rotate-45 border border-sky-200 bg-sky-50" aria-hidden="true" />
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
-                    {isZh ? "优化" : "Optimization"}
-                  </p>
-                  <div className="mt-3 grid gap-2">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "优化后利润" : "Optimized Profit"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyDecimal.format(displayedOptimizedProfit)}
-                      </p>
-                      <p className="mt-0.5 text-xs font-bold text-slate-500">
-                        {signedCurrency(displayedExpectedProfitGain)} ({formatSignedPercentText(displayedLiftRate)})
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "优化 SKU" : "SKU"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {displayedPendingOptimizationCountLabel} SKUs
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "优化后广告花费" : "Optimized Ad Spend"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {currencyWhole.format(displayedOptimizationAdSpend)}
-                      </p>
-                      <p className="mt-0.5 text-xs font-bold text-slate-500">
-                        {isZh
-                          ? `（新增投入 + ${currencyWhole.format(displayedOptimizationAdditionalAds)}）`
-                          : `(+ ${currencyWhole.format(displayedOptimizationAdditionalAds)} investment)`}
-                      </p>
-                    </div>
+                  <span className={cn(
+                    "relative grid size-10 place-items-center rounded-full bg-white text-sm font-extrabold text-slate-950 ring-1 ring-slate-200",
+                    selectedPortfolioView === "optimization" && "text-emerald-700"
+                  )}>
+                    AI
+                    <span className="absolute -right-0.5 bottom-0 size-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-bold">{isZh ? "优化队列" : "Optimization Queue"}</p>
+                    <p className={cn(
+                      "mt-1 truncate text-xs font-semibold text-slate-500",
+                      selectedPortfolioView === "optimization" && "text-white/75"
+                    )}>
+                      {displayedPendingOptimizationCountLabel} SKUs · {signedCurrency(displayedExpectedProfitGain)} · {formatSignedPercentText(displayedLiftRate)}
+                    </p>
                   </div>
+                  <span className={cn("text-xs font-semibold text-slate-400", selectedPortfolioView === "optimization" && "text-white/70")}>
+                    {isZh ? "待处理" : "Pending"}
+                  </span>
                 </button>
 
                 <button
                   type="button"
+                  title={isZh
+                    ? `预期利润提升 ${signedCurrency(displayedAcceptedProfitGain)}，实际利润提升 ${displayedActualProfitLiftLabel}，预计提升 ${formatSignedPercentText(displayedAcceptedLiftRate)}，新增广告投入 ${signedCurrency(displayedAcceptedAdditionalAds)}`
+                    : `Expected profit lift ${signedCurrency(displayedAcceptedProfitGain)}, actual profit lift ${displayedActualProfitLiftLabel}, projected lift ${formatSignedPercentText(displayedAcceptedLiftRate)}, additional ad spend ${signedCurrency(displayedAcceptedAdditionalAds)}`}
                   onClick={() => {
                     setSelectedPortfolioView("accepted");
-                    const nextSelection = displayedAcceptedDecisionRows[0] ?? null;
-                    setSelectedDecisionRow(nextSelection);
+                    setSelectedDecisionRow(null);
                     setIsDecisionPanelOpen(false);
-                    setFocusedOpsSku(nextSelection?.skuId ?? null);
+                    setFocusedOpsSku(null);
                   }}
                   className={cn(
-                    "relative overflow-visible rounded-[24px] rounded-br-lg border border-violet-200 bg-violet-50/70 px-4 py-3 text-left shadow-sm shadow-violet-950/5 transition hover:border-violet-300 hover:bg-violet-50",
-                    selectedPortfolioView === "accepted" && "ring-2 ring-violet-500/50"
+                    "grid min-h-[78px] grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-3 border-l-4 border-transparent px-4 py-2.5 text-left transition hover:bg-white/70",
+                    selectedPortfolioView === "accepted" && "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-500"
                   )}
                   aria-pressed={selectedPortfolioView === "accepted"}
                 >
-                  <span className="absolute -top-3 left-1/2 size-6 -translate-x-1/2 rotate-45 border border-violet-200 bg-violet-50" aria-hidden="true" />
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
-                    {isZh ? "已接受" : "Accepted"}
-                  </p>
-                  <div className="mt-3 grid gap-2">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "预期利润提升" : "Expected Profit Lift"}
+                  <span className={cn(
+                    "grid size-10 place-items-center rounded-full bg-white text-sm font-extrabold text-slate-950 ring-1 ring-slate-200",
+                    selectedPortfolioView === "accepted" && "text-emerald-700"
+                  )}>
+                    {isZh ? "执" : "EX"}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-bold">{isZh ? "已接受策略" : "Accepted Actions"}</p>
+                    <p className={cn(
+                      "mt-1 truncate text-xs font-semibold text-slate-500",
+                      selectedPortfolioView === "accepted" && "text-white/75"
+                    )}>
+                      {numberFormat.format(displayedAcceptedSkuCount)} SKUs · {displayedActualProfitLiftLabel}
+                    </p>
+                    {actualProfitLiftMeta ? (
+                      <p className={cn(
+                        "mt-0.5 truncate text-xs font-semibold text-slate-400",
+                        selectedPortfolioView === "accepted" && "text-white/65"
+                      )}>
+                        {actualProfitLiftMeta}
                       </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {signedCurrency(displayedAcceptedProfitGain)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "实际利润提升" : "Actual Profit Lift"}
-                      </p>
-                      <p className="mt-1 break-words text-base font-extrabold text-slate-950">
-                        {displayedActualProfitLiftLabel}
-                      </p>
-                      {actualProfitLiftMeta ? (
-                        <p className="mt-0.5 text-xs font-bold text-slate-500">
-                          {actualProfitLiftMeta}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        SKU
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {numberFormat.format(displayedAcceptedSkuCount)} SKUs
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                        {isZh ? "新增广告投入" : "Additional Ad Spend"}
-                      </p>
-                      <p className="mt-1 break-words text-xl font-extrabold text-slate-950">
-                        {signedCurrency(displayedAcceptedAdditionalAds)}
-                      </p>
-                    </div>
+                    ) : null}
                   </div>
+                  <span className={cn("text-xs font-semibold text-slate-400", selectedPortfolioView === "accepted" && "text-white/70")}>
+                    {isZh ? "运行中" : "Active"}
+                  </span>
                 </button>
               </div>
             </div>
-          </>
         </section>
 
-        <section className="min-h-[520px] min-w-0 bg-[#e7ebe8] xl:h-full xl:overflow-hidden xl:border-r xl:border-slate-200">
+        <section className="min-h-[520px] min-w-0 bg-[#fbfbfb] xl:h-full xl:min-h-0 xl:overflow-hidden xl:border-r xl:border-slate-200">
           {isResolvingOptimizationState ? (
-            <div className="grid h-[520px] place-items-center bg-[#e7ebe8] p-5 text-center">
-              <div className="translate-y-12 space-y-3">
-                <RefreshCw className="mx-auto size-7 animate-spin text-slate-600" />
+            <div className="grid h-full min-h-[520px] place-items-center bg-[#fbfbfb] p-5 text-center xl:min-h-0">
+              <div className="space-y-3">
+                <div className="butterfly-flap mx-auto grid size-14 place-items-center">
+                  <BrandLogo compact label="Monarca AI" className="h-14 w-14 opacity-75" />
+                </div>
                 <p className="text-base font-semibold text-slate-600">
                   {isZh ? "正在准备优化队列" : "Preparing optimization queue"}
                 </p>
               </div>
             </div>
           ) : shouldShowOptimizationStarter ? (
-            <div className="grid h-full min-h-[520px] place-items-center bg-[#e7ebe8] p-5 text-center">
+            <div className="grid h-full min-h-[520px] place-items-center bg-[#fbfbfb] p-5 text-center xl:min-h-0">
               <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
                 <p className="text-center text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                   {isZh ? "优化待运行" : "Ready to optimize"}
@@ -2726,8 +2747,8 @@ function SkuPortfolioOptimizationPanel({
 
         <section
           className={cn(
-            "relative flex min-h-[96px] min-w-0 flex-col transition-colors xl:h-full xl:min-h-[520px] xl:overflow-hidden",
-            "bg-[#e7ebe8]"
+            "relative flex min-h-[96px] min-w-0 flex-col transition-colors xl:h-full xl:min-h-0 xl:overflow-hidden",
+            "bg-white"
           )}
         >
           <button
@@ -2771,21 +2792,23 @@ function SkuPortfolioOptimizationPanel({
           {isDecisionPanelOpen ? (
             <>
               <div className="min-h-0 flex-1 overflow-auto">
-                {selectedDecision ? (
+                {selectedOptimizationDecision ? (
                   <SelectedSkuOptimizationPanel
-                    row={selectedDecision}
-                    recommendation={portfolioRowsBySku.get(selectedDecision.skuId)}
+                    row={selectedOptimizationDecision}
+                    recommendation={portfolioRowsBySku.get(selectedOptimizationDecision.skuId)}
                     trackedOutcomeRows={trackedOutcomeRows}
                     simulationHorizonDays={simulationHorizonDays}
-                    actionStatus={actionStatuses[decisionRowKey(selectedDecision)] === "accepted" ? "accepted" : actionStatuses[decisionRowKey(selectedDecision)] === "rejected" ? "rejected" : "pending"}
-                    acceptedAt={acceptedAtByDecision[decisionRowKey(selectedDecision)]}
+                    actionStatus={actionStatuses[decisionRowKey(selectedOptimizationDecision)] === "accepted" ? "accepted" : actionStatuses[decisionRowKey(selectedOptimizationDecision)] === "rejected" ? "rejected" : "pending"}
+                    acceptedAt={acceptedAtByDecision[decisionRowKey(selectedOptimizationDecision)]}
                     locale={locale}
                   />
                 ) : (
-                  <div className="grid h-[520px] place-items-center bg-transparent text-center">
-                    <p className="max-w-none translate-y-20 whitespace-nowrap text-sm font-semibold text-slate-500">
-                      {isZh ? "从优化队列选择一个 SKU 查看详情" : "Select a SKU from the optimization queue to view details"}
-                    </p>
+                  <div className="grid h-full min-h-[520px] place-items-center bg-transparent xl:min-h-0">
+                    <div className="max-w-xs px-6 text-center">
+                      <p className="text-lg font-extrabold text-slate-700">
+                        {isZh ? "选择一个 SKU 查看优化决策" : "Select a SKU to view the optimization decision"}
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2830,8 +2853,8 @@ function CurrentSkuRail({ rows, locale }: { rows: SkuReportRow[]; locale: Render
 
   return (
     <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white xl:sticky xl:top-24 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
-        <div className="flex items-start justify-between gap-3">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-base font-bold text-slate-950">{isZh ? "当前 SKU" : "Current SKUs"}</p>
             <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
@@ -2840,9 +2863,16 @@ function CurrentSkuRail({ rows, locale }: { rows: SkuReportRow[]; locale: Render
                 : `${numberFormat.format(rows.length)} SKUs · ranked by revenue`}
             </p>
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
-            {isZh ? `${numberFormat.format(displayedRows.length)} 个显示` : `${numberFormat.format(displayedRows.length)} shown`}
-          </span>
+          <div className="flex min-w-[280px] flex-1 items-center justify-end gap-3">
+            <div className="flex h-10 w-full max-w-[360px] items-center gap-3 rounded-xl bg-white px-3 text-sm font-semibold text-slate-400 ring-1 ring-slate-200">
+              <Search className="size-4 shrink-0" />
+              <span className="truncate">{isZh ? "搜索 SKU 或动作" : "Search SKU or action"}</span>
+              <Plus className="ml-auto size-4 shrink-0 text-slate-500" />
+            </div>
+            <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+              {isZh ? `${numberFormat.format(displayedRows.length)} 个显示` : `${numberFormat.format(displayedRows.length)} shown`}
+            </span>
+          </div>
         </div>
       </div>
       <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
@@ -2970,6 +3000,7 @@ type PortfolioDecisionRow = DecisionIntelligenceReportV1["sku_portfolio_optimiza
 type PortfolioDecisionFilter = PortfolioDecisionRow["action"] | "INVENTORY_RISK" | "BUDGET_OPPORTUNITY" | "ALL";
 type OptimizationGoal = "GROWTH" | "PROFIT" | "INVENTORY" | "PORTFOLIO_HEALTH";
 type PortfolioSummaryView = "current" | "optimization" | "accepted";
+
 type DecisionActionDisplay = {
   title: string;
   icon: string;
@@ -3028,6 +3059,23 @@ function actionFilterDisplayLabel(action: string, locale: RendererLocale = "en")
     "No Action Required": "无需操作"
   };
   return labels[action] ?? action;
+}
+
+function actionFilterIcon(action: string) {
+  const icons: Record<string, typeof Menu> = {
+    "Scale Ads": Megaphone,
+    "Expand Channel": GitBranch,
+    "Increase Price": DollarSign,
+    "Decrease Price": BadgeDollarSign,
+    "Run Promotion": BadgePercent,
+    "Restock Inventory": PackagePlus,
+    "Clear Excess Inventory": PackageX,
+    "Enrich Inputs": Database,
+    "Reduce Ad Waste": CircleOff,
+    "Reallocate Budget": Wallet,
+    "Exit SKU": PackageSearch
+  };
+  return icons[action] ?? Menu;
 }
 
 function localizeDecisionActionDisplay(display: DecisionActionDisplay, locale: RendererLocale): DecisionActionDisplay {
@@ -3858,15 +3906,24 @@ function OptimizationDecisionRail({
   };
 
   return (
-    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden bg-transparent xl:sticky xl:top-24 xl:h-full xl:max-h-full">
-      <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-[#e7ebe8] px-3 py-3">
+    <aside className="flex h-[640px] max-h-[640px] min-h-0 flex-col overflow-hidden bg-[#fbfbfb] xl:sticky xl:top-24 xl:h-full xl:max-h-full">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-[#fbfbfb] px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="truncate text-lg font-bold text-slate-950">
+            {isAcceptedMode
+              ? (isZh ? "已接受策略" : "Active Strategies")
+              : (isZh ? "Monarca 优化助手" : "Monarca Optimization")}
+          </p>
+          <button
+            type="button"
+            className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+            aria-label={isZh ? "新建优化视图" : "New optimization view"}
+          >
+            <Plus className="size-5" />
+          </button>
+        </div>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-base font-bold text-slate-950">
-              {isAcceptedMode
-                ? (isZh ? "已接受策略" : "Active Strategies")
-                : (isZh ? "优化队列" : "Optimization Queue")}
-            </p>
             {!isAcceptedMode && analysisStats ? (
               <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
                 {isZh
@@ -3875,12 +3932,12 @@ function OptimizationDecisionRail({
               </p>
             ) : null}
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+          <span className="mt-1 shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
             {queueCountLabel}
           </span>
         </div>
         {!isAcceptedMode ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 grid gap-1 rounded-[14px] bg-slate-100/70 p-1 shadow-sm sm:grid-cols-4">
             {optimizationGoalFilters.map((filter) => {
               const isSelected = selectedGoal === filter.goal;
               return (
@@ -3893,41 +3950,44 @@ function OptimizationDecisionRail({
                     setSelectedGoal(filter.goal);
                   }}
                   className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] font-bold transition ring-1",
+                    "flex h-10 min-w-0 items-center justify-center gap-2 rounded-[11px] px-3 text-xs font-bold text-slate-600 transition hover:bg-white/75 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
                     isSelected
-                      ? "bg-slate-950 text-white ring-slate-950"
-                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-slate-950 text-white shadow-sm"
+                      : "bg-transparent"
                   )}
                   aria-pressed={isSelected}
                 >
-                  {goalFilterDisplayLabel(filter.goal, locale)}
+                  <Menu className={cn("size-4 shrink-0", isSelected ? "text-white/80" : "text-slate-500")} />
+                  <span className="truncate">{goalFilterDisplayLabel(filter.goal, locale)}</span>
                 </button>
               );
             })}
           </div>
         ) : null}
         {!isAcceptedMode ? (
-          <div className="mt-3 flex min-h-[30px] flex-wrap content-start gap-1.5">
+          <div className="mt-3 grid gap-1 rounded-[14px] bg-slate-100/70 p-1 shadow-sm sm:grid-cols-2">
             {optimizationActionFilters[selectedGoal].map((action) => {
               const isSelected = selectedGoalAction === action;
               const count = actionCounts.get(action) ?? 0;
+              const ActionIcon = actionFilterIcon(action);
               return (
                 <button
                   key={action}
                   type="button"
                   onClick={() => setSelectedGoalAction((current) => current === action ? null : action)}
                   className={cn(
-                    "rounded-full px-2.5 py-1 text-xs font-bold transition ring-1",
+                    "flex h-10 min-w-0 items-center justify-center gap-2 rounded-[11px] px-3 text-xs font-bold text-slate-600 transition hover:bg-white/75 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
                     isSelected
-                      ? "bg-slate-950 text-white ring-slate-950"
-                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-slate-950 text-white shadow-sm"
+                      : "bg-transparent"
                   )}
                   aria-pressed={isSelected}
                 >
-                  {actionFilterDisplayLabel(action, locale)}
+                  <ActionIcon className={cn("size-4 shrink-0", isSelected ? "text-white/80" : "text-slate-500")} />
+                  <span className="truncate">{actionFilterDisplayLabel(action, locale)}</span>
                   <span className={cn(
-                    "ml-1 text-[10px]",
-                    isSelected ? "text-white/80" : "text-slate-500"
+                    "rounded-full bg-white px-1.5 py-0.5 text-[10px] text-slate-500",
+                    isSelected && "bg-white/15 text-white"
                   )}>
                     {numberFormat.format(count)}
                   </span>
@@ -3937,7 +3997,7 @@ function OptimizationDecisionRail({
           </div>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 divide-y divide-slate-200/70 overflow-y-scroll overscroll-contain pr-3 [scrollbar-color:rgba(100,116,139,0.55)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/70">
+      <div className="min-h-0 flex-1 overflow-y-scroll overscroll-contain bg-[#fbfbfb] px-5 py-5 [scrollbar-color:rgba(100,116,139,0.45)_transparent] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/60">
         {displayedRows.length ? displayedRows.map((row) => {
           const key = decisionRowKey(row);
           const isSelected = visibleSelectedKey === key;
@@ -3948,16 +4008,17 @@ function OptimizationDecisionRail({
 		          const actionDisplay = localizeDecisionActionDisplay(actionDisplayForDecision(row, recommendation), locale);
             const previousDecisionStatus = previousDecisionActiveStatus(row);
 
+          const metricRows = [
+            [isZh ? "预计利润" : "Projected Profit", signedCurrency(impact)],
+            [isZh ? "动作" : "Action", actionDisplay.title],
+            [isZh ? "周期" : "Window", `${simulationHorizonDays}D`]
+          ];
+
           return (
-            <div
-              key={key}
-              className={cn(
-                "bg-transparent transition",
-                isSelected
-                  ? "bg-white/45"
-                  : "hover:bg-white/30"
-              )}
-            >
+            <div key={key} className="mb-5">
+              <p className="mb-3 text-center text-xs font-semibold text-slate-400">
+                {isZh ? "Thursday 18:04" : "Thursday 18:04"}
+              </p>
               <div
                 role="button"
                 tabIndex={0}
@@ -3977,30 +4038,56 @@ function OptimizationDecisionRail({
                   }
                 }}
                 className={cn(
-                  "w-full select-none px-4 py-3 text-left transition",
-                  isSelected && "shadow-[inset_3px_0_0_#0f766e]"
+                  "mx-auto w-full max-w-[520px] select-none overflow-hidden rounded-[8px] border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
+                  isSelected ? "border-emerald-500 ring-2 ring-emerald-100" : "border-slate-200"
                 )}
               >
-                <div className="grid gap-3 lg:grid-cols-[minmax(108px,0.7fr)_minmax(168px,1fr)_minmax(122px,auto)] lg:items-center">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-950">{row.skuId}</p>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal, locale)} />
-		                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
+                <div className={cn(
+                  "relative min-h-[138px] overflow-hidden p-5 text-white",
+                  goal.goal === "GROWTH"
+                    ? "bg-[linear-gradient(135deg,#0f766e,#10b981)]"
+                    : goal.goal === "PROFIT"
+                      ? "bg-[linear-gradient(135deg,#111827,#4f46e5)]"
+                      : goal.goal === "INVENTORY"
+                        ? "bg-[linear-gradient(135deg,#0f172a,#0284c7)]"
+                        : "bg-[linear-gradient(135deg,#334155,#64748b)]"
+                )}>
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_85%_20%,rgba(255,255,255,0.26),transparent_28%),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[length:auto,56px_56px,56px_56px]" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/75">
+                        {goalFilterDisplayLabel(goal.goal, locale)}
+                      </p>
+                      <p className="mt-3 truncate text-2xl font-extrabold tracking-normal text-white">{row.skuId}</p>
+                      <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-white/80">
+                        {actionDisplay.description}
+                      </p>
                     </div>
+                    {status === "awaiting_decision" && !isAcceptedMode ? (
+                      <span className="shrink-0 rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold text-amber-800">
+                        {isZh ? "待审批" : "Pending"}
+                      </span>
+                    ) : (
+                      <RecommendationStatusBadge status={isAcceptedMode ? "accepted" : status} locale={locale} />
+                    )}
                   </div>
-                  <div className="min-w-0">
-                    <p className="line-clamp-2 text-xs font-semibold leading-5 text-slate-600">
-                      {actionDisplay.description}
-                    </p>
-                    {previousDecisionStatus ? (
-                      <div className="mt-1">
-                        <ActiveDecisionStatusBadge status={previousDecisionStatus} locale={locale} />
+                </div>
+
+                <div className="bg-[#f0f1f2] px-5 py-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    {metricRows.map(([label, value]) => (
+                      <div key={label} className="min-w-0">
+                        <p className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                        <p className="mt-1 truncate text-sm font-extrabold text-slate-950">{value}</p>
                       </div>
-                    ) : null}
+                    ))}
                   </div>
-                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 lg:flex-col lg:items-end lg:justify-center">
-                    <span className="min-w-[64px] text-right text-sm font-bold text-emerald-700">{signedCurrency(impact)}</span>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      <OptimizationGoalBadge goal={goal.goal} label={goalFilterDisplayLabel(goal.goal, locale)} />
+                      <OptimizationActionBadge goal={goal.goal} label={actionDisplay.title} />
+                      {previousDecisionStatus ? <ActiveDecisionStatusBadge status={previousDecisionStatus} locale={locale} /> : null}
+                    </div>
                     {status === "awaiting_decision" && !isAcceptedMode ? (
                       <ActionDecisionButtons
                         locale={locale}
@@ -4012,7 +4099,6 @@ function OptimizationDecisionRail({
                           event?.stopPropagation();
                           onReject(row);
                         }}
-                        compact
                       />
                     ) : (
                       <RecommendationStatusBadge status={isAcceptedMode ? "accepted" : status} locale={locale} />
@@ -5268,7 +5354,7 @@ function SelectedSkuOptimizationPanel({
     : row.decision_confidence?.confidence_level !== "LOW";
 
   return (
-    <aside className="sticky bottom-0 top-auto mx-auto max-h-[68vh] max-w-5xl overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
+    <aside className="sticky bottom-0 top-auto mx-auto w-full max-h-[68vh] max-w-none overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
       <div className="p-0">
         <p className="text-sm font-bold text-slate-950">AI Decision Summary</p>
         <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
@@ -5465,24 +5551,24 @@ function DecisionSummaryRow({ label, value, strong = false }: { label: string; v
 function DecisionProfitComparisonTable({ decision, horizonDays }: { decision: SkuDecisionObject; horizonDays: number }) {
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-left text-xs">
+      <table className="w-full table-fixed text-left text-[11px]">
         <thead className="bg-white text-slate-500">
           <tr>
-            <th className="px-3 py-2 font-bold uppercase tracking-wide">Metric</th>
-            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">Current Plan</th>
-            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">AI Action</th>
-            <th className="px-3 py-2 text-right font-bold uppercase tracking-wide">Change</th>
+            <th className="w-[28%] px-2 py-2 font-bold uppercase tracking-wide">Metric</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">Current Plan</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">AI Action</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">Change</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {decision.summary_comparison.map((item) => (
             <tr key={item.metric}>
-              <td className="px-3 py-2 font-semibold text-slate-600">
+              <td className="break-words px-2 py-2 font-semibold text-slate-600">
                 {item.metric.includes("/") ? item.metric : `${item.metric}${item.metric === "Profit" ? ` / ${horizonDays} days` : ""}`}
               </td>
-              <td className="px-3 py-2 text-right font-bold text-slate-950">{item.current}</td>
-              <td className="px-3 py-2 text-right font-bold text-slate-950">{item.action}</td>
-              <td className={cn("px-3 py-2 text-right font-bold", item.strong ? "text-emerald-700" : "text-slate-700")}>{item.change}</td>
+              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{item.current}</td>
+              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{item.action}</td>
+              <td className={cn("break-words px-2 py-2 text-right font-bold", item.strong ? "text-emerald-700" : "text-slate-700")}>{item.change}</td>
             </tr>
           ))}
         </tbody>

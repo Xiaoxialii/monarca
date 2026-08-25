@@ -46,6 +46,11 @@ body {
   animation: butterfly-float 5s ease-in-out infinite;
 }
 
+.butterfly-flap {
+  animation: butterfly-flap 1.15s ease-in-out infinite;
+  transform-origin: 50% 52%;
+}
+
 .feature-card-reveal {
   --feature-card-delay: 0ms;
   animation: feature-card-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) var(--feature-card-delay) both;
@@ -162,6 +167,21 @@ body {
 
   50% {
     transform: translateY(-10px);
+  }
+}
+
+@keyframes butterfly-flap {
+  0%,
+  100% {
+    transform: translateY(0) scaleX(1) scaleY(1);
+  }
+
+  45% {
+    transform: translateY(-3px) scaleX(0.88) scaleY(1.06);
+  }
+
+  70% {
+    transform: translateY(1px) scaleX(1.08) scaleY(0.97);
   }
 }
 

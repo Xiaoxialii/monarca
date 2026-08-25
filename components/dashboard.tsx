@@ -812,7 +812,7 @@ const dashboardCopy = {
   zh: {
 	    navItems: [
 	      { label: "数据源", href: "/dashboard/import-data", target: "#import-data", icon: Database },
-	      { label: "利润优化", href: "/optimization", target: "#reports", icon: BrainCircuit },
+	      { label: "运营优化", href: "/optimization", target: "#reports", icon: BrainCircuit },
 	      { label: "产品发布", href: "/dashboard/launch-optimizer", target: "#launch-optimizer", icon: Plus },
 	      { label: "经营报表", href: "/dashboard/report", target: "#report", icon: FileText },
 	      { label: "设置", href: "/dashboard/settings", target: "#settings", icon: Settings }
@@ -1243,7 +1243,7 @@ const dashboardCopy = {
         ["管理层摘要", "可信指标准备好后，会自动生成汇报说明"]
       ],
       pageBadge: "AI 实时分析",
-      pageTitle: "利润优化",
+      pageTitle: "运营优化",
       pageSubtitle: "来自已连接数据的实时业务智能",
       periodLabel: "报告周期",
       periodValue: "今日",
@@ -10446,6 +10446,7 @@ type ProfitOptimizationJobPayload = {
   status?: ProfitOptimizationJobStatus;
   currentStep?: string | null;
   message?: string;
+  reusedCache?: boolean;
   recommendedAction?: string;
   optimizationReadiness?: OptimizationReadinessViewData | null;
   validation?: OptimizationReadinessViewData | null;
@@ -17654,7 +17655,7 @@ function ReportsPage({
           : "The optimization request did not reach Monarca. Refresh the page and try again."
       );
 
-      if (!response.ok || !payload?.ok || !payload.jobId) {
+      if (!response.ok || !payload?.ok) {
         const validation = payload?.optimizationReadiness ?? payload?.validation ?? null;
         if (validation?.status === "BLOCKED") {
           setOptimizationValidationModal(validation);
@@ -17665,6 +17666,20 @@ function ReportsPage({
       setHasStartedProfitOptimization(true);
       setProfitOptimizationRunStatus(payload.status ?? "QUEUED");
       setProfitOptimizationRunStep(profitOptimizationStatusMessage(payload.status, payload.currentStep, isZh));
+
+      if (!payload.jobId && payload.status === "COMPLETED") {
+        setProfitOptimizationRunStatus("COMPLETED");
+        setProfitOptimizationRunStep(profitOptimizationStatusMessage("COMPLETED", payload.currentStep, isZh));
+        setStatusMessage(payload.reusedCache
+          ? (isZh ? "当前数据已完成优化，推荐已刷新。" : "Optimization is already ready for the current data version.")
+          : (isZh ? "优化已完成，推荐已刷新。" : "Optimization completed and recommendations refreshed."));
+        void loadAnalysisDecisionReport("full", { showLoading: false });
+        return;
+      }
+
+      if (!payload.jobId) {
+        throw new Error(payload.message || (isZh ? "创建优化任务失败" : "Failed to create optimization job"));
+      }
 
       const completedJob = await waitForProfitOptimizationJob(payload.jobId, {
         isZh,
@@ -17849,7 +17864,9 @@ function ReportsPage({
   const reportHeaderAction = (
     <div className="flex shrink-0 items-center justify-end text-right text-xs font-bold tabular-nums text-slate-500">
       <span className="whitespace-nowrap">
-        {optimizationHeaderUpdatedAt ? formatReportDate(optimizationHeaderUpdatedAt) : "--"}
+        {optimizationHeaderUpdatedAt
+          ? `${locale === "zh" ? "数据日期：" : "Data date: "}${formatReportDate(optimizationHeaderUpdatedAt)}`
+          : "--"}
       </span>
     </div>
   );
@@ -17864,7 +17881,7 @@ function ReportsPage({
   }, [analysisDecisionReportPayload?.decision_report, analysisDecisionReportPayload?.optimizationRun]);
 
 	  return (
-    <section id="reports" className="dashboard-density flex min-w-0 max-w-full flex-col gap-2 overflow-hidden scroll-mt-20">
+    <section id="reports" className="dashboard-density flex h-full min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden scroll-mt-20">
 
       {statusMessage ? (
         <div className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm">
@@ -18075,38 +18092,63 @@ function ReportPage({
 }
 
 function ReportSectionNav({ isZh, placement = "inline" }: { isZh: boolean; placement?: "inline" | "sidebar" }) {
-  const items = [
+  const items = useMemo(() => [
     { href: "#report-sku", label: isZh ? "SKU" : "SKU", icon: Table2 },
     { href: "#report-ads", label: isZh ? "广告" : "Ads", icon: BarChart3 },
     { href: "#report-warehouse", label: isZh ? "仓库" : "Warehouse", icon: Database },
     { href: "#report-customers", label: isZh ? "用户" : "Customers", icon: Users }
-  ];
+  ], [isZh]);
   const isSidebar = placement === "sidebar";
+  const [activeHref, setActiveHref] = useState(items[0].href);
+
+  useEffect(() => {
+    if (!isSidebar || typeof window === "undefined") return;
+
+    const syncActiveHash = () => {
+      const nextHash = items.some((item) => item.href === window.location.hash)
+        ? window.location.hash
+        : items[0].href;
+      setActiveHref(nextHash);
+    };
+
+    syncActiveHash();
+    window.addEventListener("hashchange", syncActiveHash);
+    return () => window.removeEventListener("hashchange", syncActiveHash);
+  }, [isSidebar, items]);
 
   return (
     <nav
       className={cn(
         isSidebar
-          ? "flex gap-3 lg:grid lg:gap-4"
+          ? "grid gap-1"
           : "mt-3 flex max-w-full gap-2 overflow-x-auto pb-1"
       )}
       aria-label={isZh ? "报表板块导航" : "Report section navigation"}
     >
-      {items.map((item) => (
+      {items.map((item) => {
+        const isActiveSidebarItem = isSidebar && activeHref === item.href;
+        return (
         <a
           key={item.href}
           href={item.href}
+          onClick={() => {
+            if (isSidebar) setActiveHref(item.href);
+          }}
           className={cn(
-            "inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-emerald-800",
+            "inline-flex shrink-0 items-center gap-2 text-sm font-semibold transition",
             isSidebar
-              ? "px-1 py-2"
-              : "rounded-full border bg-white px-3 py-1.5 shadow-sm hover:border-emerald-200 hover:bg-emerald-50"
+              ? cn(
+                  "h-12 justify-start rounded-[14px] px-4 text-slate-900 hover:bg-slate-100/80",
+                  isActiveSidebarItem && "bg-emerald-600 text-white hover:bg-emerald-600"
+                )
+              : "justify-center rounded-full border bg-white px-3 py-1.5 text-slate-500 shadow-sm hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
           )}
         >
-          <item.icon className="size-4" />
+          <item.icon className={cn("size-4", isActiveSidebarItem ? "text-white" : "text-current")} />
           {item.label}
         </a>
-      ))}
+        );
+      })}
     </nav>
   );
 }
@@ -18420,11 +18462,13 @@ export function Dashboard({
       />
       <div className="min-w-0 flex h-full flex-1 flex-col overflow-hidden">
         <Header copy={copy} activeTarget={activeTarget} locale={locale} onLocaleChange={setLocale} />
-        <div className={cn("min-h-0 flex-1 overflow-y-auto", isImportDataView && "bg-[#e7ebe8]")}>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto", isReportsView && "overflow-hidden", isImportDataView && "bg-[#e7ebe8]")}>
           <main
             className={cn(
-              "mx-auto grid min-h-full max-w-[1500px] gap-4 px-4 lg:px-6 xl:grid-cols-1 xl:items-start",
-              isReportsView ? "py-3" : "py-5"
+              "mx-auto max-w-[1500px] px-4 lg:px-6",
+              isReportsView
+                ? "flex h-full min-h-0 w-full flex-col py-3 pb-0"
+                : "grid min-h-full gap-4 py-5 xl:grid-cols-1 xl:items-start"
             )}
           >
             {isImportDataView ? (
@@ -18461,7 +18505,7 @@ export function Dashboard({
                 />
               </div>
             ) : view === "reports" ? (
-              <div className="flex min-h-0 min-w-0 flex-col xl:col-start-1">
+              <div className="flex h-full min-h-0 min-w-0 flex-col xl:col-start-1">
                 <DashboardErrorBoundary locale={locale}>
                   <ReportsPage
                     copy={copy}

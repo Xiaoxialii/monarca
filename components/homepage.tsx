@@ -103,7 +103,7 @@ const homepageCopy = {
     hero: {
       eyebrow: "Ecommerce Growth Operator",
       headline: "AI-powered Global Ecommerce Operations",
-      subheadline: "Connect your ecommerce business.We grow them globally.",
+      subheadline: "Connect your ecommerce business. We power intelligent growth.",
       teamLabel: "Monarca turns products, stores, and operating data into global growth actions",
       team: [
         { role: "Find growth opportunities earlier", text: "Identify high-potential signals, abnormal shifts, and key growth windows before the team misses them." },

@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { META_ADS_PROVIDER } from "@/lib/ads/meta/meta-oauth";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
-import { assertProductAccessForUser } from "@/lib/product-access";
 import { prisma } from "@/lib/prisma";
-import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -14,13 +12,6 @@ export async function GET() {
 
   if (!session) {
     return NextResponse.json({ connected: false, code: "UNAUTHENTICATED", message: "Missing authenticated user." }, { status: 401 });
-  }
-  try {
-    await assertProductAccessForUser(session.user);
-  } catch (error) {
-    const authResponse = workspaceAuthErrorResponse(error);
-    if (authResponse) return authResponse;
-    throw error;
   }
 
   const account = await prisma.ecommerceConnectorAccount.findFirst({

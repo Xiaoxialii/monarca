@@ -79,7 +79,7 @@ export function EcommerceSalesDashboard({ data, state, message, embedded = false
   };
 
   return (
-    <Root className={embedded ? "w-full" : "min-h-screen bg-slate-50"}>
+    <Root className={embedded ? "w-full" : "min-h-screen bg-[#e7ebe8]"}>
       <div className={embedded ? "flex w-full flex-col gap-6" : "mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8"}>
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>

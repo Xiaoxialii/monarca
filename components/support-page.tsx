@@ -179,12 +179,12 @@ export function SupportPage({ defaultLocale = "en" }: { defaultLocale?: Locale }
   };
 
   if (!isLocaleReady) {
-    return <main className="min-h-screen bg-background" />;
+    return <main className="min-h-screen bg-[#e7ebe8]" />;
   }
 
   return (
     <main
-      className="min-h-screen bg-[#fbfcfa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8"
+      className="min-h-screen bg-[#e7ebe8] px-4 py-5 text-slate-950 sm:px-6 lg:px-8"
       lang={getHtmlLang(locale)}
     >
       <div className="mx-auto max-w-6xl">

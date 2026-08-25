@@ -11,14 +11,14 @@ type AccessApprovalCardProps = {
 
 const copy = {
   en: {
-    title: "Your account is awaiting approval",
+    title: "Data connection access is not enabled",
     description:
-      "Monarca is currently available to approved ecommerce teams. Please contact the Monarca AI team to request access.",
+      "Your account can sign in and use Monarca, but data-source connection requires approval. Please contact the Monarca AI team to enable data access.",
     signOut: "Sign out"
   },
   zh: {
-    title: "账号正在等待审核",
-    description: "Monarca 目前仅面向已批准的电商团队开放。请联系 Monarca AI 团队申请访问权限。",
+    title: "暂未开通数据接入权限",
+    description: "你可以注册、登录并使用 Monarca，但连接数据源需要单独开通权限。请联系 Monarca AI 团队开通数据接入权限。",
     signOut: "退出登录"
   }
 } as const;

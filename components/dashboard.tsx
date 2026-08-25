@@ -6214,7 +6214,7 @@ function ImportDataSection({
   const searchParams = useSearchParams();
   const isZh = copy.connectors.connectedCountLabel.includes("个");
   const [shopifyPermissionIssue, setShopifyPermissionIssue] = useState<ShopifyConnectorMessage | null>(null);
-  const connectorError = googleAdsConnectorErrorMessage(searchParams, isZh) ?? amazonConnectorErrorMessage(searchParams, isZh) ?? shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
+  const connectorError = googleAdsConnectorErrorMessage(searchParams, isZh) ?? amazonConnectorErrorMessage(searchParams, isZh) ?? metaConnectorErrorMessage(searchParams, isZh) ?? shopifyConnectorErrorMessage(searchParams, isZh) ?? shopifyPermissionIssue;
 
   useEffect(() => {
     let isActive = true;
@@ -6305,6 +6305,10 @@ function shopifyConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyUR
   if (searchParams?.get("shopify") !== "failed") return null;
 
   const code = searchParams.get("code");
+  if (code === "PRODUCT_ACCESS_REQUIRED") {
+    return productAccessConnectorMessage("Shopify", "/dashboard/import-data/connect?source=Shopify", isZh);
+  }
+
   if (code === "SHOPIFY_SCOPES_NOT_GRANTED") {
     const shop = searchParams.get("shop");
     const actionHref = shop ? `/api/connectors/shopify/start?shop=${encodeURIComponent(shop)}` : "/dashboard/import-data/connect?source=Shopify";
@@ -6334,6 +6338,10 @@ function amazonConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURL
   if (searchParams?.get("amazon") !== "failed") return null;
 
   const code = searchParams.get("code") ?? "unknown";
+  if (code === "PRODUCT_ACCESS_REQUIRED") {
+    return productAccessConnectorMessage("Amazon", "/dashboard/import-data/connect?source=Amazon", isZh);
+  }
+
   const missingEnv = code.startsWith("MISSING_AMAZON_") || code.startsWith("INVALID_AMAZON_");
 
   if (missingEnv) {
@@ -6365,6 +6373,10 @@ function googleAdsConnectorErrorMessage(searchParams: URLSearchParams | Readonly
   if (searchParams?.get("google_ads") !== "failed") return null;
 
   const code = searchParams.get("code") ?? "unknown";
+  if (code === "PRODUCT_ACCESS_REQUIRED") {
+    return productAccessConnectorMessage("Google Ads", "/dashboard/import-data/connect?source=Google%20Ads", isZh);
+  }
+
   const missingEnv = code.startsWith("MISSING_GOOGLE_ADS_") || code.startsWith("INVALID_GOOGLE_ADS_");
 
   if (missingEnv) {
@@ -6397,6 +6409,37 @@ function googleAdsConnectorErrorMessage(searchParams: URLSearchParams | Readonly
     missingPermissions: [],
     actionHref: "/dashboard/import-data/connect?source=Google%20Ads",
     actionLabel: isZh ? "重试 Google Ads 连接" : "Retry Google Ads Connection"
+  };
+}
+
+function metaConnectorErrorMessage(searchParams: URLSearchParams | ReadonlyURLSearchParamsLike | null, isZh: boolean) {
+  if (searchParams?.get("meta_ads") !== "failed") return null;
+
+  const code = searchParams.get("code") ?? "unknown";
+  if (code === "PRODUCT_ACCESS_REQUIRED") {
+    return productAccessConnectorMessage("Meta Ads", "/dashboard/import-data/connect?source=Meta%20Ads", isZh);
+  }
+
+  return {
+    title: isZh ? "Meta Ads 连接失败" : "Meta Ads connection failed",
+    message: isZh
+      ? `错误代码：${code}。请检查 Meta 应用配置、OAuth 权限和广告账户访问权限后重试。`
+      : `Error code: ${code}. Check Meta app configuration, OAuth permissions, and ad account access, then try again.`,
+    missingPermissions: [],
+    actionHref: "/dashboard/import-data/connect?source=Meta%20Ads",
+    actionLabel: isZh ? "重试 Meta Ads 连接" : "Retry Meta Ads Connection"
+  };
+}
+
+function productAccessConnectorMessage(sourceName: string, actionHref: string, isZh: boolean): ShopifyConnectorMessage {
+  return {
+    title: isZh ? "暂未开通数据接入权限" : "Data connection access is not enabled",
+    message: isZh
+      ? `当前账号还没有连接 ${sourceName} 数据源的权限。请联系 Monarca AI 团队开通数据接入权限。`
+      : `This account does not have permission to connect ${sourceName} data sources yet. Contact the Monarca AI team to enable data access.`,
+    missingPermissions: [],
+    actionHref,
+    actionLabel: isZh ? "返回连接数据" : "Back to Data Connection"
   };
 }
 
@@ -7358,6 +7401,12 @@ function ConnectorPanel({
     }
   };
   const friendlyConnectionMessage = (message: string) => {
+    if (message.includes("PRODUCT_ACCESS_REQUIRED") || message.includes("not been approved for product access")) {
+      return isZh
+        ? "当前账号还没有连接数据源权限。请联系 Monarca AI 团队开通数据接入权限。"
+        : "This account does not have permission to connect data sources yet. Contact the Monarca AI team to enable data access.";
+    }
+
     if (message.includes("DATABASE_PRESET_INCOMPLETE")) {
       const cleanedMessage = message.replace(/^DATABASE_PRESET_INCOMPLETE:\s*/, "");
 
@@ -7641,13 +7690,17 @@ function ConnectorPanel({
             : "Your session expired. Sign in again on local port 3100 before uploading.");
         }
 
+        if (payloadCode(payload) === "PRODUCT_ACCESS_REQUIRED") {
+          throw new Error("PRODUCT_ACCESS_REQUIRED");
+        }
+
         if (response.status === 403 || payload?.message === "Forbidden" || payload?.error === "Forbidden") {
           throw new Error(isZh
             ? "当前账号没有上传权限。请使用 Owner / Admin 账号登录后重试。"
             : "Your account does not have upload permission. Sign in as an Owner or Admin and try again.");
         }
 
-        throw new Error(payload?.message || (isZh
+        throw new Error(connectionErrorText(payload, isZh
           ? "文件上传失败，请稍后重试。"
           : "File upload failed. Please try again."));
       }
@@ -7695,7 +7748,7 @@ function ConnectorPanel({
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || (isZh ? "连接失败" : "Connection failed"));
+        throw new Error(connectionErrorText(payload, isZh ? "连接失败" : "Connection failed"));
       }
 
       setConnectionResult({
@@ -7739,7 +7792,7 @@ function ConnectorPanel({
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload?.ok || !payload?.dataSource) {
-        throw new Error(payload?.message || (isZh ? "连接数据库失败" : "Database connection failed"));
+        throw new Error(connectionErrorText(payload, isZh ? "连接数据库失败" : "Database connection failed"));
       }
 
       setSchemaResult({
@@ -8458,6 +8511,35 @@ function localeSafeText(value: string | undefined | null, fallback: string, loca
   if (locale === "en" && containsCjkText(text)) return fallback;
 
   return text;
+}
+
+function payloadCode(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.code === "string") return record.code;
+  const error = record.error;
+  if (error && typeof error === "object" && typeof (error as Record<string, unknown>).code === "string") {
+    return (error as Record<string, string>).code;
+  }
+
+  return null;
+}
+
+function connectionErrorText(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const record = payload as Record<string, unknown>;
+  const code = payloadCode(record);
+  const error = record.error;
+  const nestedMessage = error && typeof error === "object"
+    ? (error as Record<string, unknown>).message
+    : null;
+  const message = typeof record.message === "string"
+    ? record.message
+    : typeof nestedMessage === "string"
+      ? nestedMessage
+      : null;
+
+  return [code, message].filter(Boolean).join(": ") || fallback;
 }
 
 function titleCaseMetricText(value: string) {
@@ -18448,7 +18530,7 @@ export function Dashboard({
   }, [connectedSources, isUserLoaded, loadConnectedSources]);
 
   if (!isLocaleReady) {
-    return <div className="h-screen bg-background" />;
+    return <div className="h-screen bg-[#e7ebe8]" />;
   }
 
   const isImportDataView = view === "import-data" || view === "import-data-connect";

@@ -4,9 +4,9 @@ import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 export const PRODUCT_ACCESS_REQUIRED_CODE = "PRODUCT_ACCESS_REQUIRED";
 export const PRODUCT_ACCESS_REQUIRED_MESSAGE =
-  "Your Monarca account has not been approved for product access.";
+  "Your Monarca account has not been approved to connect data sources.";
 
-type ProductAccessUser = {
+export type ProductAccessUser = {
   id: string;
   productAccessEnabled?: boolean | null;
 };

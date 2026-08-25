@@ -1,6 +1,5 @@
 import { WorkspaceMemberStatus } from "@prisma/client";
 import { syncCurrentClerkUserIdentity } from "@/lib/clerk-user-sync";
-import { assertProductAccessForUser } from "@/lib/product-access";
 import { ensureReportEntitlement } from "@/lib/report-entitlements";
 import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
@@ -17,8 +16,6 @@ export async function getCurrentWorkspaceContext(_request?: Request | null): Pro
   if (!identity) {
     throw new WorkspaceAuthError("Unauthorized", 401);
   }
-
-  await assertProductAccessForUser(identity.user);
 
   const activeMemberships = identity.user.memberships.filter(
     (membership) => membership.status === WorkspaceMemberStatus.ACTIVE

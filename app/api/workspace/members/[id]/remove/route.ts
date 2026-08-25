@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
-import { assertProductAccessForUser } from "@/lib/product-access";
 import { prisma } from "@/lib/prisma";
-import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { WorkspaceMemberStatus, WorkspaceRole } from "@prisma/client";
 import { canRemoveMember, mapDbRoleToTeamRole, mapDbStatusToTeamStatus } from "@/lib/workspace-members";
 
@@ -12,13 +10,6 @@ export async function PATCH(_request: Request, context: { params: Promise<{ id: 
 
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  try {
-    await assertProductAccessForUser(session.user);
-  } catch (error) {
-    const authResponse = workspaceAuthErrorResponse(error);
-    if (authResponse) return authResponse;
-    throw error;
   }
 
   const target = await prisma.workspaceMember.findUnique({

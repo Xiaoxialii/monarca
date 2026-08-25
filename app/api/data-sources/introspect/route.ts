@@ -10,6 +10,7 @@ import {
 } from "@/lib/database-connection-config";
 import { introspectDatabase } from "@/lib/database-introspection";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
+import { requireCanConnectDataSource } from "@/lib/billing/entitlements";
 import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
     logWorkspaceContext("[workspace-context] data-sources.introspect.POST", session);
+    await requireCanConnectDataSource(session.workspace.id, session.user);
     const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const type = normalizeDatabaseType(payload?.type);
 

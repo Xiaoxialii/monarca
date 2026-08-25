@@ -53,7 +53,7 @@ export function JoinWorkspacePage({ token }: { token: string }) {
   }, [isLoaded, isSignedIn, message, router, status, token]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f6f8fb] px-5 py-8">
+    <main className="flex min-h-screen items-center justify-center bg-[#e7ebe8] px-5 py-8">
       <section className="w-full max-w-md rounded-lg border bg-white p-6 shadow-sm">
         <BrandLogo className="mb-6" />
         <h1 className="text-2xl font-semibold tracking-tight">加入工作区</h1>

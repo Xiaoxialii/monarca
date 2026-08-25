@@ -21,13 +21,11 @@ test("product access migration is fail-closed for existing and new users", () =>
   assert.doesNotMatch(migration, /UPDATE\s+"User"[\s\S]*productAccessEnabled"\s*=\s*true/i);
 });
 
-test("workspace authorization checks product access before workspace membership", () => {
+test("workspace authorization does not block registered users on product access", () => {
   const context = read("lib/current-workspace-context.ts");
-  const productAccessIndex = context.indexOf("assertProductAccessForUser(identity.user)");
-  const membershipIndex = context.indexOf("const activeMemberships");
 
-  assert.ok(productAccessIndex > 0, "product access check must be present");
-  assert.ok(membershipIndex > productAccessIndex, "workspace lookup should happen after product access");
+  assert.doesNotMatch(context, /assertProductAccessForUser\(identity\.user\)/);
+  assert.match(context, /const activeMemberships/);
 });
 
 test("product access failure returns uniform 403 API payload", () => {
@@ -35,21 +33,22 @@ test("product access failure returns uniform 403 API payload", () => {
   const access = read("lib/product-access.ts");
 
   assert.match(access, /PRODUCT_ACCESS_REQUIRED_CODE\s*=\s*"PRODUCT_ACCESS_REQUIRED"/);
-  assert.match(access, /Your Monarca account has not been approved for product access\./);
+  assert.match(access, /Your Monarca account has not been approved to connect data sources\./);
   assert.match(auth, /productAccessErrorPayload\(\)/);
   assert.match(auth, /status:\s*403/);
 });
 
-test("protected product pages redirect unapproved users to access pending", () => {
+test("protected product pages allow signed-in users without product access approval", () => {
   const dashboardLayout = read("app/dashboard/layout.tsx");
   const optimizationPage = read("app/optimization/page.tsx");
   const pendingPage = read("app/access-pending/page.tsx");
 
-  assert.match(dashboardLayout, /productAccessEnabled !== true[\s\S]*redirect\("\/access-pending"\)/);
-  assert.match(optimizationPage, /productAccessEnabled !== true[\s\S]*redirect\("\/access-pending"\)/);
-  assert.match(pendingPage, /Your account is awaiting approval/);
-  assert.match(pendingPage, /Please contact the Monarca AI team to request access\./);
-  assert.match(pendingPage, /Sign out/);
+  assert.doesNotMatch(dashboardLayout, /redirect\("\/access-pending"\)/);
+  assert.doesNotMatch(optimizationPage, /redirect\("\/access-pending"\)/);
+  assert.match(pendingPage, /AccessApprovalCard/);
+  const approvalCard = read("components/access-approval-card.tsx");
+  assert.match(approvalCard, /Data connection access is not enabled/);
+  assert.match(approvalCard, /Sign out/);
 });
 
 test("connector OAuth initiation and callbacks are product-gated", () => {
@@ -76,18 +75,31 @@ test("connector OAuth initiation and callbacks are product-gated", () => {
   }
 });
 
-test("sensitive direct runtime APIs and workspace member APIs are product-gated", () => {
+test("non-connection runtime and workspace member APIs are not product-gated", () => {
   const routes = [
     "app/api/evolution/run/route.ts",
     "app/api/runtime/execute/route.ts",
-    "app/api/actions/[actionId]/route.ts",
     "app/api/workspace/members/route.ts",
     "app/api/workspace/members/[id]/role/route.ts",
     "app/api/workspace/members/[id]/remove/route.ts"
   ];
 
   for (const route of routes) {
-    assert.match(read(route), /assertProductAccessForUser\(session\.user\)|resolveActionSession\(request\)/, `${route} must check product access`);
+    assert.doesNotMatch(read(route), /assertProductAccessForUser\(session\.user\)/, `${route} should not check product access`);
+  }
+});
+
+test("direct data-source connection APIs are product-gated at connection time", () => {
+  const routes = [
+    "app/api/data-sources/connect/route.ts",
+    "app/api/data-sources/introspect/route.ts",
+    "app/api/data-sources/upload/route.ts",
+    "app/api/data-sources/upload/complete/route.ts",
+    "app/api/uploads/presign/route.ts"
+  ];
+
+  for (const route of routes) {
+    assert.match(read(route), /requireCanConnectDataSource\(session\.workspace\.id,\s*session\.user\)/, `${route} must gate data connection`);
   }
 });
 

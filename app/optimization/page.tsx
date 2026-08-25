@@ -10,9 +10,5 @@ export default async function OptimizationPage() {
     redirect("/sign-in");
   }
 
-  if (identity.user.productAccessEnabled !== true) {
-    redirect("/access-pending");
-  }
-
   return <Dashboard view="reports" defaultLocale={await getRequestLocale("en")} />;
 }

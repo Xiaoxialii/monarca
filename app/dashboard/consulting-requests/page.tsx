@@ -64,7 +64,7 @@ export default async function ConsultingRequestsPage() {
   });
 
   return (
-    <main className="min-h-screen bg-[#fbfcfa] px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[#e7ebe8] px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1500px]">
         <header className="mb-6 flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>

@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { buildMetaOAuthUrl, createMetaOAuthState, publicMetaError, requiredMetaEnv } from "@/lib/ads/meta/meta-oauth";
 import { syncCurrentClerkUser } from "@/lib/clerk-user-sync";
-import { assertProductAccessForUser } from "@/lib/product-access";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUser } from "@/lib/product-access";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
+
+function dashboardRedirect(request: Request, code: string) {
+  const url = new URL("/dashboard/import-data", request.url);
+  url.searchParams.set("meta_ads", "failed");
+  url.searchParams.set("code", code);
+
+  return NextResponse.redirect(url);
+}
 
 async function createMetaStartResult() {
   const session = await syncCurrentClerkUser();
@@ -39,13 +48,17 @@ async function createMetaStartResult() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const result = await createMetaStartResult();
     if ("error" in result) return result.error;
 
     return NextResponse.redirect(result.oauthUrl);
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, PRODUCT_ACCESS_REQUIRED_CODE);
+    }
+
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;
     const publicError = publicMetaError(error);

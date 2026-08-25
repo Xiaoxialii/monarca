@@ -107,7 +107,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
     logWorkspaceContext("[workspace-context] data-sources.upload.complete.POST", session);
-    await requireCanConnectDataSource(session.workspace.id);
+    await requireCanConnectDataSource(session.workspace.id, session.user);
 
     const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
     const key = stringValue(payload?.key) || stringValue(payload?.path);

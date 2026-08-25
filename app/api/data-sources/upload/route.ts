@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
     logWorkspaceContext("[workspace-context] data-sources.upload.POST", session);
-    await requireCanConnectDataSource(session.workspace.id);
+    await requireCanConnectDataSource(session.workspace.id, session.user);
     const formData = await request.formData();
     const file = formData.get("file");
 

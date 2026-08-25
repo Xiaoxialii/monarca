@@ -28,7 +28,7 @@
 body {
   min-height: 100vh;
   color: hsl(var(--foreground));
-  background: #fbfcfa;
+  background: #e7ebe8;
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 

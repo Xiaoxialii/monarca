@@ -7,6 +7,7 @@ import {
   SubscriptionStatus
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { assertProductAccessForUser, type ProductAccessUser } from "@/lib/product-access";
 import { getReportEntitlementState } from "@/lib/report-entitlements";
 
 export type BillingAccessPlanType = "FREE" | "ONE_TIME" | "MONTHLY";
@@ -227,7 +228,11 @@ export async function canGenerateReport(workspaceId: string) {
   return state.canGenerateReport;
 }
 
-export async function requireCanConnectDataSource(workspaceId: string) {
+export async function requireCanConnectDataSource(workspaceId: string, user?: ProductAccessUser) {
+  if (user) {
+    await assertProductAccessForUser(user);
+  }
+
   const state = await getBillingAccessState(workspaceId);
 
   return state;

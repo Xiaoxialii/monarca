@@ -22,7 +22,7 @@ function stringValue(value: unknown) {
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-    await requireCanConnectDataSource(session.workspace.id);
+    await requireCanConnectDataSource(session.workspace.id, session.user);
 
     if (!isR2Configured()) {
       return NextResponse.json(

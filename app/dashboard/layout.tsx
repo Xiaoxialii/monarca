@@ -10,9 +10,5 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/sign-in");
   }
 
-  if (identity.user.productAccessEnabled !== true) {
-    redirect("/access-pending");
-  }
-
   return children;
 }

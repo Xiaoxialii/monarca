@@ -17,7 +17,7 @@ export default function OptimizationErrorPage({
   });
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#f6f8fb] px-6 py-10 text-slate-950">
+    <main className="grid min-h-screen place-items-center bg-[#e7ebe8] px-6 py-10 text-slate-950">
       <Card className="w-full max-w-2xl border-amber-200 bg-amber-50 shadow-sm">
         <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex gap-3">

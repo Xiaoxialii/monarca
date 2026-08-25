@@ -7,8 +7,9 @@ import {
   requiredGoogleAdsEnv
 } from "@/lib/connectors/google-ads/google-ads-oauth";
 import { publicGoogleAdsError } from "@/lib/connectors/google-ads/google-ads-errors";
-import { assertProductAccessForUser } from "@/lib/product-access";
+import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUser } from "@/lib/product-access";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, code: string) {
   const url = new URL("/dashboard/import-data", request.url);
@@ -68,6 +69,10 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(result.oauthUrl);
   } catch (error) {
+    if (error instanceof WorkspaceAuthError && error.code === PRODUCT_ACCESS_REQUIRED_CODE) {
+      return dashboardRedirect(request, PRODUCT_ACCESS_REQUIRED_CODE);
+    }
+
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;
     const publicError = publicGoogleAdsError(error);

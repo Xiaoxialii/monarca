@@ -349,9 +349,9 @@ export function PaymentPage({ plan, defaultLocale = "en" }: { plan: PaymentPlan;
   return (
     <main
       lang={getHtmlLang(locale)}
-      className="relative isolate z-30 min-h-screen overflow-x-hidden bg-[#fbfbf8] text-slate-950"
+      className="relative isolate z-30 min-h-screen overflow-x-hidden bg-[#e7ebe8] text-slate-950"
     >
-      <header className="border-b border-slate-200/70 bg-[#fbfbf8]/90 backdrop-blur-xl">
+      <header className="border-b border-slate-200/70 bg-[#e7ebe8]/90 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
           <Link href="/" className="flex items-center" aria-label={copy.brand}>
             <BrandLogo label={copy.brand} className="h-10" />

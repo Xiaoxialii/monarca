@@ -188,7 +188,7 @@ export function SignUpPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }
   }, [clerkKey, isSignedIn, isUserLoaded, redirectPath, router]);
 
   return (
-    <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#f7f8fa] px-5 py-5 sm:px-8">
+    <main lang={getHtmlLang(locale)} className="flex min-h-screen flex-col overflow-x-hidden bg-[#e7ebe8] px-5 py-5 sm:px-8">
       <header className="mx-auto flex w-full max-w-[1080px] justify-end px-1">
         <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white/80 p-1 text-sm text-slate-500">
           <button

@@ -61,3 +61,16 @@ test("job polling is read-only and retry is readiness gated", () => {
   assert.match(retryRoute, /leaseExpiresAt:\s*null/);
   assert.match(retryRoute, /after\(\(\) => \{\s*void processJob\(jobId\)/);
 });
+
+test("connector sync enqueue does not reuse stale active jobs", () => {
+  const queue = read("lib/jobs/connector-sync-queue.ts");
+  const dataSourcesRoute = read("app/api/data-sources/route.ts");
+
+  assert.match(queue, /STALE_ASYNC_JOB_MS/);
+  assert.match(queue, /QUEUED_ASYNC_JOB_MS/);
+  assert.match(queue, /Failed - stale connector sync job/);
+  assert.match(queue, /CONNECTOR_SYNC_STALE_JOB/);
+  assert.match(queue, /leaseExpiresAt:\s*\{\s*lt:\s*now/);
+  assert.match(dataSourcesRoute, /isStaleConnectorJob/);
+  assert.match(dataSourcesRoute, /Connector sync stopped before completion/);
+});

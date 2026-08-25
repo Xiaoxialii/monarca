@@ -2,6 +2,7 @@ import { ConnectionStatus, Prisma, type PrismaClient } from "@prisma/client";
 import { ShopifyConnectorError, SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { AMAZON_PROVIDER, AmazonConnectorError, isAmazonAuthRevokedError } from "@/lib/connectors/amazon/amazon-errors";
 import { GOOGLE_ADS_PROVIDER, GoogleAdsConnectorError, isGoogleAdsAuthRevokedError } from "@/lib/connectors/google-ads/google-ads-errors";
+import { META_ADS_PROVIDER } from "@/lib/ads/meta/meta-oauth";
 
 export const SHOPIFY_SYNC_INTERVAL_OPTIONS = [60, 180, 360, 720, 1440] as const;
 export const DEFAULT_SHOPIFY_SYNC_INTERVAL_MINUTES = 360;
@@ -102,7 +103,7 @@ export async function updateShopifySyncSettings(client: PrismaClient, input: {
     where: {
       workspaceId: input.workspaceId,
       dataSourceId: input.dataSourceId,
-      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER] },
+      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER, META_ADS_PROVIDER] },
       dataSource: {
         workspaceId: input.workspaceId,
         isActive: true
@@ -177,7 +178,7 @@ export async function enqueueDueShopifySyncs(client: PrismaClient, input: {
 
   const dueAccounts = await client.ecommerceConnectorAccount.findMany({
     where: {
-      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER] },
+      provider: { in: [SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER, META_ADS_PROVIDER] },
       status: "connected",
       autoSyncEnabled: true,
       dataSourceId: { not: null },

@@ -7,7 +7,7 @@ import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopi
 import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
-import { recoverAsyncJobs } from "@/lib/jobs/async-job-runner";
+import { QUEUED_ASYNC_JOB_MS, recoverAsyncJobs, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -123,13 +123,45 @@ function isActiveIngestionStatus(status: string | null | undefined) {
   return ["RUNNING", "PROCESSING", "SCHEMA_READY", "CANONICALIZING"].includes((status ?? "").toUpperCase());
 }
 
+function isStaleConnectorJob(job: {
+  status: string | null;
+  heartbeatAt?: Date | null;
+  leaseExpiresAt?: Date | null;
+  updatedAt: Date;
+}) {
+  const status = (job.status ?? "").toUpperCase();
+  const now = Date.now();
+  if (status === "QUEUED") {
+    return job.updatedAt.getTime() < now - QUEUED_ASYNC_JOB_MS;
+  }
+  if (status !== "PROCESSING" && status !== "PAUSED" && status !== "RUNNING") return false;
+  if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() < now) return true;
+  const heartbeatAt = job.heartbeatAt ?? job.updatedAt;
+  return heartbeatAt.getTime() < now - STALE_ASYNC_JOB_MS;
+}
+
+function connectorJobStatusRank(job: {
+  status: string | null;
+  heartbeatAt?: Date | null;
+  leaseExpiresAt?: Date | null;
+  updatedAt: Date;
+}) {
+  if (isStaleConnectorJob(job)) return 1;
+
+  const normalized = (job.status ?? "").toUpperCase();
+  if (normalized === "RUNNING" || normalized === "PROCESSING" || normalized === "QUEUED") return 0;
+  if (normalized === "FAILED" || normalized === "TIMEOUT") return 1;
+  if (normalized === "COMPLETED" || normalized === "SUCCESS") return 2;
+
+  return 3;
+}
+
 async function recoverStaleDataSourceJobs(workspaceId: string) {
   try {
     const [ingestionRecovery, asyncRecovery] = await Promise.all([
       recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
       recoverAsyncJobs({ workspaceId, limit: 5 })
     ]);
-
     if (
       ingestionRecovery.attempted ||
       ingestionRecovery.timedOut ||
@@ -173,6 +205,14 @@ function syncStatusFromSource(source: {
     status: string | null;
     errorMessage: string | null;
   } | null;
+  latestConnectorJob?: {
+    status: string | null;
+    errorMessage: string | null;
+    currentStep: string | null;
+    heartbeatAt?: Date | null;
+    leaseExpiresAt?: Date | null;
+    updatedAt: Date;
+  } | null;
 }): {
   syncStatus: DataSourceSyncStatus;
   statusReason: string | null;
@@ -201,9 +241,12 @@ function syncStatusFromSource(source: {
   let statusReason: string | null = source.lastErrorMessage ?? null;
   const snapshot = source.latestSnapshot ?? null;
   const latestIngestionJob = source.latestIngestionJob ?? null;
+  const latestConnectorJob = source.latestConnectorJob ?? null;
   const schemaStatus = snapshot?.schemaStatus?.toUpperCase() ?? null;
   const canonicalStatus = snapshot?.canonicalStatus?.toUpperCase() ?? null;
   const ingestionStatus = latestIngestionJob?.status?.toUpperCase() ?? null;
+  const connectorStatus = latestConnectorJob?.status?.toUpperCase() ?? null;
+  const connectorJobIsStale = latestConnectorJob ? isStaleConnectorJob(latestConnectorJob) : false;
   const hasReadyCanonicalSnapshot =
     snapshot?.status === ConnectionStatus.CONNECTED &&
     schemaStatus === "READY" &&
@@ -213,6 +256,23 @@ function syncStatusFromSource(source: {
   if (hasReadyCanonicalSnapshot) {
     syncStatus = "CONNECTED";
     statusReason = null;
+  } else if (connectorJobIsStale) {
+    syncStatus = "FAILED_SYNC";
+    statusReason =
+      latestConnectorJob?.errorMessage ??
+      "Connector sync stopped before completion. Retry sync to resume processing.";
+  } else if (connectorStatus === "QUEUED") {
+    syncStatus = "QUEUED";
+    statusReason = latestConnectorJob?.currentStep ?? "Connector sync is waiting to start.";
+  } else if (connectorStatus === "RUNNING" || connectorStatus === "PROCESSING") {
+    syncStatus = "RUNNING";
+    statusReason = latestConnectorJob?.currentStep ?? "Connector sync is running.";
+  } else if (connectorStatus === "FAILED") {
+    syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
+    statusReason =
+      latestConnectorJob?.errorMessage ??
+      source.lastErrorMessage ??
+      "Connector sync failed. Retry sync to resume processing.";
   } else if (schemaStatus === "PROCESSING" || canonicalStatus === "GENERATING") {
     if (ingestionStatus === "QUEUED") {
       syncStatus = "QUEUED";
@@ -554,6 +614,47 @@ export async function GET(request: Request) {
         latestIngestionJobBySourceId.set(job.dataSourceId, job);
       }
     }
+    const latestConnectorJobs = dataSources.length
+      ? await prisma.asyncJob.findMany({
+          where: {
+            workspaceId: session.workspace.id,
+            type: "SYNC_CONNECTOR"
+          },
+          select: {
+            id: true,
+            status: true,
+            currentStep: true,
+            errorMessage: true,
+            heartbeatAt: true,
+            leaseExpiresAt: true,
+            payload: true,
+            updatedAt: true
+          },
+          orderBy: {
+            updatedAt: "desc"
+          },
+          take: 100
+        })
+      : [];
+    const sourceIds = new Set(dataSources.map((source) => source.id));
+    const latestConnectorJobBySourceId = new Map<string, typeof latestConnectorJobs[number]>();
+    for (const job of latestConnectorJobs) {
+      const payload = asRecord(job.payload);
+      const dataSourceId = typeof payload?.dataSourceId === "string" ? payload.dataSourceId : null;
+      if (!dataSourceId || !sourceIds.has(dataSourceId)) continue;
+
+      const current = latestConnectorJobBySourceId.get(dataSourceId);
+      if (
+        !current ||
+        connectorJobStatusRank(job) < connectorJobStatusRank(current) ||
+        (
+          connectorJobStatusRank(job) === connectorJobStatusRank(current) &&
+          job.updatedAt > current.updatedAt
+        )
+      ) {
+        latestConnectorJobBySourceId.set(dataSourceId, job);
+      }
+    }
     const deletedDataSources = includeDeleted
       ? await prisma.dataSourceConnection.findMany({
           where: {
@@ -613,7 +714,8 @@ export async function GET(request: Request) {
       const detailedStatus = syncStatusFromSource({
         ...source,
         latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null,
-        latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null
+        latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null,
+        latestConnectorJob: latestConnectorJobBySourceId.get(source.id) ?? null
       });
       const latestIngestionJob = latestIngestionJobBySourceId.get(source.id) ?? null;
       const connectorAccount = source.ecommerceConnectorAccounts?.[0] ?? null;

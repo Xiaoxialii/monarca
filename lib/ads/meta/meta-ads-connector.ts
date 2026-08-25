@@ -2,6 +2,8 @@ import type { CanonicalMappedRecord } from "@/lib/semantic/mapper/canonical-sche
 
 const DEFAULT_META_API_VERSION = "v20.0";
 const META_GRAPH_BASE = "https://graph.facebook.com";
+const DEFAULT_META_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_META_FETCH_RETRIES = 2;
 
 export type MetaAdsInsight = {
   campaign_id?: string;
@@ -47,6 +49,8 @@ export type MetaAdsConnectorOptions = {
   adAccountId: string;
   apiVersion?: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  retries?: number;
 };
 
 export class MetaAdsConnector {
@@ -54,6 +58,8 @@ export class MetaAdsConnector {
   private readonly adAccountId: string;
   private readonly apiVersion: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly retries: number;
 
   constructor(options: MetaAdsConnectorOptions) {
     if (!options.accessToken) throw new Error("Meta access token is required.");
@@ -63,25 +69,46 @@ export class MetaAdsConnector {
     this.adAccountId = normalizeAdAccountId(options.adAccountId);
     this.apiVersion = options.apiVersion || process.env.META_MARKETING_API_VERSION || DEFAULT_META_API_VERSION;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? numberFromEnv(process.env.META_MARKETING_API_TIMEOUT_MS, DEFAULT_META_FETCH_TIMEOUT_MS);
+    this.retries = options.retries ?? numberFromEnv(process.env.META_MARKETING_API_RETRIES, DEFAULT_META_FETCH_RETRIES);
+  }
+
+  async fetchAccount() {
+    return this.singleGet(`/${this.adAccountId}`, {
+      fields: "id,account_id,name,currency,timezone_name,account_status,business_name"
+    });
   }
 
   async fetchCampaigns() {
     return this.paginatedGet(`/${this.adAccountId}/campaigns`, {
-      fields: "id,name,status,effective_status,created_time,updated_time",
+      fields: "id,name,objective,buying_type,status,effective_status,start_time,stop_time,created_time,updated_time",
       limit: "100"
     });
   }
 
   async fetchAdSets() {
     return this.paginatedGet(`/${this.adAccountId}/adsets`, {
-      fields: "id,name,campaign_id,status,effective_status,created_time,updated_time",
+      fields: "id,name,campaign_id,optimization_goal,billing_event,bid_strategy,daily_budget,lifetime_budget,targeting,promoted_object,status,effective_status,created_time,updated_time",
       limit: "100"
     });
   }
 
   async fetchAds() {
     return this.paginatedGet(`/${this.adAccountId}/ads`, {
-      fields: "id,name,campaign_id,adset_id,status,effective_status,created_time,updated_time",
+      fields: [
+        "id",
+        "name",
+        "campaign_id",
+        "adset_id",
+        "status",
+        "effective_status",
+        "created_time",
+        "updated_time",
+        "tracking_specs",
+        "url_tags",
+        "preview_shareable_link",
+        "creative{id,name,object_type,object_story_spec,asset_feed_spec,image_hash,image_url,thumbnail_url,video_id,video_thumbnail_url,body,title,description,call_to_action_type,effective_object_story_id,instagram_actor_id,product_set_id,template_url_spec,url_tags}"
+      ].join(","),
       limit: "100"
     });
   }
@@ -101,9 +128,19 @@ export class MetaAdsConnector {
         "ad_name",
         "spend",
         "impressions",
+        "reach",
+        "frequency",
         "clicks",
+        "inline_link_clicks",
+        "outbound_clicks",
+        "cpm",
+        "cpc",
+        "ctr",
         "actions",
         "action_values",
+        "conversions",
+        "purchase_roas",
+        "attribution_setting",
         "date_start",
         "date_stop"
       ].join(","),
@@ -114,12 +151,28 @@ export class MetaAdsConnector {
     });
   }
 
+  private async singleGet<T = Record<string, unknown>>(path: string, params: Record<string, string>) {
+    const response = await this.fetchWithRetry(this.url(path, params), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`
+      }
+    });
+    const payload = await response.json().catch(() => null) as (T & MetaGraphPage<T>) | null;
+
+    if (!response.ok) {
+      throw new Error(metaErrorMessage(payload, response.status));
+    }
+
+    return (payload ?? {}) as T;
+  }
+
   private async paginatedGet<T = Record<string, unknown>>(path: string, params: Record<string, string>) {
     const rows: T[] = [];
     let nextUrl: string | null = this.url(path, params);
 
     while (nextUrl) {
-      const response = await this.fetchImpl(nextUrl, {
+      const response = await this.fetchWithRetry(nextUrl, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${this.accessToken}`
@@ -145,6 +198,38 @@ export class MetaAdsConnector {
     }
 
     return url.toString();
+  }
+
+  private async fetchWithRetry(url: string, init: RequestInit) {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= this.retries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const response = await this.fetchImpl(url, {
+          ...init,
+          signal: controller.signal
+        });
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt < this.retries) {
+            await delay(backoffMs(attempt));
+            continue;
+          }
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.retries) break;
+        await delay(backoffMs(attempt));
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    const message = lastError instanceof Error ? lastError.message : "Meta Marketing API request failed.";
+    throw new Error(`META_ADS_NETWORK_ERROR: ${message}`);
   }
 }
 
@@ -214,6 +299,19 @@ export function metaInsightsToCanonicalMappedRecords(insights: MetaAdsInsight[])
 
 function normalizeAdAccountId(value: string) {
   return value.startsWith("act_") ? value : `act_${value}`;
+}
+
+function numberFromEnv(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function backoffMs(attempt: number) {
+  return Math.min(5_000, 500 * Math.pow(2, attempt));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function metaErrorMessage(payload: MetaGraphPage<unknown> | null, status: number) {

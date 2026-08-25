@@ -18498,7 +18498,7 @@ export function Dashboard({
       const cachedSources =
         readConnectedSourcesMemoryCache(currentWorkspaceId, currentUserId) ??
         readConnectedSourcesBrowserCache(currentWorkspaceId, currentUserId);
-      if (cachedSources) {
+      if (cachedSources && cachedSources.length > 0) {
         const filteredCachedSources = withoutLocallyRemovedSources(cachedSources);
         connectedSourcesWorkspaceIdCache = currentWorkspaceId;
         connectedSourcesUserIdCache = currentUserId;
@@ -18507,7 +18507,7 @@ export function Dashboard({
         setIsLoadingConnectedSources(false);
       }
 
-      void loadConnectedSources({ silent: Boolean(cachedSources) });
+      void loadConnectedSources({ silent: Boolean(cachedSources?.length) });
     };
 
     void hydrateWorkspaceSources();

@@ -17,6 +17,8 @@ import { AMAZON_PROVIDER } from "@/lib/connectors/amazon/amazon-errors";
 import { runAmazonProductionSync } from "@/lib/connectors/amazon/amazon-sync";
 import { GOOGLE_ADS_PROVIDER } from "@/lib/connectors/google-ads/google-ads-errors";
 import { runGoogleAdsProductionSync } from "@/lib/connectors/google-ads/google-ads-sync";
+import { META_ADS_PROVIDER } from "@/lib/ads/meta/meta-oauth";
+import { runMetaAdsProductionSync } from "@/lib/ads/meta/meta-sync-engine";
 import {
   collectDecisionExecutionMetric,
   evaluateDecisionOutcome
@@ -868,9 +870,10 @@ async function processConnectorSyncAsyncJob(
   const dataSourceId = typeof input.payload.dataSourceId === "string" ? input.payload.dataSourceId : null;
   const connectorAccountId = typeof input.payload.connectorAccountId === "string" ? input.payload.connectorAccountId : null;
   const shopDomain = typeof input.payload.shopDomain === "string" ? input.payload.shopDomain : null;
-  const trigger = input.payload.trigger === "scheduled" ? "scheduled" : "manual";
+  const trigger = input.payload.trigger === "scheduled" ? "scheduled" : input.payload.trigger === "meta_oauth_callback" ? "meta_oauth_callback" : "manual";
+  const standardTrigger = trigger === "scheduled" ? "scheduled" : "manual";
 
-  if (!provider || ![SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER].includes(provider) || !dataSourceId || !connectorAccountId || !shopDomain) {
+  if (!provider || ![SHOPIFY_PROVIDER, AMAZON_PROVIDER, GOOGLE_ADS_PROVIDER, META_ADS_PROVIDER].includes(provider) || !dataSourceId || !connectorAccountId || !shopDomain) {
     throw new Error("Connector sync job payload is incomplete.");
   }
 
@@ -910,20 +913,25 @@ async function processConnectorSyncAsyncJob(
       ? await runAmazonProductionSync(client, {
           workspaceId: input.workspaceId,
           dataSourceId,
-          trigger,
+          trigger: standardTrigger,
           force: false
         })
       : provider === GOOGLE_ADS_PROVIDER
         ? await runGoogleAdsProductionSync(client, {
             workspaceId: input.workspaceId,
             dataSourceId,
-            trigger,
+            trigger: standardTrigger,
             force: false
           })
+        : provider === META_ADS_PROVIDER
+          ? await runMetaAdsProductionSync(client, {
+              workspaceId: input.workspaceId,
+              dataSourceId
+            })
         : await runShopifyProductionSync(client, {
             workspaceId: input.workspaceId,
             dataSourceId,
-            trigger,
+            trigger: standardTrigger,
             force: false
           });
     const downstreamJobId = "downstreamJobId" in result ? result.downstreamJobId ?? null : null;
@@ -957,7 +965,14 @@ async function processConnectorSyncAsyncJob(
           };
         });
 
-    console.info(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_SUCCESS" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_SUCCESS" : "SHOPIFY_SYNC_SUCCESS", {
+    const syncSuccessLabel = provider === AMAZON_PROVIDER
+      ? "AMAZON_SYNC_SUCCESS"
+      : provider === GOOGLE_ADS_PROVIDER
+        ? "GOOGLE_ADS_SYNC_SUCCESS"
+        : provider === META_ADS_PROVIDER
+          ? "META_ADS_SYNC_SUCCESS"
+          : "SHOPIFY_SYNC_SUCCESS";
+    console.info(syncSuccessLabel, {
       workspaceId: input.workspaceId,
       dataSourceId,
       connectorAccountId,
@@ -990,7 +1005,14 @@ async function processConnectorSyncAsyncJob(
       }
     };
   } catch (error) {
-    console.error(provider === AMAZON_PROVIDER ? "AMAZON_SYNC_FAILED" : provider === GOOGLE_ADS_PROVIDER ? "GOOGLE_ADS_SYNC_FAILED" : "SHOPIFY_SYNC_FAILED", {
+    const syncFailedLabel = provider === AMAZON_PROVIDER
+      ? "AMAZON_SYNC_FAILED"
+      : provider === GOOGLE_ADS_PROVIDER
+        ? "GOOGLE_ADS_SYNC_FAILED"
+        : provider === META_ADS_PROVIDER
+          ? "META_ADS_SYNC_FAILED"
+          : "SHOPIFY_SYNC_FAILED";
+    console.error(syncFailedLabel, {
       workspaceId: input.workspaceId,
       dataSourceId,
       connectorAccountId,

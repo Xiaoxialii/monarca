@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { ConnectionStatus } from "@prisma/client";
 import { writeR2ObjectText } from "@/lib/r2-storage";
 import {
@@ -9,6 +9,12 @@ import {
 } from "@/lib/ads/meta/meta-ads-connector";
 import { META_ADS_PROVIDER } from "@/lib/ads/meta/meta-oauth";
 import { decryptConnectorToken } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { normalizeMetaCreativeIntelligence } from "@/lib/ads/creative-intelligence/meta-creative-normalizer";
+import {
+  persistCreativeIntelligenceDataset,
+  recomputeCreativeProfitSnapshots,
+  runAutomaticCreativeMappings
+} from "@/lib/ads/creative-intelligence/store";
 import {
   buildCanonicalSnapshotJson,
   storeCanonicalSchemaSnapshot
@@ -18,6 +24,7 @@ import type { CanonicalDataset } from "@/lib/semantic/types";
 
 const SCHEMA_VERSION = "ecommerce_canonical_v1";
 const DEFAULT_SYNC_DAYS = 30;
+const ACTIVE_SYNC_RUN_MAX_AGE_MS = 10 * 60 * 1000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -115,13 +122,15 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
       }
     },
     select: {
+      id: true,
       syncRunId: true,
       status: true,
-      manifestKey: true
+      manifestKey: true,
+      startedAt: true
     }
   });
 
-  if (existingRun?.status === "running" || existingRun?.status === "success") {
+  if (existingRun?.status === "success") {
     return {
       ok: true,
       reused: true,
@@ -130,22 +139,54 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
       manifestKey: existingRun.manifestKey
     };
   }
-
-  const syncRunId = `meta_sync_${crypto.randomUUID()}`;
-  const syncRun = await prisma.ecommerceSyncRun.create({
-    data: {
-      workspaceId: input.workspaceId,
-      dataSourceId: account.dataSourceId,
-      connectorAccountId: account.id,
-      provider: META_ADS_PROVIDER,
-      shopDomain: adAccountId,
-      syncRunId,
-      idempotencyKey,
-      status: "running",
-      syncWindowStart,
-      syncWindowEnd
+  if (existingRun?.status === "running") {
+    const ageMs = syncWindowEnd.getTime() - existingRun.startedAt.getTime();
+    if (ageMs < ACTIVE_SYNC_RUN_MAX_AGE_MS) {
+      throw new Error("META_SYNC_ALREADY_RUNNING");
     }
-  });
+
+    await prisma.ecommerceSyncRun.update({
+      where: { id: existingRun.id },
+      data: {
+        status: "failed",
+        errorMessage: "Previous Meta sync run became stale before completion.",
+        finishedAt: new Date()
+      }
+    });
+  }
+
+  const syncRun = existingRun
+    ? await prisma.ecommerceSyncRun.update({
+        where: { id: existingRun.id },
+        data: {
+          status: "running",
+          rowsPulled: 0,
+          rowsNormalized: 0,
+          rowsRejected: 0,
+          manifestKey: null,
+          errorMessage: null,
+          cursorJson: Prisma.JsonNull,
+          startedAt: new Date(),
+          finishedAt: null,
+          syncWindowStart,
+          syncWindowEnd
+        }
+      })
+    : await prisma.ecommerceSyncRun.create({
+        data: {
+          workspaceId: input.workspaceId,
+          dataSourceId: account.dataSourceId,
+          connectorAccountId: account.id,
+          provider: META_ADS_PROVIDER,
+          shopDomain: adAccountId,
+          syncRunId: `meta_sync_${crypto.randomUUID()}`,
+          idempotencyKey,
+          status: "running",
+          syncWindowStart,
+          syncWindowEnd
+        }
+      });
+  const syncRunId = syncRun.syncRunId;
 
   try {
     const accessToken = decryptConnectorToken(account.encryptedAccessToken);
@@ -154,7 +195,8 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
       adAccountId
     });
 
-    const [campaigns, adsets, ads, insights] = await Promise.all([
+    const [metaAccount, campaigns, adsets, ads, insights] = await Promise.all([
+      connector.fetchAccount(),
       connector.fetchCampaigns(),
       connector.fetchAdSets(),
       connector.fetchAds(),
@@ -167,6 +209,18 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
 
     const canonicalRows = normalizeMetaInsightsToCanonicalAds(insights);
     const canonicalDataset = buildMetaCanonicalDataset(insights);
+    const creativeDataset = normalizeMetaCreativeIntelligence({
+      workspaceId: input.workspaceId,
+      dataSourceId: account.dataSourceId,
+      sourceAccountId: adAccountId,
+      adAccountId,
+      account: metaAccount,
+      campaigns,
+      adsets,
+      ads,
+      insights,
+      currency: stringValue(config.currency)
+    });
     const latestBusinessDate = latestDate(canonicalRows.map((row) => row.date));
     const baseKey = [
       "workspaces",
@@ -178,6 +232,7 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
     ].join("/");
 
     const rawArtifacts = {
+      account: await writeArtifact(`${baseKey}/raw/account.jsonl`, [metaAccount]),
       campaigns: await writeArtifact(`${baseKey}/raw/campaigns.jsonl`, campaigns),
       adsets: await writeArtifact(`${baseKey}/raw/adsets.jsonl`, adsets),
       ads: await writeArtifact(`${baseKey}/raw/ads.jsonl`, ads),
@@ -251,6 +306,24 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
     });
 
     await prisma.$transaction(async (tx) => {
+      const creativePersistence = await persistCreativeIntelligenceDataset(tx, {
+        dataset: creativeDataset,
+        lastSyncedAt: syncWindowEnd
+      });
+      const mappingResult = await runAutomaticCreativeMappings(tx, {
+        workspaceId: input.workspaceId,
+        provider: META_ADS_PROVIDER,
+        dataSourceId: account.dataSourceId!,
+        sourceAccountId: adAccountId
+      });
+      const profitSnapshots = await recomputeCreativeProfitSnapshots(tx, {
+        workspaceId: input.workspaceId,
+        provider: META_ADS_PROVIDER,
+        dataSourceId: account.dataSourceId!,
+        sourceAccountId: adAccountId,
+        dateWindowStart: syncWindowStart,
+        dateWindowEnd: syncWindowEnd
+      });
       await tx.ecommerceSyncArtifact.createMany({
         data: allArtifacts.map((item) => ({
           workspaceId: input.workspaceId,
@@ -273,11 +346,17 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
           status: "success",
           cursorJson: {
             syncWindowStart: syncWindowStart.toISOString(),
-            syncWindowEnd: syncWindowEnd.toISOString()
+            syncWindowEnd: syncWindowEnd.toISOString(),
+            creativeIntelligence: {
+              ...creativePersistence,
+              autoMappingsEvaluated: mappingResult.evaluated,
+              profitSnapshotsGenerated: profitSnapshots.generated,
+              rejectedCreatives: creativeDataset.rejectedCreatives
+            }
           },
           rowsPulled: manifest.quality_summary.raw_rows,
-          rowsNormalized: normalizedArtifacts.ecommerce_ads.rowCount,
-          rowsRejected: 0,
+          rowsNormalized: normalizedArtifacts.ecommerce_ads.rowCount + creativePersistence.performanceDaily + creativePersistence.creatives + creativePersistence.assets,
+          rowsRejected: creativeDataset.rejectedCreatives.length,
           manifestKey: manifest.manifest_key,
           finishedAt: new Date()
         }
@@ -336,7 +415,15 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
             latestBusinessDate,
             checksum: manifest.checksum,
             schemaSnapshotId: snapshot.id,
-            qualitySummary: manifest.quality_summary
+            qualitySummary: {
+              ...manifest.quality_summary,
+              creativeIntelligence: {
+                ...creativePersistence,
+                autoMappingsEvaluated: mappingResult.evaluated,
+                profitSnapshotsGenerated: profitSnapshots.generated,
+                rejectedCreatives: creativeDataset.rejectedCreatives.length
+              }
+            }
           } as Prisma.InputJsonValue
         }
       });
@@ -353,7 +440,12 @@ export async function runMetaAdsProductionSync(prisma: PrismaClient, input: {
         adsets: adsets.length,
         ads: ads.length,
         insights: insights.length,
-        ecommerce_ads: canonicalDataset.tables.ecommerce_ads?.length ?? 0
+        ecommerce_ads: canonicalDataset.tables.ecommerce_ads?.length ?? 0,
+        creative_intelligence_ads: creativeDataset.ads.length,
+        creative_intelligence_creatives: creativeDataset.creatives.length,
+        creative_intelligence_assets: creativeDataset.assets.length,
+        creative_intelligence_performance_daily: creativeDataset.performanceDaily.length,
+        rejected_creatives: creativeDataset.rejectedCreatives.length
       }
     };
   } catch (error) {

@@ -206,6 +206,68 @@ enum StorePartnershipFulfillmentCapability {
   UNSURE_DISCUSS
 }
 
+enum CreativeAttributionLevel {
+  AD
+  CREATIVE
+  ASSET
+  ASSET_GROUP
+  NOT_SEPARATELY_ATTRIBUTABLE
+}
+
+enum CreativeAssetType {
+  IMAGE
+  VIDEO
+  PRIMARY_TEXT
+  HEADLINE
+  DESCRIPTION
+  CTA
+  CAROUSEL_CARD
+  OTHER
+}
+
+enum CreativeAssetStatus {
+  ACTIVE
+  ARCHIVED
+  NOT_SEPARATELY_ATTRIBUTABLE
+}
+
+enum AdvertisingMappingStatus {
+  AUTO_CONFIRMED
+  NEEDS_REVIEW
+  MANUALLY_CONFIRMED
+  REJECTED
+  UNMAPPED
+  AMBIGUOUS
+}
+
+enum AdvertisingMappingMethod {
+  CATALOG_PRODUCT_ID
+  SHOPIFY_PRODUCT_ID
+  SHOPIFY_VARIANT_ID
+  GOOGLE_MERCHANT_ITEM_ID
+  LANDING_PAGE_URL
+  URL_PRODUCT_HANDLE
+  UTM_SKU
+  URL_SKU_PARAMETER
+  AD_NAME_SKU
+  CREATIVE_NAME_SKU
+  DESTINATION_URL
+  MANUAL
+  MULTI_PRODUCT_AD
+  UNKNOWN
+}
+
+enum CreativeAnalysisReadiness {
+  READY_FOR_CREATIVE_ANALYSIS
+  INSUFFICIENT_DATA
+  UNMAPPED_SKU
+  LOW_ATTRIBUTION_CONFIDENCE
+  MULTI_ASSET_NOT_ATTRIBUTABLE
+  MISSING_COST_DATA
+  INVENTORY_CONSTRAINED
+  LEARNING
+}
+
 model User {
   id                  String             @id @default(cuid())
   clerkUserId         String             @unique
@@ -290,6 +352,17 @@ model Workspace {
   snapshots                   Snapshot[]
   backgroundJobs              BackgroundJob[]
   unifiedIngestionJobs        UnifiedIngestionJob[]
+  advertisingAccounts         AdvertisingAccount[]
+  advertisingCampaigns        AdvertisingCampaign[]
+  advertisingAdSets           AdvertisingAdSet[]
+  advertisingAds              AdvertisingAd[]
+  advertisingCreatives        AdvertisingCreative[]
+  advertisingCreativeAssets   AdvertisingCreativeAsset[]
+  advertisingCreativeAssetLinks AdvertisingCreativeAssetLink[]
+  advertisingPerformanceDaily AdvertisingPerformanceDaily[]
+  advertisingProductMappings  AdvertisingProductMapping[]
+  advertisingProductMappingAudits AdvertisingProductMappingAudit[]
+  advertisingProfitSnapshots  AdvertisingProfitSnapshot[]
 }
 
 model SemanticMappingMemory {
@@ -381,6 +454,15 @@ model DataSourceConnection {
   ecommerceSyncRuns          EcommerceSyncRun[]
   ecommerceSyncArtifacts     EcommerceSyncArtifact[]
   googleAdsConnections       GoogleAdsConnection[]
+  advertisingAccounts        AdvertisingAccount[]
+  advertisingCampaigns       AdvertisingCampaign[]
+  advertisingAdSets          AdvertisingAdSet[]
+  advertisingAds             AdvertisingAd[]
+  advertisingCreatives       AdvertisingCreative[]
+  advertisingCreativeAssets  AdvertisingCreativeAsset[]
+  advertisingPerformanceDaily AdvertisingPerformanceDaily[]
+  advertisingProductMappings AdvertisingProductMapping[]
+  advertisingProfitSnapshots AdvertisingProfitSnapshot[]
 
   @@index([workspaceId, status])
   @@index([workspaceId, contentHash])
@@ -516,6 +598,367 @@ model EcommerceSyncArtifact {
   @@unique([syncRunId, artifactKey])
   @@index([workspaceId, dataSourceId, provider])
   @@index([syncRunId])
+}
+
+model AdvertisingAccount {
+  id              String               @id @default(cuid())
+  workspaceId     String
+  dataSourceId    String
+  provider        String
+  sourceAccountId String
+  adAccountId     String
+  accountName     String?
+  currency        String?
+  timezone        String?
+  status          String?
+  metadataJson    Json?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource      DataSourceConnection @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, adAccountId], map: "ad_acct_identity_key")
+  @@index([workspaceId, dataSourceId, provider], map: "ad_acct_source_idx")
+  @@index([workspaceId, provider, status], map: "ad_acct_status_idx")
+}
+
+model AdvertisingCampaign {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  dataSourceId     String
+  provider         String
+  sourceAccountId  String
+  adAccountId      String
+  sourceCampaignId String
+  campaignName     String?
+  objective        String?
+  buyingType       String?
+  status           String?
+  effectiveStatus  String?
+  startTime        DateTime?
+  stopTime         DateTime?
+  metadataJson     Json?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource       DataSourceConnection @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceCampaignId], map: "ad_campaign_identity_key")
+  @@index([workspaceId, dataSourceId, provider], map: "ad_campaign_source_idx")
+  @@index([workspaceId, provider, effectiveStatus], map: "ad_campaign_status_idx")
+}
+
+model AdvertisingAdSet {
+  id                String               @id @default(cuid())
+  workspaceId       String
+  dataSourceId      String
+  provider          String
+  sourceAccountId   String
+  sourceCampaignId  String
+  sourceAdSetId     String
+  adSetName         String?
+  optimizationGoal  String?
+  billingEvent      String?
+  bidStrategy       String?
+  dailyBudget       Float?
+  lifetimeBudget    Float?
+  targetingSummary  Json?
+  promotedObject    Json?
+  status            String?
+  effectiveStatus   String?
+  metadataJson      Json?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource        DataSourceConnection @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceAdSetId], map: "ad_set_identity_key")
+  @@index([workspaceId, provider, sourceCampaignId], map: "ad_set_campaign_idx")
+  @@index([workspaceId, dataSourceId, provider], map: "ad_set_source_idx")
+}
+
+model AdvertisingAd {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  dataSourceId         String
+  provider             String
+  sourceAccountId      String
+  sourceCampaignId     String?
+  sourceAdSetId        String?
+  sourceAdId           String
+  sourceCreativeId     String?
+  adName               String?
+  status               String?
+  effectiveStatus      String?
+  createdTime          DateTime?
+  updatedTime          DateTime?
+  previewUrl           String?
+  finalUrl             String?
+  trackingParameters   Json?
+  urlTags              String?
+  sourcePayloadHash    String?
+  metadataJson         Json?
+  lastSyncedAt         DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource           DataSourceConnection @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceAdId], map: "ad_identity_key")
+  @@index([workspaceId, provider, sourceCampaignId], map: "ad_campaign_idx")
+  @@index([workspaceId, provider, sourceAdSetId], map: "ad_adset_idx")
+  @@index([workspaceId, provider, sourceCreativeId], map: "ad_creative_idx")
+}
+
+model AdvertisingCreative {
+  id                    String               @id @default(cuid())
+  workspaceId           String
+  dataSourceId          String
+  provider              String
+  sourceAccountId       String
+  sourceCreativeId      String
+  creativeName          String?
+  creativeFormat        String?
+  objectStorySpec       Json?
+  assetFeedSpec         Json?
+  imageHash             String?
+  imageUrl              String?
+  thumbnailUrl          String?
+  videoId               String?
+  videoThumbnailUrl     String?
+  primaryText           String?
+  headline              String?
+  description           String?
+  callToAction          String?
+  destinationUrl        String?
+  pageId                String?
+  instagramActorId      String?
+  catalogReference      Json?
+  sourcePayloadHash     String?
+  metadataJson          Json?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  workspace             Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource            DataSourceConnection @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceCreativeId], map: "ad_creative_identity_key")
+  @@index([workspaceId, dataSourceId, provider], map: "ad_creative_source_idx")
+  @@index([workspaceId, provider, creativeFormat], map: "ad_creative_format_idx")
+}
+
+model AdvertisingCreativeAsset {
+  id                String                      @id @default(cuid())
+  workspaceId       String
+  dataSourceId      String
+  provider          String
+  sourceAccountId   String
+  sourceCreativeId  String?
+  sourceAssetId     String
+  assetType         CreativeAssetType
+  role              String?
+  textContent       String?
+  imageUrl          String?
+  thumbnailUrl      String?
+  videoId           String?
+  contentHash       String
+  sourcePayloadHash String?
+  metadataJson      Json?
+  status            CreativeAssetStatus         @default(ACTIVE)
+  firstSeenAt       DateTime                    @default(now())
+  lastSeenAt        DateTime                    @default(now())
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  workspace         Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource        DataSourceConnection        @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  links             AdvertisingCreativeAssetLink[]
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceAssetId, contentHash], map: "ad_asset_identity_key")
+  @@index([workspaceId, dataSourceId, provider], map: "ad_asset_source_idx")
+  @@index([workspaceId, provider, assetType], map: "ad_asset_type_idx")
+  @@index([workspaceId, provider, contentHash], map: "ad_asset_hash_idx")
+}
+
+model AdvertisingCreativeAssetLink {
+  id                String                  @id @default(cuid())
+  workspaceId       String
+  provider          String
+  sourceAccountId   String
+  sourceAdId        String?
+  sourceCreativeId  String
+  creativeAssetId   String
+  assetRole         String?
+  position          Int?
+  validFrom         DateTime                @default(now())
+  validTo           DateTime?
+  isActive          Boolean                 @default(true)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  workspace         Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creativeAsset     AdvertisingCreativeAsset @relation(fields: [creativeAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceAdId, sourceCreativeId, creativeAssetId, assetRole, position], map: "ad_asset_link_identity_key")
+  @@index([workspaceId, provider, sourceAdId], map: "ad_asset_link_ad_idx")
+  @@index([workspaceId, provider, sourceCreativeId], map: "ad_asset_link_creative_idx")
+  @@index([workspaceId, creativeAssetId], map: "ad_asset_link_asset_idx")
+}
+
+model AdvertisingPerformanceDaily {
+  id                     String                   @id @default(cuid())
+  workspaceId            String
+  dataSourceId           String
+  provider               String
+  sourceAccountId        String
+  sourceCampaignId       String?
+  sourceAdSetId          String?
+  sourceAdId             String?
+  sourceCreativeId       String?
+  creativeAssetId        String?
+  date                   DateTime
+  attributionLevel       CreativeAttributionLevel
+  attributionConfidence  Float                    @default(1)
+  attributionMethod      String
+  sourceMetricScope      String
+  impressions            Int?
+  reach                  Int?
+  frequency              Float?
+  clicks                 Int?
+  inlineLinkClicks       Int?
+  outboundClicks         Int?
+  spend                  Float?
+  cpm                    Float?
+  cpc                    Float?
+  ctr                    Float?
+  conversions            Float?
+  purchases              Float?
+  purchaseConversionValue Float?
+  addToCart              Float?
+  initiateCheckout       Float?
+  landingPageViews       Float?
+  attributedRevenue      Float?
+  attributionWindow      String?
+  currency               String?
+  rawMetricsJson         Json?
+  derivedMetricsJson     Json?
+  sourcePayloadHash      String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  workspace              Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource             DataSourceConnection     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceMetricScope, attributionLevel, date, sourceCampaignId, sourceAdSetId, sourceAdId, sourceCreativeId, creativeAssetId], map: "ad_perf_daily_identity_key")
+  @@index([workspaceId, dataSourceId, provider, date], map: "ad_perf_daily_source_idx")
+  @@index([workspaceId, provider, sourceAdId, date], map: "ad_perf_daily_ad_idx")
+  @@index([workspaceId, provider, sourceCreativeId, date], map: "ad_perf_daily_creative_idx")
+}
+
+model AdvertisingProductMapping {
+  id                    String                    @id @default(cuid())
+  workspaceId           String
+  provider              String
+  dataSourceId          String
+  sourceAccountId       String
+  sourceCampaignId      String?
+  sourceAdSetId         String?
+  sourceAdId            String?
+  sourceCreativeId      String?
+  creativeAssetId       String?
+  canonicalProductId    String?
+  canonicalVariantId    String?
+  sku                   String?
+  sourceProductId       String?
+  mappingMethod         AdvertisingMappingMethod
+  mappingConfidence     Float                     @default(0)
+  evidenceJson          Json?
+  status                AdvertisingMappingStatus
+  manuallyConfirmedBy   String?
+  manuallyConfirmedAt   DateTime?
+  validFrom             DateTime                  @default(now())
+  validTo               DateTime?
+  mappingVersion        Int                       @default(1)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  workspace             Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource            DataSourceConnection      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  audits                AdvertisingProductMappingAudit[]
+
+  @@unique([workspaceId, provider, sourceAccountId, sourceAdId, sourceCreativeId, creativeAssetId, validTo], map: "ad_product_mapping_identity_key")
+  @@index([workspaceId, dataSourceId, provider, status], map: "ad_product_mapping_status_idx")
+  @@index([workspaceId, provider, sku], map: "ad_product_mapping_sku_idx")
+  @@index([workspaceId, provider, sourceAdId], map: "ad_product_mapping_ad_idx")
+}
+
+model AdvertisingProductMappingAudit {
+  id               String                     @id @default(cuid())
+  workspaceId      String
+  mappingId        String
+  action           String
+  previousStatus   AdvertisingMappingStatus?
+  nextStatus       AdvertisingMappingStatus?
+  previousValue    Json?
+  nextValue        Json?
+  actorUserId      String?
+  createdAt        DateTime                   @default(now())
+  workspace        Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mapping          AdvertisingProductMapping  @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, mappingId, createdAt], map: "ad_product_mapping_audit_idx")
+}
+
+model AdvertisingProfitSnapshot {
+  id                         String                    @id @default(cuid())
+  workspaceId                String
+  dataSourceId               String
+  provider                   String
+  sourceAccountId            String
+  sourceAdId                 String?
+  sourceCreativeId           String?
+  creativeAssetId            String?
+  sku                        String?
+  metricScope                String
+  attributionLevel           CreativeAttributionLevel
+  attributionMethod          String
+  attributionConfidence      Float                     @default(0)
+  mappingId                  String?
+  mappingVersion             Int                       @default(1)
+  profitabilityEngineVersion String
+  attributionVersion         String
+  dataVersion                String
+  dateWindowStart            DateTime
+  dateWindowEnd              DateTime
+  adSpend                    Float?
+  attributedOrders           Float?
+  attributedRevenue          Float?
+  attributedCogs             Float?
+  attributedOperatingCost    Float?
+  attributedContributionProfit Float?
+  netProfitAfterAds          Float?
+  netMargin                  Float?
+  roas                       Float?
+  contributionRoas           Float?
+  profitPerAdDollar          Float?
+  cac                        Float?
+  breakEvenRoas              Float?
+  breakEvenCpa               Float?
+  costCompleteness           Float                     @default(0)
+  readiness                  CreativeAnalysisReadiness
+  canCompareAssets           Boolean                   @default(false)
+  comparisonBlockReason      String?
+  warningsJson               Json?
+  generatedAt                DateTime                  @default(now())
+  staleAt                    DateTime?
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  workspace                  Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource                 DataSourceConnection      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, sourceAccountId, metricScope, sourceAdId, sourceCreativeId, creativeAssetId, sku, dateWindowStart, dateWindowEnd, mappingVersion, profitabilityEngineVersion, attributionVersion], map: "ad_profit_snapshot_identity_key")
+  @@index([workspaceId, dataSourceId, provider, generatedAt], map: "ad_profit_snapshot_source_idx")
+  @@index([workspaceId, provider, sku], map: "ad_profit_snapshot_sku_idx")
+  @@index([workspaceId, provider, readiness], map: "ad_profit_snapshot_ready_idx")
 }
 
 model DataSourceStats {

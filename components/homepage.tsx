@@ -1047,7 +1047,7 @@ function UseCaseSection({ copy }: { copy: HomeCopy["useCases"] }) {
       </div>
       <div className="mx-auto mt-14 max-w-5xl text-center lg:mt-20">
         <h3 className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-          {isZh ? "开始全球增长！" : "Ready for global growth?"}
+          {isZh ? "开始全球增长！" : "Ready to optimize your growth?"}
         </h3>
         <Button asChild className="mt-6 h-14 rounded-full bg-slate-950 px-8 text-base font-semibold text-white hover:bg-slate-800 sm:h-16 sm:px-10 sm:text-lg">
           <Link href="/apply">

@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 const ACTIVE_CONNECTOR_JOB_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
 
@@ -19,14 +19,13 @@ export async function enqueueConnectorSyncJob(
 ) {
   const now = new Date();
   const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
-  const staleQueuedBefore = new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
 
   await client.asyncJob.updateMany({
     where: {
       workspaceId: input.workspaceId,
       type: "SYNC_CONNECTOR",
       status: {
-        in: [...ACTIVE_CONNECTOR_JOB_STATUSES]
+        in: ["PROCESSING", "PAUSED"]
       },
       payload: {
         path: ["dataSourceId"],
@@ -34,35 +33,22 @@ export async function enqueueConnectorSyncJob(
       },
       OR: [
         {
-          status: "QUEUED",
-          updatedAt: {
-            lt: staleQueuedBefore
+          leaseExpiresAt: {
+            lt: now
           }
         },
         {
-          status: {
-            in: ["PROCESSING", "PAUSED"]
-          },
-          OR: [
-            {
-              leaseExpiresAt: {
-                lt: now
-              }
-            },
-            {
-              leaseExpiresAt: null,
-              heartbeatAt: {
-                lt: staleHeartbeatBefore
-              }
-            },
-            {
-              leaseExpiresAt: null,
-              heartbeatAt: null,
-              updatedAt: {
-                lt: staleHeartbeatBefore
-              }
-            }
-          ]
+          leaseExpiresAt: null,
+          heartbeatAt: {
+            lt: staleHeartbeatBefore
+          }
+        },
+        {
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+          updatedAt: {
+            lt: staleHeartbeatBefore
+          }
         }
       ]
     },

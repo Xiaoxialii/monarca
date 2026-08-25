@@ -7,7 +7,7 @@ import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopi
 import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
-import { QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -113,7 +113,7 @@ function currentMissingScopesFromConfig(config: Record<string, unknown> | null) 
 
 function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   if (syncStatus === "PENDING_PERMISSION" || syncStatus === "FAILED_AUTH") return "UPDATE_PERMISSION";
-  if (syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC" || syncStatus === "TIMEOUT" || syncStatus === "FAILED") return "SYNC_NOW";
+  if (syncStatus === "QUEUED" || syncStatus === "PENDING_FIRST_SYNC" || syncStatus === "FAILED_SYNC" || syncStatus === "TIMEOUT" || syncStatus === "FAILED") return "SYNC_NOW";
   if (syncStatus === "DISCONNECTED") return "RECONNECT";
 
   return null;
@@ -131,9 +131,6 @@ function isStaleConnectorJob(job: {
 }) {
   const status = (job.status ?? "").toUpperCase();
   const now = Date.now();
-  if (status === "QUEUED") {
-    return job.updatedAt.getTime() < now - QUEUED_ASYNC_JOB_MS;
-  }
   if (status !== "PROCESSING" && status !== "PAUSED" && status !== "RUNNING") return false;
   if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() < now) return true;
   const heartbeatAt = job.heartbeatAt ?? job.updatedAt;
@@ -160,7 +157,6 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
   try {
     const now = new Date();
     const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
-    const staleQueuedBefore = new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
     const staleSyncRunBefore = new Date(now.getTime() - Math.max(STALE_ASYNC_JOB_MS, 10 * 60 * 1000));
     const [ingestionRecovery, staleConnectorJobs, staleConnectorRuns] = await Promise.all([
       recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
@@ -169,39 +165,26 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
           workspaceId,
           type: "SYNC_CONNECTOR",
           status: {
-            in: ["QUEUED", "PROCESSING", "PAUSED"]
+            in: ["PROCESSING", "PAUSED"]
           },
           OR: [
             {
-              status: "QUEUED",
-              updatedAt: {
-                lt: staleQueuedBefore
+              leaseExpiresAt: {
+                lt: now
               }
             },
             {
-              status: {
-                in: ["PROCESSING", "PAUSED"]
-              },
-              OR: [
-                {
-                  leaseExpiresAt: {
-                    lt: now
-                  }
-                },
-                {
-                  leaseExpiresAt: null,
-                  heartbeatAt: {
-                    lt: staleHeartbeatBefore
-                  }
-                },
-                {
-                  leaseExpiresAt: null,
-                  heartbeatAt: null,
-                  updatedAt: {
-                    lt: staleHeartbeatBefore
-                  }
-                }
-              ]
+              leaseExpiresAt: null,
+              heartbeatAt: {
+                lt: staleHeartbeatBefore
+              }
+            },
+            {
+              leaseExpiresAt: null,
+              heartbeatAt: null,
+              updatedAt: {
+                lt: staleHeartbeatBefore
+              }
             }
           ]
         },

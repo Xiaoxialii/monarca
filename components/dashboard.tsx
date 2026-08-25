@@ -6581,7 +6581,6 @@ function sourceStatusValues(source: ConnectedSourceRow) {
 
 function sourceIsSyncing(source: ConnectedSourceRow) {
   const syncingStatuses = [
-    "QUEUED",
     "RUNNING",
     "SYNCING",
     "PROCESSING",
@@ -6602,7 +6601,6 @@ function sourceSyncProgress(source: ConnectedSourceRow) {
 
   const statuses = sourceStatusValues(source);
   const status = statuses.find((value) => [
-    "QUEUED",
     "RUNNING",
     "SYNCING",
     "PROCESSING",

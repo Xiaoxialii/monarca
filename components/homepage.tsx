@@ -1437,7 +1437,8 @@ function PricingSection({ copy }: { copy: HomeCopy["pricing"] }) {
       </section>
       <footer className="px-5 pb-14 pt-8 sm:px-8 sm:pb-16">
         <div className="mx-auto flex max-w-7xl flex-col items-end gap-2 border-t border-slate-200 pt-7 text-right text-sm font-medium text-slate-500">
-          <p>2026 Monarca AI. © 2026 All rights reserved.</p>
+          <p>Copyright © 2026 Monarca AI Ltd</p>
+          <p>乘数增长信息技术（深圳）有限公司</p>
           <Link href="/privacy" className="text-emerald-800 underline-offset-4 transition hover:text-emerald-950 hover:underline">
             {isZh ? "隐私政策与数据收集说明" : "Privacy Policy and Data Collection"}
           </Link>

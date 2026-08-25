@@ -842,7 +842,7 @@ function FeatureCards({ copy }: { copy: HomeCopy["features"] }) {
         <p className="text-xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-2xl lg:text-3xl">
           {isZh
             ? "你打造产品与品牌，我们负责把它卖向全球、卖成爆品"
-            : "You build the business. We sell them globally and turn them into bestsellers."}
+            : "We optimize how they sell-turn them into bestsellers."}
         </p>
       </div>
       <p className="mb-4 px-1 text-sm font-medium text-emerald-700 sm:text-base">{isZh ? "合作方式" : "How we work together"}</p>

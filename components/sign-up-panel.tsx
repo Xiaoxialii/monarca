@@ -1,6 +1,6 @@
 "use client";
 
-import { useSignUp as useCurrentSignUp, useUser } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
@@ -55,7 +55,7 @@ const signUpCopy = {
     incompleteSignUp: "The code was verified, but Clerk still requires: {fields}. Make these fields optional in Clerk, or add them to this sign-up form.",
     pendingVerification: "Clerk still requires verification for: {fields}. Disable email verification for username/password sign-up, or use the Email tab.",
     incompleteStatus: "The code was accepted, but sign-up is not complete yet. Clerk status: {status}.",
-    googleUnavailable: "Google sign-up is not available right now.",
+    googleUnavailable: "Unable to start Google sign-up. Please try again.",
     signInPrompt: "Already have an account?",
     signInInstead: "Sign in",
     next: "Next",
@@ -106,7 +106,7 @@ const signUpCopy = {
     incompleteSignUp: "验证码已通过，但 Clerk 注册还缺必填项：{fields}。请在 Clerk Dashboard 把这些字段改为 optional，或把注册页补上对应字段。",
     pendingVerification: "Clerk 还要求继续验证：{fields}。用户名密码注册不发送验证码，请在 Clerk 关闭邮箱验证要求，或改用邮箱注册。",
     incompleteStatus: "验证码已通过，但注册还没有完成。Clerk 当前状态：{status}。",
-    googleUnavailable: "当前无法使用 Google 注册。",
+    googleUnavailable: "无法启动 Google 注册，请重试。",
     signInPrompt: "已有账号？",
     signInInstead: "登录",
     next: "下一步",
@@ -136,35 +136,6 @@ function completeSignUpRedirect(path: string) {
   if (typeof window !== "undefined") {
     window.location.assign(path);
   }
-}
-
-function findClerkRedirectUrl(value: unknown, depth = 0): string | null {
-  if (depth > 4 || !value) return null;
-
-  if (typeof value === "string") {
-    return /^https?:\/\//i.test(value) || value.startsWith("/") ? value : null;
-  }
-
-  if (value instanceof URL) {
-    return value.toString();
-  }
-
-  if (typeof value !== "object") return null;
-
-  const record = value as Record<string, unknown>;
-  for (const [key, nestedValue] of Object.entries(record)) {
-    if (/redirect|url/i.test(key)) {
-      const redirectUrl = findClerkRedirectUrl(nestedValue, depth + 1);
-      if (redirectUrl) return redirectUrl;
-    }
-  }
-
-  for (const nestedValue of Object.values(record)) {
-    const redirectUrl = findClerkRedirectUrl(nestedValue, depth + 1);
-    if (redirectUrl) return redirectUrl;
-  }
-
-  return null;
 }
 
 function isValidUsername(username: string) {
@@ -251,7 +222,6 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, signUp, setActive } = useSignUp();
-  const { fetchStatus: currentSignUpFetchStatus, signUp: currentSignUp } = useCurrentSignUp();
   const [mode, setMode] = useState<"email" | "password">("email");
   const [emailAddress, setEmailAddress] = useState("");
   const [username, setUsername] = useState("");
@@ -332,27 +302,17 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
   }
 
   async function startGoogleSignUp() {
-    if (currentSignUpFetchStatus === "fetching" || isGoogleRedirecting) return;
+    if (!isLoaded || isGoogleRedirecting) return;
 
     setError("");
     setIsGoogleRedirecting(true);
 
     try {
-      const ssoResult = await currentSignUp.sso({
+      await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectCallbackUrl: "/sign-up/sso-callback",
-        redirectUrl: authRedirectPath(searchParams)
+        redirectUrl: "/sign-up/sso-callback",
+        redirectUrlComplete: authRedirectPath(searchParams)
       });
-
-      const redirectUrl = findClerkRedirectUrl(ssoResult);
-      if (redirectUrl && typeof window !== "undefined") {
-        window.location.assign(redirectUrl);
-        return;
-      }
-
-      if (ssoResult.error) throw ssoResult.error;
-
-      throw new Error(copy.googleUnavailable);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError) || copy.googleUnavailable);
       setIsGoogleRedirecting(false);
@@ -504,7 +464,7 @@ function PasswordlessSignUp({ copy }: { copy: SignUpCopy }) {
                 type="button"
                 variant="outline"
                 onClick={() => void startGoogleSignUp()}
-                disabled={currentSignUpFetchStatus === "fetching" || isGoogleRedirecting}
+                disabled={!isLoaded || isGoogleRedirecting}
                 aria-busy={isGoogleRedirecting}
                 className="h-12 w-full cursor-pointer select-none rounded-md border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-none transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
               >

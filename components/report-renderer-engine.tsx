@@ -3149,6 +3149,28 @@ type ActionOutcomeRow = {
   evidence: string;
 };
 
+type CompetitiveContextView = {
+  status?: string;
+  category?: string | null;
+  price_position?: string;
+  own_price?: number | null;
+  market_reference_price?: number | null;
+  competitor_price?: number | null;
+  competitor_count?: number;
+  active_public_ads?: number;
+  longest_running_ad_days?: number | null;
+  repeated_hooks?: string[];
+  top_formats?: string[];
+  competitor_brands?: Array<{ name?: string; confidence?: number; source?: string }>;
+  data_quality?: {
+    has_confirmed_competitors?: boolean;
+    has_public_ad_library_data?: boolean;
+    can_use_for_decision?: boolean;
+    warnings?: string[];
+  };
+  next_step?: string;
+};
+
 const seedActionOutcomeRows: ActionOutcomeRow[] = [
   {
     action: "Increase Ads",
@@ -3196,6 +3218,32 @@ const seedActionOutcomeRows: ActionOutcomeRow[] = [
 
 function decisionRowKey(row: PortfolioDecisionRow) {
   return `${row.skuId}:${row.action}:${row.sourceAction}`;
+}
+
+function competitiveContextForDecision(row: PortfolioDecisionRow): CompetitiveContextView | null {
+  const rowContext = (row as PortfolioDecisionRow & { competitive_context?: CompetitiveContextView }).competitive_context;
+  const objectContext = (row.sku_decision_object as { competitive_context?: CompetitiveContextView } | undefined)?.competitive_context;
+  return rowContext ?? objectContext ?? null;
+}
+
+function competitiveStatusLabel(context: CompetitiveContextView | null, locale: RendererLocale) {
+  const isZh = locale === "zh";
+  if (!context) return isZh ? "竞品信号待建立" : "Competitive signals pending";
+  if (context.data_quality?.has_public_ad_library_data) {
+    return isZh ? "已连接公开广告库" : "Public ad signals connected";
+  }
+  if (context.data_quality?.has_confirmed_competitors) {
+    return isZh ? "竞品已确认，待同步广告库" : "Competitors confirmed, ad sync pending";
+  }
+  return isZh ? "待确认竞品与公开广告库" : "Needs competitor review";
+}
+
+function competitivePricePositionLabel(value: string | undefined, locale: RendererLocale) {
+  const isZh = locale === "zh";
+  if (value === "BELOW_MARKET") return isZh ? "低于市场参考价" : "Below market reference";
+  if (value === "ABOVE_MARKET") return isZh ? "高于市场参考价" : "Above market reference";
+  if (value === "AT_MARKET") return isZh ? "接近市场参考价" : "Near market reference";
+  return isZh ? "价格位置未知" : "Price position unknown";
 }
 
 function recommendationIdForDecision(row: PortfolioDecisionRow, report: DecisionIntelligenceReportV1) {
@@ -4007,6 +4055,7 @@ function OptimizationDecisionRail({
 	          const goal = optimizationGoalForDecision(row, recommendation);
 		          const actionDisplay = localizeDecisionActionDisplay(actionDisplayForDecision(row, recommendation), locale);
             const previousDecisionStatus = previousDecisionActiveStatus(row);
+            const competitiveContext = competitiveContextForDecision(row);
 
           const metricRows = [
             [isZh ? "预计利润" : "Projected Profit", signedCurrency(impact)],
@@ -4103,6 +4152,17 @@ function OptimizationDecisionRail({
                     ) : (
                       <RecommendationStatusBadge status={isAcceptedMode ? "accepted" : status} locale={locale} />
                     )}
+                  </div>
+                  <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-slate-950">{isZh ? "竞品信息" : "Competitive context"}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                        {competitiveStatusLabel(competitiveContext, locale)}
+                      </span>
+                    </div>
+                    <p className="mt-1 leading-5">
+                      {competitiveContext?.category ?? (isZh ? "未识别品类" : "Category unavailable")} · {competitivePricePositionLabel(competitiveContext?.price_position, locale)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -5352,6 +5412,7 @@ function SelectedSkuOptimizationPanel({
   const aiCanDecide = decisionReadiness
     ? decisionReadiness.confidence_level !== "LOW" && !(decisionReadiness.allowed_actions ?? []).every((action) => action === "MONITOR")
     : row.decision_confidence?.confidence_level !== "LOW";
+  const competitiveContext = competitiveContextForDecision(row);
 
   return (
     <aside className="sticky bottom-0 top-auto mx-auto w-full max-h-[68vh] max-w-none overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
@@ -5382,6 +5443,7 @@ function SelectedSkuOptimizationPanel({
               label="AI can decide"
               value={`${aiCanDecide ? "Yes" : "Monitor only"} · ${readinessScore === null ? percent.format(detail.confidence) : `${Math.round(readinessScore)}/100`}`}
             />
+            <CompetitiveContextSummary context={competitiveContext} locale={locale} />
             <DecisionSummaryRow label="Decision Status" value={decision.decision_status} />
           </div>
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
@@ -5538,6 +5600,52 @@ type SkuDecisionObject = {
   lifecycle_status: string;
   decision_status: string;
 };
+
+function CompetitiveContextSummary({ context, locale }: { context: CompetitiveContextView | null; locale: RendererLocale }) {
+  const isZh = locale === "zh";
+  const warnings = context?.data_quality?.warnings ?? [];
+  const competitorCount = context?.competitor_count ?? 0;
+  const publicAdCount = context?.active_public_ads ?? 0;
+  const canUseForDecision = context?.data_quality?.can_use_for_decision ?? false;
+  const longestRunningLabel = context?.longest_running_ad_days === null || context?.longest_running_ad_days === undefined
+    ? "N/A"
+    : `${numberFormat.format(context.longest_running_ad_days)}d`;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          {isZh ? "竞品信息" : "Competitive Context"}
+        </span>
+        <span className={cn(
+          "rounded-full px-2 py-0.5 text-[10px] font-bold",
+          canUseForDecision ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+        )}>
+          {competitiveStatusLabel(context, locale)}
+        </span>
+      </div>
+      <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-3">
+        <span>{isZh ? "竞品数" : "Competitors"}: {numberFormat.format(competitorCount)}</span>
+        <span>{isZh ? "公开广告" : "Public ads"}: {numberFormat.format(publicAdCount)}</span>
+        <span>{isZh ? "最长投放" : "Longest live"}: {longestRunningLabel}</span>
+      </div>
+      <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+        <span>{isZh ? "品类" : "Category"}: {context?.category ?? "N/A"}</span>
+        <span>{competitivePricePositionLabel(context?.price_position, locale)}</span>
+        <span>{isZh ? "本 SKU 价格" : "Own price"}: {context?.own_price ? currencyDecimal.format(context.own_price) : "N/A"}</span>
+        <span>{isZh ? "市场参考价" : "Market reference"}: {context?.market_reference_price ? currencyDecimal.format(context.market_reference_price) : "N/A"}</span>
+      </div>
+      {warnings.length ? (
+        <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
+          {warnings[0]}
+        </p>
+      ) : null}
+      <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+        {context?.next_step ?? (isZh ? "确认竞品品牌后，可同步公开广告库信息。" : "Confirm competitor brands, then sync public ad library signals.")}
+      </p>
+    </div>
+  );
+}
 
 function DecisionSummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (

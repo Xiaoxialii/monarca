@@ -22,6 +22,7 @@ import {
 import { buildScenarioComparison, type AIDecisionSelection, type AIScenario } from "@/lib/optimization/scenario-engine";
 import {
   simulateGeneratedActions,
+  type CompetitiveContext,
   type PortfolioOptimizationInput,
   type ProfitSimulationResult
 } from "@/lib/optimization/profit-simulation-engine";
@@ -82,6 +83,7 @@ export type PortfolioRecommendation = {
   evidence_tags: string[];
   lifecycle_stage?: SkuLifecycleStage;
   lifecycle?: SkuLifecycleClassification;
+  competitive_context?: CompetitiveContext;
   why: string;
   evidence: string[];
   decisionDrivers: DecisionDriver[];
@@ -238,6 +240,7 @@ export type SKUDecision = {
     revenueDelta: number;
     marginChange: number;
   };
+  competitive_context?: CompetitiveContext;
   simulation_horizon: ProfitSimulationResult["simulation_horizon"];
   simulation_estimate?: ProfitSimulationResult["simulation_estimate"];
   current_ads_spend?: number;
@@ -309,6 +312,7 @@ export type SKUDecisionObject = {
     stock: number;
     ads_spend: number;
   };
+  competitive_context?: CompetitiveContext;
   recommended_action: string;
   evidence: AIEvidenceCard[];
   scenarios: AIScenario[];
@@ -1174,6 +1178,7 @@ function toRecommendation(row: ProfitSimulationResult, simulations: ProfitSimula
     evidence_tags: row.evidence_tags,
     lifecycle_stage: row.lifecycle_stage,
     lifecycle: row.lifecycle,
+    competitive_context: row.competitive_context,
     recommendation_status: row.recommendation_status,
     ranking_reason: row.ranking_reason,
     queue_ready: row.queue_ready,
@@ -1504,6 +1509,7 @@ function buildSkuDecisions(rows: ProfitSimulationResult[], simulations: ProfitSi
         revenueDelta: row.revenue_delta,
         marginChange: row.margin_change
       },
+      competitive_context: row.competitive_context,
       simulation_horizon: row.simulation_horizon,
       simulation_estimate: row.simulation_estimate,
       timing: buildActionTiming(row),
@@ -1576,6 +1582,7 @@ function buildSkuDecisionObject(
       stock: row.current_inventory,
       ads_spend: row.current_ads_spend
     },
+    competitive_context: row.competitive_context,
     recommended_action: row.action,
     evidence,
     scenarios: scenarioComparison.scenarios,

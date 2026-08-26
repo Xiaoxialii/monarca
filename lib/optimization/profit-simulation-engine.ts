@@ -11,6 +11,33 @@ import type { DecisionConfidenceResult } from "@/lib/optimization/decision-confi
 import type { DecisionQuality } from "@/lib/optimization/decision-governance-engine";
 import type { DecisionReadiness } from "@/lib/optimization/decision-readiness-engine";
 
+export type CompetitiveContext = {
+  status: "READY" | "NEEDS_COMPETITOR_REVIEW" | "PUBLIC_AD_LIBRARY_NOT_CONNECTED" | "INSUFFICIENT_SKU_SIGNAL";
+  source: "PUBLIC_AD_LIBRARY" | "SKU_CONTEXT" | "USER_CONFIRMED_COMPETITORS";
+  category: string | null;
+  price_position: "BELOW_MARKET" | "AT_MARKET" | "ABOVE_MARKET" | "UNKNOWN";
+  own_price: number | null;
+  market_reference_price: number | null;
+  competitor_price: number | null;
+  competitor_count: number;
+  active_public_ads: number;
+  longest_running_ad_days: number | null;
+  repeated_hooks: string[];
+  top_formats: string[];
+  competitor_brands: Array<{
+    name: string;
+    source: "USER_CONFIRMED" | "DISCOVERED";
+    confidence: number;
+  }>;
+  data_quality: {
+    has_confirmed_competitors: boolean;
+    has_public_ad_library_data: boolean;
+    can_use_for_decision: boolean;
+    warnings: string[];
+  };
+  next_step: string;
+};
+
 export type PortfolioSkuInput = {
   sku: string;
   category?: string;
@@ -60,6 +87,7 @@ export type PortfolioSkuInput = {
   market_price_low?: number;
   market_price_high?: number;
   similar_sku_price?: number;
+  competitive_context?: CompetitiveContext;
   price_elasticity?: number;
   order_growth?: number;
   conversion_trend?: number;
@@ -267,6 +295,7 @@ export type ProfitSimulationResult = {
   time_to_impact: "immediate" | "short" | "medium" | "long";
   risk_level: "Low" | "Medium" | "High";
   market_reference_price?: number;
+  competitive_context?: CompetitiveContext;
   optimization_goal: "GROWTH" | "PROFIT" | "INVENTORY" | "PORTFOLIO_HEALTH";
   unified_action:
     | "SCALE_ADS"
@@ -560,6 +589,7 @@ export function simulateSkuAction(
     time_to_impact: timeToImpact(action, requiredInventory, sku.inventory),
     risk_level: riskLevel(risk),
     market_reference_price: marketReasonablePrice(sku) ?? undefined,
+    competitive_context: sku.competitive_context,
     optimization_goal: optimizationGoalForAction(action, requiredInventory, sku.inventory),
     unified_action: unifiedActionForAction(action, requiredInventory, sku.inventory),
     strategic_fit: roundRatio(strategicFit * lifecycleFit),

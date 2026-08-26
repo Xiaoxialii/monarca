@@ -14,7 +14,7 @@ import {
 } from "@/lib/optimization/portfolio-optimizer";
 import { DEFAULT_OPTIMIZATION_POLICY } from "@/lib/optimization/policy/default-policies";
 import { dynamicThresholdProfileFromPolicy } from "@/lib/optimization/policy/optimization-policy";
-import type { AdsCampaignInput, PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
+import type { AdsCampaignInput, CompetitiveContext, PortfolioSkuInput } from "@/lib/optimization/profit-simulation-engine";
 import type { SkuAttributionMethod, SkuRoasStatus } from "@/lib/sku/sku-profit-allocation-engine";
 import { calculateSkuProfitability, type CogsStatus, type ProfitValidationStatus } from "@/lib/profit/canonical-profitability-engine";
 import { buildSkuOptimizationAlgorithm, type SkuOptimizationAlgorithmOutput } from "@/lib/sku/sku-optimization-engine";
@@ -1014,6 +1014,75 @@ function buildOptimizationAdsInput(input: {
   return rows;
 }
 
+function buildCompetitiveContextForSku(input: {
+  sku: string;
+  category: string | null;
+  price: number;
+  sourceRow: unknown;
+}): CompetitiveContext {
+  const source = recordValue(input.sourceRow);
+  const competitorPrice = numberValue(source.competitor_price);
+  const marketMedianPrice = numberValue(source.market_median_price);
+  const marketPriceLow = numberValue(source.market_price_low);
+  const marketPriceHigh = numberValue(source.market_price_high);
+  const similarSkuPrice = numberValue(source.similar_sku_price);
+  const referencePrice = marketMedianPrice ?? competitorPrice ?? similarSkuPrice ?? midpoint(marketPriceLow, marketPriceHigh);
+  const hasPriceSignal = referencePrice !== null && referencePrice > 0 && input.price > 0;
+  const pricePosition = hasPriceSignal
+    ? input.price < referencePrice * 0.95
+      ? "BELOW_MARKET"
+      : input.price > referencePrice * 1.05
+        ? "ABOVE_MARKET"
+        : "AT_MARKET"
+    : "UNKNOWN";
+  const warnings = [
+    "Public competitor ad library is not connected for this SKU.",
+    "No user-confirmed competitor brands are attached to this SKU.",
+    "Competitor creative signals are not used for automated budget decisions yet."
+  ];
+
+  return {
+    status: hasPriceSignal ? "PUBLIC_AD_LIBRARY_NOT_CONNECTED" : "INSUFFICIENT_SKU_SIGNAL",
+    source: "SKU_CONTEXT",
+    category: input.category,
+    price_position: pricePosition,
+    own_price: input.price > 0 ? input.price : null,
+    market_reference_price: referencePrice,
+    competitor_price: competitorPrice,
+    competitor_count: 0,
+    active_public_ads: 0,
+    longest_running_ad_days: null,
+    repeated_hooks: [],
+    top_formats: [],
+    competitor_brands: [],
+    data_quality: {
+      has_confirmed_competitors: false,
+      has_public_ad_library_data: false,
+      can_use_for_decision: false,
+      warnings
+    },
+    next_step: `Confirm competitor brands for ${input.sku}, then run public Meta Ad Library collection.`
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function midpoint(left: number | null, right: number | null) {
+  if (left !== null && right !== null && left > 0 && right > 0) return roundCurrency((left + right) / 2);
+  return null;
+}
+
 function buildPortfolioOptimizationSkuInputs(input: {
   profitRows: DecisionIntelligenceReportV1["sku_breakdown"]["top_profit_skus"];
   revenueRows: DecisionIntelligenceReportV1["sku_breakdown"]["top_revenue_skus"];
@@ -1021,37 +1090,46 @@ function buildPortfolioOptimizationSkuInputs(input: {
   confidence: number;
 }): PortfolioSkuInput[] {
   if (input.profitRows.length) {
-    return input.profitRows.map((row) => ({
-      sku: row.sku,
-      category: row.category ?? "portfolio",
-      channel: dominantChannel(row.channel_breakdown),
-      revenue: row.revenue,
-      quantity: row.quantity,
-      price: row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0,
-      cogs: row.quantity > 0 ? roundCurrency((row.cost_breakdown?.cogs ?? 0) / row.quantity) : row.cost_breakdown?.cogs ?? 0,
-      ads_spend: row.ad_cost_allocated ?? 0,
-      margin: row.margin,
-      net_profit: row.net_profit,
-      profitability_confidence: row.profitability_confidence ?? row.profit_confidence ?? input.confidence,
-      optimization_allowed: row.optimization_allowed,
-      warnings: row.warnings,
-      cogs_status: row.cogs_status,
-      cogs_confidence: row.cogs_confidence,
-      ad_allocation_method: row.ad_allocation_method,
-      attribution_confidence: row.attribution_confidence ?? row.ad_allocation_confidence,
-      inventory: row.available_stock ?? row.stock_level ?? 0,
-      sales_velocity: row.sales_velocity ?? 0,
-      sales_velocity_confidence: row.velocity_confidence,
-      velocity_window_days: row.velocity_window_days,
-      data_period_days: row.data_period_days,
-      inventory_risk_status: row.inventory_risk_status,
-      refund_rate: row.refund_rate ?? 0,
-      customer_ltv: input.metrics.customer.ltv,
-      cac_confidence: input.metrics.customer.cac_confidence,
-      customer_metric_confidence: input.metrics.customer.cac_confidence,
-      conversion_rate: input.metrics.core.orders > 0 ? roundRatio(row.quantity / Math.max(1, input.metrics.core.orders)) : 0.02,
-      prediction_confidence: row.profit_confidence ?? input.confidence
-    }));
+    return input.profitRows.map((row) => {
+      const price = row.quantity > 0 ? roundCurrency(row.revenue / row.quantity) : 0;
+      return {
+        sku: row.sku,
+        category: row.category ?? "portfolio",
+        channel: dominantChannel(row.channel_breakdown),
+        revenue: row.revenue,
+        quantity: row.quantity,
+        price,
+        cogs: row.quantity > 0 ? roundCurrency((row.cost_breakdown?.cogs ?? 0) / row.quantity) : row.cost_breakdown?.cogs ?? 0,
+        ads_spend: row.ad_cost_allocated ?? 0,
+        margin: row.margin,
+        net_profit: row.net_profit,
+        profitability_confidence: row.profitability_confidence ?? row.profit_confidence ?? input.confidence,
+        optimization_allowed: row.optimization_allowed,
+        warnings: row.warnings,
+        cogs_status: row.cogs_status,
+        cogs_confidence: row.cogs_confidence,
+        ad_allocation_method: row.ad_allocation_method,
+        attribution_confidence: row.attribution_confidence ?? row.ad_allocation_confidence,
+        inventory: row.available_stock ?? row.stock_level ?? 0,
+        sales_velocity: row.sales_velocity ?? 0,
+        sales_velocity_confidence: row.velocity_confidence,
+        velocity_window_days: row.velocity_window_days,
+        data_period_days: row.data_period_days,
+        inventory_risk_status: row.inventory_risk_status,
+        refund_rate: row.refund_rate ?? 0,
+        customer_ltv: input.metrics.customer.ltv,
+        cac_confidence: input.metrics.customer.cac_confidence,
+        customer_metric_confidence: input.metrics.customer.cac_confidence,
+        conversion_rate: input.metrics.core.orders > 0 ? roundRatio(row.quantity / Math.max(1, input.metrics.core.orders)) : 0.02,
+        prediction_confidence: row.profit_confidence ?? input.confidence,
+        competitive_context: buildCompetitiveContextForSku({
+          sku: row.sku,
+          category: row.category ?? "portfolio",
+          price,
+          sourceRow: row
+        })
+      };
+    });
   }
 
   if (input.revenueRows.length) {
@@ -1106,7 +1184,13 @@ function buildPortfolioOptimizationSkuInputs(input: {
         cac_confidence: input.metrics.customer.cac_confidence,
         customer_metric_confidence: input.metrics.customer.cac_confidence,
         conversion_rate: 0.018 + ((index % 6) * 0.004),
-        prediction_confidence: clamp(input.confidence || 0.72, 0.58, 0.9)
+        prediction_confidence: clamp(input.confidence || 0.72, 0.58, 0.9),
+        competitive_context: buildCompetitiveContextForSku({
+          sku: row.sku,
+          category: row.category ?? "portfolio",
+          price,
+          sourceRow: row
+        })
       };
     });
   }
@@ -1177,7 +1261,13 @@ function buildSyntheticPortfolioSkuInputs(confidence: number): PortfolioSkuInput
       refund_rate: 0.025 + ((index % 8) * 0.006),
       customer_ltv: 120 + ((index * 17) % 170),
       conversion_rate: 0.018 + ((index % 9) * 0.004),
-      prediction_confidence: rowConfidence
+      prediction_confidence: rowConfidence,
+      competitive_context: buildCompetitiveContextForSku({
+        sku,
+        category: index % 5 === 0 ? "evergreen apparel" : index % 7 === 0 ? "seasonal portfolio" : "portfolio",
+        price,
+        sourceRow: {}
+      })
     });
   }
 

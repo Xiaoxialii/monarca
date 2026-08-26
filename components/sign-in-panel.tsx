@@ -1,6 +1,6 @@
 "use client";
 
-import { useSignIn as useCurrentSignIn, useUser } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import type { SignInFirstFactor } from "@clerk/nextjs/types";
 import { ArrowRight } from "lucide-react";
@@ -125,35 +125,6 @@ function completeSignInRedirect(path: string) {
     window.location.assign(path);
     return;
   }
-}
-
-function findClerkRedirectUrl(value: unknown, depth = 0): string | null {
-  if (depth > 4 || !value) return null;
-
-  if (typeof value === "string") {
-    return /^https?:\/\//i.test(value) || value.startsWith("/") ? value : null;
-  }
-
-  if (value instanceof URL) {
-    return value.toString();
-  }
-
-  if (typeof value !== "object") return null;
-
-  const record = value as Record<string, unknown>;
-  for (const [key, nestedValue] of Object.entries(record)) {
-    if (/redirect|url/i.test(key)) {
-      const redirectUrl = findClerkRedirectUrl(nestedValue, depth + 1);
-      if (redirectUrl) return redirectUrl;
-    }
-  }
-
-  for (const nestedValue of Object.values(record)) {
-    const redirectUrl = findClerkRedirectUrl(nestedValue, depth + 1);
-    if (redirectUrl) return redirectUrl;
-  }
-
-  return null;
 }
 
 export function SignInPanel({ defaultLocale = "en" }: { defaultLocale?: Locale }) {
@@ -393,7 +364,7 @@ function PasswordSignIn({ copy }: { copy: SignInCopy }) {
 }
 
 function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
-  const { fetchStatus, signIn } = useCurrentSignIn();
+  const { isLoaded, signIn } = useSignIn();
   const searchParams = useSearchParams();
   const [error, setError] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -408,27 +379,17 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
   }
 
   async function startGoogleSignIn() {
-    if (fetchStatus === "fetching" || isRedirecting) return;
+    if (!isLoaded || isRedirecting) return;
 
     setError("");
     setIsRedirecting(true);
 
     try {
-      const ssoResult = await signIn.sso({
+      await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectCallbackUrl: "/sign-in/sso-callback",
-        redirectUrl: authRedirectPath(searchParams)
+        redirectUrl: "/sign-in/sso-callback",
+        redirectUrlComplete: authRedirectPath(searchParams)
       });
-
-      const redirectUrl = findClerkRedirectUrl(ssoResult);
-      if (redirectUrl && typeof window !== "undefined") {
-        window.location.assign(redirectUrl);
-        return;
-      }
-
-      if (ssoResult.error) throw ssoResult.error;
-
-      throw new Error(copy.googleUnavailable);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
       setIsRedirecting(false);
@@ -441,7 +402,7 @@ function GoogleSignInButton({ copy }: { copy: SignInCopy }) {
         type="button"
         variant="outline"
         onClick={() => void startGoogleSignIn()}
-        disabled={fetchStatus === "fetching" || isRedirecting}
+        disabled={!isLoaded || isRedirecting}
         aria-busy={isRedirecting}
         className="h-14 w-full cursor-pointer select-none rounded-md border-slate-300 bg-white text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-wait"
       >

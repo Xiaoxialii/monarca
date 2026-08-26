@@ -3177,8 +3177,16 @@ function localizeDecisionText(value: string | null | undefined, locale: Renderer
     "Current portfolio performance is optimal; AI will continue monitoring new signals.": "当前组合表现未发现需要执行的动作，AI 将继续监控新信号。",
     "Why AI Selected Hold": "AI 为什么选择继续监控",
     "No alternative action generated higher risk-adjusted profit than the current baseline.": "没有其他动作产生高于当前基准方案的风险调整利润。",
+    "No alternative action generated higher risk-adjusted profit": "没有其他动作产生高于当前基准方案的风险调整利润",
+    "Current operation is already efficient": "当前运营效率已经达标",
+    "Waiting for stronger signal before changing strategy": "等待更强信号后再调整策略",
+    "Candidate actions did not beat the current operating plan after risk, confidence, and constraints.": "结合风险、置信度和约束后，候选动作没有优于当前运营方案。",
+    "The SKU does not need an immediate operating change.": "该 SKU 暂不需要立即调整运营动作。",
+    "AI will re-evaluate after new demand, cost, inventory, or ad efficiency signals arrive.": "当新的需求、成本、库存或广告效率信号出现后，AI 会重新评估。",
+    "AI recommends monitoring because no action cleared the risk-adjusted decision threshold.": "AI 建议继续监控，因为当前没有动作达到风险调整后的决策阈值。",
     "Growth evidence supports scaling ads.": "增长证据支持扩大广告。",
     "Decision: Hold baseline": "决策：保持基准方案",
+    "Monitoring window": "监控窗口",
     "No active discount": "无进行中的折扣",
     "10% discount test": "测试 10% 折扣",
     "Test": "测试",
@@ -3218,6 +3226,8 @@ function localizeDecisionText(value: string | null | undefined, locale: Renderer
     [/Growth evidence is present\./g, "增长证据已存在。"],
     [/Growth evidence supports scaling ads\./g, "增长证据支持扩大广告。"],
     [/Inventory gap/g, "库存缺口"],
+    [/Monitoring window/g, "监控窗口"],
+    [/Margin/g, "毛利率"],
     [/Current/g, "当前"],
     [/Required/g, "所需"],
     [/Rejected/g, "已排除"],
@@ -5566,14 +5576,14 @@ function SelectedSkuOptimizationPanel({
     : localizeDecisionText("Monitor only", locale);
 
   return (
-    <aside className="sticky bottom-0 top-auto mx-auto w-full max-h-[68vh] max-w-none overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
-      <div className="p-0">
+    <aside className="sticky bottom-0 top-auto mx-auto w-full max-w-full max-h-[68vh] overflow-auto overflow-x-hidden bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
+      <div className="min-w-0 p-0">
         <p className="text-sm font-bold text-slate-950">{localizeDecisionText("AI Decision Summary", locale)}</p>
         <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-lg font-extrabold text-[#5747e8]">{decision.sku}</p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
+              <p className="mt-1 break-words text-xs font-semibold text-slate-500">
                 {localizeDecisionText(decision.action === "No Action Required"
                   ? "AI is monitoring this SKU because no action currently beats the baseline."
                   : "AI is recommending a business action for this SKU.", locale)}
@@ -5597,51 +5607,51 @@ function SelectedSkuOptimizationPanel({
             <CompetitiveContextSummary context={competitiveContext} locale={locale} />
             <DecisionSummaryRow label={localizeDecisionText("Decision Status", locale)} value={localizeDecisionText(decision.decision_status, locale)} />
           </div>
-          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-3 mt-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-600">{localizeDecisionText("Decision Context", locale)}</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{localizeDecisionText("Optimization Goal", locale)}</p>
-                <p className="mt-1 text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.optimization_goal, locale)}</p>
+                <p className="mt-1 break-words text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.optimization_goal, locale)}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{localizeDecisionText("Recommended Action", locale)}</p>
-                <p className="mt-1 text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.action, locale)}</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{localizeDecisionText(decision.action_description, locale)}</p>
+                <p className="mt-1 break-words text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.action, locale)}</p>
+                <p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-500">{localizeDecisionText(decision.action_description, locale)}</p>
               </div>
             </div>
-            <p className="mt-3 text-sm font-bold text-slate-950">{localizeDecisionText("Why AI Selected This Decision", locale)}</p>
-            <p className="mt-1 text-xs font-bold text-slate-700">{localizeDecisionText(decision.reasoning.title, locale)}</p>
-            <div className="mt-3 rounded-md border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-600">
+            <p className="mt-3 break-words text-sm font-bold text-slate-950">{localizeDecisionText("Why AI Selected This Decision", locale)}</p>
+            <p className="mt-1 break-words text-xs font-bold text-slate-700">{localizeDecisionText(decision.reasoning.title, locale)}</p>
+            <div className="mt-3 min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-600">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold text-slate-950">{localizeDecisionText("Decision Trace", locale)}</span>
-                <span>{localizeDecisionText(decisionTrace?.originalAction ?? "UNKNOWN", locale)} → {localizeDecisionText(decisionTrace?.finalAction ?? decision.action, locale)}</span>
+                <span className="min-w-0 break-words">{localizeDecisionText(decisionTrace?.originalAction ?? "UNKNOWN", locale)} → {localizeDecisionText(decisionTrace?.finalAction ?? decision.action, locale)}</span>
               </div>
-              <p className="mt-1 leading-5">{localizeDecisionText(decisionTrace?.validationReason ?? "Decision passed runtime normalization.", locale)}</p>
+              <p className="mt-1 break-words leading-5">{localizeDecisionText(decisionTrace?.validationReason ?? "Decision passed runtime normalization.", locale)}</p>
               {traceRejectedActions.length ? (
-                <p className="mt-1 leading-5">
+                <p className="mt-1 break-words leading-5">
                   {localizeDecisionText("Rejected", locale)}: {traceRejectedActions.map((item) => `${localizeDecisionText(item.action, locale)} (${localizeDecisionText(item.reason, locale)})`).join(", ")}
                 </p>
               ) : null}
-              <p className="mt-1 leading-5">
+              <p className="mt-1 break-words leading-5">
                 {localizeDecisionText("Inventory gap", locale)}: {traceEvidence.inventory_gap ?? zhEmpty(locale)} · {localizeDecisionText("Current", locale)}: {traceEvidence.current_inventory ?? zhEmpty(locale)} · {localizeDecisionText("Required", locale)}: {traceEvidence.required_inventory ?? zhEmpty(locale)} · ROAS: {traceEvidence.roas ?? zhEmpty(locale)}
               </p>
             </div>
             <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700">
               {reasoningReasons.map((item) => (
-                <div key={item.signal} className="rounded-md border border-slate-200 bg-white p-2">
-                  <span className="inline-flex items-center gap-2 text-slate-950">
+                <div key={item.signal} className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white p-2">
+                  <span className="inline-flex max-w-full items-start gap-2 break-words text-slate-950">
                     <span className="text-slate-500">✓</span>
-                    {localizeDecisionText(item.signal, locale)}
+                    <span className="min-w-0 break-words">{localizeDecisionText(item.signal, locale)}</span>
                   </span>
                   <div className="mt-1 grid gap-0.5 pl-5 text-xs font-semibold text-slate-600">
-                    <span>{localizeDecisionText(item.metric, locale)}</span>
-                    <span className="font-medium leading-5 text-slate-500">{localizeDecisionText(item.explanation, locale)}</span>
+                    <span className="break-words">{localizeDecisionText(item.metric, locale)}</span>
+                    <span className="break-words font-medium leading-5 text-slate-500">{localizeDecisionText(item.explanation, locale)}</span>
                   </div>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{localizeDecisionText(decision.reasoning.summary, locale)}</p>
+            <p className="mt-3 break-words text-xs font-semibold leading-5 text-slate-600">{localizeDecisionText(decision.reasoning.summary, locale)}</p>
           </div>
         </div>
       </div>
@@ -5952,9 +5962,9 @@ function DecisionSignalCards({ decision, locale }: { decision: SkuDecisionObject
               : "Benchmark";
 
         return (
-        <div key={item.signal} className="rounded-lg border border-emerald-100 bg-emerald-50/55 p-3">
+        <div key={item.signal} className="min-w-0 overflow-hidden rounded-lg border border-emerald-100 bg-emerald-50/55 p-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-bold text-slate-950">{localizeDecisionText(item.signal, locale)}</p>
+            <p className="min-w-0 break-words text-sm font-bold text-slate-950">{localizeDecisionText(item.signal, locale)}</p>
             <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
               <span className="size-1.5 rounded-full bg-emerald-500" />
               {localizeDecisionText(item.status, locale)}
@@ -5964,7 +5974,7 @@ function DecisionSignalCards({ decision, locale }: { decision: SkuDecisionObject
             <DetailRow label={localizeDecisionText(primaryLabel, locale)} value={localizeDecisionText(item.metric, locale)} />
             {item.benchmark ? <DetailRow label={localizeDecisionText(benchmarkLabel, locale)} value={localizeDecisionText(item.benchmark, locale)} /> : null}
           </div>
-          <p className="mt-3 text-xs font-medium leading-5 text-slate-600">{localizeDecisionText(item.explanation, locale)}</p>
+          <p className="mt-3 break-words text-xs font-medium leading-5 text-slate-600">{localizeDecisionText(item.explanation, locale)}</p>
         </div>
         );
       })}
@@ -6010,12 +6020,12 @@ function AIReasoningPanel({ decision, locale }: { decision: SkuDecisionObject; l
 
 function DecisionReasonItem({ index, title, body }: { index: number; title: string; body: string }) {
   return (
-    <div className="rounded-lg bg-slate-50 p-3">
+    <div className="min-w-0 overflow-hidden rounded-lg bg-slate-50 p-3">
       <div className="flex gap-3">
         <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-extrabold text-emerald-800">{index}</span>
-        <div>
-          <p className="text-sm font-bold text-slate-950">{title}</p>
-          <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{body}</p>
+        <div className="min-w-0">
+          <p className="break-words text-sm font-bold text-slate-950">{title}</p>
+          <p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-600">{body}</p>
         </div>
       </div>
     </div>
@@ -6066,10 +6076,10 @@ function AIEvidenceCards({ row, detail }: { row: PortfolioDecisionRow; detail: S
 function ScenarioSimulationComparison({ decision, locale }: { decision: SkuDecisionObject; locale: RendererLocale }) {
   return (
     <div className="space-y-3">
-      <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-950">
+      <div className="min-w-0 overflow-hidden rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-950">
         {localizeDecisionText("AI evaluated: ", locale)}<span className="text-emerald-700">{decision.scenarios.length} {locale === "zh" ? "个策略" : "strategies"}</span>
       </div>
-      <div className="overflow-hidden rounded-lg border border-slate-200">
+      <div className="max-w-full overflow-auto rounded-lg border border-slate-200">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
@@ -6099,13 +6109,13 @@ function ScenarioSimulationComparison({ decision, locale }: { decision: SkuDecis
         </table>
       </div>
       {decision.action === "No Action Required" ? (
-        <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
+        <div className="min-w-0 overflow-hidden rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
           {localizeDecisionText("AI selected no action because current portfolio performance is optimal under current constraints.", locale)}
         </div>
       ) : (
-        <div className="rounded-lg bg-emerald-950 p-3 text-white">
+        <div className="min-w-0 overflow-hidden rounded-lg bg-emerald-950 p-3 text-white">
           <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">{localizeDecisionText("Selected because:", locale)}</p>
-          <p className="mt-1 text-sm font-bold">{localizeDecisionText("Highest risk-adjusted profit under current constraints.", locale)}</p>
+          <p className="mt-1 break-words text-sm font-bold">{localizeDecisionText("Highest risk-adjusted profit under current constraints.", locale)}</p>
         </div>
       )}
     </div>
@@ -6271,7 +6281,7 @@ function DailyProfitTrackingTable({ rows, locale }: { rows: DailyProfitTrackingR
 
 function PanelDisclosure({ title, children, defaultOpen = false, locale = "en" }: { title: string; children: ReactNode; defaultOpen?: boolean; locale?: RendererLocale }) {
   return (
-    <details className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100" open={defaultOpen}>
+    <details className="mt-3 min-w-0 max-w-full overflow-hidden rounded-lg bg-white p-3 ring-1 ring-slate-100" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-slate-950 marker:hidden">
         <span>{title}</span>
         <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">{localizeDecisionText("Open", locale)}</span>
@@ -7727,9 +7737,9 @@ function DetailSection({ title, children }: { title: string; children: ReactNode
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 text-xs">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-right font-semibold text-slate-900">{value}</span>
+    <div className="flex min-w-0 items-start justify-between gap-3 text-xs">
+      <span className="min-w-0 break-words text-slate-500">{label}</span>
+      <span className="min-w-0 break-words text-right font-semibold text-slate-900">{value}</span>
     </div>
   );
 }

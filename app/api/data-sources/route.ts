@@ -159,9 +159,9 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
     const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
     const staleQueuedBefore = new Date(now.getTime() - CONNECTOR_QUEUED_ASYNC_JOB_MS);
     const staleSyncRunBefore = new Date(now.getTime() - Math.max(STALE_ASYNC_JOB_MS, 10 * 60 * 1000));
-    const [ingestionRecovery, staleConnectorJobs, staleConnectorRuns] = await Promise.all([
+    const [ingestionRecovery, staleConnectorJobRows, staleConnectorRuns] = await Promise.all([
       recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
-      prisma.asyncJob.updateMany({
+      prisma.asyncJob.findMany({
         where: {
           workspaceId,
           type: "SYNC_CONNECTOR",
@@ -201,19 +201,14 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
             }
           ]
         },
-        data: {
-          status: "FAILED",
-          progress: 100,
-          currentStep: "Failed - stale connector sync job",
-          errorCode: "CONNECTOR_SYNC_STALE_JOB",
-          errorMessage: "Connector sync stopped before completion. Retry sync to resume processing.",
-          heartbeatAt: now,
-          lockedAt: null,
-          lockedBy: null,
-          leaseExpiresAt: null,
-          completedAt: now,
-          failedAt: now
-        }
+        select: {
+          id: true,
+          status: true,
+          payload: true,
+          createdAt: true,
+          startedAt: true
+        },
+        take: 25
       }),
       prisma.ecommerceSyncRun.updateMany({
         where: {
@@ -230,6 +225,91 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
         }
       })
     ]);
+    const staleConnectorJobResults = await Promise.all(staleConnectorJobRows.map(async (job) => {
+      const payload = asRecord(job.payload);
+      const dataSourceId = typeof payload?.dataSourceId === "string" ? payload.dataSourceId : null;
+      const provider = typeof payload?.provider === "string" ? payload.provider : null;
+      const syncStartedAfter = job.startedAt ?? job.createdAt;
+      const successfulRun = dataSourceId && provider
+        ? await prisma.ecommerceSyncRun.findFirst({
+            where: {
+              workspaceId,
+              dataSourceId,
+              provider,
+              status: "success",
+              startedAt: {
+                gte: syncStartedAfter
+              }
+            },
+            select: {
+              syncRunId: true,
+              manifestKey: true,
+              finishedAt: true
+            },
+            orderBy: {
+              finishedAt: "desc"
+            }
+          })
+        : null;
+
+      if (successfulRun) {
+        await prisma.asyncJob.updateMany({
+          where: {
+            id: job.id,
+            status: job.status
+          },
+          data: {
+            status: "COMPLETED",
+            progress: 100,
+            currentStep: "Completed",
+            errorCode: null,
+            errorMessage: null,
+            heartbeatAt: now,
+            lockedAt: null,
+            lockedBy: null,
+            leaseExpiresAt: null,
+            completedAt: successfulRun.finishedAt ?? now,
+            failedAt: null,
+            resultReference: {
+              provider,
+              dataSourceId,
+              syncRunId: successfulRun.syncRunId,
+              manifestKey: successfulRun.manifestKey,
+              snapshotType: "CONNECTOR_SYNC",
+              snapshotVersion: `${provider}_sync_v1`,
+              recoveredFromStaleWrapper: true
+            }
+          }
+        });
+        return "completed";
+      }
+
+      await prisma.asyncJob.updateMany({
+        where: {
+          id: job.id,
+          status: job.status
+        },
+        data: {
+          status: "FAILED",
+          progress: 100,
+          currentStep: "Failed - stale connector sync job",
+          errorCode: "CONNECTOR_SYNC_STALE_JOB",
+          errorMessage: "Connector sync stopped before completion. Retry sync to resume processing.",
+          heartbeatAt: now,
+          lockedAt: null,
+          lockedBy: null,
+          leaseExpiresAt: null,
+          completedAt: now,
+          failedAt: now
+        }
+      });
+      return "failed";
+    }));
+    const staleConnectorJobs = {
+      count: staleConnectorJobResults.length,
+      completed: staleConnectorJobResults.filter((result) => result === "completed").length,
+      failed: staleConnectorJobResults.filter((result) => result === "failed").length
+    };
     if (
       ingestionRecovery.attempted ||
       ingestionRecovery.timedOut ||
@@ -244,6 +324,8 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
         ingestionTimedOut: ingestionRecovery.timedOut,
         ingestionExhausted: ingestionRecovery.exhausted,
         staleConnectorJobs: staleConnectorJobs.count,
+        staleConnectorJobsCompleted: staleConnectorJobs.completed,
+        staleConnectorJobsFailed: staleConnectorJobs.failed,
         staleConnectorRuns: staleConnectorRuns.count
       });
     }

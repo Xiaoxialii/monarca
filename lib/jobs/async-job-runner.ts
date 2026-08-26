@@ -102,6 +102,21 @@ function configuredDurationMs(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+        if (typeof timeout.unref === "function") timeout.unref();
+      })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export const STALE_ASYNC_JOB_MS = configuredDurationMs(
   process.env.ASYNC_JOB_STALE_MS,
   DEFAULT_STALE_ASYNC_JOB_MS
@@ -954,6 +969,10 @@ async function processConnectorSyncAsyncJob(
             trigger: standardTrigger,
             force: false
           });
+    await input.setJobState({
+      progress: 85,
+      currentStep: `Finished ${provider} sync`
+    });
     const downstreamJobId = "downstreamJobId" in result ? result.downstreamJobId ?? null : null;
     const optimizationRefresh = result.reused
       ? {
@@ -961,12 +980,16 @@ async function processConnectorSyncAsyncJob(
           skipped: true,
           reason: "sync_reused_existing_result"
         }
-      : await markOptimizationRefreshRequiredAfterConnectorSync(client, {
-          workspaceId: input.workspaceId,
-          provider,
-          dataSourceId,
-          connectorJobId: input.id
-        }).catch((error) => {
+      : await withTimeout(
+          markOptimizationRefreshRequiredAfterConnectorSync(client, {
+            workspaceId: input.workspaceId,
+            provider,
+            dataSourceId,
+            connectorJobId: input.id
+          }),
+          10_000,
+          "Optimization refresh timed out after connector sync."
+        ).catch((error) => {
           const message = error instanceof Error ? error.message : "Failed to mark optimization refresh after connector sync.";
           console.warn("Connector sync succeeded but optimization refresh state could not be marked", {
             workspaceId: input.workspaceId,

@@ -7,7 +7,7 @@ import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopi
 import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
-import { STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -157,6 +157,7 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
   try {
     const now = new Date();
     const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
+    const staleQueuedBefore = new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
     const staleSyncRunBefore = new Date(now.getTime() - Math.max(STALE_ASYNC_JOB_MS, 10 * 60 * 1000));
     const [ingestionRecovery, staleConnectorJobs, staleConnectorRuns] = await Promise.all([
       recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
@@ -164,22 +165,34 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
         where: {
           workspaceId,
           type: "SYNC_CONNECTOR",
-          status: {
-            in: ["PROCESSING", "PAUSED"]
-          },
           OR: [
             {
+              status: "QUEUED",
+              updatedAt: {
+                lt: staleQueuedBefore
+              }
+            },
+            {
+              status: {
+                in: ["PROCESSING", "PAUSED"]
+              },
               leaseExpiresAt: {
                 lt: now
               }
             },
             {
+              status: {
+                in: ["PROCESSING", "PAUSED"]
+              },
               leaseExpiresAt: null,
               heartbeatAt: {
                 lt: staleHeartbeatBefore
               }
             },
             {
+              status: {
+                in: ["PROCESSING", "PAUSED"]
+              },
               leaseExpiresAt: null,
               heartbeatAt: null,
               updatedAt: {
@@ -307,7 +320,10 @@ function syncStatusFromSource(source: {
     canonicalStatus === "READY" &&
     Boolean(snapshot.canonicalVersion);
 
-  if (hasReadyCanonicalSnapshot) {
+  if (source.status === ConnectionStatus.DISCONNECTED) {
+    syncStatus = "DISCONNECTED";
+    statusReason ??= "Data source is disconnected.";
+  } else if (hasReadyCanonicalSnapshot) {
     syncStatus = "CONNECTED";
     statusReason = null;
   } else if (connectorJobIsStale) {
@@ -353,9 +369,6 @@ function syncStatusFromSource(source: {
   } else if (schemaStatus === "FAILED" || canonicalStatus === "FAILED") {
     syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
     statusReason ??= "Data source sync failed.";
-  } else if (source.status === ConnectionStatus.DISCONNECTED) {
-    syncStatus = "DISCONNECTED";
-    statusReason ??= "Data source is disconnected.";
   } else if (source.status === ConnectionStatus.FAILED) {
     syncStatus = isPermissionProblem ? "FAILED_AUTH" : "FAILED_SYNC";
   } else if (source.status === ConnectionStatus.PENDING && isPermissionProblem) {

@@ -68,7 +68,8 @@ test("connector sync enqueue does not reuse stale active jobs", () => {
   const dashboard = read("components/dashboard.tsx");
 
   assert.match(queue, /STALE_ASYNC_JOB_MS/);
-  assert.doesNotMatch(queue, /QUEUED_ASYNC_JOB_MS/);
+  assert.match(queue, /CONNECTOR_QUEUED_ASYNC_JOB_MS/);
+  assert.doesNotMatch(queue, /(^|[^\w])QUEUED_ASYNC_JOB_MS([^\w]|$)/);
   assert.match(queue, /Failed - stale connector sync job/);
   assert.match(queue, /CONNECTOR_SYNC_STALE_JOB/);
   assert.match(queue, /leaseExpiresAt:\s*\{\s*lt:\s*now/);

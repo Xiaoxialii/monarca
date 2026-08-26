@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { CONNECTOR_QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 const ACTIVE_CONNECTOR_JOB_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
 
@@ -19,7 +19,7 @@ export async function enqueueConnectorSyncJob(
 ) {
   const now = new Date();
   const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
-  const staleQueuedBefore = new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
+  const staleQueuedBefore = new Date(now.getTime() - CONNECTOR_QUEUED_ASYNC_JOB_MS);
 
   await client.asyncJob.updateMany({
     where: {

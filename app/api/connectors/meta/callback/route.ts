@@ -1,5 +1,5 @@
 import { ConnectionStatus, DataSourceType } from "@prisma/client";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   META_ADS_PROVIDER,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/ads/meta/meta-oauth";
 import { PRODUCT_ACCESS_REQUIRED_CODE, assertProductAccessForUserId } from "@/lib/product-access";
 import { enqueueConnectorSyncJob } from "@/lib/jobs/connector-sync-queue";
+import { processAsyncJobBatch } from "@/lib/jobs/async-job-runner";
 import { WorkspaceAuthError } from "@/lib/workspace-auth-error";
 
 function dashboardRedirect(request: Request, status: "connected" | "failed", code?: string) {
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
     const currency = typeof firstAdAccount.currency === "string" ? firstAdAccount.currency : undefined;
     const timezone = typeof firstAdAccount.timezone_name === "string" ? firstAdAccount.timezone_name : undefined;
 
-    await prisma.$transaction(async (tx) => {
+    const enqueueResult = await prisma.$transaction(async (tx) => {
       const account = await tx.ecommerceConnectorAccount.upsert({
         where: {
           workspaceId_provider_shopDomain: {
@@ -174,6 +175,20 @@ export async function GET(request: Request) {
         dataSourceId: dataSource.id,
         shopDomain: adAccountId,
         currentStep: "Queued Meta Ads initial creative sync"
+      });
+    });
+    after(() => {
+      void processAsyncJobBatch({
+        client: prisma,
+        jobId: enqueueResult.job.id,
+        jobType: "SYNC_CONNECTOR",
+        limit: 1
+      }).catch((error) => {
+        console.warn("[meta-oauth] queued sync worker trigger failed", {
+          workspaceId: state.workspaceId,
+          jobId: enqueueResult.job.id,
+          message: error instanceof Error ? error.message : "Unknown worker trigger failure"
+        });
       });
     });
 

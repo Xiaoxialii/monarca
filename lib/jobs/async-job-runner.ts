@@ -53,6 +53,7 @@ const RESUMABLE_ASYNC_JOB_STATUSES = ["PROCESSING", "PAUSED"] as const;
 const DEFAULT_STALE_ASYNC_JOB_MS = 2 * 60 * 1000;
 const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 30 * 60 * 1000;
 const DEFAULT_QUEUED_ASYNC_JOB_MS = 2 * 60 * 1000;
+const DEFAULT_CONNECTOR_QUEUED_ASYNC_JOB_MS = 15 * 60 * 1000;
 const DEFAULT_OPTIMIZATION_QUEUED_ASYNC_JOB_MS = 15 * 60 * 1000;
 const DEFAULT_OPTIMIZATION_MAX_EXECUTION_MS = 30 * 60 * 1000;
 const DEFAULT_ASYNC_JOB_LEASE_MS = 2 * 60 * 1000;
@@ -109,6 +110,11 @@ export const STALE_ASYNC_JOB_MS = configuredDurationMs(
 export const QUEUED_ASYNC_JOB_MS = configuredDurationMs(
   process.env.ASYNC_JOB_QUEUED_MS,
   DEFAULT_QUEUED_ASYNC_JOB_MS
+);
+
+export const CONNECTOR_QUEUED_ASYNC_JOB_MS = configuredDurationMs(
+  process.env.CONNECTOR_QUEUED_STALE_MS,
+  DEFAULT_CONNECTOR_QUEUED_ASYNC_JOB_MS
 );
 
 export const SKU_OPTIMIZATION_STALE_JOB_MS = configuredDurationMs(
@@ -178,6 +184,10 @@ function queuedBeforeDate(now = new Date()) {
   return new Date(now.getTime() - QUEUED_ASYNC_JOB_MS);
 }
 
+function connectorQueuedBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - CONNECTOR_QUEUED_ASYNC_JOB_MS);
+}
+
 function optimizationQueuedBeforeDate(now = new Date()) {
   return new Date(now.getTime() - OPTIMIZATION_QUEUED_ASYNC_JOB_MS);
 }
@@ -201,6 +211,16 @@ function staleOptimizationQueuedJobWhere(now = new Date()) {
     type: "SKU_OPTIMIZATION",
     updatedAt: {
       lt: optimizationQueuedBeforeDate(now)
+    }
+  };
+}
+
+function staleConnectorQueuedJobWhere(now = new Date()) {
+  return {
+    status: "QUEUED",
+    type: "SYNC_CONNECTOR",
+    updatedAt: {
+      lt: connectorQueuedBeforeDate(now)
     }
   };
 }
@@ -1637,9 +1657,10 @@ export async function recoverAsyncJobs(
         {
           ...staleQueuedJobWhere(),
           type: {
-            not: "SKU_OPTIMIZATION"
+            notIn: ["SKU_OPTIMIZATION", "SYNC_CONNECTOR"]
           }
         },
+        staleConnectorQueuedJobWhere(),
         staleOptimizationQueuedJobWhere(),
         {
           ...staleResumableJobWhere(),

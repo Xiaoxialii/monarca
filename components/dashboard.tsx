@@ -1826,6 +1826,16 @@ function isOperationalConnectedSource(source: ConnectedSourceRow) {
   return (source.syncStatus || source.status || "").toUpperCase() === "CONNECTED";
 }
 
+function sourceIsDisconnected(source: ConnectedSourceRow) {
+  return [source.connectionStatus, source.syncStatus, source.status]
+    .filter((status): status is string => typeof status === "string")
+    .some((status) => status.toUpperCase() === "DISCONNECTED");
+}
+
+function sanitizeConnectedSources(sources: ConnectedSourceRow[]) {
+  return withoutPermanentlyDeletedSources(withoutLocallyRemovedSources(sources)).filter((source) => !sourceIsDisconnected(source));
+}
+
 function readConnectedSourcesMemoryCache(workspaceId?: string | null, userId?: string | null) {
   if (!workspaceId || connectedSourcesWorkspaceIdCache !== workspaceId) return null;
   if ((connectedSourcesUserIdCache ?? null) !== (userId ?? null)) return null;
@@ -6655,7 +6665,7 @@ function buildBusinessSources(connectedSources: ConnectedSourceRow[], isZh: bool
   const grouped = new Map<string, ConnectedSourceRow[]>();
   const ungrouped: ConnectedSourceRow[] = [];
 
-  connectedSources.forEach((source) => {
+  connectedSources.filter((source) => !sourceIsDisconnected(source)).forEach((source) => {
     const key = inferBusinessSourceKey(source);
     if (!key) {
       ungrouped.push(source);
@@ -18426,7 +18436,7 @@ export function Dashboard({
       const payload = await response.json().catch(() => null);
 
       if (response.ok && payload?.ok && Array.isArray(payload.dataSources)) {
-        const nextSources = withoutLocallyRemovedSources(payload.dataSources as ConnectedSourceRow[]);
+        const nextSources = sanitizeConnectedSources(payload.dataSources as ConnectedSourceRow[]);
         const nextWorkspaceId = typeof payload.workspace?.id === "string" ? payload.workspace.id : null;
         const nextUserId = connectedSourcesUserIdCache;
         const workspaceChanged = Boolean(
@@ -18493,11 +18503,15 @@ export function Dashboard({
       }
       connectedSourcesUserIdCache = currentUserId;
 
-      const cachedSources =
-        readConnectedSourcesMemoryCache(currentWorkspaceId, currentUserId) ??
-        readConnectedSourcesBrowserCache(currentWorkspaceId, currentUserId);
+      const urlParams = new URLSearchParams(window.location.search);
+      const hasConnectorCallbackParam = ["shopify", "amazon", "google_ads", "meta_ads"]
+        .some((key) => urlParams.has(key));
+      const cachedSources = hasConnectorCallbackParam
+        ? null
+        : readConnectedSourcesMemoryCache(currentWorkspaceId, currentUserId) ??
+          readConnectedSourcesBrowserCache(currentWorkspaceId, currentUserId);
       if (cachedSources && cachedSources.length > 0) {
-        const filteredCachedSources = withoutLocallyRemovedSources(cachedSources);
+        const filteredCachedSources = sanitizeConnectedSources(cachedSources);
         connectedSourcesWorkspaceIdCache = currentWorkspaceId;
         connectedSourcesUserIdCache = currentUserId;
         connectedSourcesCache = filteredCachedSources;

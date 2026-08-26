@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { ConnectionStatus } from "@prisma/client";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 import { prisma } from "@/lib/prisma";
@@ -557,9 +557,7 @@ export async function GET(request: Request) {
   try {
     const session = await requireWorkspace(request);
     logWorkspaceContext("[workspace-context] data-sources.GET", session);
-    after(() => {
-      void recoverStaleDataSourceJobs(session.workspace.id);
-    });
+    await recoverStaleDataSourceJobs(session.workspace.id);
     const includeDeleted = true;
 
     const dataSources = await prisma.dataSourceConnection.findMany({

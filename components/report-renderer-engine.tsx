@@ -3105,6 +3105,154 @@ function localizeDecisionActionDisplay(display: DecisionActionDisplay, locale: R
   };
 }
 
+function zhEmpty(locale: RendererLocale) {
+  return locale === "zh" ? "暂无" : "N/A";
+}
+
+function localizeDecisionText(value: string | null | undefined, locale: RendererLocale) {
+  if (!value) return "";
+  if (locale !== "zh") return value;
+
+  const exact: Record<string, string> = {
+    "AI Decision Summary": "AI 决策摘要",
+    "AI is monitoring this SKU because no action currently beats the baseline.": "AI 正在监控该 SKU，因为当前没有动作优于基准方案。",
+    "AI is recommending a business action for this SKU.": "AI 正在为该 SKU 推荐业务动作。",
+    "Pending Approval": "等待确认",
+    "Lifecycle": "生命周期",
+    "AI can decide": "AI 是否可决策",
+    "Yes": "可以",
+    "Monitor only": "仅监控",
+    "Decision Status": "决策状态",
+    "Decision Context": "决策上下文",
+    "Optimization Goal": "优化目标",
+    "Recommended Action": "推荐动作",
+    "Why AI Selected This Decision": "AI 为什么选择这个决策",
+    "Decision Trace": "决策链路",
+    "Decision passed runtime normalization.": "决策已通过运行时标准化。",
+    "Why This SKU Has Opportunity": "为什么该 SKU 有优化机会",
+    "AI Reasoning": "AI 推理",
+    "AI Scenario Comparison": "AI 方案对比",
+    "Simulation Breakdown": "模拟拆解",
+    "Prediction by Day": "按天预测",
+    "Daily Impact Tracking": "每日影响跟踪",
+    "AI Decision Lifecycle": "AI 决策生命周期",
+    "Input Signals": "输入信号",
+    "Detected Opportunity": "识别到的机会",
+    "Candidate Actions": "候选动作",
+    "Selected Action": "选中的动作",
+    "Highest risk-adjusted profit under current constraints.": "在当前约束下风险调整后利润最高。",
+    "Current operation remains the best risk-adjusted baseline.": "当前运营方案仍是风险调整后的最佳基准。",
+    "AI selected no action because current portfolio performance is optimal under current constraints.": "AI 选择不执行动作，因为当前组合表现在约束条件下仍是最佳方案。",
+    "Selected because:": "选择原因：",
+    "Action": "动作",
+    "Expected Profit Impact": "预计利润影响",
+    "Confidence": "置信度",
+    "Decision": "决策",
+    "Selected": "已选择",
+    "Rejected": "已排除",
+    "Date": "日期",
+    "Action Status": "动作状态",
+    "Ad Spend Change": "广告花费变化",
+    "Revenue Impact": "收入影响",
+    "Profit Impact": "利润影响",
+    "Running": "执行中",
+    "Pending": "等待中",
+    "Ads": "广告",
+    "Revenue": "收入",
+    "Profit": "利润",
+    "Open": "展开",
+    "Demand Signal": "需求信号",
+    "Profit Signal": "利润信号",
+    "Advertising Signal": "广告信号",
+    "Inventory Signal": "库存信号",
+    "Lifecycle Strategy": "生命周期策略",
+    "Revenue Trend": "收入趋势",
+    "Margin": "毛利率",
+    "Current Stock": "当前库存",
+    "Stock Coverage": "库存覆盖",
+    "Portfolio Average": "组合平均",
+    "Marginal ROAS": "边际 ROAS",
+    "Demand Forecast": "需求预测",
+    "Benchmark": "基准",
+    "Current portfolio performance is optimal; AI will continue monitoring new signals.": "当前组合表现未发现需要执行的动作，AI 将继续监控新信号。",
+    "Why AI Selected Hold": "AI 为什么选择继续监控",
+    "No alternative action generated higher risk-adjusted profit than the current baseline.": "没有其他动作产生高于当前基准方案的风险调整利润。",
+    "Growth evidence supports scaling ads.": "增长证据支持扩大广告。",
+    "Decision: Hold baseline": "决策：保持基准方案",
+    "No active discount": "无进行中的折扣",
+    "10% discount test": "测试 10% 折扣",
+    "Test": "测试",
+    "UNKNOWN": "未知",
+    "n/a": "暂无",
+    "N/A": "暂无"
+  };
+
+  if (exact[value]) return exact[value];
+
+  const replacements: Array<[RegExp, string]> = [
+    [/Portfolio Health Optimization/g, "组合健康优化"],
+    [/Growth Optimization/g, "增长优化"],
+    [/Profit Optimization/g, "利润优化"],
+    [/Inventory Optimization/g, "库存优化"],
+    [/Portfolio Health/g, "组合健康"],
+    [/Scale Ads/g, "扩大广告"],
+    [/Expand Channel/g, "拓展渠道"],
+    [/Increase Price/g, "提高价格"],
+    [/Decrease Price/g, "降低价格"],
+    [/Run Promotion/g, "测试促销"],
+    [/Restock Inventory/g, "补充库存"],
+    [/Clear Excess Inventory/g, "清理库存"],
+    [/Enrich Inputs/g, "补齐数据"],
+    [/Reduce Ad Waste/g, "减少广告浪费"],
+    [/Reallocate Budget/g, "重分配预算"],
+    [/Exit SKU/g, "退出 SKU"],
+    [/No Action Required/g, "无需操作"],
+    [/AI evaluated: /g, "AI 已评估："],
+    [/\bstrategies\b/g, "个策略"],
+    [/VALIDATE_AND_SCALE/g, "验证并扩大"],
+    [/SCALE_ADS/g, "扩大广告"],
+    [/ENRICH_PROFIT_INPUTS/g, "补齐利润输入"],
+    [/HOLD/g, "继续监控"],
+    [/MONITOR/g, "监控"],
+    [/UNKNOWN/g, "未知"],
+    [/Growth evidence is present\./g, "增长证据已存在。"],
+    [/Growth evidence supports scaling ads\./g, "增长证据支持扩大广告。"],
+    [/Inventory gap/g, "库存缺口"],
+    [/Current/g, "当前"],
+    [/Required/g, "所需"],
+    [/Rejected/g, "已排除"],
+    [/Decision passed runtime normalization\./g, "决策已通过运行时标准化。"],
+    [/Confirm competitor brands, then sync public ad library signals\./g, "确认竞品品牌后，可同步公开广告库信息。"],
+    [/No competitor brands confirmed for this SKU\./g, "该 SKU 尚未确认竞品品牌。"],
+    [/Public ad library sync has not run yet\./g, "公开广告库尚未同步。"],
+    [/\bcategory\b/gi, "品类"],
+    [/\bunits\b/g, "件"],
+    [/\bdays\b/g, "天"]
+  ];
+
+  return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), value);
+}
+
+function localizeDecisionMetricLabel(metric: string, horizonDays: number, locale: RendererLocale) {
+  const base = metric.includes("/") ? metric : `${metric}${metric === "Profit" ? ` / ${horizonDays} days` : ""}`;
+  if (locale !== "zh") return base;
+
+  const adSpendMatch = base.match(/^Ad Spend \/ (\d+) days$/);
+  if (adSpendMatch) return `广告花费 / ${adSpendMatch[1]} 天`;
+
+  const profitMatch = base.match(/^Profit \/ (\d+) days$/);
+  if (profitMatch) return `利润 / ${profitMatch[1]} 天`;
+
+  const labels: Record<string, string> = {
+    "Budget Move": "预算调整",
+    "Inventory Units": "库存件数",
+    "Price": "价格",
+    "Promotion": "促销",
+    "Profit": `利润 / ${horizonDays} 天`
+  };
+  return labels[base] ?? localizeDecisionText(base, locale);
+}
+
 type ActionOutcomeStatus = "Pending" | "Accepted" | "Running" | "Completed" | "Rejected" | "Blocked";
 
 type PersistedActionTrackingRecord = {
@@ -5413,67 +5561,70 @@ function SelectedSkuOptimizationPanel({
     ? decisionReadiness.confidence_level !== "LOW" && !(decisionReadiness.allowed_actions ?? []).every((action) => action === "MONITOR")
     : row.decision_confidence?.confidence_level !== "LOW";
   const competitiveContext = competitiveContextForDecision(row);
+  const aiCanDecideLabel = aiCanDecide
+    ? localizeDecisionText("Yes", locale)
+    : localizeDecisionText("Monitor only", locale);
 
   return (
     <aside className="sticky bottom-0 top-auto mx-auto w-full max-h-[68vh] max-w-none overflow-auto bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
       <div className="p-0">
-        <p className="text-sm font-bold text-slate-950">AI Decision Summary</p>
+        <p className="text-sm font-bold text-slate-950">{localizeDecisionText("AI Decision Summary", locale)}</p>
         <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-lg font-extrabold text-[#5747e8]">{decision.sku}</p>
               <p className="mt-1 text-xs font-semibold text-slate-500">
-                {decision.action === "No Action Required"
+                {localizeDecisionText(decision.action === "No Action Required"
                   ? "AI is monitoring this SKU because no action currently beats the baseline."
-                  : "AI is recommending a business action for this SKU."}
+                  : "AI is recommending a business action for this SKU.", locale)}
               </p>
             </div>
             {actionStatus === "pending" ? (
-              <Badge tone="warning">Pending Approval</Badge>
+              <Badge tone="warning">{localizeDecisionText("Pending Approval", locale)}</Badge>
             ) : (
               <RecommendationStatusBadge status={actionStatus === "accepted" ? "accepted" : "rejected"} locale={locale} />
             )}
           </div>
           <div className="mt-3 grid gap-2 text-sm">
-            <DecisionSummaryRow label="Lifecycle" value={decision.lifecycle_status} />
+            <DecisionSummaryRow label={localizeDecisionText("Lifecycle", locale)} value={localizeDecisionText(decision.lifecycle_status, locale)} />
             {decision.action !== "No Action Required" ? (
-              <DecisionProfitComparisonTable decision={decision} horizonDays={simulationHorizonDays} />
+              <DecisionProfitComparisonTable decision={decision} horizonDays={simulationHorizonDays} locale={locale} />
             ) : null}
             <DecisionSummaryRow
-              label="AI can decide"
-              value={`${aiCanDecide ? "Yes" : "Monitor only"} · ${readinessScore === null ? percent.format(detail.confidence) : `${Math.round(readinessScore)}/100`}`}
+              label={localizeDecisionText("AI can decide", locale)}
+              value={`${aiCanDecideLabel} · ${readinessScore === null ? percent.format(detail.confidence) : `${Math.round(readinessScore)}/100`}`}
             />
             <CompetitiveContextSummary context={competitiveContext} locale={locale} />
-            <DecisionSummaryRow label="Decision Status" value={decision.decision_status} />
+            <DecisionSummaryRow label={localizeDecisionText("Decision Status", locale)} value={localizeDecisionText(decision.decision_status, locale)} />
           </div>
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Decision Context</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">{localizeDecisionText("Decision Context", locale)}</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Optimization Goal</p>
-                <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.optimization_goal}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{localizeDecisionText("Optimization Goal", locale)}</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.optimization_goal, locale)}</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Recommended Action</p>
-                <p className="mt-1 text-sm font-extrabold text-slate-950">{decision.action}</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{decision.action_description}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{localizeDecisionText("Recommended Action", locale)}</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-950">{localizeDecisionText(decision.action, locale)}</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{localizeDecisionText(decision.action_description, locale)}</p>
               </div>
             </div>
-            <p className="mt-3 text-sm font-bold text-slate-950">Why AI Selected This Decision</p>
-            <p className="mt-1 text-xs font-bold text-slate-700">{decision.reasoning.title}</p>
+            <p className="mt-3 text-sm font-bold text-slate-950">{localizeDecisionText("Why AI Selected This Decision", locale)}</p>
+            <p className="mt-1 text-xs font-bold text-slate-700">{localizeDecisionText(decision.reasoning.title, locale)}</p>
             <div className="mt-3 rounded-md border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-600">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-bold text-slate-950">Decision Trace</span>
-                <span>{decisionTrace?.originalAction ?? "UNKNOWN"} → {decisionTrace?.finalAction ?? decision.action}</span>
+                <span className="font-bold text-slate-950">{localizeDecisionText("Decision Trace", locale)}</span>
+                <span>{localizeDecisionText(decisionTrace?.originalAction ?? "UNKNOWN", locale)} → {localizeDecisionText(decisionTrace?.finalAction ?? decision.action, locale)}</span>
               </div>
-              <p className="mt-1 leading-5">{decisionTrace?.validationReason ?? "Decision passed runtime normalization."}</p>
+              <p className="mt-1 leading-5">{localizeDecisionText(decisionTrace?.validationReason ?? "Decision passed runtime normalization.", locale)}</p>
               {traceRejectedActions.length ? (
                 <p className="mt-1 leading-5">
-                  Rejected: {traceRejectedActions.map((item) => `${item.action} (${item.reason})`).join(", ")}
+                  {localizeDecisionText("Rejected", locale)}: {traceRejectedActions.map((item) => `${localizeDecisionText(item.action, locale)} (${localizeDecisionText(item.reason, locale)})`).join(", ")}
                 </p>
               ) : null}
               <p className="mt-1 leading-5">
-                Inventory gap: {traceEvidence.inventory_gap ?? "n/a"} · Current: {traceEvidence.current_inventory ?? "n/a"} · Required: {traceEvidence.required_inventory ?? "n/a"} · ROAS: {traceEvidence.roas ?? "n/a"}
+                {localizeDecisionText("Inventory gap", locale)}: {traceEvidence.inventory_gap ?? zhEmpty(locale)} · {localizeDecisionText("Current", locale)}: {traceEvidence.current_inventory ?? zhEmpty(locale)} · {localizeDecisionText("Required", locale)}: {traceEvidence.required_inventory ?? zhEmpty(locale)} · ROAS: {traceEvidence.roas ?? zhEmpty(locale)}
               </p>
             </div>
             <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700">
@@ -5481,41 +5632,41 @@ function SelectedSkuOptimizationPanel({
                 <div key={item.signal} className="rounded-md border border-slate-200 bg-white p-2">
                   <span className="inline-flex items-center gap-2 text-slate-950">
                     <span className="text-slate-500">✓</span>
-                    {item.signal}
+                    {localizeDecisionText(item.signal, locale)}
                   </span>
                   <div className="mt-1 grid gap-0.5 pl-5 text-xs font-semibold text-slate-600">
-                    <span>{item.metric}</span>
-                    <span className="font-medium leading-5 text-slate-500">{item.explanation}</span>
+                    <span>{localizeDecisionText(item.metric, locale)}</span>
+                    <span className="font-medium leading-5 text-slate-500">{localizeDecisionText(item.explanation, locale)}</span>
                   </div>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{decision.reasoning.summary}</p>
+            <p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{localizeDecisionText(decision.reasoning.summary, locale)}</p>
           </div>
         </div>
       </div>
 
-      <PanelDisclosure title="Why This SKU Has Opportunity" defaultOpen>
-        <DecisionSignalCards decision={decision} />
+      <PanelDisclosure title={localizeDecisionText("Why This SKU Has Opportunity", locale)} defaultOpen locale={locale}>
+        <DecisionSignalCards decision={decision} locale={locale} />
       </PanelDisclosure>
 
-      <PanelDisclosure title="AI Reasoning">
-        <AIReasoningPanel decision={decision} />
+      <PanelDisclosure title={localizeDecisionText("AI Reasoning", locale)} locale={locale}>
+        <AIReasoningPanel decision={decision} locale={locale} />
       </PanelDisclosure>
 
-      <PanelDisclosure title="AI Scenario Comparison">
-        <ScenarioSimulationComparison decision={decision} />
+      <PanelDisclosure title={localizeDecisionText("AI Scenario Comparison", locale)} locale={locale}>
+        <ScenarioSimulationComparison decision={decision} locale={locale} />
       </PanelDisclosure>
 
       {row.simulation_estimate ? (
-        <PanelDisclosure title="Simulation Breakdown">
+        <PanelDisclosure title={localizeDecisionText("Simulation Breakdown", locale)} locale={locale}>
           <SimulationEstimateBreakdown row={row} />
         </PanelDisclosure>
       ) : null}
 
       <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-bold text-slate-950">Prediction by Day</p>
+          <p className="text-sm font-bold text-slate-950">{localizeDecisionText("Prediction by Day", locale)}</p>
           <div className="flex rounded-md bg-slate-100 p-1">
             {[7, 14, 30].map((value) => (
               <button
@@ -5532,14 +5683,14 @@ function SelectedSkuOptimizationPanel({
             ))}
           </div>
         </div>
-        <ProfitTrendChart rows={visibleRows} compact />
+        <ProfitTrendChart rows={visibleRows} compact locale={locale} />
         <div className="mt-3 border-t border-slate-100 pt-3">
-          <p className="mb-2 text-sm font-bold text-slate-950">Daily Impact Tracking</p>
-          <DailyProfitTrackingTable rows={visibleRows} />
+          <p className="mb-2 text-sm font-bold text-slate-950">{localizeDecisionText("Daily Impact Tracking", locale)}</p>
+          <DailyProfitTrackingTable rows={visibleRows} locale={locale} />
         </div>
       </div>
 
-      <PanelDisclosure title="AI Decision Lifecycle">
+      <PanelDisclosure title={localizeDecisionText("AI Decision Lifecycle", locale)} locale={locale}>
         <ActionLifecycleCard detail={detail} actionStatus={actionStatus} accuracy={accuracy} compact showTitle={false} />
       </PanelDisclosure>
 
@@ -5608,8 +5759,8 @@ function CompetitiveContextSummary({ context, locale }: { context: CompetitiveCo
   const publicAdCount = context?.active_public_ads ?? 0;
   const canUseForDecision = context?.data_quality?.can_use_for_decision ?? false;
   const longestRunningLabel = context?.longest_running_ad_days === null || context?.longest_running_ad_days === undefined
-    ? "N/A"
-    : `${numberFormat.format(context.longest_running_ad_days)}d`;
+    ? zhEmpty(locale)
+    : isZh ? `${numberFormat.format(context.longest_running_ad_days)} 天` : `${numberFormat.format(context.longest_running_ad_days)}d`;
 
   return (
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -5630,18 +5781,18 @@ function CompetitiveContextSummary({ context, locale }: { context: CompetitiveCo
         <span>{isZh ? "最长投放" : "Longest live"}: {longestRunningLabel}</span>
       </div>
       <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-2">
-        <span>{isZh ? "品类" : "Category"}: {context?.category ?? "N/A"}</span>
+        <span>{isZh ? "品类" : "Category"}: {context?.category ?? zhEmpty(locale)}</span>
         <span>{competitivePricePositionLabel(context?.price_position, locale)}</span>
-        <span>{isZh ? "本 SKU 价格" : "Own price"}: {context?.own_price ? currencyDecimal.format(context.own_price) : "N/A"}</span>
-        <span>{isZh ? "市场参考价" : "Market reference"}: {context?.market_reference_price ? currencyDecimal.format(context.market_reference_price) : "N/A"}</span>
+        <span>{isZh ? "本 SKU 价格" : "Own price"}: {context?.own_price ? currencyDecimal.format(context.own_price) : zhEmpty(locale)}</span>
+        <span>{isZh ? "市场参考价" : "Market reference"}: {context?.market_reference_price ? currencyDecimal.format(context.market_reference_price) : zhEmpty(locale)}</span>
       </div>
       {warnings.length ? (
         <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
-          {warnings[0]}
+          {localizeDecisionText(warnings[0], locale)}
         </p>
       ) : null}
       <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-        {context?.next_step ?? (isZh ? "确认竞品品牌后，可同步公开广告库信息。" : "Confirm competitor brands, then sync public ad library signals.")}
+        {context?.next_step ? localizeDecisionText(context.next_step, locale) : (isZh ? "确认竞品品牌后，可同步公开广告库信息。" : "Confirm competitor brands, then sync public ad library signals.")}
       </p>
     </div>
   );
@@ -5656,27 +5807,28 @@ function DecisionSummaryRow({ label, value, strong = false }: { label: string; v
   );
 }
 
-function DecisionProfitComparisonTable({ decision, horizonDays }: { decision: SkuDecisionObject; horizonDays: number }) {
+function DecisionProfitComparisonTable({ decision, horizonDays, locale }: { decision: SkuDecisionObject; horizonDays: number; locale: RendererLocale }) {
+  const isZh = locale === "zh";
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <table className="w-full table-fixed text-left text-[11px]">
         <thead className="bg-white text-slate-500">
           <tr>
-            <th className="w-[28%] px-2 py-2 font-bold uppercase tracking-wide">Metric</th>
-            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">Current Plan</th>
-            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">AI Action</th>
-            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">Change</th>
+            <th className="w-[28%] px-2 py-2 font-bold uppercase tracking-wide">{isZh ? "指标" : "Metric"}</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">{isZh ? "当前方案" : "Current Plan"}</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">{isZh ? "AI 动作" : "AI Action"}</th>
+            <th className="w-[24%] px-2 py-2 text-right font-bold uppercase tracking-wide">{isZh ? "变化" : "Change"}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {decision.summary_comparison.map((item) => (
             <tr key={item.metric}>
               <td className="break-words px-2 py-2 font-semibold text-slate-600">
-                {item.metric.includes("/") ? item.metric : `${item.metric}${item.metric === "Profit" ? ` / ${horizonDays} days` : ""}`}
+                {localizeDecisionMetricLabel(item.metric, horizonDays, locale)}
               </td>
-              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{item.current}</td>
-              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{item.action}</td>
-              <td className={cn("break-words px-2 py-2 text-right font-bold", item.strong ? "text-emerald-700" : "text-slate-700")}>{item.change}</td>
+              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{localizeDecisionText(item.current, locale)}</td>
+              <td className="break-words px-2 py-2 text-right font-bold text-slate-950">{localizeDecisionText(item.action, locale)}</td>
+              <td className={cn("break-words px-2 py-2 text-right font-bold", item.strong ? "text-emerald-700" : "text-slate-700")}>{localizeDecisionText(item.change, locale)}</td>
             </tr>
           ))}
         </tbody>
@@ -5778,7 +5930,7 @@ function buildDecisionSummaryComparisonRows(
   return rows;
 }
 
-function DecisionSignalCards({ decision }: { decision: SkuDecisionObject }) {
+function DecisionSignalCards({ decision, locale }: { decision: SkuDecisionObject; locale: RendererLocale }) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       {decision.evidence.map((item) => {
@@ -5802,17 +5954,17 @@ function DecisionSignalCards({ decision }: { decision: SkuDecisionObject }) {
         return (
         <div key={item.signal} className="rounded-lg border border-emerald-100 bg-emerald-50/55 p-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-bold text-slate-950">{item.signal}</p>
+            <p className="text-sm font-bold text-slate-950">{localizeDecisionText(item.signal, locale)}</p>
             <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
               <span className="size-1.5 rounded-full bg-emerald-500" />
-              {item.status}
+              {localizeDecisionText(item.status, locale)}
             </span>
           </div>
           <div className="mt-3 space-y-1.5 text-xs">
-            <DetailRow label={primaryLabel} value={item.metric} />
-            {item.benchmark ? <DetailRow label={benchmarkLabel} value={item.benchmark} /> : null}
+            <DetailRow label={localizeDecisionText(primaryLabel, locale)} value={localizeDecisionText(item.metric, locale)} />
+            {item.benchmark ? <DetailRow label={localizeDecisionText(benchmarkLabel, locale)} value={localizeDecisionText(item.benchmark, locale)} /> : null}
           </div>
-          <p className="mt-3 text-xs font-medium leading-5 text-slate-600">{item.explanation}</p>
+          <p className="mt-3 text-xs font-medium leading-5 text-slate-600">{localizeDecisionText(item.explanation, locale)}</p>
         </div>
         );
       })}
@@ -5820,37 +5972,37 @@ function DecisionSignalCards({ decision }: { decision: SkuDecisionObject }) {
   );
 }
 
-function AIReasoningPanel({ decision }: { decision: SkuDecisionObject }) {
+function AIReasoningPanel({ decision, locale }: { decision: SkuDecisionObject; locale: RendererLocale }) {
   const selectedScenario = decision.scenarios.find((scenario) => scenario.status === "Selected") ?? decision.scenarios[0];
 
   return (
     <div className="space-y-3">
       <DecisionReasonItem
         index={1}
-        title="Input Signals"
-        body={decision.reasoning.reasons.map((reason) => `✓ ${reason.signal}`).join(" · ")}
+        title={localizeDecisionText("Input Signals", locale)}
+        body={decision.reasoning.reasons.map((reason) => `✓ ${localizeDecisionText(reason.signal, locale)}`).join(" · ")}
       />
       <DecisionReasonItem
         index={2}
-        title="Detected Opportunity"
-        body={decision.optimization_goal}
+        title={localizeDecisionText("Detected Opportunity", locale)}
+        body={localizeDecisionText(decision.optimization_goal, locale)}
       />
       <DecisionReasonItem
         index={3}
-        title="Candidate Actions"
-        body={decision.scenarios.slice(0, 4).map((scenario) => `${scenario.action}: ${signedCurrency(scenario.profit_delta)}`).join(" · ")}
+        title={localizeDecisionText("Candidate Actions", locale)}
+        body={decision.scenarios.slice(0, 4).map((scenario) => `${localizeDecisionText(scenario.action, locale)}: ${signedCurrency(scenario.profit_delta)}`).join(" · ")}
       />
       <div className="rounded-lg bg-emerald-950 p-3 text-white">
-        <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">Selected Action</p>
-        <p className="mt-1 text-lg font-extrabold">{decision.action}</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">{localizeDecisionText("Selected Action", locale)}</p>
+        <p className="mt-1 text-lg font-extrabold">{localizeDecisionText(decision.action, locale)}</p>
         <p className="mt-1 text-xs font-semibold leading-5 text-emerald-50">
-          {selectedScenario?.selected
+          {localizeDecisionText(selectedScenario?.selected
             ? "Highest risk-adjusted profit under current constraints."
-            : "Current operation remains the best risk-adjusted baseline."}
+            : "Current operation remains the best risk-adjusted baseline.", locale)}
         </p>
       </div>
       <div className="rounded-lg bg-slate-50 p-3 text-xs font-semibold leading-5 text-slate-600">
-        {decision.reasoning.summary}
+        {localizeDecisionText(decision.reasoning.summary, locale)}
       </div>
     </div>
   );
@@ -5911,26 +6063,26 @@ function AIEvidenceCards({ row, detail }: { row: PortfolioDecisionRow; detail: S
   );
 }
 
-function ScenarioSimulationComparison({ decision }: { decision: SkuDecisionObject }) {
+function ScenarioSimulationComparison({ decision, locale }: { decision: SkuDecisionObject; locale: RendererLocale }) {
   return (
     <div className="space-y-3">
       <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-950">
-        AI evaluated: <span className="text-emerald-700">{decision.scenarios.length} strategies</span>
+        {localizeDecisionText("AI evaluated: ", locale)}<span className="text-emerald-700">{decision.scenarios.length} {locale === "zh" ? "个策略" : "strategies"}</span>
       </div>
       <div className="overflow-hidden rounded-lg border border-slate-200">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
-              <th className="px-3 py-2">Action</th>
-              <th className="px-3 py-2">Expected Profit Impact</th>
-              <th className="px-3 py-2">Confidence</th>
-              <th className="px-3 py-2">Decision</th>
+              <th className="px-3 py-2">{localizeDecisionText("Action", locale)}</th>
+              <th className="px-3 py-2">{localizeDecisionText("Expected Profit Impact", locale)}</th>
+              <th className="px-3 py-2">{localizeDecisionText("Confidence", locale)}</th>
+              <th className="px-3 py-2">{localizeDecisionText("Decision", locale)}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {decision.scenarios.map((scenario) => (
               <tr key={scenario.action} className={scenario.status === "Selected" ? "bg-emerald-50/70" : ""}>
-                <td className="px-3 py-2 font-bold text-slate-950">{scenario.action}</td>
+                <td className="px-3 py-2 font-bold text-slate-950">{localizeDecisionText(scenario.action, locale)}</td>
                 <td className={cn("px-3 py-2 font-extrabold", scenario.profit_delta >= 0 ? "text-emerald-700" : "text-rose-600")}>{signedCurrency(scenario.profit_delta)}</td>
                 <td className="px-3 py-2 font-semibold text-slate-700">{percent.format(scenario.confidence)}</td>
                 <td className="px-3 py-2">
@@ -5938,7 +6090,7 @@ function ScenarioSimulationComparison({ decision }: { decision: SkuDecisionObjec
                     "rounded-full px-2 py-0.5 text-[11px] font-bold",
                     scenario.status === "Selected" ? "bg-emerald-100 text-emerald-800" : scenario.status === "Rejected" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"
                   )}>
-                    {scenario.status}
+                    {localizeDecisionText(scenario.status, locale)}
                   </span>
                 </td>
               </tr>
@@ -5948,12 +6100,12 @@ function ScenarioSimulationComparison({ decision }: { decision: SkuDecisionObjec
       </div>
       {decision.action === "No Action Required" ? (
         <div className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
-          AI selected no action because current portfolio performance is optimal under current constraints.
+          {localizeDecisionText("AI selected no action because current portfolio performance is optimal under current constraints.", locale)}
         </div>
       ) : (
         <div className="rounded-lg bg-emerald-950 p-3 text-white">
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">Selected because:</p>
-          <p className="mt-1 text-sm font-bold">Highest risk-adjusted profit under current constraints.</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">{localizeDecisionText("Selected because:", locale)}</p>
+          <p className="mt-1 text-sm font-bold">{localizeDecisionText("Highest risk-adjusted profit under current constraints.", locale)}</p>
         </div>
       )}
     </div>
@@ -6050,7 +6202,7 @@ function fallbackScenarios(row: PortfolioDecisionRow, recommendation: PortfolioR
   ] as NonNullable<PortfolioDecisionRow["scenarios"]>;
 }
 
-function ProfitTrendChart({ rows, compact = false }: { rows: DailyProfitTrackingRow[]; compact?: boolean }) {
+function ProfitTrendChart({ rows, compact = false, locale = "en" }: { rows: DailyProfitTrackingRow[]; compact?: boolean; locale?: RendererLocale }) {
   let cumulativeExpected = 0;
   let cumulativeActual = 0;
   const data = rows.map((row) => {
@@ -6073,28 +6225,29 @@ function ProfitTrendChart({ rows, compact = false }: { rows: DailyProfitTracking
           <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
           <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" width={48} />
           <Tooltip formatter={(value) => currencyDecimal.format(Number(value))} />
-          <Line name="Expected Profit Lift" type="monotone" dataKey="expected" stroke="#059669" strokeWidth={2} dot={false} />
-          <Line name="Actual Profit Lift" type="monotone" dataKey="actual" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls />
+          <Line name={locale === "zh" ? "预计利润提升" : "Expected Profit Lift"} type="monotone" dataKey="expected" stroke="#059669" strokeWidth={2} dot={false} />
+          <Line name={locale === "zh" ? "实际利润提升" : "Actual Profit Lift"} type="monotone" dataKey="actual" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-function DailyProfitTrackingTable({ rows }: { rows: DailyProfitTrackingRow[] }) {
+function DailyProfitTrackingTable({ rows, locale }: { rows: DailyProfitTrackingRow[]; locale: RendererLocale }) {
   const baselineAds = rows[0]?.ads_spend ?? 0;
   const baselineRevenue = rows[0]?.revenue ?? 0;
+  const isZh = locale === "zh";
 
   return (
     <div className="max-h-44 overflow-auto rounded-lg border">
       <table className="min-w-[620px] w-full text-left text-xs">
         <thead className="sticky top-0 bg-slate-50 text-slate-500">
           <tr>
-            <th className="px-2 py-2">Date</th>
-            <th className="px-2 py-2">Action Status</th>
-            <th className="px-2 py-2">Ad Spend Change</th>
-            <th className="px-2 py-2">Revenue Impact</th>
-            <th className="px-2 py-2">Profit Impact</th>
+            <th className="px-2 py-2">{localizeDecisionText("Date", locale)}</th>
+            <th className="px-2 py-2">{localizeDecisionText("Action Status", locale)}</th>
+            <th className="px-2 py-2">{localizeDecisionText("Ad Spend Change", locale)}</th>
+            <th className="px-2 py-2">{localizeDecisionText("Revenue Impact", locale)}</th>
+            <th className="px-2 py-2">{localizeDecisionText("Profit Impact", locale)}</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -6102,11 +6255,11 @@ function DailyProfitTrackingTable({ rows }: { rows: DailyProfitTrackingRow[] }) 
             const profitImpact = row.actual_profit === null ? null : row.actual_profit - row.baseline_profit;
             return (
             <tr key={`${row.sku}-${row.date}`}>
-              <td className="px-2 py-2 font-semibold text-slate-900">{new Date(`${row.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
-              <td className="px-2 py-2"><Badge tone={row.action_status === "tracking" ? "success" : "warning"}>{row.action_status === "tracking" ? "Running" : "Pending"}</Badge></td>
-              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.ads_spend - baselineAds)} Ads</td>
-              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.revenue - baselineRevenue)} Revenue</td>
-              <td className="px-2 py-2 font-bold text-emerald-700">{profitImpact === null ? "Pending" : `${signedCurrency(profitImpact)} Profit`}</td>
+              <td className="px-2 py-2 font-semibold text-slate-900">{new Date(`${row.date}T00:00:00`).toLocaleDateString(isZh ? "zh-CN" : "en-US", { month: "short", day: "numeric" })}</td>
+              <td className="px-2 py-2"><Badge tone={row.action_status === "tracking" ? "success" : "warning"}>{row.action_status === "tracking" ? localizeDecisionText("Running", locale) : localizeDecisionText("Pending", locale)}</Badge></td>
+              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.ads_spend - baselineAds)} {localizeDecisionText("Ads", locale)}</td>
+              <td className="px-2 py-2 font-semibold text-slate-700">{signedCurrency(row.revenue - baselineRevenue)} {localizeDecisionText("Revenue", locale)}</td>
+              <td className="px-2 py-2 font-bold text-emerald-700">{profitImpact === null ? localizeDecisionText("Pending", locale) : `${signedCurrency(profitImpact)} ${localizeDecisionText("Profit", locale)}`}</td>
             </tr>
             );
           })}
@@ -6116,12 +6269,12 @@ function DailyProfitTrackingTable({ rows }: { rows: DailyProfitTrackingRow[] }) 
   );
 }
 
-function PanelDisclosure({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+function PanelDisclosure({ title, children, defaultOpen = false, locale = "en" }: { title: string; children: ReactNode; defaultOpen?: boolean; locale?: RendererLocale }) {
   return (
     <details className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-slate-950 marker:hidden">
         <span>{title}</span>
-        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">Open</span>
+        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">{localizeDecisionText("Open", locale)}</span>
       </summary>
       <div className="mt-3">
         {children}

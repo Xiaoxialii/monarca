@@ -25,7 +25,7 @@ import {
   Users,
   Wallet
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -1883,6 +1883,9 @@ function SkuPortfolioOptimizationPanel({
   const wasLoadingOptimizationRef = useRef(isLoadingOptimization);
   const decisionPanelDragStartXRef = useRef<number | null>(null);
   const decisionPanelDidDragRef = useRef(false);
+  const decisionPanelResizeStartXRef = useRef<number | null>(null);
+  const decisionPanelResizeStartWidthRef = useRef<number | null>(null);
+  const [decisionPanelWidth, setDecisionPanelWidth] = useState(760);
   const optimizationReportRunId = useMemo(() => optimizationReportKey(report), [report]);
   const actionStatusHydrationKey = useMemo(
     () => decisionRows.map((row) => recommendationIdForDecision(row, report)).join("|"),
@@ -2082,6 +2085,9 @@ function SkuPortfolioOptimizationPanel({
     : null;
   const selectedOptimizationDecision = selectedPortfolioView === "optimization" ? selectedDecision : null;
   const shouldShowOptimizationStarter = isSkuOperationsOpen && (showSkuTableEmptyState || !effectiveOptimizationStarted || isResolvingOptimizationState);
+  const decisionPanelGridStyle = {
+    "--decision-panel-width": `${decisionPanelWidth}px`
+  } as CSSProperties;
 
   useEffect(() => {
     if (isResolvingOptimizationState) {
@@ -2516,9 +2522,10 @@ function SkuPortfolioOptimizationPanel({
         className={cn(
           "relative grid min-h-[560px] overflow-hidden rounded-[18px] border border-slate-200 bg-[#f7f8f7] shadow-sm xl:h-full xl:min-h-0 xl:items-stretch",
           isDecisionPanelOpen
-            ? "xl:grid-cols-[300px_minmax(460px,0.72fr)_minmax(720px,1.28fr)]"
+            ? "xl:grid-cols-[300px_minmax(380px,1fr)_minmax(520px,var(--decision-panel-width))]"
             : "xl:grid-cols-[300px_minmax(620px,1fr)_64px]"
         )}
+        style={isDecisionPanelOpen ? decisionPanelGridStyle : undefined}
       >
         <section className="relative flex min-h-[520px] min-w-0 flex-col bg-[#eef0f2] xl:h-full xl:min-h-0 xl:overflow-hidden xl:border-r xl:border-slate-200">
           <div className="border-b border-slate-200 bg-[#f8f9f9] px-4 py-3">
@@ -2747,10 +2754,41 @@ function SkuPortfolioOptimizationPanel({
 
         <section
           className={cn(
-            "relative flex min-h-[96px] min-w-0 flex-col transition-colors xl:h-full xl:min-h-0 xl:overflow-hidden",
+            "relative flex min-h-[96px] min-w-0 max-w-full flex-col transition-colors xl:h-full xl:min-h-0 xl:overflow-hidden",
             "bg-white"
           )}
         >
+          {isDecisionPanelOpen ? (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={isZh ? "调整 AI 决策摘要宽度" : "Resize AI decision summary"}
+              title={isZh ? "拖动调整宽度" : "Drag to resize"}
+              onPointerDown={(event) => {
+                decisionPanelResizeStartXRef.current = event.clientX;
+                decisionPanelResizeStartWidthRef.current = decisionPanelWidth;
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+                event.preventDefault();
+              }}
+              onPointerMove={(event) => {
+                const startX = decisionPanelResizeStartXRef.current;
+                const startWidth = decisionPanelResizeStartWidthRef.current;
+                if (startX === null || startWidth === null) return;
+                const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
+                const maxWidth = Math.max(560, Math.min(1040, viewportWidth - 420));
+                const nextWidth = Math.max(520, Math.min(maxWidth, startWidth - (event.clientX - startX)));
+                setDecisionPanelWidth(nextWidth);
+              }}
+              onPointerUp={(event) => {
+                decisionPanelResizeStartXRef.current = null;
+                decisionPanelResizeStartWidthRef.current = null;
+                event.currentTarget.releasePointerCapture?.(event.pointerId);
+              }}
+              className="absolute left-0 top-0 z-30 hidden h-full w-3 cursor-col-resize touch-none select-none items-center justify-center xl:flex"
+            >
+              <span className="h-12 w-1 rounded-full bg-slate-300 opacity-70 transition hover:bg-emerald-500" />
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -2791,7 +2829,7 @@ function SkuPortfolioOptimizationPanel({
 
           {isDecisionPanelOpen ? (
             <>
-              <div className="min-h-0 flex-1 overflow-auto">
+              <div className="min-h-0 max-w-full flex-1 overflow-auto overflow-x-hidden">
                 {selectedOptimizationDecision ? (
                   <SelectedSkuOptimizationPanel
                     row={selectedOptimizationDecision}
@@ -5586,8 +5624,8 @@ function SelectedSkuOptimizationPanel({
     : localizeDecisionText("Monitor only", locale);
 
   return (
-    <aside className="sticky bottom-0 top-auto mx-auto w-full max-w-full max-h-[68vh] overflow-auto overflow-x-hidden bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
-      <div className="min-w-0 p-0">
+    <aside className="sticky bottom-0 top-auto mx-auto max-h-[68vh] w-full max-w-full overflow-auto overflow-x-hidden bg-transparent p-4 pb-6 xl:top-0 xl:max-h-[calc(100vh-6rem)]">
+      <div className="min-w-0 max-w-full overflow-hidden p-0">
         <p className="text-sm font-bold text-slate-950">{localizeDecisionText("AI Decision Summary", locale)}</p>
         <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-slate-100">
           <div className="flex items-start justify-between gap-3">
@@ -5901,7 +5939,7 @@ function CompetitiveContextSummary({
   };
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-slate-200 bg-white px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
           {isZh ? "竞品信息" : "Competitive Context"}
@@ -5969,7 +6007,7 @@ function CompetitiveContextSummary({
       ) : null}
       {needsCompetitorInput ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
-          <p className="text-xs font-semibold leading-5 text-amber-800">
+          <p className="break-words text-xs font-semibold leading-5 text-amber-800">
             {isZh
               ? "Shopify 商品字段已接入。系统会根据 SKU 商品信息、公开广告数量和长期投放信号自动选择高置信竞品；低置信候选仍可手动确认。"
               : "Shopify product fields are connected. Monarca can auto-select high-confidence competitors from SKU context, public ad volume, and long-running ads; lower-confidence candidates can still be confirmed manually."}
@@ -5984,18 +6022,18 @@ function CompetitiveContextSummary({
           </button>
           {discoveryMessage ? (
             <p className={cn(
-              "mt-2 text-xs font-semibold leading-5",
+              "mt-2 break-words text-xs font-semibold leading-5",
               discoveryState === "error" ? "text-rose-600" : "text-amber-800"
             )}>
               {discoveryMessage}
             </p>
           ) : null}
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-2 flex min-w-0 max-w-full flex-col gap-2 sm:flex-row">
             <input
               value={brandInput}
               onChange={(event) => setBrandInput(event.target.value)}
               placeholder={isZh ? "输入竞品品牌，多个用逗号分隔" : "Competitor brands, comma separated"}
-              className="min-w-0 flex-1 rounded-md border border-amber-200 bg-white px-2 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-amber-400"
+              className="min-w-0 max-w-full flex-1 rounded-md border border-amber-200 bg-white px-2 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-amber-400"
             />
             <button
               type="button"

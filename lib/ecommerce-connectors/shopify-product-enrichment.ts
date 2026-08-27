@@ -18,3 +18,12 @@ export function shopifyProductMetafieldKeys() {
 
   return configured?.length ? configured : [...DEFAULT_PRODUCT_METAFIELD_KEYS];
 }
+
+export function shopifyInventoryScopeGranted(grantedScopes: string | string[] | null | undefined) {
+  const scopes = Array.isArray(grantedScopes)
+    ? grantedScopes
+    : String(grantedScopes ?? "").split(/[\s,]+/);
+  const normalized = new Set(scopes.map((scope) => scope.trim().toLowerCase()).filter(Boolean));
+
+  return normalized.has("read_inventory") || normalized.has("write_inventory");
+}

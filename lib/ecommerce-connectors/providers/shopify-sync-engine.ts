@@ -18,7 +18,7 @@ import {
   shopifyScopeStatus,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
-import { shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
+import { shopifyInventoryScopeGranted, shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
 import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
 import { SelfLearningSemanticRuntime } from "@/lib/semantic/runtime";
@@ -289,7 +289,8 @@ const ORDERS_QUERY = `
   }
 `;
 
-const PRODUCTS_QUERY = `
+function productsQuery(includeInventoryFields: boolean) {
+  return `
   query ShopifySyncProducts($first: Int!, $after: String, $metafieldKeys: [String!]) {
     products(first: $first, after: $after, sortKey: UPDATED_AT) {
       edges {
@@ -343,8 +344,9 @@ const PRODUCTS_QUERY = `
                 price
                 compareAtPrice
                 barcode
-                inventoryQuantity
                 selectedOptions { name value }
+                ${includeInventoryFields ? `
+                inventoryQuantity
                 inventoryItem {
                   id
                   sku
@@ -353,6 +355,7 @@ const PRODUCTS_QUERY = `
                   unitCost { amount currencyCode }
                   measurement { weight { value unit } }
                 }
+                ` : ""}
                 media(first: 5) {
                   edges {
                     node {
@@ -386,6 +389,7 @@ const PRODUCTS_QUERY = `
     }
   }
 `;
+}
 
 const CUSTOMERS_QUERY = `
   query ShopifySyncCustomers($first: Int!, $after: String) {
@@ -534,7 +538,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
     const missingFields: string[] = [];
     const orderQuery = `updated_at:>=${syncWindowStart.toISOString()}`;
     const productsPage = await client.fetchConnectionWithPageInfo<ShopifyProduct>(
-      PRODUCTS_QUERY,
+      productsQuery(shopifyInventoryScopeGranted(grantedScopes)),
       "products",
       { metafieldKeys: shopifyProductMetafieldKeys() },
       MAX_RESOURCE_NODES

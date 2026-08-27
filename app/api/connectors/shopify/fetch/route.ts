@@ -7,7 +7,7 @@ import {
   publicShopifyError,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
-import { shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
+import { shopifyInventoryScopeGranted, shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -36,7 +36,8 @@ const ORDERS_QUERY = `
   }
 `;
 
-const PRODUCTS_QUERY = `
+function productsQuery(includeInventoryFields: boolean) {
+  return `
   query FetchShopifyProducts($first: Int!, $after: String, $metafieldKeys: [String!]) {
     products(first: $first, after: $after) {
       edges {
@@ -88,8 +89,9 @@ const PRODUCTS_QUERY = `
                 price
                 compareAtPrice
                 barcode
-                inventoryQuantity
                 selectedOptions { name value }
+                ${includeInventoryFields ? `
+                inventoryQuantity
                 inventoryItem {
                   id
                   sku
@@ -98,6 +100,7 @@ const PRODUCTS_QUERY = `
                   unitCost { amount currencyCode }
                   measurement { weight { value unit } }
                 }
+                ` : ""}
                 media(first: 5) {
                   edges {
                     node {
@@ -134,6 +137,7 @@ const PRODUCTS_QUERY = `
     }
   }
 `;
+}
 
 const CUSTOMERS_QUERY = `
   query FetchShopifyCustomers($first: Int!, $after: String) {
@@ -218,7 +222,7 @@ export async function GET() {
       fetchOptionalConnection({ client, query: ORDERS_QUERY, connectionKey: "orders", resource: "Order" }),
       fetchOptionalConnection({
         client,
-        query: PRODUCTS_QUERY,
+        query: productsQuery(shopifyInventoryScopeGranted(account.grantedScopes ?? account.scopes)),
         connectionKey: "products",
         resource: "Product",
         variables: { metafieldKeys: shopifyProductMetafieldKeys() }

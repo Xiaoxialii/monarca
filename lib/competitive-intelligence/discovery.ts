@@ -325,17 +325,25 @@ async function loadSkuProductContext(prisma: PrismaClient, input: {
     select: { schemaJson: true }
   });
 
+  let bestMatch: JsonRecord | null = null;
+  let bestScore = -1;
   for (const snapshot of snapshots) {
     const schema = objectValue(snapshot.schemaJson);
     const embedded = objectValue(objectValue(schema.canonicalDataset).tables);
     const embeddedRows = Array.isArray(embedded.ecommerce_products) ? embedded.ecommerce_products.map(objectValue) : [];
     const artifactRows = embeddedRows.length ? [] : await readProductArtifactRows(schema);
     const rows = embeddedRows.length ? embeddedRows : artifactRows;
-    const match = rows.find((row) => normalizeSku(stringValue(row.sku)) === normalizeSku(input.sku));
-    if (match) return match;
+    for (const row of rows) {
+      if (normalizeSku(stringValue(row.sku)) !== normalizeSku(input.sku)) continue;
+      const score = productContextScore(row);
+      if (score > bestScore) {
+        bestMatch = row;
+        bestScore = score;
+      }
+    }
   }
 
-  return null;
+  return bestMatch;
 }
 
 async function readProductArtifactRows(schema: JsonRecord) {
@@ -360,6 +368,26 @@ function searchTermsFromProduct(product: JsonRecord) {
   ].filter((term) => term.length >= 3 && !/^\d+$/.test(term));
 
   return Array.from(new Set(terms)).slice(0, 6);
+}
+
+function productContextScore(product: JsonRecord) {
+  const productName = cleanSearchText(stringValue(product.product_name));
+  const category = cleanSearchText(stringValue(product.category, product.category_full_name, product.category_name, product.product_type));
+  const tags = stringArray(product.tags).map(cleanSearchText).filter(Boolean);
+  const handle = cleanSearchText(stringValue(product.handle, product.product_handle).replace(/-/g, " "));
+  const description = cleanSearchText(stringValue(product.description, product.description_html));
+  const vendor = normalizeCompetitorBrandName(stringValue(product.vendor, product.brand));
+  const price = stringValue(product.price, product.compare_at_price);
+
+  return [
+    productName.length >= 3 ? 12 : 0,
+    category.length >= 3 ? 10 : 0,
+    tags.length ? Math.min(12, tags.length * 3) : 0,
+    handle.length >= 3 ? 8 : 0,
+    description.length >= 12 ? 8 : 0,
+    vendor.length >= 3 ? 4 : 0,
+    price ? 1 : 0
+  ].reduce((sum, value) => sum + value, 0);
 }
 
 function confidenceForCandidate(input: {

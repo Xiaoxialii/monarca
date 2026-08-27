@@ -5906,13 +5906,25 @@ function CompetitiveContextSummary({
       const payload = await response.json().catch(() => null) as {
         code?: string;
         message?: string;
+        searchTerms?: string[];
+        searchedCountries?: string[];
         candidates?: Array<{ brandName?: string; confidence?: number }>;
       } | null;
       if (!response.ok) {
         if (payload?.code === "PUBLIC_AD_LIBRARY_TOKEN_MISSING") {
           throw new Error(isZh ? "公开广告库 token 未配置，暂时无法自动发现竞品。" : "Public ad library token is not configured.");
         }
-        throw new Error(payload?.message || (isZh ? "未能根据 SKU 找到竞品候选。" : "Could not discover competitor candidates for this SKU."));
+        const searched = payload?.searchedCountries?.length
+          ? `${isZh ? "搜索国家" : "Countries"}：${payload.searchedCountries.join(", ")}`
+          : null;
+        const terms = payload?.searchTerms?.length
+          ? `${isZh ? "搜索词" : "Search terms"}：${payload.searchTerms.slice(0, 6).join(", ")}`
+          : null;
+        throw new Error([
+          payload?.message || (isZh ? "未能根据 SKU 找到竞品候选。" : "Could not discover competitor candidates for this SKU."),
+          searched,
+          terms
+        ].filter(Boolean).join(" "));
       }
       const candidates = (payload?.candidates ?? [])
         .map((candidate) => ({

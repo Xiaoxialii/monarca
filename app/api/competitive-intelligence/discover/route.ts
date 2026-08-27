@@ -30,7 +30,17 @@ export async function POST(request: Request) {
       limitPerTerm: body.limitPerTerm
     });
 
-    return NextResponse.json(result, { status: result.ok ? 200 : result.status === "UNSUPPORTED" ? 409 : 404 });
+    const message = result.ok
+      ? undefined
+      : result.code === "SKU_PRODUCT_CONTEXT_MISSING"
+        ? "No Shopify product context was found for this SKU."
+        : result.code === "SKU_PRODUCT_CONTEXT_INSUFFICIENT"
+          ? "Shopify product context for this SKU is missing searchable product name, category, tags, or handle."
+          : result.code === "PUBLIC_AD_LIBRARY_TOKEN_MISSING"
+            ? "Configure META_AD_LIBRARY_ACCESS_TOKEN before discovering competitors from public ads."
+            : "No competitor candidates were found from the current SKU product context and public ad search terms.";
+
+    return NextResponse.json({ ...result, message }, { status: result.ok ? 200 : result.status === "UNSUPPORTED" ? 409 : 404 });
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;

@@ -11,6 +11,8 @@ const renderer = readFileSync(new URL("../components/report-renderer-engine.tsx"
 test("competitor discovery uses SKU product context and public ad search", () => {
   assert.match(discovery, /loadSkuProductContext/, "Discovery should load canonical Shopify product context for the SKU.");
   assert.match(discovery, /readR2ObjectText/, "Discovery should read canonical product artifacts, including R2-backed snapshots.");
+  assert.match(discovery, /productContextScore/, "Discovery should prefer the richest SKU product context across snapshots.");
+  assert.doesNotMatch(discovery, /if \(match\) return match/, "Weak uploaded SKU rows must not shadow richer Shopify product rows.");
   assert.match(discovery, /searchTermsFromProduct/, "Discovery should derive keyword search terms from product attributes.");
   assert.match(discovery, /fetchMetaAdLibrarySearchAds/, "Discovery should query legal public ad data using product-derived terms.");
 });

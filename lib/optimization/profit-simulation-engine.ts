@@ -13,7 +13,7 @@ import type { DecisionReadiness } from "@/lib/optimization/decision-readiness-en
 
 export type CompetitiveContext = {
   status: "READY" | "NEEDS_COMPETITOR_REVIEW" | "PUBLIC_AD_LIBRARY_NOT_CONNECTED" | "INSUFFICIENT_SKU_SIGNAL";
-  source: "PUBLIC_AD_LIBRARY" | "SKU_CONTEXT" | "USER_CONFIRMED_COMPETITORS";
+  source: "PUBLIC_AD_LIBRARY" | "SKU_CONTEXT" | "USER_CONFIRMED_COMPETITORS" | "SKU_PRODUCT_CONTEXT_CANDIDATES";
   category: string | null;
   price_position: "BELOW_MARKET" | "AT_MARKET" | "ABOVE_MARKET" | "UNKNOWN";
   own_price: number | null;
@@ -26,7 +26,7 @@ export type CompetitiveContext = {
   top_formats: string[];
   competitor_brands: Array<{
     name: string;
-    source: "USER_CONFIRMED" | "DISCOVERED";
+    source: string;
     confidence: number;
   }>;
   data_quality: {

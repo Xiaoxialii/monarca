@@ -428,6 +428,90 @@ export async function fetchMetaAdLibraryBrandAds(input: {
   return records;
 }
 
+export async function fetchMetaAdLibrarySearchAds(input: {
+  accessToken: string;
+  searchTerm: string;
+  country: string;
+  limit: number;
+  fetchImpl?: typeof fetch;
+}) {
+  return fetchMetaAdLibraryBrandAds({
+    accessToken: input.accessToken,
+    brandName: input.searchTerm,
+    country: input.country,
+    limit: input.limit,
+    fetchImpl: input.fetchImpl
+  });
+}
+
+export async function upsertSuggestedCompetitorBrands(
+  prisma: PrismaClient,
+  input: {
+    workspaceId: string;
+    sku: string;
+    brands: Array<{
+      brandName: string;
+      category?: string | null;
+      confidence: number;
+      evidence: JsonRecord;
+    }>;
+  }
+) {
+  const sku = normalizeSku(input.sku);
+  if (!sku) throw new Error("SKU_REQUIRED");
+
+  const rows = [];
+  for (const brand of input.brands) {
+    const brandName = brand.brandName.trim();
+    if (!brandName) continue;
+    const normalizedBrandName = normalizeCompetitorBrandName(brandName);
+    const existing = await prisma.competitiveSkuBrand.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        sku,
+        normalizedBrandName,
+        validTo: null
+      }
+    });
+
+    if (existing?.status === "USER_CONFIRMED" || existing?.status === "REJECTED") {
+      rows.push(existing);
+      continue;
+    }
+
+    if (existing) {
+      rows.push(await prisma.competitiveSkuBrand.update({
+        where: { id: existing.id },
+        data: {
+          brandName,
+          category: brand.category ?? existing.category,
+          status: "NEEDS_REVIEW",
+          source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+          confidence: brand.confidence,
+          evidenceJson: brand.evidence as Prisma.InputJsonValue
+        }
+      }));
+      continue;
+    }
+
+    rows.push(await prisma.competitiveSkuBrand.create({
+      data: {
+        workspaceId: input.workspaceId,
+        sku,
+        brandName,
+        normalizedBrandName,
+        category: brand.category ?? null,
+        status: "NEEDS_REVIEW",
+        source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+        confidence: brand.confidence,
+        evidenceJson: brand.evidence as Prisma.InputJsonValue
+      }
+    }));
+  }
+
+  return rows;
+}
+
 export function metaAdLibraryAccessToken() {
   return process.env.META_AD_LIBRARY_ACCESS_TOKEN
     || process.env.META_SYSTEM_USER_ACCESS_TOKEN

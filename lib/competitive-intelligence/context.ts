@@ -19,10 +19,12 @@ export async function buildCompetitiveContextFromPublicAds(
       workspaceId: input.workspaceId,
       sku,
       validTo: null,
-      status: "USER_CONFIRMED"
+      status: { in: ["USER_CONFIRMED", "NEEDS_REVIEW"] }
     },
     orderBy: { updatedAt: "desc" }
   });
+  const confirmedBrands = brands.filter((brand) => brand.status === "USER_CONFIRMED");
+  const suggestedBrands = brands.filter((brand) => brand.status === "NEEDS_REVIEW");
 
   const ads = await prisma.competitivePublicAd.findMany({
     where: {
@@ -39,9 +41,10 @@ export async function buildCompetitiveContextFromPublicAds(
     take: 200
   });
 
-  const hasBrands = brands.length > 0;
+  const hasBrands = confirmedBrands.length > 0;
+  const hasSuggestedBrands = suggestedBrands.length > 0;
   const hasAds = ads.length > 0;
-  if (!hasBrands && !hasAds) return null;
+  if (!hasBrands && !hasAds && !hasSuggestedBrands) return null;
 
   const longestRunningAdDays = ads.reduce<number | null>((max, ad) => {
     if (!ad.startDate) return max;
@@ -53,25 +56,26 @@ export async function buildCompetitiveContextFromPublicAds(
   const repeatedHooks = topValues(ads.flatMap((ad) => jsonStringArray(ad.creativeBodies)).map(shortHook));
   const warnings = [
     "Public competitor ad library data is informational only and is not used for automated budget decisions yet.",
-    ...(!hasAds ? ["Public ad library sync has not returned active ads for the confirmed competitors."] : [])
+    ...(!hasBrands && hasSuggestedBrands ? ["Competitor candidates were inferred from SKU product context and public ads. Confirm the brands before syncing competitor ad data."] : []),
+    ...(!hasAds && hasBrands ? ["Public ad library sync has not returned active ads for the confirmed competitors."] : [])
   ];
 
   return {
     status: hasBrands && hasAds ? "READY" : hasBrands ? "PUBLIC_AD_LIBRARY_NOT_CONNECTED" : "NEEDS_COMPETITOR_REVIEW",
-    source: hasAds ? "PUBLIC_AD_LIBRARY" : "USER_CONFIRMED_COMPETITORS",
+    source: hasAds ? "PUBLIC_AD_LIBRARY" : hasBrands ? "USER_CONFIRMED_COMPETITORS" : "SKU_PRODUCT_CONTEXT_CANDIDATES",
     category: input.category ?? brands[0]?.category ?? null,
     price_position: "UNKNOWN",
     own_price: input.ownPrice && input.ownPrice > 0 ? input.ownPrice : null,
     market_reference_price: null,
     competitor_price: null,
-    competitor_count: brands.length || new Set(ads.map((ad) => ad.normalizedBrandName)).size,
+    competitor_count: confirmedBrands.length || suggestedBrands.length || new Set(ads.map((ad) => ad.normalizedBrandName)).size,
     active_public_ads: ads.length,
     longest_running_ad_days: longestRunningAdDays,
     repeated_hooks: repeatedHooks,
     top_formats: topFormats,
     competitor_brands: brands.map((brand) => ({
       name: brand.brandName,
-      source: "USER_CONFIRMED" as const,
+      source: brand.source,
       confidence: brand.confidence
     })),
     data_quality: {
@@ -82,7 +86,9 @@ export async function buildCompetitiveContextFromPublicAds(
     },
     next_step: hasAds
       ? "Review public competitor ad patterns; Monarca will keep them informational until validated for decision use."
-      : "Run public Meta Ad Library collection for confirmed competitor brands."
+      : hasBrands
+        ? "Run public Meta Ad Library collection for confirmed competitor brands."
+        : "Confirm inferred competitor candidates before syncing public ad library signals."
   };
 }
 

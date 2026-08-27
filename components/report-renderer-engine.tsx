@@ -3336,6 +3336,7 @@ type CompetitiveContextView = {
 };
 
 type CompetitiveContextSaveState = "idle" | "saving" | "queued" | "error";
+type CompetitiveContextDiscoveryState = "idle" | "discovering" | "done" | "error";
 
 const seedActionOutcomeRows: ActionOutcomeRow[] = [
   {
@@ -5787,11 +5788,25 @@ function CompetitiveContextSummary({
   const competitorCount = context?.competitor_count ?? 0;
   const publicAdCount = context?.active_public_ads ?? 0;
   const canUseForDecision = context?.data_quality?.can_use_for_decision ?? false;
-  const confirmedCompetitors = context?.competitor_brands?.filter((brand) => brand.name).map((brand) => brand.name as string) ?? [];
+  const confirmedCompetitors = context?.competitor_brands
+    ?.filter((brand) => brand.name && brand.source === "USER_CONFIRMED")
+    .map((brand) => brand.name as string) ?? [];
+  const suggestedCompetitors = useMemo(() => context?.competitor_brands
+    ?.filter((brand) => brand.name && brand.source !== "USER_CONFIRMED")
+    .map((brand) => ({
+      name: brand.name as string,
+      confidence: typeof brand.confidence === "number" ? brand.confidence : null
+    })) ?? [], [context?.competitor_brands]);
   const needsCompetitorInput = !context?.data_quality?.has_confirmed_competitors;
   const [brandInput, setBrandInput] = useState("");
   const [saveState, setSaveState] = useState<CompetitiveContextSaveState>("idle");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [discoveryState, setDiscoveryState] = useState<CompetitiveContextDiscoveryState>("idle");
+  const [discoveryMessage, setDiscoveryMessage] = useState<string | null>(null);
+  const [discoveredBrands, setDiscoveredBrands] = useState<Array<{ name: string; confidence?: number | null }>>(suggestedCompetitors);
+  useEffect(() => {
+    setDiscoveredBrands(suggestedCompetitors);
+  }, [suggestedCompetitors]);
   const longestRunningLabel = context?.longest_running_ad_days === null || context?.longest_running_ad_days === undefined
     ? zhEmpty(locale)
     : isZh ? `${numberFormat.format(context.longest_running_ad_days)} 天` : `${numberFormat.format(context.longest_running_ad_days)}d`;
@@ -5840,6 +5855,47 @@ function CompetitiveContextSummary({
       setSaveMessage(error instanceof Error ? error.message : (isZh ? "竞品信息保存失败。" : "Failed to save competitor context."));
     }
   };
+  const discoverCompetitorBrands = async () => {
+    if (discoveryState === "discovering") return;
+    setDiscoveryState("discovering");
+    setDiscoveryMessage(null);
+    try {
+      const response = await fetch("/api/competitive-intelligence/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku, country: "US", limitPerTerm: 20 })
+      });
+      const payload = await response.json().catch(() => null) as {
+        code?: string;
+        message?: string;
+        candidates?: Array<{ brandName?: string; confidence?: number }>;
+      } | null;
+      if (!response.ok) {
+        if (payload?.code === "PUBLIC_AD_LIBRARY_TOKEN_MISSING") {
+          throw new Error(isZh ? "公开广告库 token 未配置，暂时无法自动发现竞品。" : "Public ad library token is not configured.");
+        }
+        throw new Error(payload?.message || (isZh ? "未能根据 SKU 找到竞品候选。" : "Could not discover competitor candidates for this SKU."));
+      }
+      const candidates = (payload?.candidates ?? [])
+        .map((candidate) => ({
+          name: candidate.brandName?.trim() ?? "",
+          confidence: typeof candidate.confidence === "number" ? candidate.confidence : null
+        }))
+        .filter((candidate) => candidate.name);
+      setDiscoveredBrands(candidates);
+      if (candidates.length) {
+        setBrandInput(candidates.map((candidate) => candidate.name).join(", "));
+        setDiscoveryState("done");
+        setDiscoveryMessage(isZh ? "已根据 SKU 商品信息找到候选竞品。请确认后同步公开广告。" : "Competitor candidates found from SKU context. Confirm them before syncing public ads.");
+      } else {
+        setDiscoveryState("done");
+        setDiscoveryMessage(isZh ? "未找到可靠候选，请手动输入竞品品牌。" : "No reliable candidates found. Enter competitor brands manually.");
+      }
+    } catch (error) {
+      setDiscoveryState("error");
+      setDiscoveryMessage(error instanceof Error ? error.message : (isZh ? "竞品发现失败。" : "Competitor discovery failed."));
+    }
+  };
 
   return (
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -5874,6 +5930,26 @@ function CompetitiveContextSummary({
           ))}
         </div>
       ) : null}
+      {needsCompetitorInput && discoveredBrands.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {discoveredBrands.slice(0, 6).map((brand) => (
+            <button
+              key={brand.name}
+              type="button"
+              onClick={() => {
+                const current = brandInput
+                  .split(/[,，\n]/)
+                  .map((value) => value.trim())
+                  .filter(Boolean);
+                if (!current.includes(brand.name)) setBrandInput([...current, brand.name].join(", "));
+              }}
+              className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+            >
+              {brand.name}{brand.confidence ? ` ${Math.round(brand.confidence * 100)}%` : ""}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {context?.top_formats?.length || context?.repeated_hooks?.length ? (
         <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600">
           {context.top_formats?.length ? (
@@ -5892,9 +5968,25 @@ function CompetitiveContextSummary({
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
           <p className="text-xs font-semibold leading-5 text-amber-800">
             {isZh
-              ? "Shopify 商品字段已接入，但系统还不能自动确认竞品。请先确认这个 SKU 的竞品品牌，Monarca 才会同步合法公开广告库信号。"
+              ? "Shopify 商品字段已接入。系统可根据 SKU 商品信息和公开广告库生成竞品候选，但需要你确认后才会同步广告并进入分析。"
               : "Shopify product fields are connected, but competitors still need confirmation before public ad signals can be synced."}
           </p>
+          <button
+            type="button"
+            onClick={() => void discoverCompetitorBrands()}
+            disabled={discoveryState === "discovering"}
+            className="mt-2 rounded-md border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {discoveryState === "discovering" ? (isZh ? "查找中" : "Finding") : (isZh ? "根据 SKU 查找竞品" : "Find from SKU")}
+          </button>
+          {discoveryMessage ? (
+            <p className={cn(
+              "mt-2 text-xs font-semibold leading-5",
+              discoveryState === "error" ? "text-rose-600" : "text-amber-800"
+            )}>
+              {discoveryMessage}
+            </p>
+          ) : null}
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               value={brandInput}

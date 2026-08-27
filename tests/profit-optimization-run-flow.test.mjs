@@ -112,20 +112,22 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /optimizationRefreshAvailability/);
   assert.match(route, /refreshSkippedReason:\s*"canonical_artifact_unavailable"/);
   assert.match(route, /latestOptimizationJob/);
+  assert.match(route, /ensureOptimizationRefreshJob/);
+  assert.match(route, /enqueueSkuOptimizationJob/);
+  assert.match(route, /processJob\(job\.id\)/);
   assert.match(route, /manualOptimizationRequiredResponse/);
   assert.match(route, /status:\s*"READY_TO_OPTIMIZE"/);
   assert.match(route, /non_ready_decision_report_cache/);
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
   assert.match(route, /state:\s*"ready_to_optimize"/);
   assert.match(route, /decision_report:\s*null/);
-  assert.match(route, /New data invalidated the previous optimization snapshot/);
+  assert.match(route, /auto_optimization_refresh:stale_decision_report_cache/);
+  assert.match(route, /auto_optimization_refresh:stale_decision_snapshot/);
   assert.match(route, /stale_decision_snapshot/);
   assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
   assert.match(route, /const manualJobs = jobs\.filter\(\(job\) => asRecord\(job\.payload\)\.reason === "manual_optimization_refresh"\)/);
   assert.match(route, /const queued = manualJobs\.find\(\(job\) => job\.status === "QUEUED"\)/);
-  assert.doesNotMatch(route, /enqueueSkuOptimizationJob/);
   assert.doesNotMatch(route, /processQueuedOptimizationJob/);
-  assert.doesNotMatch(route, /processJob\(job\.id\)/);
   assert.doesNotMatch(route, /liveDecisionReportResponse/);
   assert.doesNotMatch(route, /freshOptimizationCacheResponse/);
   assert.match(route, /optimizationStatus:\s*"PENDING"/);
@@ -381,7 +383,8 @@ test("optimization header separates optimization and live metric timestamps", ()
   assert.match(dashboard, /optimizationRun\?\.started_at/);
   assert.match(dashboard, /analysisDecisionReportPayload\?\.snapshot\?\.updatedAt/);
   assert.match(dashboard, /const optimizationHeaderUpdatedAt = optimizationLastUpdatedAt \?\? metricsLastUpdatedAt \?\? undefined/);
-  assert.match(headerBlock[0], /optimizationHeaderUpdatedAt \? formatReportDate\(optimizationHeaderUpdatedAt\) : "--"/);
+  assert.match(headerBlock[0], /formatReportDate\(optimizationHeaderUpdatedAt\)/);
+  assert.match(headerBlock[0], /数据日期：/);
   assert.doesNotMatch(headerBlock[0], /Last updated/);
   assert.doesNotMatch(headerBlock[0], /opportunities/);
   assert.doesNotMatch(headerBlock[0], /Updating/);
@@ -398,7 +401,7 @@ test("optimization page loads latest decision report on initial render", () => {
   assert.match(dashboard, /setHasStartedProfitOptimization\(true\)/);
 });
 
-test("connector sync success marks optimization stale without automatically queueing refresh", () => {
+test("connector sync success marks optimization stale and decision report auto-queues refresh", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const connectorHandler = runner.match(/async function processConnectorSyncAsyncJob\([\s\S]*?\n\}/);
   const refreshHelper = runner.match(/async function markOptimizationRefreshRequiredAfterConnectorSync\([\s\S]*?\n\}/);
@@ -625,14 +628,14 @@ test("optimization portfolio controls stay visible and current portfolio uses po
   assert.match(renderer, /setIsDecisionPanelOpen\(\(open\) => !open\)/);
   assert.match(renderer, /AI Decision Summary/);
   assert.match(renderer, /Daily SKU Profit Optimization/);
-  assert.match(renderer, /min-h-0 flex-1 overflow-auto/);
+  assert.match(renderer, /min-h-0 max-w-full flex-1 overflow-auto overflow-x-hidden/);
   assert.doesNotMatch(renderer, /sticky top-24 z-20 flex w-full flex-wrap items-center gap-2 rounded-full/);
   assert.match(renderer, /sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b/);
   assert.match(renderer, /xl:sticky xl:top-24 xl:h-full xl:max-h-full/);
   assert.match(renderer, /sticky top-0 z-20 border-b border-slate-200 bg-white\/95/);
   assert.match(renderer, /xl:overflow-hidden/);
-  assert.match(renderer, /lg:grid-cols-\[minmax\(108px,0\.7fr\)_minmax\(168px,1fr\)_minmax\(122px,auto\)\]/);
-  assert.match(renderer, /lg:flex-col lg:items-end lg:justify-center/);
+  assert.match(renderer, /--decision-panel-width/);
+  assert.match(renderer, /xl:grid-cols-\[300px_minmax\(380px,1fr\)_minmax\(520px,var\(--decision-panel-width\)\)\]/);
   assert.match(renderer, /compact \? "min-w-\[116px\]"/);
   assert.match(renderer, /All channels/);
 });

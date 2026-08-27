@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
-import { decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import { currentDecisionSnapshotVersions, decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import {
   findLatestDecisionSnapshot,
   snapshotPerformance
@@ -14,7 +14,9 @@ import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifac
 import { optimizationReadiness, type OptimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import {
+  enqueueSkuOptimizationJob,
   recoverAsyncJobs,
+  processJob,
   SKU_OPTIMIZATION_STALE_JOB_MS
 } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
@@ -535,6 +537,40 @@ async function latestOptimizationJob(workspaceId: string) {
   }) ?? null;
 }
 
+async function ensureOptimizationRefreshJob(input: {
+  workspaceId: string;
+  decisionMode: "full" | "sku";
+  readiness?: OptimizationReadiness | null;
+  reason: string;
+}) {
+  const existing = await latestOptimizationJob(input.workspaceId);
+  if (existing && isPendingOptimizationStatus(existing.status)) return existing;
+
+  const versions = await currentDecisionSnapshotVersions(prisma, {
+    workspaceId: input.workspaceId
+  });
+  const job = await enqueueSkuOptimizationJob(prisma, {
+    workspaceId: input.workspaceId,
+    reason: input.reason,
+    decisionMode: input.decisionMode,
+    schemaSnapshotId: input.readiness?.canonicalSnapshotId ?? null,
+    inputHash: versions.inputHash
+  });
+
+  after(() => {
+    void processJob(job.id).catch((error) => {
+      console.error("[decision-report] failed to process auto optimization refresh job", {
+        jobId: job.id,
+        workspaceId: input.workspaceId,
+        reason: input.reason,
+        error
+      });
+    });
+  });
+
+  return job;
+}
+
 function queuedOptimizationResponse(input: {
   workspaceId: string;
   mode: "full" | "sku";
@@ -785,22 +821,12 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await latestOptimizationJob(session.workspace.id);
-
-      if (!job || !isPendingOptimizationStatus(job.status)) {
-        return manualOptimizationRequiredResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          startedAt,
-          message: "New data is available. Run optimization to generate current recommendations.",
-          reason: `non_ready_decision_report_cache:${reportCache.state || "unknown"}`,
-          readiness: refreshAvailability.readiness,
-          currentVersions: {
-            canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null,
-            inputHash: reportCache.inputHash
-          }
-        });
-      }
+      const job = await ensureOptimizationRefreshJob({
+        workspaceId: session.workspace.id,
+        decisionMode,
+        readiness: refreshAvailability.readiness,
+        reason: `auto_optimization_refresh:non_ready_decision_report_cache:${reportCache.state || "unknown"}`
+      });
 
       return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
@@ -831,31 +857,21 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await latestOptimizationJob(session.workspace.id);
-      if (job && isPendingOptimizationStatus(job.status)) {
-        return queuedOptimizationResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          jobId: job.id,
-          status: job.status,
-          currentStep: job.currentStep,
-          message: "Optimization refresh is running.",
-          readiness: refreshAvailability.readiness,
-          startedAt
-        });
-      }
-
-      return manualOptimizationRequiredResponse({
+      const job = await ensureOptimizationRefreshJob({
+        workspaceId: session.workspace.id,
+        decisionMode,
+        readiness: refreshAvailability.readiness,
+        reason: "auto_optimization_refresh:missing_ops_rows"
+      });
+      return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        startedAt,
-        message: "Optimization snapshot is invalid. Run optimization to generate current recommendations.",
-        reason: "invalid_decision_report_cache:missing_ops_rows",
+        jobId: job.id,
+        status: job.status,
+        currentStep: job.currentStep,
+        message: "Optimization refresh is running.",
         readiness: refreshAvailability.readiness,
-        currentVersions: {
-          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null,
-          inputHash: reportCache.inputHash
-        }
+        startedAt
       });
     }
 
@@ -888,29 +904,21 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await latestOptimizationJob(session.workspace.id);
-      if (job && isPendingOptimizationStatus(job.status)) {
-        return queuedOptimizationResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          jobId: job.id,
-          status: job.status,
-          currentStep: job.currentStep,
-          message: "New data is available. Optimization refresh is running.",
-          readiness: refreshAvailability.readiness,
-          startedAt
-        });
-      }
-
-      return manualOptimizationRequiredResponse({
+      const job = await ensureOptimizationRefreshJob({
+        workspaceId: session.workspace.id,
+        decisionMode,
+        readiness: refreshAvailability.readiness,
+        reason: `auto_optimization_refresh:stale_decision_report_cache:${freshness.reason ?? "unknown"}`
+      });
+      return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        startedAt,
-        message: "New data invalidated the previous optimization snapshot. Run optimization to generate current recommendations.",
-        reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
+        jobId: job.id,
+        status: job.status,
+        currentStep: job.currentStep,
+        message: "New data is available. Optimization refresh is running.",
         readiness: refreshAvailability.readiness,
-        currentVersions: freshness.current,
-        snapshotType: "OptimizationReportCache"
+        startedAt
       });
     }
 
@@ -979,30 +987,22 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await latestOptimizationJob(session.workspace.id);
-      if (job && isPendingOptimizationStatus(job.status)) {
-        return queuedOptimizationResponse({
-          workspaceId: session.workspace.id,
-          mode: decisionMode,
-          payload: recommendationsJson,
-          jobId: job.id,
-          status: job.status,
-          currentStep: job.currentStep,
-          message: "New data is available. Optimization refresh is running.",
-          readiness: refreshAvailability.readiness,
-          startedAt
-        });
-      }
-
-      return manualOptimizationRequiredResponse({
+      const job = await ensureOptimizationRefreshJob({
+        workspaceId: session.workspace.id,
+        decisionMode,
+        readiness: refreshAvailability.readiness,
+        reason: `auto_optimization_refresh:stale_decision_snapshot:${freshness.reason ?? "unknown"}`
+      });
+      return queuedOptimizationResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        startedAt,
-        message: "New data invalidated the previous optimization snapshot. Run optimization to generate current recommendations.",
-        reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
+        payload: recommendationsJson,
+        jobId: job.id,
+        status: job.status,
+        currentStep: job.currentStep,
+        message: "New data is available. Optimization refresh is running.",
         readiness: refreshAvailability.readiness,
-        currentVersions: freshness.current,
-        snapshotType: "DecisionSnapshot"
+        startedAt
       });
     }
 

@@ -42,7 +42,7 @@ const PRODUCT_SYNC_PAGE_SIZE = 10;
 
 type JsonRecord = Record<string, unknown>;
 
-type ShopifyProduct = {
+export type ShopifyProduct = {
   id?: string | null;
   title?: string | null;
   handle?: string | null;
@@ -173,7 +173,7 @@ type ShopifyCustomer = {
   } | null;
 };
 
-type CanonicalArtifact = {
+export type CanonicalArtifact = {
   ecommerce_orders: JsonRecord[];
   ecommerce_order_items: JsonRecord[];
   ecommerce_products: JsonRecord[];
@@ -181,7 +181,7 @@ type CanonicalArtifact = {
   ecommerce_refunds: JsonRecord[];
 };
 
-type ArtifactWriteResult = {
+export type ArtifactWriteResult = {
   artifactKey: string;
   checksum: string;
   rowCount: number;
@@ -290,7 +290,7 @@ const ORDERS_QUERY = `
   }
 `;
 
-function productsQuery(includeInventoryFields: boolean) {
+export function productsQuery(includeInventoryFields: boolean) {
   return `
   query ShopifySyncProducts($first: Int!, $after: String, $metafieldKeys: [String!]) {
     products(first: $first, after: $after, sortKey: UPDATED_AT) {
@@ -897,7 +897,7 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
   }
 }
 
-function normalizeShopifyRecords(input: {
+export function normalizeShopifyRecords(input: {
   workspaceId: string;
   dataSourceId: string;
   connectorAccountId: string;
@@ -1114,7 +1114,7 @@ function normalizeShopifyRecords(input: {
   return artifact;
 }
 
-function dedupeCanonicalArtifact(artifact: CanonicalArtifact) {
+export function dedupeCanonicalArtifact(artifact: CanonicalArtifact) {
   const duplicateCounts: Record<string, number> = {};
   const deduped = Object.fromEntries(Object.entries(artifact).map(([tableName, rows]) => {
     const map = new Map<string, JsonRecord>();
@@ -1141,7 +1141,7 @@ function canonicalKey(tableName: string, row: JsonRecord) {
   return `${base}|${row.source_record_id}`;
 }
 
-async function writeArtifact(key: string, rows: unknown[], contentType = "application/x-ndjson"): Promise<ArtifactWriteResult> {
+export async function writeArtifact(key: string, rows: unknown[], contentType = "application/x-ndjson"): Promise<ArtifactWriteResult> {
   const body = contentType === "application/json"
     ? JSON.stringify(rows[0] ?? {}, null, 2)
     : rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : "");
@@ -1150,7 +1150,7 @@ async function writeArtifact(key: string, rows: unknown[], contentType = "applic
   return { artifactKey: key, checksum, rowCount: rows.length };
 }
 
-function buildCanonicalDatasetFromArtifact(artifact: CanonicalArtifact, input: {
+export function buildCanonicalDatasetFromArtifact(artifact: CanonicalArtifact, input: {
   sourceProvider: string;
   normalizedAt: string;
   validationWarnings: string[];
@@ -1224,7 +1224,7 @@ function skippedSemanticLearning() {
   };
 }
 
-function canonicalColumns(tableName: string) {
+export function canonicalColumns(tableName: string) {
   const shared = ["workspace_id", "data_source_id", "source_provider", "source_account_id", "schema_version", "sync_run_id", "source_record_id", "raw_payload_hash", "normalized_at"];
   const tableFields: Record<string, string[]> = {
     ecommerce_orders: ["source_order_id", "order_id", "customer_id", "order_date", "order_status", "financial_status", "fulfillment_status", "country", "province", "city", "currency", "gross_sales", "discount_amount", "refund_amount", "net_sales", "tax_amount", "shipping_amount", "total_paid", "is_cancelled", "is_test", "is_paid", "created_at_source", "updated_at_source", "processed_at_source", "cancelled_at_source"],

@@ -33,7 +33,7 @@ test("Shopify sync scheduler has production scheduling fields, API, and cron gua
 
   assert.match(scheduler, /SHOPIFY_SYNC_INTERVAL_OPTIONS = \[60, 180, 360, 720, 1440\]/, "Scheduler should use the allowlisted intervals only");
   assert.match(scheduler, /SHOPIFY_SYNC_BATCH_SIZE = 50/, "Scheduler should scan due accounts in bounded batches");
-  assert.match(scheduler, /provider:\s*\{\s*in:\s*\[SHOPIFY_PROVIDER,\s*AMAZON_PROVIDER,\s*GOOGLE_ADS_PROVIDER\]\s*\}[\s\S]*status:\s*"connected"[\s\S]*autoSyncEnabled:\s*true/, "Scheduler should select only enabled connected connector accounts");
+  assert.match(scheduler, /provider:\s*\{\s*in:\s*\[SHOPIFY_PROVIDER,\s*AMAZON_PROVIDER,\s*GOOGLE_ADS_PROVIDER,\s*META_ADS_PROVIDER\]\s*\}[\s\S]*status:\s*"connected"[\s\S]*autoSyncEnabled:\s*true/, "Scheduler should select only enabled connected connector accounts");
   assert.match(scheduler, /dataSource:\s*\{[\s\S]*isActive:\s*true[\s\S]*status:\s*ConnectionStatus\.CONNECTED/, "Scheduler should require an active connected data source");
   assert.match(scheduler, /OR:\s*\[\s*\{\s*nextSyncAt:\s*null\s*\},\s*\{\s*nextSyncAt:\s*\{\s*lte:\s*now\s*\}\s*\}/, "Scheduler should select null-or-due nextSyncAt accounts");
   assert.match(scheduler, /activeSyncJobForAccount/, "Scheduler should check for active sync jobs before enqueueing");

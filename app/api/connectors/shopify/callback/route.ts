@@ -1,6 +1,7 @@
 import { ConnectionStatus, DataSourceType, Prisma } from "@prisma/client";
 import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { enqueueShopifyBulkProductSync } from "@/lib/ecommerce-connectors/providers/shopify-bulk-product-sync";
 import { runShopifyProductionSync } from "@/lib/ecommerce-connectors/providers/shopify-sync-engine";
 import { DEFAULT_SHOPIFY_SYNC_INTERVAL_MINUTES } from "@/lib/ecommerce-connectors/shopify-sync-scheduler";
 import {
@@ -68,6 +69,24 @@ async function runInitialShopifySync(input: {
       workspaceId: input.workspaceId,
       dataSourceId: input.dataSourceId
     });
+    const connectorAccount = await prisma.ecommerceConnectorAccount.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        dataSourceId: input.dataSourceId,
+        provider: SHOPIFY_PROVIDER,
+        status: "connected"
+      },
+      select: { id: true, shopDomain: true }
+    });
+    const fullProductJob = connectorAccount
+      ? await enqueueShopifyBulkProductSync(prisma, {
+          workspaceId: input.workspaceId,
+          dataSourceId: input.dataSourceId,
+          connectorAccountId: connectorAccount.id,
+          shopDomain: connectorAccount.shopDomain,
+          trigger: "initial"
+        }).catch(() => null)
+      : null;
 
     await prisma.backgroundJob.update({
       where: { id: job.id },
@@ -81,7 +100,8 @@ async function runInitialShopifySync(input: {
           trigger: "shopify_oauth_callback",
           syncRunId: result.syncRunId,
           dataMode: result.dataMode,
-          confidenceScore: result.confidenceScore
+          confidenceScore: result.confidenceScore,
+          fullProductJobId: fullProductJob?.id ?? null
         } as Prisma.InputJsonValue
       }
     });

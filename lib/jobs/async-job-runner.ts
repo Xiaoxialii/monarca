@@ -11,6 +11,10 @@ import { normalizeProfitInputs } from "@/lib/profit/profit-input-normalizer";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { generateWorkspaceMetricsFromConnectedSources } from "@/lib/workspace-metric-generation";
 import { runShopifyProductionSync } from "@/lib/ecommerce-connectors/providers/shopify-sync-engine";
+import {
+  enqueueShopifyBulkProductSync,
+  runShopifyBulkProductSync
+} from "@/lib/ecommerce-connectors/providers/shopify-bulk-product-sync";
 import { SHOPIFY_PROVIDER } from "@/lib/ecommerce-connectors/shopify-oauth";
 import { markShopifyScheduledSyncFailure } from "@/lib/ecommerce-connectors/shopify-sync-scheduler";
 import { AMAZON_PROVIDER } from "@/lib/connectors/amazon/amazon-errors";
@@ -36,6 +40,7 @@ export const ASYNC_JOB_TYPES = [
   "SKU_OPTIMIZATION",
   "SIMULATION",
   "PUBLIC_COMPETITOR_AD_SYNC",
+  "SHOPIFY_BULK_PRODUCT_SYNC",
   "DECISION_OUTCOME_COLLECTOR",
   "DECISION_EVALUATOR",
   "DECISION_LEARNING_UPDATER"
@@ -883,6 +888,8 @@ async function executeJobHandler(
       return processSkuOptimizationAsyncJob(client, input);
     case "PUBLIC_COMPETITOR_AD_SYNC":
       return processPublicCompetitorAdSyncAsyncJob(client, input);
+    case "SHOPIFY_BULK_PRODUCT_SYNC":
+      return processShopifyBulkProductSyncAsyncJob(client, input);
     case "DECISION_OUTCOME_COLLECTOR":
       return processDecisionOutcomeCollectorJob(client, input);
     case "DECISION_EVALUATOR":
@@ -894,6 +901,118 @@ async function executeJobHandler(
     case "SIMULATION":
       throw new Error(`${input.type} handler is registered but has not been migrated to AsyncJob yet.`);
   }
+}
+
+async function processShopifyBulkProductSyncAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const dataSourceId = typeof input.payload.dataSourceId === "string" ? input.payload.dataSourceId : null;
+  const connectorAccountId = typeof input.payload.connectorAccountId === "string" ? input.payload.connectorAccountId : null;
+  const shopDomain = typeof input.payload.shopDomain === "string" ? input.payload.shopDomain : null;
+  const syncRunId = typeof input.payload.syncRunId === "string" ? input.payload.syncRunId : null;
+  const trigger = typeof input.payload.trigger === "string" ? input.payload.trigger : "quick_sync";
+
+  if (!dataSourceId || !connectorAccountId || !shopDomain) {
+    throw new Error("Shopify full product sync job payload is incomplete.");
+  }
+
+  await input.setJobState({
+    progress: 20,
+    currentStep: "Starting Shopify full product export"
+  });
+
+  const result = await runShopifyBulkProductSync(client, {
+    workspaceId: input.workspaceId,
+    dataSourceId,
+    connectorAccountId,
+    shopDomain,
+    trigger,
+    syncRunId,
+    pollLimit: 1
+  });
+
+  if (!result.completed) {
+    await input.setJobState({
+      progress: 45,
+      currentStep: "Waiting for Shopify full product export"
+    });
+
+    return {
+      snapshotType: "SHOPIFY_BULK_PRODUCT_SYNC",
+      snapshotVersion: "v1",
+      dataReference: {
+        provider: SHOPIFY_PROVIDER,
+        dataSourceId,
+        connectorAccountId,
+        shopDomain,
+        syncRunId: result.syncRunId,
+        bulkOperationId: result.bulkOperationId,
+        bulkStatus: result.bulkStatus,
+        status: result.status
+      },
+      metadataJson: {
+        completed: false,
+        note: "Shopify bulk operation is still running and a follow-up polling job was queued."
+      },
+      nextJobs: [
+        {
+          type: "SHOPIFY_BULK_PRODUCT_SYNC",
+          currentStep: "Queued to poll Shopify full product export",
+          payload: {
+            provider: SHOPIFY_PROVIDER,
+            dataSourceId,
+            connectorAccountId,
+            shopDomain,
+            trigger: "bulk_poll",
+            syncRunId: result.syncRunId
+          } as Prisma.InputJsonValue
+        }
+      ]
+    };
+  }
+
+  await input.setJobState({
+    progress: 90,
+    currentStep: "Finished Shopify full product sync"
+  });
+
+  return {
+    snapshotType: "SHOPIFY_BULK_PRODUCT_SYNC",
+    snapshotVersion: "v1",
+    dataReference: {
+      provider: SHOPIFY_PROVIDER,
+      dataSourceId,
+      connectorAccountId,
+      shopDomain,
+      syncRunId: result.syncRunId,
+      rowCount: result.rowCount,
+      schemaSnapshotId: result.schemaSnapshotId,
+      downstreamJobId: result.downstreamJobId,
+      status: result.status
+    },
+    metadataJson: {
+      completed: true,
+      source: "Shopify Bulk Operations API"
+    },
+    nextJobs: [
+      ...(result.downstreamJobId ? [] : [{
+        type: "CALCULATE_METRICS" as const,
+        currentStep: "Queued after Shopify full product sync",
+        payload: {
+          dataSourceId,
+          schemaSnapshotId: result.schemaSnapshotId,
+          syncRunId: result.syncRunId,
+          reason: "shopify_full_product_sync"
+        } as Prisma.InputJsonValue
+      }])
+    ]
+  };
 }
 
 async function processPublicCompetitorAdSyncAsyncJob(
@@ -1043,6 +1162,24 @@ async function processConnectorSyncAsyncJob(
       currentStep: `Finished ${provider} sync`
     });
     const downstreamJobId = "downstreamJobId" in result ? result.downstreamJobId ?? null : null;
+    const fullProductJob = provider === SHOPIFY_PROVIDER && !result.reused
+      ? await enqueueShopifyBulkProductSync(client, {
+          workspaceId: input.workspaceId,
+          dataSourceId,
+          connectorAccountId,
+          shopDomain,
+          trigger: standardTrigger === "scheduled" ? "scheduled" : "quick_sync"
+        }).catch((error) => {
+          console.warn("Failed to enqueue Shopify full product sync", {
+            workspaceId: input.workspaceId,
+            dataSourceId,
+            connectorAccountId,
+            shopDomain,
+            message: error instanceof Error ? error.message : "unknown"
+          });
+          return null;
+        })
+      : null;
     const optimizationRefresh = result.reused
       ? {
           jobId: null,
@@ -1107,6 +1244,7 @@ async function processConnectorSyncAsyncJob(
         shopDomain,
         syncRunId: result.syncRunId,
         downstreamJobId,
+        fullProductJobId: fullProductJob?.id ?? null,
         optimizationRefreshJobId: optimizationRefresh.jobId
       },
       metadataJson: {

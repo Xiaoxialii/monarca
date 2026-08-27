@@ -14,6 +14,7 @@ const AUTO_CONFIRM_MIN_ADS = 6;
 const AUTO_CONFIRM_MIN_MATCHED_TERMS = 2;
 const AUTO_CONFIRM_MIN_LONG_RUNNING_DAYS = 45;
 const MAX_AUTO_CONFIRMED_COMPETITORS = 5;
+const FALLBACK_AD_LIBRARY_COUNTRIES = ["GB", "CA", "AU", "DE", "FR"] as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -24,15 +25,18 @@ export type CompetitorDiscoveryResult = {
   status: "SUCCESS" | "UNSUPPORTED" | "NO_PRODUCT_CONTEXT" | "NO_CANDIDATES";
   code?: string;
   searchTerms: string[];
+  searchedCountries?: string[];
   candidates: Array<{
     brandName: string;
     confidence: number;
     adCount: number;
     longestRunningDays: number | null;
     autoConfirmed: boolean;
+    country: string;
     evidence: JsonRecord;
   }>;
   queuedSyncJobId?: string | null;
+  queuedSyncJobIds?: string[];
 };
 
 export async function discoverCompetitorBrandsForSku(
@@ -102,38 +106,33 @@ export async function discoverCompetitorBrandsForSku(
     pageIds: Set<string>;
     longestRunningDays: number | null;
     earliestStartTime: number | null;
+    countries: Map<string, number>;
   }>();
 
-  for (const term of searchTerms) {
-    const records = await fetchMetaAdLibrarySearchAds({
-      accessToken: token,
-      searchTerm: term,
-      country,
-      limit: Math.max(5, Math.min(input.limitPerTerm ?? 20, 50)),
-      fetchImpl: input.fetchImpl
-    });
-    for (const record of records) {
-      const brandName = stringValue(record.page_name);
-      const normalized = normalizeCompetitorBrandName(brandName);
-      if (!brandName || !normalized || ownBrandNames.has(normalized)) continue;
-      const current = scored.get(normalized) ?? {
-        brandName,
-        adCount: 0,
-        matchedTerms: new Set<string>(),
-        pageIds: new Set<string>(),
-        longestRunningDays: null,
-        earliestStartTime: null
-      };
-      current.adCount += 1;
-      current.matchedTerms.add(term);
-      if (record.page_id) current.pageIds.add(String(record.page_id));
-      const startTime = dateTimeValue(record.ad_delivery_start_time ?? record.ad_creation_time);
-      if (startTime) {
-        current.earliestStartTime = current.earliestStartTime === null ? startTime : Math.min(current.earliestStartTime, startTime);
-        const runningDays = Math.max(0, Math.floor((Date.now() - startTime) / 86_400_000));
-        current.longestRunningDays = current.longestRunningDays === null ? runningDays : Math.max(current.longestRunningDays, runningDays);
-      }
-      scored.set(normalized, current);
+  const searchedCountries = [country];
+  await searchCountry({
+    scored,
+    token,
+    country,
+    searchTerms,
+    limitPerTerm: input.limitPerTerm,
+    fetchImpl: input.fetchImpl,
+    ownBrandNames
+  });
+  if (scored.size === 0) {
+    for (const fallbackCountry of FALLBACK_AD_LIBRARY_COUNTRIES) {
+      if (fallbackCountry === country) continue;
+      searchedCountries.push(fallbackCountry);
+      await searchCountry({
+        scored,
+        token,
+        country: fallbackCountry,
+        searchTerms,
+        limitPerTerm: input.limitPerTerm,
+        fetchImpl: input.fetchImpl,
+        ownBrandNames
+      });
+      if (scored.size >= 3) break;
     }
   }
 
@@ -172,8 +171,11 @@ export async function discoverCompetitorBrandsForSku(
         adCount: candidate.adCount,
         longestRunningDays: candidate.longestRunningDays,
         autoConfirmed,
+        country: topCountry(candidate.countries) ?? country,
         evidence: {
           source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+          source_country: topCountry(candidate.countries) ?? country,
+          searched_countries: searchedCountries,
           matched_terms: Array.from(candidate.matchedTerms),
           ad_count: candidate.adCount,
           longest_running_days: candidate.longestRunningDays,
@@ -220,18 +222,24 @@ export async function discoverCompetitorBrandsForSku(
 
   const autoConfirmedBrands = candidates
     .filter((candidate) => candidate.autoConfirmed)
-    .map((candidate) => candidate.brandName);
-  const queued = autoConfirmedBrands.length
-    ? await enqueueCompetitivePublicAdSyncJob(prisma, {
+    .reduce((groups, candidate) => {
+      const key = candidate.country;
+      groups.set(key, [...(groups.get(key) ?? []), candidate.brandName]);
+      return groups;
+    }, new Map<string, string[]>());
+  const queuedSyncJobIds: string[] = [];
+  for (const [syncCountry, brands] of autoConfirmedBrands.entries()) {
+    const queued = await enqueueCompetitivePublicAdSyncJob(prisma, {
       workspaceId: input.workspaceId,
       sku,
-      brands: autoConfirmedBrands,
+      brands,
       category: stringValue(product.category, product.category_full_name, product.product_type) || null,
-      country,
+      country: syncCountry,
       trigger: "sku_competitor_auto_discovery",
       limitPerBrand: 75
-    }).catch(() => null)
-    : null;
+    }).catch(() => null);
+    if (queued?.job?.id) queuedSyncJobIds.push(queued.job.id);
+  }
 
   return {
     ok: candidates.length > 0,
@@ -239,9 +247,64 @@ export async function discoverCompetitorBrandsForSku(
     country,
     status: candidates.length ? "SUCCESS" : "NO_CANDIDATES",
     searchTerms,
+    searchedCountries,
     candidates,
-    queuedSyncJobId: queued?.job?.id ?? null
+    queuedSyncJobId: queuedSyncJobIds[0] ?? null,
+    queuedSyncJobIds
   };
+}
+
+async function searchCountry(input: {
+  scored: Map<string, {
+    brandName: string;
+    adCount: number;
+    matchedTerms: Set<string>;
+    pageIds: Set<string>;
+    longestRunningDays: number | null;
+    earliestStartTime: number | null;
+    countries: Map<string, number>;
+  }>;
+  token: string;
+  country: string;
+  searchTerms: string[];
+  limitPerTerm?: number;
+  fetchImpl?: typeof fetch;
+  ownBrandNames: Set<string>;
+}) {
+  for (const term of input.searchTerms) {
+    const records = await fetchMetaAdLibrarySearchAds({
+      accessToken: input.token,
+      searchTerm: term,
+      country: input.country,
+      limit: Math.max(5, Math.min(input.limitPerTerm ?? 20, 50)),
+      fetchImpl: input.fetchImpl
+    });
+    for (const record of records) {
+      const brandName = stringValue(record.page_name);
+      const normalized = normalizeCompetitorBrandName(brandName);
+      if (!brandName || !normalized || input.ownBrandNames.has(normalized)) continue;
+      const current = input.scored.get(normalized) ?? {
+        brandName,
+        adCount: 0,
+        matchedTerms: new Set<string>(),
+        pageIds: new Set<string>(),
+        longestRunningDays: null,
+        earliestStartTime: null,
+        countries: new Map<string, number>()
+      };
+      current.adCount += 1;
+      current.matchedTerms.add(term);
+      current.countries.set(input.country, (current.countries.get(input.country) ?? 0) + 1);
+      if (record.page_id) current.pageIds.add(String(record.page_id));
+      const startTime = dateTimeValue(record.ad_delivery_start_time ?? record.ad_creation_time);
+      if (startTime) {
+        current.earliestStartTime = current.earliestStartTime === null ? startTime : Math.min(current.earliestStartTime, startTime);
+        const runningDays = Math.max(0, Math.floor((Date.now() - startTime) / 86_400_000));
+        current.longestRunningDays = current.longestRunningDays === null ? runningDays : Math.max(current.longestRunningDays, runningDays);
+      }
+      input.scored.set(normalized, current);
+    }
+  }
 }
 
 async function loadSkuProductContext(prisma: PrismaClient, input: {
@@ -335,6 +398,11 @@ function shouldAutoConfirmCandidate(input: {
   return input.adCount >= AUTO_CONFIRM_MIN_ADS
     || input.matchedTermCount >= AUTO_CONFIRM_MIN_MATCHED_TERMS
     || (input.longestRunningDays ?? 0) >= AUTO_CONFIRM_MIN_LONG_RUNNING_DAYS;
+}
+
+function topCountry(countries: Map<string, number>) {
+  return Array.from(countries.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
 }
 
 function dateTimeValue(value: unknown) {

@@ -98,8 +98,8 @@ test("competitive context aggregates confirmed brands and public ad library rows
     const prisma = {
       competitiveSkuBrand: {
         findMany: async () => [
-          { brandName: "Brand A", category: "bags", confidence: 1 },
-          { brandName: "Brand B", category: "bags", confidence: 0.9 }
+          { brandName: "Brand A", category: "bags", status: "USER_CONFIRMED", source: "USER_CONFIRMED", confidence: 1 },
+          { brandName: "Brand B", category: "bags", status: "USER_CONFIRMED", source: "AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS", confidence: 0.9 }
         ]
       },
       competitivePublicAd: {

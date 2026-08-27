@@ -15,12 +15,16 @@ test("competitor discovery uses SKU product context and public ad search", () =>
   assert.match(discovery, /fetchMetaAdLibrarySearchAds/, "Discovery should query legal public ad data using product-derived terms.");
 });
 
-test("discovered competitors require review and are not auto-confirmed", () => {
+test("discovered competitors auto-confirm only high-confidence public ad candidates", () => {
   assert.match(metaLibrary, /upsertSuggestedCompetitorBrands/, "Meta library should persist suggested competitors.");
-  assert.match(metaLibrary, /status:\s*"NEEDS_REVIEW"/, "Suggested competitors must require review.");
-  assert.match(metaLibrary, /source:\s*"META_AD_LIBRARY_KEYWORD_SEARCH"/, "Suggested competitors should preserve their public search source.");
-  assert.match(discovery, /auto_confirmed:\s*false/, "Discovery evidence should explicitly avoid auto-confirming competitors.");
-  assert.doesNotMatch(discovery, /status:\s*"USER_CONFIRMED"/, "Discovery should not directly confirm competitor brands.");
+  assert.match(metaLibrary, /brand\.autoConfirm\s*\?\s*"USER_CONFIRMED"\s*:\s*"NEEDS_REVIEW"/, "Low-confidence suggested competitors must remain in review.");
+  assert.match(metaLibrary, /status\s*=\s*brand\.autoConfirm\s*\?\s*"USER_CONFIRMED"\s*:\s*"NEEDS_REVIEW"/, "High-confidence candidates should be eligible for auto-confirmation.");
+  assert.match(metaLibrary, /source\s*=\s*brand\.autoConfirm\s*\?\s*"AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS"/, "Auto-confirmed competitors should keep an auditable source.");
+  assert.match(metaLibrary, /brand\.autoConfirm\s*\?\s*"AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS"\s*:\s*"META_AD_LIBRARY_KEYWORD_SEARCH"/, "Suggested competitors should preserve their public search source.");
+  assert.match(discovery, /AUTO_CONFIRM_MIN_CONFIDENCE/, "Discovery should centralize auto-confirm thresholds.");
+  assert.match(discovery, /longest_running_days/, "Discovery evidence should include long-running ad signals.");
+  assert.match(discovery, /enqueueCompetitivePublicAdSyncJob/, "Auto-confirmed competitors should queue public ad sync.");
+  assert.match(discovery, /auto_confirmed:\s*autoConfirmed/, "Discovery evidence should record whether a candidate was auto-confirmed.");
 });
 
 test("competitor discovery API is workspace-authenticated", () => {
@@ -34,5 +38,6 @@ test("optimization context and UI expose suggested competitor confirmation path"
   assert.match(context, /SKU_PRODUCT_CONTEXT_CANDIDATES/, "Competitive context should identify SKU-derived candidates.");
   assert.match(renderer, /根据 SKU 查找竞品/, "Decision summary should expose SKU-based competitor discovery.");
   assert.match(renderer, /\/api\/competitive-intelligence\/discover/, "UI should call the discovery API.");
-  assert.match(renderer, /确认后才会同步广告并进入分析/, "UI should communicate that suggested competitors require confirmation.");
+  assert.match(renderer, /自动选择高置信竞品/, "UI should explain automatic high-confidence competitor selection.");
+  assert.match(renderer, /AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS/, "UI should treat auto-confirmed SKU competitors as confirmed.");
 });

@@ -5789,10 +5789,10 @@ function CompetitiveContextSummary({
   const publicAdCount = context?.active_public_ads ?? 0;
   const canUseForDecision = context?.data_quality?.can_use_for_decision ?? false;
   const confirmedCompetitors = context?.competitor_brands
-    ?.filter((brand) => brand.name && brand.source === "USER_CONFIRMED")
+    ?.filter((brand) => brand.name && (brand.source === "USER_CONFIRMED" || brand.source === "AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS"))
     .map((brand) => brand.name as string) ?? [];
   const suggestedCompetitors = useMemo(() => context?.competitor_brands
-    ?.filter((brand) => brand.name && brand.source !== "USER_CONFIRMED")
+    ?.filter((brand) => brand.name && brand.source !== "USER_CONFIRMED" && brand.source !== "AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS")
     .map((brand) => ({
       name: brand.name as string,
       confidence: typeof brand.confidence === "number" ? brand.confidence : null
@@ -5886,7 +5886,10 @@ function CompetitiveContextSummary({
       if (candidates.length) {
         setBrandInput(candidates.map((candidate) => candidate.name).join(", "));
         setDiscoveryState("done");
-        setDiscoveryMessage(isZh ? "已根据 SKU 商品信息找到候选竞品。请确认后同步公开广告。" : "Competitor candidates found from SKU context. Confirm them before syncing public ads.");
+        const autoConfirmedCount = candidates.filter((candidate) => (candidate.confidence ?? 0) >= 0.72).length;
+        setDiscoveryMessage(autoConfirmedCount > 0
+          ? (isZh ? "已根据 SKU 商品信息和公开广告信号自动选择高置信竞品，并排队同步公开广告。" : "High-confidence competitors were selected from SKU context and public ad signals; public ad sync has been queued.")
+          : (isZh ? "已根据 SKU 商品信息找到候选竞品。可确认后同步公开广告。" : "Competitor candidates found from SKU context. You can confirm them before syncing public ads."));
       } else {
         setDiscoveryState("done");
         setDiscoveryMessage(isZh ? "未找到可靠候选，请手动输入竞品品牌。" : "No reliable candidates found. Enter competitor brands manually.");
@@ -5968,8 +5971,8 @@ function CompetitiveContextSummary({
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
           <p className="text-xs font-semibold leading-5 text-amber-800">
             {isZh
-              ? "Shopify 商品字段已接入。系统可根据 SKU 商品信息和公开广告库生成竞品候选，但需要你确认后才会同步广告并进入分析。"
-              : "Shopify product fields are connected, but competitors still need confirmation before public ad signals can be synced."}
+              ? "Shopify 商品字段已接入。系统会根据 SKU 商品信息、公开广告数量和长期投放信号自动选择高置信竞品；低置信候选仍可手动确认。"
+              : "Shopify product fields are connected. Monarca can auto-select high-confidence competitors from SKU context, public ad volume, and long-running ads; lower-confidence candidates can still be confirmed manually."}
           </p>
           <button
             type="button"

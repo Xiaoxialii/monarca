@@ -2,11 +2,18 @@ import type { PrismaClient } from "@prisma/client";
 import { readR2ObjectText } from "@/lib/r2-storage";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import {
+  enqueueCompetitivePublicAdSyncJob,
   fetchMetaAdLibrarySearchAds,
   metaAdLibraryAccessToken,
   normalizeCompetitorBrandName,
   upsertSuggestedCompetitorBrands
 } from "@/lib/competitive-intelligence/meta-ad-library";
+
+const AUTO_CONFIRM_MIN_CONFIDENCE = 0.72;
+const AUTO_CONFIRM_MIN_ADS = 6;
+const AUTO_CONFIRM_MIN_MATCHED_TERMS = 2;
+const AUTO_CONFIRM_MIN_LONG_RUNNING_DAYS = 45;
+const MAX_AUTO_CONFIRMED_COMPETITORS = 5;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -21,8 +28,11 @@ export type CompetitorDiscoveryResult = {
     brandName: string;
     confidence: number;
     adCount: number;
+    longestRunningDays: number | null;
+    autoConfirmed: boolean;
     evidence: JsonRecord;
   }>;
+  queuedSyncJobId?: string | null;
 };
 
 export async function discoverCompetitorBrandsForSku(
@@ -90,6 +100,8 @@ export async function discoverCompetitorBrandsForSku(
     adCount: number;
     matchedTerms: Set<string>;
     pageIds: Set<string>;
+    longestRunningDays: number | null;
+    earliestStartTime: number | null;
   }>();
 
   for (const term of searchTerms) {
@@ -108,39 +120,89 @@ export async function discoverCompetitorBrandsForSku(
         brandName,
         adCount: 0,
         matchedTerms: new Set<string>(),
-        pageIds: new Set<string>()
+        pageIds: new Set<string>(),
+        longestRunningDays: null,
+        earliestStartTime: null
       };
       current.adCount += 1;
       current.matchedTerms.add(term);
       if (record.page_id) current.pageIds.add(String(record.page_id));
+      const startTime = dateTimeValue(record.ad_delivery_start_time ?? record.ad_creation_time);
+      if (startTime) {
+        current.earliestStartTime = current.earliestStartTime === null ? startTime : Math.min(current.earliestStartTime, startTime);
+        const runningDays = Math.max(0, Math.floor((Date.now() - startTime) / 86_400_000));
+        current.longestRunningDays = current.longestRunningDays === null ? runningDays : Math.max(current.longestRunningDays, runningDays);
+      }
       scored.set(normalized, current);
     }
   }
 
   const candidates = Array.from(scored.values())
-    .sort((left, right) => right.adCount - left.adCount || right.matchedTerms.size - left.matchedTerms.size || left.brandName.localeCompare(right.brandName))
+    .map((candidate) => {
+      const confidence = confidenceForCandidate({
+        adCount: candidate.adCount,
+        matchedTermCount: candidate.matchedTerms.size,
+        totalTerms: searchTerms.length,
+        longestRunningDays: candidate.longestRunningDays
+      });
+      return {
+        ...candidate,
+        confidence,
+        rankScore: rankScoreForCandidate({
+          adCount: candidate.adCount,
+          matchedTermCount: candidate.matchedTerms.size,
+          longestRunningDays: candidate.longestRunningDays,
+          confidence
+        })
+      };
+    })
+    .sort((left, right) => right.rankScore - left.rankScore || left.brandName.localeCompare(right.brandName))
     .slice(0, 8)
-    .map((candidate) => ({
-      brandName: candidate.brandName,
-      confidence: confidenceForCandidate(candidate.adCount, candidate.matchedTerms.size, searchTerms.length),
-      adCount: candidate.adCount,
-      evidence: {
-        source: "META_AD_LIBRARY_KEYWORD_SEARCH",
-        matched_terms: Array.from(candidate.matchedTerms),
-        ad_count: candidate.adCount,
-        page_ids: Array.from(candidate.pageIds).slice(0, 5),
-        sku_product_context: {
-          sku,
-          product_name: stringValue(product.product_name),
-          category: stringValue(product.category, product.category_full_name, product.product_type),
-          tags: stringArray(product.tags).slice(0, 12),
-          handle: stringValue(product.handle, product.product_handle),
-          own_brand: stringValue(product.vendor, product.brand)
-        },
-        auto_confirmed: false,
-        review_required_reason: "Candidate came from public keyword search and must be confirmed before ad sync or optimization use."
-      }
-    }));
+    .map((candidate, index) => {
+      const autoConfirmed = shouldAutoConfirmCandidate({
+        confidence: candidate.confidence,
+        adCount: candidate.adCount,
+        matchedTermCount: candidate.matchedTerms.size,
+        longestRunningDays: candidate.longestRunningDays,
+        rankIndex: index
+      });
+      return {
+        brandName: candidate.brandName,
+        confidence: candidate.confidence,
+        adCount: candidate.adCount,
+        longestRunningDays: candidate.longestRunningDays,
+        autoConfirmed,
+        evidence: {
+          source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+          matched_terms: Array.from(candidate.matchedTerms),
+          ad_count: candidate.adCount,
+          longest_running_days: candidate.longestRunningDays,
+          page_ids: Array.from(candidate.pageIds).slice(0, 5),
+          rank_score: candidate.rankScore,
+          sku_product_context: {
+            sku,
+            product_name: stringValue(product.product_name),
+            category: stringValue(product.category, product.category_full_name, product.product_type),
+            tags: stringArray(product.tags).slice(0, 12),
+            handle: stringValue(product.handle, product.product_handle),
+            own_brand: stringValue(product.vendor, product.brand)
+          },
+          auto_confirmed: autoConfirmed,
+          auto_confirm_reason: autoConfirmed
+            ? "High-confidence candidate selected from SKU product context, public ad volume, matched terms, and long-running active ads."
+            : null,
+          auto_confirm_thresholds: {
+            min_confidence: AUTO_CONFIRM_MIN_CONFIDENCE,
+            min_ads: AUTO_CONFIRM_MIN_ADS,
+            min_matched_terms: AUTO_CONFIRM_MIN_MATCHED_TERMS,
+            min_long_running_days: AUTO_CONFIRM_MIN_LONG_RUNNING_DAYS
+          },
+          review_required_reason: autoConfirmed
+            ? null
+            : "Candidate confidence was below the auto-confirm threshold and should be reviewed before ad sync or optimization use."
+        }
+      };
+    });
 
   if (candidates.length) {
     await upsertSuggestedCompetitorBrands(prisma, {
@@ -150,10 +212,26 @@ export async function discoverCompetitorBrandsForSku(
         brandName: candidate.brandName,
         category: stringValue(product.category, product.category_full_name, product.product_type) || null,
         confidence: candidate.confidence,
-        evidence: candidate.evidence
+        evidence: candidate.evidence,
+        autoConfirm: candidate.autoConfirmed
       }))
     });
   }
+
+  const autoConfirmedBrands = candidates
+    .filter((candidate) => candidate.autoConfirmed)
+    .map((candidate) => candidate.brandName);
+  const queued = autoConfirmedBrands.length
+    ? await enqueueCompetitivePublicAdSyncJob(prisma, {
+      workspaceId: input.workspaceId,
+      sku,
+      brands: autoConfirmedBrands,
+      category: stringValue(product.category, product.category_full_name, product.product_type) || null,
+      country,
+      trigger: "sku_competitor_auto_discovery",
+      limitPerBrand: 75
+    }).catch(() => null)
+    : null;
 
   return {
     ok: candidates.length > 0,
@@ -161,7 +239,8 @@ export async function discoverCompetitorBrandsForSku(
     country,
     status: candidates.length ? "SUCCESS" : "NO_CANDIDATES",
     searchTerms,
-    candidates
+    candidates,
+    queuedSyncJobId: queued?.job?.id ?? null
   };
 }
 
@@ -220,10 +299,48 @@ function searchTermsFromProduct(product: JsonRecord) {
   return Array.from(new Set(terms)).slice(0, 6);
 }
 
-function confidenceForCandidate(adCount: number, matchedTermCount: number, totalTerms: number) {
-  const adScore = Math.min(0.45, adCount * 0.05);
-  const termScore = totalTerms > 0 ? Math.min(0.35, (matchedTermCount / totalTerms) * 0.35) : 0;
-  return Math.round((0.2 + adScore + termScore) * 100) / 100;
+function confidenceForCandidate(input: {
+  adCount: number;
+  matchedTermCount: number;
+  totalTerms: number;
+  longestRunningDays: number | null;
+}) {
+  const adScore = Math.min(0.36, input.adCount * 0.04);
+  const termScore = input.totalTerms > 0 ? Math.min(0.28, (input.matchedTermCount / input.totalTerms) * 0.28) : 0;
+  const longevityScore = input.longestRunningDays === null ? 0 : Math.min(0.24, input.longestRunningDays / 180 * 0.24);
+  return Math.round((0.12 + adScore + termScore + longevityScore) * 100) / 100;
+}
+
+function rankScoreForCandidate(input: {
+  adCount: number;
+  matchedTermCount: number;
+  longestRunningDays: number | null;
+  confidence: number;
+}) {
+  return input.confidence * 100
+    + Math.min(input.adCount, 25) * 2
+    + input.matchedTermCount * 8
+    + Math.min(input.longestRunningDays ?? 0, 180) * 0.2;
+}
+
+function shouldAutoConfirmCandidate(input: {
+  confidence: number;
+  adCount: number;
+  matchedTermCount: number;
+  longestRunningDays: number | null;
+  rankIndex: number;
+}) {
+  if (input.rankIndex >= MAX_AUTO_CONFIRMED_COMPETITORS) return false;
+  if (input.confidence < AUTO_CONFIRM_MIN_CONFIDENCE) return false;
+  return input.adCount >= AUTO_CONFIRM_MIN_ADS
+    || input.matchedTermCount >= AUTO_CONFIRM_MIN_MATCHED_TERMS
+    || (input.longestRunningDays ?? 0) >= AUTO_CONFIRM_MIN_LONG_RUNNING_DAYS;
+}
+
+function dateTimeValue(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
 }
 
 function cleanSearchText(value: string) {

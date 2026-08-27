@@ -454,6 +454,7 @@ export async function upsertSuggestedCompetitorBrands(
       category?: string | null;
       confidence: number;
       evidence: JsonRecord;
+      autoConfirm?: boolean;
     }>;
   }
 ) {
@@ -479,16 +480,21 @@ export async function upsertSuggestedCompetitorBrands(
       continue;
     }
 
+    const status = brand.autoConfirm ? "USER_CONFIRMED" : "NEEDS_REVIEW";
+    const source = brand.autoConfirm ? "AUTO_CONFIRMED_FROM_SKU_PUBLIC_ADS" : "META_AD_LIBRARY_KEYWORD_SEARCH";
+    const confirmedAt = brand.autoConfirm ? new Date() : null;
+
     if (existing) {
       rows.push(await prisma.competitiveSkuBrand.update({
         where: { id: existing.id },
         data: {
           brandName,
           category: brand.category ?? existing.category,
-          status: "NEEDS_REVIEW",
-          source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+          status,
+          source,
           confidence: brand.confidence,
-          evidenceJson: brand.evidence as Prisma.InputJsonValue
+          evidenceJson: brand.evidence as Prisma.InputJsonValue,
+          confirmedAt
         }
       }));
       continue;
@@ -501,10 +507,11 @@ export async function upsertSuggestedCompetitorBrands(
         brandName,
         normalizedBrandName,
         category: brand.category ?? null,
-        status: "NEEDS_REVIEW",
-        source: "META_AD_LIBRARY_KEYWORD_SEARCH",
+        status,
+        source,
         confidence: brand.confidence,
-        evidenceJson: brand.evidence as Prisma.InputJsonValue
+        evidenceJson: brand.evidence as Prisma.InputJsonValue,
+        confirmedAt
       }
     }));
   }

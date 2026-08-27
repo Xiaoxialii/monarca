@@ -38,6 +38,7 @@ const SCHEMA_VERSION = "ecommerce_canonical_v1";
 const SAFETY_OVERLAP_MS = 5 * 60 * 1000;
 const FIRST_SYNC_DAYS = 90;
 const MAX_RESOURCE_NODES = 250;
+const PRODUCT_SYNC_PAGE_SIZE = 10;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -312,14 +313,14 @@ function productsQuery(includeInventoryFields: boolean) {
           featuredMedia {
             ...ProductMediaFields
           }
-          media(first: 10) {
+          media(first: 5) {
             edges {
               node {
                 ...ProductMediaFields
               }
             }
           }
-          collections(first: 20) {
+          collections(first: 10) {
             edges {
               node { id title handle updatedAt }
             }
@@ -330,12 +331,12 @@ function productsQuery(includeInventoryFields: boolean) {
             position
             values
           }
-          metafields(first: 20, keys: $metafieldKeys) {
+          metafields(first: 10, keys: $metafieldKeys) {
             edges {
               node { id namespace key type value updatedAt }
             }
           }
-          variants(first: 50) {
+          variants(first: 25) {
             edges {
               node {
                 id
@@ -356,7 +357,7 @@ function productsQuery(includeInventoryFields: boolean) {
                   measurement { weight { value unit } }
                 }
                 ` : ""}
-                media(first: 5) {
+                media(first: 1) {
                   edges {
                     node {
                       ...ProductMediaFields
@@ -541,7 +542,8 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
       productsQuery(shopifyInventoryScopeGranted(grantedScopes)),
       "products",
       { metafieldKeys: shopifyProductMetafieldKeys() },
-      MAX_RESOURCE_NODES
+      MAX_RESOURCE_NODES,
+      PRODUCT_SYNC_PAGE_SIZE
     );
     const ordersPage = dataMode === "FULL"
       ? await client.fetchConnectionWithPageInfo<ShopifyGuardrailOrder>(ORDERS_QUERY, "orders", { query: orderQuery }, MAX_RESOURCE_NODES)

@@ -148,7 +148,8 @@ export class ShopifyGraphQLClient {
     query: string,
     connectionKey: string,
     variables: Record<string, unknown> = {},
-    maxNodes = 50
+    maxNodes = 50,
+    pageSize = 50
   ): Promise<ShopifyPaginationResult<T>> {
     const nodes: T[] = [];
     let cursor: string | null = null;
@@ -159,7 +160,7 @@ export class ShopifyGraphQLClient {
       pageCount += 1;
       const data: Record<string, Connection<T> | undefined> = await this.fetchGraphQL<Record<string, Connection<T> | undefined>>(query, {
         ...variables,
-        first: Math.min(50, maxNodes - nodes.length),
+        first: Math.min(Math.max(1, pageSize), maxNodes - nodes.length),
         after: cursor
       });
       const connection: Connection<T> | undefined = data[connectionKey];

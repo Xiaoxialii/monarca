@@ -16,10 +16,10 @@ test("Shopify product sync pulls enriched product, media, SEO, inventory, and me
     assert.match(source, /descriptionHtml/, "HTML description should be requested");
     assert.match(source, /tags/, "Product tags should be requested");
     assert.match(source, /category \{ id name fullName \}/, "Shopify taxonomy category should be requested");
-    assert.match(source, /collections\(first: 20\)/, "Product collections should be requested");
+    assert.match(source, /collections\(first: 10\)/, "Product collections should be requested with a bounded page size");
     assert.match(source, /options\s*\{[\s\S]*values/, "Product options should be requested");
     assert.match(source, /featuredMedia\s*\{[\s\S]*ProductMediaFields/, "Featured media should be requested");
-    assert.match(source, /media\(first: 10\)/, "Product media should be requested");
+    assert.match(source, /media\(first: 5\)/, "Product media should be requested with a bounded page size");
     assert.match(source, /onlineStoreUrl/, "Online store URL should be requested");
     assert.match(source, /seo \{ title description \}/, "SEO title and description should be requested");
     assert.match(source, /compareAtPrice/, "Variant compare-at price should be requested");
@@ -27,11 +27,15 @@ test("Shopify product sync pulls enriched product, media, SEO, inventory, and me
     assert.match(source, /inventoryQuantity/, "Variant inventory quantity should be requested");
     assert.match(source, /inventoryItem\s*\{[\s\S]*unitCost/, "Inventory item unit cost should be requested");
     assert.match(source, /measurement \{ weight \{ value unit \} \}/, "Inventory item weight should be requested");
-    assert.match(source, /metafields\(first: 20, keys: \$metafieldKeys\)/, "Product metafields should be requested by explicit keys with a bounded page size");
+    assert.match(source, /variants\(first: 25\)/, "Variants should be requested with a bounded page size");
+    assert.match(source, /media\(first: 1\)/, "Variant media should be requested with a low-cost page size");
+    assert.match(source, /metafields\(first: 10, keys: \$metafieldKeys\)/, "Product metafields should be requested by explicit keys with a bounded page size");
   }
 
   assert.match(enrichmentConfig, /SHOPIFY_PRODUCT_METAFIELD_KEYS/, "Metafield key whitelist should be configurable");
   assert.match(enrichmentConfig, /custom\.brand/, "Metafield whitelist should include common brand enrichment");
+  assert.match(syncEngine, /PRODUCT_SYNC_PAGE_SIZE = 10/, "Product sync should use smaller pages to stay under Shopify single-query cost limits");
+  assert.match(syncEngine, /fetchConnectionWithPageInfo<ShopifyProduct>\([\s\S]*PRODUCT_SYNC_PAGE_SIZE/, "Product sync should pass the lower page size to the GraphQL paginator");
 });
 
 test("Shopify product canonical artifact exposes enriched columns without replacing core SKU fields", () => {

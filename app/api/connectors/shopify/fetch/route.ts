@@ -57,14 +57,14 @@ function productsQuery(includeInventoryFields: boolean) {
           featuredMedia {
             ...ProductMediaFields
           }
-          media(first: 10) {
+          media(first: 5) {
             edges {
               node {
                 ...ProductMediaFields
               }
             }
           }
-          collections(first: 20) {
+          collections(first: 10) {
             edges {
               node { id title handle updatedAt }
             }
@@ -75,12 +75,12 @@ function productsQuery(includeInventoryFields: boolean) {
             position
             values
           }
-          metafields(first: 20, keys: $metafieldKeys) {
+          metafields(first: 10, keys: $metafieldKeys) {
             edges {
               node { id namespace key type value updatedAt }
             }
           }
-          variants(first: 50) {
+          variants(first: 25) {
             edges {
               node {
                 id
@@ -101,7 +101,7 @@ function productsQuery(includeInventoryFields: boolean) {
                   measurement { weight { value unit } }
                 }
                 ` : ""}
-                media(first: 5) {
+                media(first: 1) {
                   edges {
                     node {
                       ...ProductMediaFields

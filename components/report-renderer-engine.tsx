@@ -3335,6 +3335,8 @@ type CompetitiveContextView = {
   next_step?: string;
 };
 
+type CompetitiveContextSaveState = "idle" | "saving" | "queued" | "error";
+
 const seedActionOutcomeRows: ActionOutcomeRow[] = [
   {
     action: "Increase Ads",
@@ -5577,6 +5579,7 @@ function SelectedSkuOptimizationPanel({
     ? decisionReadiness.confidence_level !== "LOW" && !(decisionReadiness.allowed_actions ?? []).every((action) => action === "MONITOR")
     : row.decision_confidence?.confidence_level !== "LOW";
   const competitiveContext = competitiveContextForDecision(row);
+  const skuDecisionObjectCategory = (row.sku_decision_object as { category?: string | null } | undefined)?.category ?? null;
   const aiCanDecideLabel = aiCanDecide
     ? localizeDecisionText("Yes", locale)
     : localizeDecisionText("Monitor only", locale);
@@ -5610,7 +5613,7 @@ function SelectedSkuOptimizationPanel({
               label={localizeDecisionText("AI can decide", locale)}
               value={`${aiCanDecideLabel} · ${readinessScore === null ? percent.format(detail.confidence) : `${Math.round(readinessScore)}/100`}`}
             />
-            <CompetitiveContextSummary context={competitiveContext} locale={locale} />
+            <CompetitiveContextSummary context={competitiveContext} sku={decision.sku} category={competitiveContext?.category ?? skuDecisionObjectCategory} locale={locale} />
             <DecisionSummaryRow label={localizeDecisionText("Decision Status", locale)} value={localizeDecisionText(decision.decision_status, locale)} />
           </div>
           <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-3 mt-4">
@@ -5768,15 +5771,75 @@ type SkuDecisionObject = {
   decision_status: string;
 };
 
-function CompetitiveContextSummary({ context, locale }: { context: CompetitiveContextView | null; locale: RendererLocale }) {
+function CompetitiveContextSummary({
+  context,
+  sku,
+  category,
+  locale
+}: {
+  context: CompetitiveContextView | null;
+  sku: string;
+  category?: string | null;
+  locale: RendererLocale;
+}) {
   const isZh = locale === "zh";
   const warnings = context?.data_quality?.warnings ?? [];
   const competitorCount = context?.competitor_count ?? 0;
   const publicAdCount = context?.active_public_ads ?? 0;
   const canUseForDecision = context?.data_quality?.can_use_for_decision ?? false;
+  const confirmedCompetitors = context?.competitor_brands?.filter((brand) => brand.name).map((brand) => brand.name as string) ?? [];
+  const needsCompetitorInput = !context?.data_quality?.has_confirmed_competitors;
+  const [brandInput, setBrandInput] = useState("");
+  const [saveState, setSaveState] = useState<CompetitiveContextSaveState>("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const longestRunningLabel = context?.longest_running_ad_days === null || context?.longest_running_ad_days === undefined
     ? zhEmpty(locale)
     : isZh ? `${numberFormat.format(context.longest_running_ad_days)} 天` : `${numberFormat.format(context.longest_running_ad_days)}d`;
+  const saveCompetitorBrands = async () => {
+    const brands = brandInput
+      .split(/[,，\n]/)
+      .map((brand) => brand.trim())
+      .filter(Boolean);
+    if (!brands.length || saveState === "saving") return;
+    setSaveState("saving");
+    setSaveMessage(null);
+    try {
+      const brandResponse = await fetch("/api/competitive-intelligence/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku, brands, category, action: "confirm" })
+      });
+      const brandPayload = await brandResponse.json().catch(() => null) as { message?: string } | null;
+      if (!brandResponse.ok) {
+        throw new Error(brandPayload?.message || (isZh ? "保存竞品品牌失败。" : "Failed to save competitor brands."));
+      }
+
+      const syncResponse = await fetch("/api/competitive-intelligence/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku, brands, category, country: "US", limitPerBrand: 50 })
+      });
+      const syncPayload = await syncResponse.json().catch(() => null) as { code?: string; message?: string } | null;
+      if (!syncResponse.ok) {
+        if (syncPayload?.code === "PUBLIC_AD_LIBRARY_TOKEN_MISSING") {
+          setSaveState("queued");
+          setSaveMessage(isZh
+            ? "竞品品牌已确认。公开广告库 token 未配置，配置后会同步广告。"
+            : "Competitor brands saved. Public ad library token is not configured yet.");
+          setBrandInput("");
+          return;
+        }
+        throw new Error(syncPayload?.message || (isZh ? "公开广告库同步排队失败。" : "Failed to queue public ad sync."));
+      }
+
+      setSaveState("queued");
+      setSaveMessage(isZh ? "竞品品牌已确认，公开广告库同步已排队。" : "Competitor brands saved and public ad sync queued.");
+      setBrandInput("");
+    } catch (error) {
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : (isZh ? "竞品信息保存失败。" : "Failed to save competitor context."));
+    }
+  };
 
   return (
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -5802,6 +5865,15 @@ function CompetitiveContextSummary({ context, locale }: { context: CompetitiveCo
         <span>{isZh ? "本 SKU 价格" : "Own price"}: {context?.own_price ? currencyDecimal.format(context.own_price) : zhEmpty(locale)}</span>
         <span>{isZh ? "市场参考价" : "Market reference"}: {context?.market_reference_price ? currencyDecimal.format(context.market_reference_price) : zhEmpty(locale)}</span>
       </div>
+      {confirmedCompetitors.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {confirmedCompetitors.slice(0, 4).map((brand) => (
+            <span key={brand} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+              {brand}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {context?.top_formats?.length || context?.repeated_hooks?.length ? (
         <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600">
           {context.top_formats?.length ? (
@@ -5815,6 +5887,39 @@ function CompetitiveContextSummary({ context, locale }: { context: CompetitiveCo
             </span>
           ) : null}
         </div>
+      ) : null}
+      {needsCompetitorInput ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
+          <p className="text-xs font-semibold leading-5 text-amber-800">
+            {isZh
+              ? "Shopify 商品字段已接入，但系统还不能自动确认竞品。请先确认这个 SKU 的竞品品牌，Monarca 才会同步合法公开广告库信号。"
+              : "Shopify product fields are connected, but competitors still need confirmation before public ad signals can be synced."}
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={brandInput}
+              onChange={(event) => setBrandInput(event.target.value)}
+              placeholder={isZh ? "输入竞品品牌，多个用逗号分隔" : "Competitor brands, comma separated"}
+              className="min-w-0 flex-1 rounded-md border border-amber-200 bg-white px-2 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-amber-400"
+            />
+            <button
+              type="button"
+              onClick={() => void saveCompetitorBrands()}
+              disabled={!brandInput.trim() || saveState === "saving"}
+              className="rounded-md bg-slate-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saveState === "saving" ? (isZh ? "保存中" : "Saving") : (isZh ? "确认并同步" : "Confirm & sync")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {saveMessage ? (
+        <p className={cn(
+          "mt-2 text-xs font-semibold leading-5",
+          saveState === "error" ? "text-rose-600" : "text-emerald-700"
+        )}>
+          {saveMessage}
+        </p>
       ) : null}
       {warnings.length ? (
         <p className="mt-2 text-xs font-medium leading-5 text-slate-500">

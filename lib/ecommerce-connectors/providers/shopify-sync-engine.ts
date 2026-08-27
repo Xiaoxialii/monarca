@@ -18,6 +18,7 @@ import {
   shopifyScopeStatus,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
 import { PrismaSemanticMemoryStore } from "@/lib/semantic/memory";
 import { SelfLearningSemanticRuntime } from "@/lib/semantic/runtime";
@@ -43,11 +44,48 @@ type JsonRecord = Record<string, unknown>;
 type ShopifyProduct = {
   id?: string | null;
   title?: string | null;
+  handle?: string | null;
+  description?: string | null;
+  descriptionHtml?: string | null;
+  tags?: string[] | null;
   vendor?: string | null;
   productType?: string | null;
+  category?: {
+    id?: string | null;
+    name?: string | null;
+    fullName?: string | null;
+  } | null;
   status?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  onlineStoreUrl?: string | null;
+  seo?: {
+    title?: string | null;
+    description?: string | null;
+  } | null;
+  featuredMedia?: ShopifyMedia | null;
+  media?: {
+    edges?: Array<{ node?: ShopifyMedia | null } | null>;
+  } | null;
+  collections?: {
+    edges?: Array<{
+      node?: {
+        id?: string | null;
+        title?: string | null;
+        handle?: string | null;
+        updatedAt?: string | null;
+      } | null;
+    } | null>;
+  } | null;
+  options?: Array<{
+    id?: string | null;
+    name?: string | null;
+    position?: number | null;
+    values?: string[] | null;
+  }> | null;
+  metafields?: {
+    edges?: Array<{ node?: ShopifyMetafield | null } | null>;
+  } | null;
   variants?: {
     edges?: Array<{
       node?: {
@@ -55,9 +93,67 @@ type ShopifyProduct = {
         sku?: string | null;
         title?: string | null;
         price?: string | number | null;
+        compareAtPrice?: string | number | null;
+        barcode?: string | null;
+        inventoryQuantity?: number | null;
+        selectedOptions?: Array<{ name?: string | null; value?: string | null }>;
+        inventoryItem?: {
+          id?: string | null;
+          sku?: string | null;
+          tracked?: boolean | null;
+          requiresShipping?: boolean | null;
+          unitCost?: {
+            amount?: string | number | null;
+            currencyCode?: string | null;
+          } | null;
+          measurement?: {
+            weight?: {
+              value?: number | string | null;
+              unit?: string | null;
+            } | null;
+          } | null;
+        } | null;
+        media?: {
+          edges?: Array<{ node?: ShopifyMedia | null } | null>;
+        } | null;
       } | null;
     } | null>;
   } | null;
+};
+
+type ShopifyMetafield = {
+  id?: string | null;
+  namespace?: string | null;
+  key?: string | null;
+  type?: string | null;
+  value?: string | null;
+  updatedAt?: string | null;
+};
+
+type ShopifyMedia = {
+  id?: string | null;
+  mediaContentType?: string | null;
+  alt?: string | null;
+  preview?: {
+    image?: ShopifyImage | null;
+  } | null;
+  image?: ShopifyImage | null;
+  sources?: Array<{
+    url?: string | null;
+    mimeType?: string | null;
+    format?: string | null;
+    height?: number | null;
+    width?: number | null;
+  }> | null;
+  originUrl?: string | null;
+  embedUrl?: string | null;
+};
+
+type ShopifyImage = {
+  url?: string | null;
+  altText?: string | null;
+  width?: number | null;
+  height?: number | null;
 };
 
 type ShopifyCustomer = {
@@ -194,25 +290,99 @@ const ORDERS_QUERY = `
 `;
 
 const PRODUCTS_QUERY = `
-  query ShopifySyncProducts($first: Int!, $after: String) {
+  query ShopifySyncProducts($first: Int!, $after: String, $metafieldKeys: [String!]) {
     products(first: $first, after: $after, sortKey: UPDATED_AT) {
       edges {
         node {
           id
           title
+          handle
+          description
+          descriptionHtml
+          tags
           vendor
           productType
+          category { id name fullName }
           status
           createdAt
           updatedAt
+          onlineStoreUrl
+          seo { title description }
+          featuredMedia {
+            ...ProductMediaFields
+          }
+          media(first: 10) {
+            edges {
+              node {
+                ...ProductMediaFields
+              }
+            }
+          }
+          collections(first: 20) {
+            edges {
+              node { id title handle updatedAt }
+            }
+          }
+          options {
+            id
+            name
+            position
+            values
+          }
+          metafields(first: 20, keys: $metafieldKeys) {
+            edges {
+              node { id namespace key type value updatedAt }
+            }
+          }
           variants(first: 50) {
             edges {
-              node { id sku title price }
+              node {
+                id
+                sku
+                title
+                price
+                compareAtPrice
+                barcode
+                inventoryQuantity
+                selectedOptions { name value }
+                inventoryItem {
+                  id
+                  sku
+                  tracked
+                  requiresShipping
+                  unitCost { amount currencyCode }
+                  measurement { weight { value unit } }
+                }
+                media(first: 5) {
+                  edges {
+                    node {
+                      ...ProductMediaFields
+                    }
+                  }
+                }
+              }
             }
           }
         }
       }
       pageInfo { hasNextPage endCursor }
+    }
+  }
+
+  fragment ProductMediaFields on Media {
+    id
+    mediaContentType
+    alt
+    preview { image { url altText width height } }
+    ... on MediaImage {
+      image { url altText width height }
+    }
+    ... on Video {
+      sources { url mimeType format height width }
+    }
+    ... on ExternalVideo {
+      originUrl
+      embedUrl
     }
   }
 `;
@@ -363,7 +533,12 @@ export async function runShopifyProductionSync(prisma: PrismaClient, input: {
     const customerWarnings: string[] = [];
     const missingFields: string[] = [];
     const orderQuery = `updated_at:>=${syncWindowStart.toISOString()}`;
-    const productsPage = await client.fetchConnectionWithPageInfo<ShopifyProduct>(PRODUCTS_QUERY, "products", {}, MAX_RESOURCE_NODES);
+    const productsPage = await client.fetchConnectionWithPageInfo<ShopifyProduct>(
+      PRODUCTS_QUERY,
+      "products",
+      { metafieldKeys: shopifyProductMetafieldKeys() },
+      MAX_RESOURCE_NODES
+    );
     const ordersPage = dataMode === "FULL"
       ? await client.fetchConnectionWithPageInfo<ShopifyGuardrailOrder>(ORDERS_QUERY, "orders", { query: orderQuery }, MAX_RESOURCE_NODES)
       : {
@@ -841,7 +1016,13 @@ function normalizeShopifyRecords(input: {
   for (const product of input.products) {
     if (!product.id) continue;
     const variants = product.variants?.edges?.map((edge) => edge?.node).filter(Boolean) ?? [null];
+    const categoryName = product.category?.fullName ?? product.category?.name ?? product.productType ?? null;
+    const productMedia = mediaList(product.media);
+    const productCollections = collectionList(product.collections);
+    const productMetafields = metafieldList(product.metafields);
     for (const variant of variants.length ? variants : [null]) {
+      const inventoryItem = variant?.inventoryItem ?? null;
+      const variantMedia = mediaList(variant?.media);
       const canonicalSku = buildCanonicalSku({
         sku: variant?.sku ?? null,
         product_id: product.id,
@@ -859,7 +1040,41 @@ function normalizeShopifyRecords(input: {
         sku_source: canonicalSku.unmapped ? "fallback" : "shopify",
         product_name: product.title ?? null,
         product_type: product.productType ?? null,
-        category: product.productType ?? null,
+        handle: product.handle ?? null,
+        product_handle: product.handle ?? null,
+        description: product.description ?? null,
+        description_html: product.descriptionHtml ?? null,
+        tags: product.tags ?? [],
+        category: categoryName,
+        category_id: product.category?.id ?? null,
+        category_name: product.category?.name ?? null,
+        category_full_name: product.category?.fullName ?? null,
+        collections: productCollections,
+        collection_handles: productCollections.map((collection) => collection.handle).filter(Boolean),
+        options: product.options ?? [],
+        featured_media: normalizeMedia(product.featuredMedia),
+        featured_image_url: mediaImageUrl(product.featuredMedia),
+        media: productMedia,
+        images: productMedia.filter((media) => media.media_content_type === "IMAGE"),
+        online_store_url: product.onlineStoreUrl ?? null,
+        seo_title: product.seo?.title ?? null,
+        seo_description: product.seo?.description ?? null,
+        price: numberValue(variant?.price),
+        compare_at_price: nullableNumberValue(variant?.compareAtPrice),
+        barcode: variant?.barcode ?? null,
+        inventory_item_id: inventoryItem?.id ?? null,
+        inventory_item_sku: inventoryItem?.sku ?? null,
+        inventory_item_tracked: inventoryItem?.tracked ?? null,
+        inventory_requires_shipping: inventoryItem?.requiresShipping ?? null,
+        inventory_quantity: typeof variant?.inventoryQuantity === "number" ? variant.inventoryQuantity : null,
+        inventory_unit_cost: moneyV2Amount(inventoryItem?.unitCost),
+        inventory_unit_cost_currency: inventoryItem?.unitCost?.currencyCode ?? null,
+        weight: nullableNumberValue(inventoryItem?.measurement?.weight?.value),
+        weight_unit: inventoryItem?.measurement?.weight?.unit ?? null,
+        selected_options: variant?.selectedOptions ?? [],
+        variant_media: variantMedia,
+        metafields: productMetafields,
+        metafield_keys: productMetafields.map((metafield) => `${metafield.namespace}.${metafield.key}`),
         vendor: product.vendor ?? null,
         brand: product.vendor ?? null,
         status: product.status ?? null,
@@ -1008,7 +1223,55 @@ function canonicalColumns(tableName: string) {
   const tableFields: Record<string, string[]> = {
     ecommerce_orders: ["source_order_id", "order_id", "customer_id", "order_date", "order_status", "financial_status", "fulfillment_status", "country", "province", "city", "currency", "gross_sales", "discount_amount", "refund_amount", "net_sales", "tax_amount", "shipping_amount", "total_paid", "is_cancelled", "is_test", "is_paid", "created_at_source", "updated_at_source", "processed_at_source", "cancelled_at_source"],
     ecommerce_order_items: ["source_order_id", "source_line_item_id", "order_id", "order_item_id", "product_id", "variant_id", "sku", "product_name", "quantity", "unit_price", "gross_sales", "discount_amount", "refund_amount", "net_sales", "currency", "fulfillment_status"],
-    ecommerce_products: ["source_product_id", "source_variant_id", "product_id", "variant_id", "sku", "product_name", "product_type", "category", "vendor", "brand", "status", "created_at_source", "updated_at_source"],
+    ecommerce_products: [
+      "source_product_id",
+      "source_variant_id",
+      "product_id",
+      "variant_id",
+      "sku",
+      "product_name",
+      "product_type",
+      "handle",
+      "product_handle",
+      "description",
+      "description_html",
+      "tags",
+      "category",
+      "category_id",
+      "category_name",
+      "category_full_name",
+      "collections",
+      "collection_handles",
+      "options",
+      "featured_media",
+      "featured_image_url",
+      "media",
+      "images",
+      "online_store_url",
+      "seo_title",
+      "seo_description",
+      "price",
+      "compare_at_price",
+      "barcode",
+      "inventory_item_id",
+      "inventory_item_sku",
+      "inventory_item_tracked",
+      "inventory_requires_shipping",
+      "inventory_quantity",
+      "inventory_unit_cost",
+      "inventory_unit_cost_currency",
+      "weight",
+      "weight_unit",
+      "selected_options",
+      "variant_media",
+      "metafields",
+      "metafield_keys",
+      "vendor",
+      "brand",
+      "status",
+      "created_at_source",
+      "updated_at_source"
+    ],
     ecommerce_customers: ["source_customer_id", "customer_id", "email_hash", "country", "province", "city", "customer_created_at", "total_orders", "total_spent", "currency"],
     ecommerce_refunds: ["source_refund_id", "source_order_id", "source_line_item_id", "refund_id", "order_id", "order_item_id", "refund_date", "refund_amount", "currency", "refund_reason"]
   };
@@ -1040,8 +1303,73 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function nullableNumberValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
 function moneyCurrency(value: { shopMoney?: { currencyCode?: string | null } | null } | null | undefined) {
   return stringValue(value?.shopMoney?.currencyCode);
+}
+
+function moneyV2Amount(value: { amount?: string | number | null } | null | undefined) {
+  return nullableNumberValue(value?.amount);
+}
+
+function collectionList(value: ShopifyProduct["collections"]) {
+  return (value?.edges ?? [])
+    .map((edge) => edge?.node)
+    .filter((node): node is NonNullable<typeof node> => Boolean(node))
+    .map((node) => ({
+      id: node.id ?? null,
+      title: node.title ?? null,
+      handle: node.handle ?? null,
+      updated_at: node.updatedAt ?? null
+    }));
+}
+
+function metafieldList(value: ShopifyProduct["metafields"]) {
+  return (value?.edges ?? [])
+    .map((edge) => edge?.node)
+    .filter((node): node is ShopifyMetafield => Boolean(node?.namespace && node?.key))
+    .map((node) => ({
+      id: node.id ?? null,
+      namespace: node.namespace ?? null,
+      key: node.key ?? null,
+      type: node.type ?? null,
+      value: node.value ?? null,
+      updated_at: node.updatedAt ?? null
+    }));
+}
+
+function mediaList(value: { edges?: Array<{ node?: ShopifyMedia | null } | null> } | null | undefined) {
+  return (value?.edges ?? [])
+    .map((edge) => normalizeMedia(edge?.node))
+    .filter((media): media is NonNullable<ReturnType<typeof normalizeMedia>> => Boolean(media));
+}
+
+function normalizeMedia(media: ShopifyMedia | null | undefined) {
+  if (!media) return null;
+  const image = media.image ?? media.preview?.image ?? null;
+  const firstSource = media.sources?.find((source) => source.url) ?? null;
+
+  return {
+    id: media.id ?? null,
+    media_content_type: media.mediaContentType ?? null,
+    alt: media.alt ?? image?.altText ?? null,
+    image_url: image?.url ?? null,
+    thumbnail_url: media.preview?.image?.url ?? image?.url ?? null,
+    width: image?.width ?? firstSource?.width ?? null,
+    height: image?.height ?? firstSource?.height ?? null,
+    source_url: firstSource?.url ?? media.originUrl ?? media.embedUrl ?? null,
+    mime_type: firstSource?.mimeType ?? null,
+    format: firstSource?.format ?? null
+  };
+}
+
+function mediaImageUrl(media: ShopifyMedia | null | undefined) {
+  return normalizeMedia(media)?.image_url ?? null;
 }
 
 function moneyAmount(value: { shopMoney?: { amount?: string | number | null } | null } | null | undefined) {

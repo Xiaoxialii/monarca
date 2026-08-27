@@ -7,6 +7,7 @@ import {
   publicShopifyError,
   shopifyApiVersion
 } from "@/lib/ecommerce-connectors/shopify-oauth";
+import { shopifyProductMetafieldKeys } from "@/lib/ecommerce-connectors/shopify-product-enrichment";
 import { ShopifyGraphQLClient } from "@/lib/ecommerce-connectors/providers/shopify-graphql";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspace, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -36,20 +37,100 @@ const ORDERS_QUERY = `
 `;
 
 const PRODUCTS_QUERY = `
-  query FetchShopifyProducts($first: Int!, $after: String) {
+  query FetchShopifyProducts($first: Int!, $after: String, $metafieldKeys: [String!]) {
     products(first: $first, after: $after) {
       edges {
         node {
           id
           title
+          handle
+          description
+          descriptionHtml
+          tags
           vendor
           productType
+          category { id name fullName }
+          status
+          onlineStoreUrl
+          seo { title description }
+          featuredMedia {
+            ...ProductMediaFields
+          }
+          media(first: 10) {
+            edges {
+              node {
+                ...ProductMediaFields
+              }
+            }
+          }
+          collections(first: 20) {
+            edges {
+              node { id title handle updatedAt }
+            }
+          }
+          options {
+            id
+            name
+            position
+            values
+          }
+          metafields(first: 20, keys: $metafieldKeys) {
+            edges {
+              node { id namespace key type value updatedAt }
+            }
+          }
+          variants(first: 50) {
+            edges {
+              node {
+                id
+                sku
+                title
+                price
+                compareAtPrice
+                barcode
+                inventoryQuantity
+                selectedOptions { name value }
+                inventoryItem {
+                  id
+                  sku
+                  tracked
+                  requiresShipping
+                  unitCost { amount currencyCode }
+                  measurement { weight { value unit } }
+                }
+                media(first: 5) {
+                  edges {
+                    node {
+                      ...ProductMediaFields
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
       pageInfo {
         hasNextPage
         endCursor
       }
+    }
+  }
+
+  fragment ProductMediaFields on Media {
+    id
+    mediaContentType
+    alt
+    preview { image { url altText width height } }
+    ... on MediaImage {
+      image { url altText width height }
+    }
+    ... on Video {
+      sources { url mimeType format height width }
+    }
+    ... on ExternalVideo {
+      originUrl
+      embedUrl
     }
   }
 `;
@@ -78,6 +159,7 @@ async function fetchOptionalConnection<T>(
     query: string;
     connectionKey: string;
     resource: string;
+    variables?: Record<string, unknown>;
     maxNodes?: number;
   }
 ): Promise<{ nodes: T[]; warning?: { code: string; resource: string; message: string } }> {
@@ -86,7 +168,7 @@ async function fetchOptionalConnection<T>(
       nodes: await input.client.fetchConnection<T>(
         input.query,
         input.connectionKey,
-        {},
+        input.variables ?? {},
         input.maxNodes ?? 10
       )
     };
@@ -134,7 +216,13 @@ export async function GET() {
     });
     const [ordersResult, productsResult, customersResult] = await Promise.all([
       fetchOptionalConnection({ client, query: ORDERS_QUERY, connectionKey: "orders", resource: "Order" }),
-      fetchOptionalConnection({ client, query: PRODUCTS_QUERY, connectionKey: "products", resource: "Product" }),
+      fetchOptionalConnection({
+        client,
+        query: PRODUCTS_QUERY,
+        connectionKey: "products",
+        resource: "Product",
+        variables: { metafieldKeys: shopifyProductMetafieldKeys() }
+      }),
       fetchOptionalConnection({ client, query: CUSTOMERS_QUERY, connectionKey: "customers", resource: "Customer" })
     ]);
     const warnings = [ordersResult.warning, productsResult.warning, customersResult.warning].filter(Boolean);

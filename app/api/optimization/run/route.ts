@@ -7,6 +7,7 @@ import { optimizeSkuPortfolio } from "@/lib/optimization/portfolio-optimizer";
 import { runOptimization } from "@/lib/optimization/solver";
 import { prisma } from "@/lib/prisma";
 import { applyDecisionLearningToDecisionReport } from "@/lib/decision-outcome/optimizer-learning-integration";
+import { enrichPortfolioInputWithCompetitiveContexts } from "@/lib/competitive-intelligence/context";
 import type { CommerceState } from "@/lib/optimization/objective";
 import type { PortfolioOptimizationInput } from "@/lib/optimization/profit-simulation-engine";
 
@@ -40,7 +41,10 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const portfolioOptimization = portfolioInput ? optimizeSkuPortfolio(portfolioInput) : null;
+  const enrichedPortfolioInput = portfolioInput
+    ? await enrichPortfolioInputWithCompetitiveContexts(prisma, session.workspace.id, portfolioInput)
+    : null;
+  const portfolioOptimization = enrichedPortfolioInput ? optimizeSkuPortfolio(enrichedPortfolioInput) : null;
   const portfolioReport = portfolioOptimization ? generatePortfolioOptimizationReport(portfolioOptimization) : null;
   let learnedOptimization = portfolioOptimization;
   if (portfolioReport && portfolioOptimization) {

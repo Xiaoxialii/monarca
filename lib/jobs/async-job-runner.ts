@@ -19,6 +19,7 @@ import { GOOGLE_ADS_PROVIDER } from "@/lib/connectors/google-ads/google-ads-erro
 import { runGoogleAdsProductionSync } from "@/lib/connectors/google-ads/google-ads-sync";
 import { META_ADS_PROVIDER } from "@/lib/ads/meta/meta-oauth";
 import { runMetaAdsProductionSync } from "@/lib/ads/meta/meta-sync-engine";
+import { runCompetitivePublicAdSync } from "@/lib/competitive-intelligence/meta-ad-library";
 import {
   collectDecisionExecutionMetric,
   evaluateDecisionOutcome
@@ -34,6 +35,7 @@ export const ASYNC_JOB_TYPES = [
   "GENERATE_INSIGHT",
   "SKU_OPTIMIZATION",
   "SIMULATION",
+  "PUBLIC_COMPETITOR_AD_SYNC",
   "DECISION_OUTCOME_COLLECTOR",
   "DECISION_EVALUATOR",
   "DECISION_LEARNING_UPDATER"
@@ -879,6 +881,8 @@ async function executeJobHandler(
       return processProfitAnalysisAsyncJob(client, input);
     case "SKU_OPTIMIZATION":
       return processSkuOptimizationAsyncJob(client, input);
+    case "PUBLIC_COMPETITOR_AD_SYNC":
+      return processPublicCompetitorAdSyncAsyncJob(client, input);
     case "DECISION_OUTCOME_COLLECTOR":
       return processDecisionOutcomeCollectorJob(client, input);
     case "DECISION_EVALUATOR":
@@ -890,6 +894,71 @@ async function executeJobHandler(
     case "SIMULATION":
       throw new Error(`${input.type} handler is registered but has not been migrated to AsyncJob yet.`);
   }
+}
+
+async function processPublicCompetitorAdSyncAsyncJob(
+  client: PrismaClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    payload: AsyncJobPayload;
+    setJobState: (data: Parameters<typeof updateJob>[2]) => Promise<void>;
+  }
+): Promise<JobHandlerResult> {
+  const sku = typeof input.payload.sku === "string" ? input.payload.sku : "";
+  const country = typeof input.payload.country === "string" ? input.payload.country : "US";
+  const brands = Array.isArray(input.payload.brands)
+    ? input.payload.brands.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const category = typeof input.payload.category === "string" ? input.payload.category : null;
+  const trigger = typeof input.payload.trigger === "string" ? input.payload.trigger : "manual";
+  const limitPerBrand = typeof input.payload.limitPerBrand === "number" ? input.payload.limitPerBrand : undefined;
+  const syncRunId = typeof input.payload.syncRunId === "string" ? input.payload.syncRunId : null;
+
+  if (!sku || !brands.length) {
+    throw new Error("Public competitor ad sync job payload is incomplete.");
+  }
+
+  await input.setJobState({
+    progress: 20,
+    currentStep: "Running public competitor ad sync"
+  });
+
+  const result = await runCompetitivePublicAdSync(client, {
+    workspaceId: input.workspaceId,
+    sku,
+    country,
+    brands,
+    category,
+    trigger,
+    limitPerBrand,
+    syncRunId
+  });
+
+  await input.setJobState({
+    progress: result.ok ? 85 : 100,
+    currentStep: result.ok ? "Finished public competitor ad sync" : "Public competitor ad sync unsupported"
+  });
+
+  return {
+    snapshotType: "PUBLIC_COMPETITOR_AD_SYNC",
+    snapshotVersion: "v1",
+    dataReference: {
+      provider: "META_AD_LIBRARY",
+      sku,
+      country,
+      brands,
+      syncRunId: result.syncRunId,
+      rowCount: result.rowCount,
+      status: result.status,
+      code: "code" in result ? result.code : null
+    },
+    metadataJson: {
+      source: "Meta Ad Library API",
+      publicDataOnly: true,
+      performanceMetricsAvailable: false
+    }
+  };
 }
 
 async function processConnectorSyncAsyncJob(

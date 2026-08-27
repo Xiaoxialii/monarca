@@ -268,6 +268,24 @@ enum CreativeAnalysisReadiness {
   LEARNING
 }
 
+enum CompetitiveBrandStatus {
+  USER_CONFIRMED
+  NEEDS_REVIEW
+  REJECTED
+}
+
+enum PublicAdProvider {
+  META_AD_LIBRARY
+}
+
+enum PublicAdSyncStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  UNSUPPORTED
+}
+
 model User {
   id                  String             @id @default(cuid())
   clerkUserId         String             @unique
@@ -363,6 +381,9 @@ model Workspace {
   advertisingProductMappings  AdvertisingProductMapping[]
   advertisingProductMappingAudits AdvertisingProductMappingAudit[]
   advertisingProfitSnapshots  AdvertisingProfitSnapshot[]
+  competitiveSkuBrands        CompetitiveSkuBrand[]
+  competitivePublicAds        CompetitivePublicAd[]
+  competitivePublicAdSyncRuns CompetitivePublicAdSyncRun[]
 }
 
 model SemanticMappingMemory {
@@ -959,6 +980,93 @@ model AdvertisingProfitSnapshot {
   @@index([workspaceId, dataSourceId, provider, generatedAt], map: "ad_profit_snapshot_source_idx")
   @@index([workspaceId, provider, sku], map: "ad_profit_snapshot_sku_idx")
   @@index([workspaceId, provider, readiness], map: "ad_profit_snapshot_ready_idx")
+}
+
+model CompetitiveSkuBrand {
+  id                  String                 @id @default(cuid())
+  workspaceId          String
+  sku                 String
+  brandName           String
+  normalizedBrandName String
+  category            String?
+  status              CompetitiveBrandStatus @default(USER_CONFIRMED)
+  source              String                 @default("USER_CONFIRMED")
+  confidence          Float                  @default(1)
+  evidenceJson        Json?
+  confirmedBy         String?
+  confirmedAt         DateTime?
+  rejectedAt          DateTime?
+  validFrom           DateTime               @default(now())
+  validTo             DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  workspace           Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  publicAds           CompetitivePublicAd[]
+
+  @@unique([workspaceId, sku, normalizedBrandName, validTo], map: "competitive_sku_brand_identity_key")
+  @@index([workspaceId, sku, status], map: "competitive_sku_brand_sku_status_idx")
+  @@index([workspaceId, normalizedBrandName], map: "competitive_sku_brand_name_idx")
+}
+
+model CompetitivePublicAd {
+  id                  String              @id @default(cuid())
+  workspaceId          String
+  provider            PublicAdProvider
+  sku                 String
+  brandId             String?
+  brandName           String
+  normalizedBrandName String
+  country             String
+  sourceAdArchiveId   String
+  pageId              String?
+  pageName            String?
+  adSnapshotUrl       String?
+  startDate           DateTime?
+  endDate             DateTime?
+  isActive            Boolean             @default(true)
+  publisherPlatforms  Json?
+  displayFormat       String?
+  creativeBodies      Json?
+  creativeTitles      Json?
+  creativeDescriptions Json?
+  ctaText             String?
+  landingUrls         Json?
+  assetUrls           Json?
+  rawPayloadHash      String
+  metadataJson        Json?
+  firstSeenAt         DateTime            @default(now())
+  lastSeenAt          DateTime            @default(now())
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  workspace           Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand               CompetitiveSkuBrand? @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, provider, country, normalizedBrandName, sourceAdArchiveId], map: "competitive_public_ad_identity_key")
+  @@index([workspaceId, sku, provider, country], map: "competitive_public_ad_sku_idx")
+  @@index([workspaceId, normalizedBrandName, provider], map: "competitive_public_ad_brand_idx")
+  @@index([workspaceId, provider, startDate], map: "competitive_public_ad_start_idx")
+}
+
+model CompetitivePublicAdSyncRun {
+  id              String             @id @default(cuid())
+  workspaceId      String
+  provider        PublicAdProvider
+  sku             String
+  country         String
+  status          PublicAdSyncStatus @default(QUEUED)
+  trigger         String             @default("manual")
+  requestedBrands Json
+  rowCount        Int                @default(0)
+  errorCode       String?
+  errorMessage    String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  workspace       Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, sku, provider, status], map: "competitive_ad_sync_sku_status_idx")
+  @@index([workspaceId, provider, createdAt], map: "competitive_ad_sync_created_idx")
 }
 
 model DataSourceStats {

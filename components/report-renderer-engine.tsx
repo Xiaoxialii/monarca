@@ -3114,6 +3114,9 @@ function localizeDecisionText(value: string | null | undefined, locale: Renderer
   if (locale !== "zh") return value;
 
   const exact: Record<string, string> = {
+    "AI SKU Decision Center": "AI SKU 决策中心",
+    "SKU optimization decision": "SKU 优化决策",
+    "Top Decisions": "重点决策",
     "AI Decision Summary": "AI 决策摘要",
     "AI is monitoring this SKU because no action currently beats the baseline.": "AI 正在监控该 SKU，因为当前没有动作优于基准方案。",
     "AI is recommending a business action for this SKU.": "AI 正在为该 SKU 推荐业务动作。",
@@ -3132,10 +3135,12 @@ function localizeDecisionText(value: string | null | undefined, locale: Renderer
     "Why This SKU Has Opportunity": "为什么该 SKU 有优化机会",
     "AI Reasoning": "AI 推理",
     "AI Scenario Comparison": "AI 方案对比",
+    "Simulation Estimate": "模拟估算",
     "Simulation Breakdown": "模拟拆解",
     "Prediction by Day": "按天预测",
     "Daily Impact Tracking": "每日影响跟踪",
     "AI Decision Lifecycle": "AI 决策生命周期",
+    "Action Outcome Tracker": "动作结果跟踪",
     "Input Signals": "输入信号",
     "Detected Opportunity": "识别到的机会",
     "Candidate Actions": "候选动作",
@@ -3153,6 +3158,7 @@ function localizeDecisionText(value: string | null | undefined, locale: Renderer
     "Date": "日期",
     "Action Status": "动作状态",
     "Ad Spend Change": "广告花费变化",
+    "Potential excess inventory": "潜在库存过剩",
     "Revenue Impact": "收入影响",
     "Profit Impact": "利润影响",
     "Running": "执行中",
@@ -5796,6 +5802,20 @@ function CompetitiveContextSummary({ context, locale }: { context: CompetitiveCo
         <span>{isZh ? "本 SKU 价格" : "Own price"}: {context?.own_price ? currencyDecimal.format(context.own_price) : zhEmpty(locale)}</span>
         <span>{isZh ? "市场参考价" : "Market reference"}: {context?.market_reference_price ? currencyDecimal.format(context.market_reference_price) : zhEmpty(locale)}</span>
       </div>
+      {context?.top_formats?.length || context?.repeated_hooks?.length ? (
+        <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600">
+          {context.top_formats?.length ? (
+            <span className="break-words">
+              {isZh ? "常见广告形式" : "Top formats"}: {context.top_formats.join(", ")}
+            </span>
+          ) : null}
+          {context.repeated_hooks?.length ? (
+            <span className="break-words">
+              {isZh ? "重复出现的开头" : "Repeated hooks"}: {context.repeated_hooks.slice(0, 3).join(" / ")}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {warnings.length ? (
         <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
           {localizeDecisionText(warnings[0], locale)}
@@ -6964,9 +6984,9 @@ function DecisionDetailDrawer({
 
         <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50/60 p-4">
           <p className="text-sm font-semibold text-emerald-950">{isZh ? "Simulation" : "Simulation"}</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <SmallTrackerMetric label={isZh ? "观察窗口" : "Observation window"} value={`${row.simulation_horizon?.days ?? simulationHorizonDays} ${isZh ? "天" : "days"}`} />
-            <SmallTrackerMetric label={isZh ? "预计利润影响" : "Expected lift"} value={signedCurrency(expectedProfitImpact)} />
+            <SmallTrackerMetric label={isZh ? "模拟增量利润" : "Expected lift"} value={signedCurrency(expectedProfitImpact)} />
             {recommendation ? (
               <>
                 <SmallTrackerMetric label={isZh ? "当前利润" : "Current profit"} value={currencyDecimal.format(recommendation.current_profit)} />

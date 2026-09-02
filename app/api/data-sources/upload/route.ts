@@ -76,6 +76,10 @@ function uploadErrorMessage(error: unknown) {
   return safeMessage ? `文件上传失败：${safeMessage}` : "File upload failed";
 }
 
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
@@ -83,6 +87,7 @@ export async function POST(request: Request) {
     await requireCanConnectDataSource(session.workspace.id, session.user);
     const formData = await request.formData();
     const file = formData.get("file");
+    const requestedBusinessSource = stringValue(formData.get("businessSource") ?? formData.get("provider"));
 
     if (!(file instanceof File)) {
       return NextResponse.json({ ok: false, message: "File is required" }, { status: 400 });
@@ -279,7 +284,7 @@ export async function POST(request: Request) {
             contentHash,
             sourceFingerprint: duplicateLookup.sourceFingerprint,
             ...(inlineStoredFile ?? {}),
-            storedFilePath: localStoredFile.path,
+            storedFilePath: localStoredFile?.path,
             storage: {
               provider: localStoredFile.provider,
               path: localStoredFile.path
@@ -326,6 +331,7 @@ export async function POST(request: Request) {
           fileSize: file.size,
           mimeType: file.type || null,
           extension,
+          businessSource: requestedBusinessSource || undefined,
           schemaSnapshotId: result.schemaSnapshot.id,
           storage: localStoredFile
             ? {
@@ -346,6 +352,7 @@ export async function POST(request: Request) {
       payload: {
         unifiedIngestionJobId: ingestionJob.id,
         dataSourceId: result.dataSource.id,
+        dataSourceIds: [result.dataSource.id],
         schemaSnapshotId: result.schemaSnapshot.id
       } as Prisma.InputJsonValue
     });

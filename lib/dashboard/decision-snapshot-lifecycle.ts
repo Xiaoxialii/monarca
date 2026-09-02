@@ -1,9 +1,10 @@
 import { createHash } from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "../profit/canonical-profitability-engine";
+import { resolveCanonicalSnapshot } from "@/lib/snapshot/canonical-snapshot-resolver";
 
 export const DECISION_ALGORITHM_VERSION = "decision-intelligence-v2.1";
-export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v2.5-cache-freshness-policy-v1";
+export const OPTIMIZATION_VERSION = "sku-portfolio-optimizer-v3.2-source-scope-dedupe";
 export const SIMULATION_VERSION = "sku-portfolio-simulation-v2";
 export const METRIC_SNAPSHOT_VERSION = "metrics-from-canonical-v1";
 
@@ -25,6 +26,7 @@ export type DecisionSnapshotFreshness = {
   snapshot: {
     algorithmVersion?: string | null;
     optimizationVersion?: string | null;
+    profitabilityEngineVersion?: string | null;
     canonicalSnapshotVersion?: string | null;
     metricSnapshotVersion?: string | null;
     simulationVersion?: string | null;
@@ -36,21 +38,6 @@ function hashJson(value: unknown) {
   return createHash("sha256")
     .update(JSON.stringify(value))
     .digest("hex");
-}
-
-function canonicalSnapshotVersion(snapshot: {
-  id: string;
-  version: number;
-  canonicalVersion?: string | null;
-  createdAt: Date;
-} | null) {
-  if (!snapshot) return null;
-
-  return [
-    snapshot.id,
-    snapshot.version,
-    snapshot.canonicalVersion ?? "canonical-unknown"
-  ].join(":");
 }
 
 function metricSnapshotVersion(snapshot: {
@@ -71,24 +58,9 @@ export async function currentDecisionSnapshotVersions(
   prisma: PrismaClient,
   input: { workspaceId: string }
 ): Promise<DecisionSnapshotVersions> {
-  const [schemaSnapshot, metricSnapshot] = await Promise.all([
-    prisma.schemaSnapshot.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        OR: [
-          { canonicalStatus: "READY" },
-          { canonicalStatus: "PARTIAL_READY" }
-        ]
-      },
-      select: {
-        id: true,
-        version: true,
-        canonicalVersion: true,
-        createdAt: true
-      },
-      orderBy: [
-        { createdAt: "desc" }
-      ]
+  const [resolvedCanonicalSnapshot, metricSnapshot] = await Promise.all([
+    resolveCanonicalSnapshot(prisma, {
+      workspaceId: input.workspaceId
     }),
     prisma.metricSnapshot.findFirst({
       where: {
@@ -107,7 +79,7 @@ export async function currentDecisionSnapshotVersions(
     })
   ]);
 
-  const canonicalVersion = canonicalSnapshotVersion(schemaSnapshot);
+  const canonicalVersion = resolvedCanonicalSnapshot.dataVersion;
   const metricVersion = metricSnapshotVersion(metricSnapshot);
   const inputHash = hashJson({
     algorithmVersion: DECISION_ALGORITHM_VERSION,
@@ -147,6 +119,7 @@ export async function decisionSnapshotFreshness(
   const checks: Array<[keyof DecisionSnapshotVersions, string]> = [
     ["algorithmVersion", "algorithm_version_changed"],
     ["optimizationVersion", "optimization_version_changed"],
+    ["profitabilityEngineVersion", "profitability_engine_version_changed"],
     ["simulationVersion", "simulation_version_changed"],
     ["canonicalSnapshotVersion", "canonical_snapshot_changed"],
     ["metricSnapshotVersion", "metric_snapshot_changed"],

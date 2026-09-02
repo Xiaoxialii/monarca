@@ -1,6 +1,7 @@
 import { WorkspaceRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 import {
+  OPTIMIZATION_MAX_EXECUTION_MS,
   OPTIMIZATION_QUEUED_ASYNC_JOB_MS,
   SKU_OPTIMIZATION_STALE_JOB_MS
 } from "@/lib/jobs/async-job-runner";
@@ -19,6 +20,7 @@ function optimizationRecoveryState(job: {
   startedAt: Date | null;
   lockedAt: Date | null;
   leaseExpiresAt: Date | null;
+  createdAt: Date;
 }) {
   if (job.type !== "SKU_OPTIMIZATION") return { needed: false, reason: null };
 
@@ -29,6 +31,9 @@ function optimizationRecoveryState(job: {
   }
 
   if (job.status !== "PROCESSING" && job.status !== "PAUSED") return { needed: false, reason: null };
+  const executionStartedAt = job.startedAt ?? job.lockedAt ?? job.createdAt;
+  const exceededMaxExecution = now - executionStartedAt.getTime() > OPTIMIZATION_MAX_EXECUTION_MS;
+  if (exceededMaxExecution) return { needed: true, reason: "JOB_MAX_EXECUTION_TIMEOUT" };
   if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() > now) return { needed: false, reason: null };
   const lastHeartbeat = job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt;
   const stale = now - lastHeartbeat.getTime() > SKU_OPTIMIZATION_STALE_JOB_MS;

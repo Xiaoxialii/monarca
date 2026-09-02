@@ -6,6 +6,8 @@ import {
   enqueueCompetitivePublicAdSyncJob,
   getConfirmedCompetitorBrands,
   metaAdLibraryAccessToken,
+  publicAdLibraryErrorCode,
+  publicAdLibraryUserMessage,
   upsertUserConfirmedCompetitorBrands
 } from "@/lib/competitive-intelligence/meta-ad-library";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -92,10 +94,18 @@ export async function POST(request: Request) {
   } catch (error) {
     const authResponse = workspaceAuthErrorResponse(error);
     if (authResponse) return authResponse;
+    const publicAdCode = publicAdLibraryErrorCode(error);
+    if (publicAdCode === "PUBLIC_AD_LIBRARY_AUTH_EXPIRED" || publicAdCode === "PUBLIC_AD_LIBRARY_AUTH_FAILED" || publicAdCode === "PUBLIC_AD_LIBRARY_RATE_LIMIT") {
+      return NextResponse.json({
+        ok: false,
+        code: publicAdCode,
+        message: publicAdLibraryUserMessage(publicAdCode)
+      }, { status: 409 });
+    }
     return NextResponse.json({
       ok: false,
       code: "PUBLIC_COMPETITOR_AD_SYNC_FAILED",
-      message: error instanceof Error ? error.message : "Failed to queue public competitor ad sync."
+      message: "Failed to queue public competitor ad sync."
     }, { status: 500 });
   }
 }

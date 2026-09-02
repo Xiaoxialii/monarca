@@ -11,6 +11,12 @@ const ACTIVE_SYNC_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
 
 type JsonRecord = Record<string, unknown>;
 
+export type PublicAdLibraryErrorCode =
+  | "PUBLIC_AD_LIBRARY_AUTH_EXPIRED"
+  | "PUBLIC_AD_LIBRARY_AUTH_FAILED"
+  | "PUBLIC_AD_LIBRARY_RATE_LIMIT"
+  | "PUBLIC_AD_LIBRARY_SYNC_FAILED";
+
 export type MetaAdLibraryRecord = {
   ad_archive_id?: string;
   id?: string;
@@ -574,11 +580,27 @@ function clampInt(value: unknown, min: number, max: number, fallback: number) {
   return Math.max(min, Math.min(max, Math.round(parsed)));
 }
 
-function publicAdLibraryErrorCode(error: unknown) {
+export function publicAdLibraryErrorCode(error: unknown): PublicAdLibraryErrorCode {
   const message = error instanceof Error ? error.message : String(error);
+  if (/code=190|session has expired|access token.*expired|token.*expired/i.test(message)) {
+    return "PUBLIC_AD_LIBRARY_AUTH_EXPIRED";
+  }
   if (/token|OAuth|permission|access/i.test(message)) return "PUBLIC_AD_LIBRARY_AUTH_FAILED";
   if (/rate|429/i.test(message)) return "PUBLIC_AD_LIBRARY_RATE_LIMIT";
   return "PUBLIC_AD_LIBRARY_SYNC_FAILED";
+}
+
+export function publicAdLibraryUserMessage(code: string | null | undefined) {
+  if (code === "PUBLIC_AD_LIBRARY_AUTH_EXPIRED") {
+    return "Meta ad library credentials have expired. Ask an administrator to reconnect Meta or update the server Meta Ad Library token.";
+  }
+  if (code === "PUBLIC_AD_LIBRARY_AUTH_FAILED") {
+    return "Meta ad library credentials could not be validated. Ask an administrator to reconnect Meta or update the server Meta Ad Library token.";
+  }
+  if (code === "PUBLIC_AD_LIBRARY_RATE_LIMIT") {
+    return "Meta ad library is temporarily rate limited. Try again later.";
+  }
+  return "Public competitor ad lookup is temporarily unavailable.";
 }
 
 function metaAdLibraryErrorMessage(payload: MetaPage<MetaAdLibraryRecord> | null, status: number) {

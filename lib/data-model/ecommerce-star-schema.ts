@@ -325,7 +325,7 @@ function buildFactAds(rows: CanonicalRow[]) {
         ad_id: adId,
         campaign_id: firstString(row.campaign_id, "unknown"),
         platform,
-        spend: roundCurrency(firstNumber(row.spend, row.ad_spend)),
+        spend: roundCurrency(adSpendValue(row)),
         impressions: firstNumber(row.impressions),
         clicks: firstNumber(row.clicks),
         conversions: firstNumber(row.conversions),
@@ -750,6 +750,22 @@ function firstNumber(...values: unknown[]) {
     if (Number.isFinite(number)) return number;
   }
   return 0;
+}
+
+function adSpendValue(row: CanonicalRow) {
+  return firstNumber(
+    row.spend,
+    row.ad_spend,
+    row.ads_spend,
+    row.amount_spent,
+    row.amountSpent,
+    row["amount spent"],
+    row["Amount spent"],
+    row.total_spend,
+    row.total_ad_spend,
+    row.ad_cost,
+    row.cost
+  );
 }
 
 function firstFiniteNumber(...values: unknown[]) {

@@ -35,6 +35,24 @@ function schemaTables(value: unknown) {
   return [];
 }
 
+function schemaTablesNeedFieldCoverage(value: unknown) {
+  const tables = schemaTables(value);
+  if (!tables.length) return true;
+
+  const columns = tables.flatMap((table) => {
+    const tableRecord = asRecord(table);
+    return Array.isArray(tableRecord.columns) ? tableRecord.columns : [];
+  });
+  if (!columns.length) return true;
+
+  return columns.every((column) => {
+    const record = asRecord(column);
+    const rowCount = Number(record.rowCount);
+    const nonNullCount = Number(record.nonNullCount);
+    return !Number.isFinite(rowCount) && !Number.isFinite(nonNullCount);
+  }) || tables.every((table) => Number(asRecord(table).rowCount) === 0);
+}
+
 function schemaHasMapping(value: unknown) {
   const schema = asRecord(value);
   const rawUploadSchema = asRecord(schema.rawUploadSchema);
@@ -99,9 +117,13 @@ export async function GET(
         createdAt: true
       }
     });
-    const latestSnapshot = snapshots.find((snapshot) =>
-      schemaTables(snapshot.schemaJson).length > 0 || schemaHasMapping(snapshot.schemaJson)
-    ) ?? snapshots[0] ?? null;
+    const latestSnapshotWithTables = snapshots.find((snapshot) =>
+      schemaTables(snapshot.schemaJson).length > 0
+    );
+    const latestSnapshotWithMapping = snapshots.find((snapshot) =>
+      schemaHasMapping(snapshot.schemaJson)
+    );
+    const latestSnapshot = latestSnapshotWithTables ?? latestSnapshotWithMapping ?? snapshots[0] ?? null;
     let responseSchema = dataSource.schemas;
     let responseSnapshot: SchemaEndpointSnapshot = latestSnapshot
       ? {
@@ -114,7 +136,7 @@ export async function GET(
         }
       : null;
     const currentSchemaJson = latestSnapshot?.schemaJson ?? dataSource.schemas;
-    const needsBackfill = schemaTables(currentSchemaJson).length === 0 && !schemaHasMapping(currentSchemaJson);
+    const needsBackfill = schemaTablesNeedFieldCoverage(currentSchemaJson);
 
     if (needsBackfill) {
       const inferredTables = await tablesFromConnectedDataSourceFile({

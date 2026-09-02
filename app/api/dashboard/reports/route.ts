@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiErrorResponse } from "@/lib/api-errors";
@@ -29,8 +28,6 @@ import {
 } from "@/lib/report-runs";
 import { tablesFromSchemaJson } from "@/lib/metric-validation";
 import { buildSemanticLayer } from "@/lib/semantic-layer";
-import { fileExtension, inferTablesFromCsvText, inferTablesFromExcelBuffer } from "@/lib/file-upload-schema";
-import { readR2ObjectBuffer, readR2ObjectText } from "@/lib/r2-storage";
 import { buildKpiAiReportJson } from "@/lib/kpi-ai-report";
 import { buildKpiFormulaBreakdowns } from "@/lib/kpi-formula-breakdown";
 import { SemanticLayerRuntime } from "@/lib/semantic-layer-runtime";
@@ -96,249 +93,12 @@ function kpiAssetLibraryFromSchemaPayload(schemaPayload: unknown, qualityReportP
   }
 }
 
-function inlineUploadBuffer(config: Record<string, unknown>) {
-  const encoded = typeof config.inlineFileBase64 === "string" ? config.inlineFileBase64 : null;
-
-  if (!encoded) {
-    return null;
-  }
-
-  try {
-    return Buffer.from(encoded, "base64");
-  } catch {
-    return null;
-  }
-}
-
 function kpiAssetLibraryFromSnapshot(snapshot: { schemaJson: unknown; qualityReport: unknown } | null) {
   if (!snapshot) {
     return null;
   }
 
   return kpiAssetLibraryFromSchemaPayload(snapshot.schemaJson, snapshot.qualityReport);
-}
-
-function enrichKpiAssetLibraryWithSampleValues(assetLibrary: unknown, tables: Array<{
-  name: string;
-  schema?: string;
-  sampleRows?: Array<Record<string, unknown>>;
-}>) {
-  const library = asRecord(assetLibrary);
-  const registry = Array.isArray(library.kpi_registry) ? library.kpi_registry : [];
-
-  if (registry.length === 0) {
-    return assetLibrary;
-  }
-
-  const sampleByTable = new Map<string, Record<string, unknown>>();
-
-  for (const table of tables) {
-    const sample = Array.isArray(table.sampleRows) ? table.sampleRows[0] : null;
-
-    if (!sample) continue;
-
-    sampleByTable.set(table.name, sample);
-    if (table.schema) sampleByTable.set(`${table.schema}.${table.name}`, sample);
-  }
-
-  return {
-    ...library,
-    kpi_registry: registry.map((item) => {
-      const kpi = asRecord(item);
-      const sourceColumns = Array.isArray(kpi.source_columns)
-        ? kpi.source_columns.filter((source): source is string => typeof source === "string")
-        : [];
-      let sampleValue: unknown = null;
-
-      for (const source of sourceColumns) {
-        const separatorIndex = source.lastIndexOf(".");
-        const tableName = separatorIndex >= 0 ? source.slice(0, separatorIndex) : "";
-        const fieldName = separatorIndex >= 0 ? source.slice(separatorIndex + 1) : source;
-        const sample = sampleByTable.get(tableName);
-        const value = sample?.[fieldName];
-
-        if (value !== undefined && value !== null && String(value).trim() !== "") {
-          sampleValue = value;
-          break;
-        }
-      }
-
-      return sampleValue === null ? kpi : { ...kpi, sample_value: sampleValue };
-    })
-  };
-}
-
-function isoDateOnlyFromValue(value: unknown) {
-  if (value instanceof Date && Number.isFinite(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
-  if (typeof value !== "string" && typeof value !== "number") {
-    return null;
-  }
-
-  const text = String(value).trim();
-  if (!text) return null;
-  const direct = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (direct) {
-    const [, year, month, day] = direct;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(text);
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
-}
-
-function dateColumnName(table: {
-  columns?: Array<{ name?: string; type?: string | null; displayName?: string | null; semanticName?: string | null }>;
-}) {
-  const columns = Array.isArray(table.columns) ? table.columns : [];
-  return columns.find((column) => /date|time/i.test(String(column.type ?? "")) || /日期|时间|date|day/i.test(`${column.name ?? ""} ${column.displayName ?? ""} ${column.semanticName ?? ""}`))?.name ?? null;
-}
-
-function availableDateRangeFromTables(tables: Array<{
-  name?: string;
-  columns?: Array<{ name?: string; type?: string | null; displayName?: string | null; semanticName?: string | null }>;
-  sampleRows?: Array<Record<string, unknown>>;
-}>) {
-  let dateField: string | null = null;
-  const dates: string[] = [];
-
-  for (const table of tables) {
-    const field = dateColumnName(table);
-    if (!field) continue;
-    dateField = dateField ?? field;
-    for (const row of Array.isArray(table.sampleRows) ? table.sampleRows : []) {
-      const date = isoDateOnlyFromValue(row[field]);
-      if (date) dates.push(date);
-    }
-  }
-
-  dates.sort();
-  return {
-    startDate: dates[0] ?? null,
-    endDate: dates.at(-1) ?? null,
-    latestDataDate: dates.at(-1) ?? null,
-    dateField
-  };
-}
-
-async function availableDateRangeFromActiveSource(source: {
-  name: string;
-  schemas: unknown;
-  config: unknown;
-} | null) {
-  if (!source) return null;
-
-  const config = asRecord(source.config);
-  const fileName = typeof config.fileName === "string" ? config.fileName : source.name;
-  const extension = fileExtension(fileName);
-  const storage = asRecord(config.storage);
-  const objectKey = typeof config.objectKey === "string" && config.objectKey
-    ? config.objectKey
-    : typeof config.storagePath === "string" && config.storagePath
-      ? config.storagePath
-      : typeof storage.key === "string" && storage.key
-        ? storage.key
-        : null;
-
-  try {
-    const inlineBuffer = inlineUploadBuffer(config);
-
-    if (inlineBuffer) {
-      const tables = extension === "csv"
-        ? inferTablesFromCsvText(fileName, inlineBuffer.toString("utf8"))
-        : await inferTablesFromExcelBuffer(fileName, inlineBuffer);
-      return availableDateRangeFromTables(tables);
-    }
-
-    if (typeof config.storedFilePath === "string" && config.storedFilePath.trim()) {
-      const buffer = await readFile(config.storedFilePath);
-      const tables = extension === "csv"
-        ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
-        : await inferTablesFromExcelBuffer(fileName, buffer);
-      return availableDateRangeFromTables(tables);
-    }
-
-    if (objectKey) {
-      const objectExtension = extension || fileExtension(objectKey);
-      const tables = objectExtension === "csv"
-        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
-        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
-      return availableDateRangeFromTables(tables);
-    }
-  } catch {
-    return null;
-  }
-
-  return availableDateRangeFromTables(tablesFromSchemaJson(source.schemas).map((table) => ({
-    name: table.name,
-    columns: table.columns,
-    sampleRows: Array.isArray((table as typeof table & { sampleRows?: unknown }).sampleRows)
-      ? (table as typeof table & { sampleRows: Array<Record<string, unknown>> }).sampleRows
-      : []
-  })));
-}
-
-async function kpiAssetLibraryFromActiveSource(source: {
-  name: string;
-  schemas: unknown;
-  config: unknown;
-} | null) {
-  if (!source) {
-    return null;
-  }
-
-  const fromStoredSchema = kpiAssetLibraryFromSchemaPayload(source.schemas);
-
-  if (fromStoredSchema) {
-    return fromStoredSchema;
-  }
-
-  const config = asRecord(source.config);
-  const fileName = typeof config.fileName === "string" ? config.fileName : source.name;
-  const extension = fileExtension(fileName);
-  const storage = asRecord(config.storage);
-  const objectKey = typeof config.objectKey === "string" && config.objectKey
-    ? config.objectKey
-    : typeof config.storagePath === "string" && config.storagePath
-      ? config.storagePath
-      : typeof storage.key === "string" && storage.key
-        ? storage.key
-        : null;
-
-  try {
-    const inlineBuffer = inlineUploadBuffer(config);
-
-    if (inlineBuffer) {
-      const tables = extension === "csv"
-        ? inferTablesFromCsvText(fileName, inlineBuffer.toString("utf8"))
-        : await inferTablesFromExcelBuffer(fileName, inlineBuffer);
-
-      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
-    }
-
-    if (typeof config.storedFilePath === "string" && config.storedFilePath.trim()) {
-      const buffer = await readFile(config.storedFilePath);
-      const tables = extension === "csv"
-        ? inferTablesFromCsvText(fileName, buffer.toString("utf8"))
-        : await inferTablesFromExcelBuffer(fileName, buffer);
-
-      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
-    }
-
-    if (objectKey) {
-      const objectExtension = extension || fileExtension(objectKey);
-      const tables = objectExtension === "csv"
-        ? inferTablesFromCsvText(fileName, await readR2ObjectText(objectKey))
-        : await inferTablesFromExcelBuffer(fileName, await readR2ObjectBuffer(objectKey));
-
-      return usableKpiAssetLibrary(enrichKpiAssetLibraryWithSampleValues(buildSemanticLayer(tables).kpiAssetLibrary, tables));
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
 }
 
 function isFailedGuardrailPayload(payload: unknown) {
@@ -411,6 +171,8 @@ function availableDateRangeFromPayload(payload: unknown) {
 
   return { startDate, endDate, latestDataDate, dateField };
 }
+
+type AvailableDateRange = NonNullable<ReturnType<typeof availableDateRangeFromPayload>>;
 
 function filterBriefingMetricResults<T extends { payloadJson?: unknown } | null>(
   briefing: T,
@@ -492,6 +254,14 @@ function reportPayloadUsesCurrentProfitabilityEngine(payload: unknown) {
 
   const versions = asRecord(record.decisionSnapshotVersions);
   return (versions.profitabilityEngineVersion ?? versions.profitability_engine_version) === CANONICAL_PROFITABILITY_ENGINE_VERSION;
+}
+
+function reportSnapshotUsesCurrentProfitabilityEngine(snapshot: { contentJson: unknown } | null) {
+  if (!snapshot) return false;
+  const content = asRecord(snapshot.contentJson);
+  if (reportPayloadUsesCurrentProfitabilityEngine(content)) return true;
+  const briefingPayload = asRecord(asRecord(content.briefing).payloadJson);
+  return reportPayloadUsesCurrentProfitabilityEngine(briefingPayload);
 }
 
 function ensureAiReportPayload<T extends Record<string, unknown>>(payload: T): T {
@@ -771,6 +541,15 @@ export async function GET(request: Request) {
       },
       orderBy: {
         updatedAt: "desc"
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        provider: true,
+        status: true,
+        isActive: true,
+        updatedAt: true
       }
     });
     const dataSources = selectKpiExecutionDataSources(activeDataSources);
@@ -823,7 +602,7 @@ export async function GET(request: Request) {
         qualityReport: true
       }
     });
-    let availableDateRange: Awaited<ReturnType<typeof availableDateRangeFromActiveSource>> = null;
+    let availableDateRange: AvailableDateRange | null = null;
     const cachedLatestDataDate = latestDataDateFromSnapshot(latestSnapshot);
     const needsAvailableDateRangeForWindow = requestedReportMode !== "custom_report" ||
       (
@@ -831,12 +610,9 @@ export async function GET(request: Request) {
         (!resolvedDateRange.startDate || !resolvedDateRange.endDate)
       );
     if (!cachedLatestDataDate && needsAvailableDateRangeForWindow) {
-      availableDateRange = await availableDateRangeFromActiveSource(activeSource);
+      availableDateRange = null;
     }
-    const latestDataDate = cachedLatestDataDate ??
-      availableDateRange?.latestDataDate ??
-      availableDateRange?.endDate ??
-      null;
+    const latestDataDate = cachedLatestDataDate ?? null;
     const effectiveRequestDateRange = reportMetricTimeWindow({
       reportMode: requestedReportMode,
       requestedRange: {
@@ -880,7 +656,7 @@ export async function GET(request: Request) {
       sourceSnapshotVersion
     });
 
-    if (snapshot) {
+    if (snapshot && reportSnapshotUsesCurrentProfitabilityEngine(snapshot)) {
       return NextResponse.json({
         ...(snapshot.contentJson as Record<string, unknown>),
         snapshot: {
@@ -890,6 +666,16 @@ export async function GET(request: Request) {
           warning: snapshot.warning
         },
         performance: snapshotPerformance(startedAt, "snapshot")
+      });
+    }
+
+    if (snapshot) {
+      console.warn("ReportSnapshot is stale for current profitability engine; falling back to live/cache recomputation", {
+        workspaceId: session.workspace.id,
+        reportType,
+        snapshotId: snapshot.id,
+        sourceSnapshotVersion,
+        expectedProfitabilityEngineVersion: CANONICAL_PROFITABILITY_ENGINE_VERSION
       });
     }
 
@@ -1016,9 +802,9 @@ export async function GET(request: Request) {
     }
 
     if (!rangedPayload) {
-      availableDateRange = availableDateRange ?? await availableDateRangeFromActiveSource(activeSource);
-      const reportEntitlement = await getReportEntitlementState(session.workspace.id);
       const missPayload = reportMetricCacheMissPayload(effectiveRequestDateRange, cacheResult.cacheKey);
+      availableDateRange = availableDateRange ?? availableDateRangeFromPayload(missPayload);
+      const reportEntitlement = await getReportEntitlementState(session.workspace.id);
 
       const responsePayload = {
         workspaceId: session.workspace.id,
@@ -1056,7 +842,7 @@ export async function GET(request: Request) {
         usedLocaleFallback: false,
         reportEntitlement,
         analysisReport: analysisReportFromSnapshot(latestSnapshot),
-        kpiAssetLibrary: await kpiAssetLibraryFromActiveSource(activeSource) ?? kpiAssetLibraryFromSnapshot(latestSnapshot),
+        kpiAssetLibrary: kpiAssetLibraryFromSnapshot(latestSnapshot),
         availableDateRange,
         warning: "SNAPSHOT_MISS_CACHE_MISS_NO_LIVE_CALCULATION",
         decisionSnapshotVersions: asRecord(missPayload.decisionSnapshotVersions),
@@ -1097,7 +883,7 @@ export async function GET(request: Request) {
     const businessMetrics = metrics.filter((metric) => isBusinessFacingMetricDefinition(metric));
     const visibleMetricIds = new Set(businessMetrics.map((metric) => metric.id));
     const visibleMetricsById = new Map(businessMetrics.map((metric) => [metric.id, metric]));
-    availableDateRange = availableDateRange ?? await availableDateRangeFromActiveSource(activeSource);
+    availableDateRange = availableDateRange ?? availableDateRangeFromPayload(rangedPayload);
     const visibleBriefing = filterBriefingMetricResults(rangedBriefing, visibleMetricIds, visibleMetricsById);
     const metricSnapshots = await loadMetricSnapshots(prisma, session.workspace.id).catch(() => []);
     const visiblePayload = asRecord(visibleBriefing?.payloadJson);
@@ -1160,8 +946,7 @@ export async function GET(request: Request) {
     const insights: never[] = [];
     const recommendations: never[] = [];
     const reportEntitlement = await getReportEntitlementState(session.workspace.id);
-    const kpiAssetLibrary = await kpiAssetLibraryFromActiveSource(activeSource) ??
-      kpiAssetLibraryFromSnapshot(latestSnapshot);
+    const kpiAssetLibrary = kpiAssetLibraryFromSnapshot(latestSnapshot);
     const responsePayload = {
       workspaceId: session.workspace.id,
       reportRunId: reportRun?.id ?? null,

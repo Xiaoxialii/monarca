@@ -126,7 +126,9 @@ function normalizeUploadTables(tables: Awaited<ReturnType<typeof inferTablesFrom
       semanticName: column.semanticName,
       rawHeaderPath: column.rawHeaderPath,
       type: column.type,
-      nullable: column.nullable
+      nullable: column.nullable,
+      rowCount: column.rowCount,
+      nonNullCount: column.nonNullCount
     }))
   }));
 }

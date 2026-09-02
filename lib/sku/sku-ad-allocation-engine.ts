@@ -40,9 +40,9 @@ export function allocateAdSpendToSkus(input: SkuAdAllocationInput): SkuAdAllocat
   const directCampaignsBySku = new Map<string, Set<string>>();
   const directCampaignDetailsBySku = new Map<string, SkuAdAllocationRow["attributed_campaigns"]>();
   const adsForFallback: Array<Record<string, unknown>> = [];
-  const totalRawAdSpend = roundCurrency(sum(input.ads.map((row) => firstNumber(row.spend, row.ad_spend))));
+  const totalRawAdSpend = roundCurrency(sum(input.ads.map(adSpendValue)));
   for (const ad of input.ads) {
-    const spend = firstNumber(ad.spend, ad.ad_spend);
+    const spend = adSpendValue(ad);
     const sku = firstString(ad.sku, ad.product_sku, ad.item_sku, ad.variant_sku, ad.source_id);
     if (sku && skuSet.has(sku)) {
       directSpendBySku.set(sku, roundCurrency((directSpendBySku.get(sku) ?? 0) + spend));
@@ -67,7 +67,7 @@ export function allocateAdSpendToSkus(input: SkuAdAllocationInput): SkuAdAllocat
   }
 
   const directAdSpend = roundCurrency(sum(Array.from(directSpendBySku.values())));
-  const fallbackAdSpend = roundCurrency(sum(adsForFallback.map((row) => firstNumber(row.spend, row.ad_spend))));
+  const fallbackAdSpend = roundCurrency(sum(adsForFallback.map(adSpendValue)));
   const totalAdSpend = roundCurrency(directAdSpend + fallbackAdSpend);
   if (!totalAdSpend) {
     return skuRows.map((row) => ({
@@ -279,64 +279,28 @@ export function allocateAdSpendToSkus(input: SkuAdAllocationInput): SkuAdAllocat
     })), totalRawAdSpend);
   }
 
-  const totalRevenue = sum(skuRows.map((row) => row.revenue));
-  if (totalRevenue > 0) {
-    const revenueShareBySku = allocateByRevenueShare({ skuRows, spend: fallbackAdSpend, allocation });
-    return reconcilePlatformAllocations(skuRows.map((row) => buildAllocationRow({
-      sku: row.sku,
-      allocated: roundCurrency(allocation.get(row.sku) ?? 0),
-      method: methodBySku.get(row.sku) ?? "revenue_share",
-      confidence: methodBySku.get(row.sku) === "direct" ? 1 : 0.45,
-      source: methodBySku.get(row.sku) === "direct" ? "sku_allocation" : "revenue_share_fallback",
-      campaignIds: Array.from(directCampaignsBySku.get(row.sku) ?? []),
-      attributedCampaigns: campaignDetailsBySku.get(row.sku) ?? [],
-      totalRawAdSpend,
-      directSpend: roundCurrency(directSpendBySku.get(row.sku) ?? 0),
-      campaignSpend: 0,
-      revenueShareSpend: revenueShareBySku.get(row.sku) ?? 0,
-      validationStatus: "PASSED",
-      warnings: methodBySku.get(row.sku) ? [] : ["Revenue-share fallback used because no SKU or campaign attribution matched this spend."],
-      windowStart: null,
-      windowEnd: null
-    })), totalRawAdSpend);
-  }
-
   return skuRows.map((row) => ({
     sku: row.sku,
-    allocated_ad_spend: null,
-    allocation_method: "unknown",
-    allocation_confidence: 0.15,
-    attribution_source: "unknown",
+    allocated_ad_spend: directSpendBySku.has(row.sku) ? roundCurrency(directSpendBySku.get(row.sku) ?? 0) : null,
+    allocation_method: directSpendBySku.has(row.sku) ? "direct" : "unavailable",
+    allocation_confidence: directSpendBySku.has(row.sku) ? 1 : 0.15,
+    attribution_source: directSpendBySku.has(row.sku) ? "sku_allocation" : "unknown",
     campaign_ids: [],
     attributed_campaigns: [],
     ads_validation_status: "UNKNOWN",
-    warnings: ["Raw ad spend exists but could not be attributed to SKU revenue, orders, conversions, or campaigns."],
+    warnings: directSpendBySku.has(row.sku)
+      ? ["Some raw ad spend could not be attributed and was not allocated to SKU profit."]
+      : ["Raw ad spend exists but could not be attributed to SKU revenue, orders, conversions, or campaigns."],
     lineage: {
       raw_platform_spend: totalRawAdSpend,
-      sku_direct_attribution: 0,
+      sku_direct_attribution: roundCurrency(directSpendBySku.get(row.sku) ?? 0),
       campaign_allocation: 0,
       revenue_share_fallback: 0,
-      final_allocated_ads: null
+      final_allocated_ads: directSpendBySku.has(row.sku) ? roundCurrency(directSpendBySku.get(row.sku) ?? 0) : null
     },
     attribution_window_start: null,
     attribution_window_end: null
   }));
-}
-
-function allocateByRevenueShare(input: {
-  skuRows: Array<{ sku: string; revenue: number }>;
-  spend: number;
-  allocation: Map<string, number>;
-}) {
-  const revenueShareBySku = new Map<string, number>();
-  const totalRevenue = sum(input.skuRows.map((row) => row.revenue));
-  if (!totalRevenue) return revenueShareBySku;
-  for (const row of input.skuRows) {
-    const allocatedSpend = roundCurrency(input.spend * (row.revenue / totalRevenue));
-    input.allocation.set(row.sku, roundCurrency((input.allocation.get(row.sku) ?? 0) + allocatedSpend));
-    revenueShareBySku.set(row.sku, allocatedSpend);
-  }
-  return revenueShareBySku;
 }
 
 function buildAllocationRow(input: {
@@ -491,6 +455,22 @@ function firstNumber(...values: unknown[]) {
     if (numeric !== null) return numeric;
   }
   return 0;
+}
+
+function adSpendValue(row: Record<string, unknown>) {
+  return firstNumber(
+    row.spend,
+    row.ad_spend,
+    row.ads_spend,
+    row.amount_spent,
+    row.amountSpent,
+    row["amount spent"],
+    row["Amount spent"],
+    row.total_spend,
+    row.total_ad_spend,
+    row.ad_cost,
+    row.cost
+  );
 }
 
 function numberValue(value: unknown, fallback = 0) {

@@ -1,8 +1,8 @@
-import { WorkspaceRole } from "@prisma/client";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireWorkspaceRole, WorkspaceAuthError } from "@/lib/workspace-auth";
+import { requireSuperAdmin } from "@/lib/system-admin-auth";
+import { WorkspaceAuthError } from "@/lib/workspace-auth";
 import {
   APPLICATION_STATUS_OPTIONS,
   BUSINESS_STAGE_OPTIONS,
@@ -53,7 +53,7 @@ export default async function PartnershipApplicationsAdminPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   try {
-    await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await requireSuperAdmin();
   } catch (error) {
     if (error instanceof WorkspaceAuthError && error.status === 401) {
       redirect("/sign-in");
@@ -104,7 +104,7 @@ export default async function PartnershipApplicationsAdminPage({
           <div>
             <p className="text-sm font-medium text-emerald-700">内部管理</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal">店铺与产品合作申请</h1>
-            <p className="mt-2 text-sm text-slate-500">仅 workspace owner / admin 可访问，默认按提交时间倒序排列。</p>
+            <p className="mt-2 text-sm text-slate-500">仅平台 SUPER_ADMIN 可访问，默认按提交时间倒序排列。</p>
           </div>
           <Link href="/dashboard" className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
             返回 Dashboard

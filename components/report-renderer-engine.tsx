@@ -55,6 +55,8 @@ type ReportRendererEngineProps = {
   message?: string;
   showEmptyShell?: boolean;
   showEmptyShellLoading?: boolean;
+  onRefreshReport?: () => unknown | Promise<unknown>;
+  isRefreshingReport?: boolean;
   locale?: RendererLocale;
 };
 
@@ -121,7 +123,7 @@ type SkuReportRow = {
   inventory_risk_score?: number;
   inventory_recommended_action?: string;
   inventory_risk_reason?: string;
-  inventory_value?: number;
+  inventory_value?: number | null;
   estimated_components: string[];
   estimated: boolean;
   lifecycle_stage?: string;
@@ -172,7 +174,7 @@ type InventoryBreakdownRow = {
   lifecycle: string;
   demandTrend: "UP" | "DOWN" | "STABLE" | "UNKNOWN";
   margin: number | null;
-  inventoryValue: number;
+  inventoryValue: number | null;
   inventoryRiskStatus?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION" | "INVENTORY_OBSERVATION";
   recommendedAction: string;
   riskReason: string;
@@ -429,6 +431,15 @@ function buildSkuReportRows(report: DecisionIntelligenceReportV1): SkuReportRow[
       attribution_risk: profit?.attribution_risk === true,
       overall_risk_score: profit?.overall_risk_score ?? 0,
       inventory_confidence: profit?.inventory_confidence ?? null,
+      lifecycle_confidence: profit?.lifecycle_confidence,
+      demand_trend: profit?.demand_trend ?? row?.demand_trend,
+      inventory_decision: profit?.inventory_decision ?? row?.inventory_decision,
+      inventory_risk_score: profit?.inventory_risk_score ?? row?.inventory_risk_score,
+      inventory_recommended_action: profit?.inventory_recommended_action ?? row?.inventory_recommended_action,
+      inventory_risk_reason: profit?.inventory_risk_reason ?? row?.inventory_risk_reason,
+      inventory_value: profit?.inventory_value ?? row?.inventory_value ?? null,
+      paid_dependency_score: profit?.paid_dependency_score ?? row?.paid_dependency_score,
+      organic_sales_ratio: profit?.organic_sales_ratio ?? row?.organic_sales_ratio,
       estimated_components: profit?.estimated_components ?? [],
       estimated: profit?.estimated === true,
       lifecycle_stage: normalizeLifecycleStage(
@@ -557,7 +568,7 @@ function inferDecisionChannelBreakdown(row: PortfolioDecisionRow, recommendation
   return Object.fromEntries(normalizedChannels.map((channel) => [channel, revenueValue]));
 }
 
-export function ReportRendererEngine({ report, message, showEmptyShell = false, showEmptyShellLoading = false, locale = "en" }: ReportRendererEngineProps) {
+export function ReportRendererEngine({ report, message, showEmptyShell = false, showEmptyShellLoading = false, onRefreshReport, isRefreshingReport = false, locale = "en" }: ReportRendererEngineProps) {
   const [skuChannel, setSkuChannel] = useState("all");
   const [inventorySearch, setInventorySearch] = useState("");
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
@@ -608,7 +619,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   if (!report) {
     if (showEmptyShell) {
-      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} />;
+      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} onRefreshReport={onRefreshReport} isRefreshingReport={isRefreshingReport} />;
     }
 
     return (
@@ -626,7 +637,7 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
 
   if (!isRenderableOperatingReport(report)) {
     if (showEmptyShell) {
-      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} />;
+      return <OperatingReportEmptyShell locale={locale} showLoadingData={showEmptyShellLoading} onRefreshReport={onRefreshReport} isRefreshingReport={isRefreshingReport} />;
     }
 
     return (
@@ -674,12 +685,12 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
         />
         <KpiCard
           icon={TrendingUp}
-          label="Profit"
+          label="Contribution Profit"
           value={formatKpiCurrency(summary.net_profit)}
           fullValue={currency.format(summary.net_profit)}
           tone={summary.net_profit >= 0 ? "positive" : "negative"}
         />
-        <KpiCard icon={BarChart3} label="Margin" value={percent.format(summary.margin)} tone={summary.margin < 0 ? "negative" : summary.margin < 0.1 ? "warning" : "positive"} />
+        <KpiCard icon={BarChart3} label="Contribution Margin" value={percent.format(summary.margin)} tone={summary.margin < 0 ? "negative" : summary.margin < 0.1 ? "warning" : "positive"} />
         <KpiCard
           icon={Megaphone}
           label={hasCampaignAttribution ? "ROAS" : "Blended MER"}
@@ -689,10 +700,14 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
         />
         <KpiCard
           icon={Users}
-          label="CAC"
+          label={cacValue === null ? "CAC" : hasCampaignAttribution ? "CAC" : "Blended CAC"}
           value={cacValue === null ? "Unavailable" : formatKpiCurrency(cacValue)}
           fullValue={cacValue === null ? undefined : currencyDecimal.format(cacValue)}
-          description={cacValue === null ? "CAC attribution confidence insufficient." : undefined}
+          description={cacValue === null
+            ? "CAC attribution confidence insufficient."
+            : hasCampaignAttribution
+              ? undefined
+              : "Store ad spend divided by new customers; campaign attribution is unavailable."}
         />
       </section>
 
@@ -872,22 +887,46 @@ export function ReportRendererEngine({ report, message, showEmptyShell = false, 
   );
 }
 
-function OperatingReportEmptyShell({ locale, showLoadingData = false }: { locale: RendererLocale; showLoadingData?: boolean }) {
+function OperatingReportEmptyShell({
+  locale,
+  showLoadingData = false,
+  onRefreshReport,
+  isRefreshingReport = false
+}: {
+  locale: RendererLocale;
+  showLoadingData?: boolean;
+  onRefreshReport?: () => unknown | Promise<unknown>;
+  isRefreshingReport?: boolean;
+}) {
   const isZh = locale === "zh";
+  const isBusy = showLoadingData || isRefreshingReport;
 
   return (
-    <div id="report-sku" className="grid min-h-[520px] w-full place-items-center bg-transparent px-6 text-center scroll-mt-24">
+    <div id="report-sku" className="grid min-h-[360px] w-full place-items-center bg-transparent px-6 text-center scroll-mt-24">
       <div className="grid gap-4">
         {showLoadingData ? (
-          <div className="w-[min(90vw,480px)] rounded-[20px] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/70">
-            <p className="mb-4 text-center text-sm font-extrabold tracking-[0.18em] text-emerald-700">
+          <div className="w-[min(88vw,380px)] rounded-2xl border border-slate-200 bg-white p-4 shadow-md shadow-slate-200/60">
+            <p className="mb-3 text-center text-xs font-extrabold tracking-[0.16em] text-emerald-700">
               {isZh ? "追踪经营数据" : "Track operating data"}
             </p>
             <button
               type="button"
-              className="inline-flex h-14 w-full items-center justify-center rounded-[14px] bg-slate-950 px-8 text-base font-extrabold text-white shadow-sm transition hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+              onClick={() => {
+                if (isBusy) return;
+                void onRefreshReport?.();
+              }}
+              className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-slate-950 px-6 text-sm font-extrabold text-white shadow-sm transition hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!onRefreshReport || isBusy}
+              aria-busy={isBusy}
             >
-              {isZh ? "开始" : "Start"}
+              {isBusy ? (
+                <>
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                  {isZh ? "报表更新中..." : "Updating report..."}
+                </>
+              ) : (
+                isZh ? "开始更新报表" : "Refresh report"
+              )}
             </button>
           </div>
         ) : null}
@@ -980,14 +1019,32 @@ function kpiMetricInfo(label: string) {
   }
   if (normalized === "profit") {
     return {
-      definition: "Net profit after product cost, operating costs, and advertising spend.",
-      formula: "Revenue - COGS - shipping - fulfillment - platform fees - payment fees - refunds - ads"
+      definition: "Contribution profit after product cost, estimated operating costs, and store-level advertising spend.",
+      formula: "Net revenue - COGS - estimated shipping - estimated fees - ad spend"
     };
   }
   if (normalized === "margin") {
     return {
-      definition: "Net profit as a percentage of revenue.",
-      formula: "Net Profit / Revenue"
+      definition: "Contribution profit as a percentage of net revenue.",
+      formula: "Contribution Profit / Net Revenue"
+    };
+  }
+  if (normalized === "contribution profit") {
+    return {
+      definition: "Contribution profit after product cost, estimated operating costs, and store-level advertising spend.",
+      formula: "Net revenue - COGS - estimated shipping - estimated fees - ad spend"
+    };
+  }
+  if (normalized === "contribution margin") {
+    return {
+      definition: "Contribution profit as a percentage of net revenue.",
+      formula: "Contribution Profit / Net Revenue"
+    };
+  }
+  if (normalized === "blended cac") {
+    return {
+      definition: "Store-level paid acquisition cost when campaign/customer attribution is not available.",
+      formula: "Store-level ad spend / new customers"
     };
   }
   if (normalized === "blended mer") {
@@ -1113,7 +1170,7 @@ function buildInventoryRows(rows: SkuReportRow[]): InventoryBreakdownRow[] {
       lifecycle: row.lifecycle_stage ?? "UNKNOWN",
       demandTrend: row.demand_trend?.direction ?? "UNKNOWN",
       margin: row.margin,
-      inventoryValue: row.inventory_decision?.inventory_value ?? row.inventory_value ?? 0,
+      inventoryValue: inventoryValueFromSkuRow(row),
       inventoryRiskStatus: row.inventory_decision?.risk_status ?? inventoryRiskStatusFromRow(runwayDays, row.velocity_confidence, row.inventory_risk_status),
       recommendedAction: row.inventory_decision?.recommended_action ?? row.inventory_recommended_action ?? "MONITOR",
       riskReason: row.inventory_decision?.reasons?.[0] ?? row.inventory_risk_reason ?? "Inventory decision uses profitability, coverage, demand, and capital signals.",
@@ -1121,6 +1178,34 @@ function buildInventoryRows(rows: SkuReportRow[]): InventoryBreakdownRow[] {
       sellThroughRate: sellThroughBase > 0 ? sold / sellThroughBase : null
     };
   });
+}
+
+function inventoryValueFromSkuRow(row: SkuReportRow) {
+  const raw = row as SkuReportRow & Record<string, unknown>;
+  return firstNumberOrNull(
+    row.inventory_decision?.inventory_value,
+    row.inventory_value,
+    raw.inventoryValue,
+    raw.total_inventory_value,
+    raw.totalInventoryValue,
+    raw["Inventory Value"],
+    raw["Inventory value"],
+    raw["inventory value"],
+    raw["Total Inventory Value"],
+    raw["Total inventory value"],
+    raw["total inventory value"],
+    raw["inventory-value"],
+    raw.inventory_cost,
+    raw.inventoryAssetValue,
+    raw.inventory_asset_value,
+    raw.stock_value,
+    raw.stockValue,
+    raw.stock_asset_value,
+    raw.on_hand_value,
+    raw.total_value,
+    raw.totalValue,
+    raw.value
+  );
 }
 
 function summarizeInventoryRows(rows: InventoryBreakdownRow[]): InventorySummary {
@@ -1460,8 +1545,8 @@ function SkuBreakdownTable({
               <th className="px-3 py-3">Shipping</th>
               <th className="px-3 py-3">Fees</th>
               <th className="px-3 py-3">Total Cost</th>
-              <th className="px-3 py-3">Net Profit</th>
-              <th className="px-3 py-3">Margin</th>
+              <th className="px-3 py-3">Pre-Ad Est. Profit</th>
+              <th className="px-3 py-3">Pre-Ad Est. Margin</th>
               <th className="px-3 py-3">ROAS</th>
             </tr>
           </thead>
@@ -1487,7 +1572,7 @@ function SkuBreakdownTable({
               <td className="px-3 py-3">{totalRow.margin === null ? "No Data" : percent.format(totalRow.margin)}</td>
               <td className="px-3 py-3">{totalRow.roas === null ? "No Data" : ratioFormat.format(totalRow.roas)}</td>
             </tr>
-            {visibleRows.map((row, index) => {
+            {visibleRows.map((row) => {
               const displayRow = selectedChannel === "all" ? row : skuRowForSelectedChannel(row, selectedChannel);
               const lowMargin = displayRow.margin !== null && displayRow.margin < 0.1;
               const isExpanded = expandedSku === row.sku;
@@ -1495,11 +1580,10 @@ function SkuBreakdownTable({
               const fees = costBreakdown ? costBreakdown.platform_fee + costBreakdown.payment_fee : null;
               return (
                 <Fragment key={row.sku}>
-                  <tr key={row.sku} data-sku-row={row.sku} className={cn("hover:bg-slate-50", index < 5 && "bg-emerald-50/40", lowMargin && "bg-rose-50/60")}>
+                  <tr key={row.sku} data-sku-row={row.sku} className="bg-white">
                     <td className={cn(
                       "sticky left-0 z-10 bg-white px-5 py-3 font-semibold text-slate-900 shadow-[1px_0_0_0_rgba(226,232,240,1)]",
-                      index < 5 && "bg-emerald-50",
-                      lowMargin && "bg-rose-50"
+                      "bg-white"
                     )}>
                       <button type="button" onClick={() => onToggleExpanded(row.sku)} className="flex items-center gap-2 text-left">
                         {isExpanded ? <ChevronDown className="size-4 text-slate-500" /> : <ChevronRight className="size-4 text-slate-500" />}
@@ -1747,6 +1831,18 @@ export function DecisionAnalysisEnginePanel({
           <div>
             <p className="font-semibold text-amber-950">{isZh ? "暂无决策分析数据。" : "No decision analysis is available."}</p>
             <p className="mt-1 text-sm text-amber-800">{message ?? (isZh ? "点击生成报告，或等待数据同步完成后刷新分析报告。" : "Generate a report, or wait for data sync to finish and refresh the analysis report.")}</p>
+            {onStartProfitOptimization ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onStartProfitOptimization();
+                }}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white shadow-sm shadow-slate-950/15 transition hover:bg-emerald-950"
+              >
+                <span>{isZh ? "运行优化" : "Run optimization"}</span>
+                <ChevronRight className="size-4" />
+              </button>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -2188,7 +2284,7 @@ function SkuPortfolioOptimizationPanel({
     let cancelled = false;
 
     async function loadAcceptedImpactSummary() {
-      const response = await fetch("/api/policy/actions", { cache: "no-store" }).catch(() => null);
+      const response = await fetch("/api/policy/actions?scope=current_optimization", { cache: "no-store" }).catch(() => null);
       if (!response?.ok) {
         if (!cancelled) {
           setAcceptedImpactSummary(null);
@@ -3353,6 +3449,13 @@ type ActionOutcomeRow = {
 
 type CompetitiveContextView = {
   status?: string;
+  data_source_id?: string | null;
+  dataSourceId?: string | null;
+  snapshot_id?: string | null;
+  snapshotId?: string | null;
+  provider?: string | null;
+  source_label?: string | null;
+  sourceLabel?: string | null;
   category?: string | null;
   price_position?: string;
   own_price?: number | null;
@@ -4104,20 +4207,24 @@ function OptimizationDecisionRail({
     INVENTORY: 0,
     PORTFOLIO_HEALTH: 0
   }), [portfolioRowsBySku, rows]);
+  const firstGoalWithRows = optimizationGoalFilters.find((filter) => goalCounts[filter.goal] > 0)?.goal ?? selectedGoal;
+  const effectiveSelectedGoal = !isAcceptedMode && rows.length > 0 && goalCounts[selectedGoal] === 0
+    ? firstGoalWithRows
+    : selectedGoal;
   const goalRows = isAcceptedMode
     ? rows
-    : rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === selectedGoal);
+    : rows.filter((row) => optimizationGoalForDecision(row, portfolioRowsBySku.get(row.skuId)).goal === effectiveSelectedGoal);
   const actionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const row of rows) {
       const recommendation = portfolioRowsBySku.get(row.skuId);
       const actionTitle = actionDisplayForDecision(row, recommendation).title;
       const goal = optimizationGoalForDecision(row, recommendation).goal;
-      if (!isAcceptedMode && goal !== selectedGoal) continue;
+      if (!isAcceptedMode && goal !== effectiveSelectedGoal) continue;
       counts.set(actionTitle, (counts.get(actionTitle) ?? 0) + 1);
     }
     return counts;
-  }, [isAcceptedMode, portfolioRowsBySku, rows, selectedGoal]);
+  }, [effectiveSelectedGoal, isAcceptedMode, portfolioRowsBySku, rows]);
   const displayedRows = isAcceptedMode
     ? rows
     : goalRows.filter((row) => {
@@ -4140,12 +4247,12 @@ function OptimizationDecisionRail({
   }, [selectedRow]);
 
   useEffect(() => {
-    if (isAcceptedMode || hasManuallySelectedGoalRef.current || !rows.length || goalCounts[selectedGoal] > 0) return;
-    const nextGoal = optimizationGoalFilters.find((filter) => goalCounts[filter.goal] > 0)?.goal;
+    if (isAcceptedMode || !rows.length || goalCounts[selectedGoal] > 0) return;
+    const nextGoal = firstGoalWithRows;
     if (!nextGoal) return;
     setSelectedGoal(nextGoal);
     setSelectedGoalAction(null);
-  }, [goalCounts, isAcceptedMode, rows.length, selectedGoal]);
+  }, [firstGoalWithRows, goalCounts, isAcceptedMode, rows.length, selectedGoal]);
 
   useEffect(() => {
     if (isAcceptedMode || !selectedGoalAction) return;
@@ -4192,14 +4299,14 @@ function OptimizationDecisionRail({
         {!isAcceptedMode ? (
           <div className="mt-3 grid gap-1 rounded-[14px] bg-slate-100/70 p-1 shadow-sm sm:grid-cols-4">
             {optimizationGoalFilters.map((filter) => {
-              const isSelected = selectedGoal === filter.goal;
+              const isSelected = effectiveSelectedGoal === filter.goal;
               return (
                 <button
                   key={filter.goal}
                   type="button"
                   onClick={() => {
                     hasManuallySelectedGoalRef.current = true;
-                    if (selectedGoal !== filter.goal) setSelectedGoalAction(null);
+                    if (effectiveSelectedGoal !== filter.goal) setSelectedGoalAction(null);
                     setSelectedGoal(filter.goal);
                   }}
                   className={cn(
@@ -4219,7 +4326,7 @@ function OptimizationDecisionRail({
         ) : null}
         {!isAcceptedMode ? (
           <div className="mt-3 grid gap-1 rounded-[14px] bg-slate-100/70 p-1 shadow-sm sm:grid-cols-2">
-            {optimizationActionFilters[selectedGoal].map((action) => {
+            {optimizationActionFilters[effectiveSelectedGoal].map((action) => {
               const isSelected = selectedGoalAction === action;
               const count = actionCounts.get(action) ?? 0;
               const ActionIcon = actionFilterIcon(action);
@@ -5836,15 +5943,51 @@ function CompetitiveContextSummary({
       confidence: typeof brand.confidence === "number" ? brand.confidence : null
     })) ?? [], [context?.competitor_brands]);
   const needsCompetitorInput = !context?.data_quality?.has_confirmed_competitors;
+  const contextDataSourceId = context?.data_source_id ?? context?.dataSourceId ?? null;
+  const contextSnapshotId = context?.snapshot_id ?? context?.snapshotId ?? null;
+  const contextSourceLabel = context?.source_label ?? context?.sourceLabel ?? context?.provider ?? null;
   const [brandInput, setBrandInput] = useState("");
   const [saveState, setSaveState] = useState<CompetitiveContextSaveState>("idle");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [discoveryState, setDiscoveryState] = useState<CompetitiveContextDiscoveryState>("idle");
   const [discoveryMessage, setDiscoveryMessage] = useState<string | null>(null);
+  const [discoveryDetails, setDiscoveryDetails] = useState<{
+    code?: string;
+    missingFields?: string[];
+    availableFields?: string[];
+    snapshotId?: string | null;
+    dataSourceId?: string | null;
+    validationStatus?: string | null;
+    canReprocess?: boolean;
+    recommendedAction?: string | null;
+    jobId?: string | null;
+    jobStatus?: string | null;
+  } | null>(null);
   const [discoveredBrands, setDiscoveredBrands] = useState<Array<{ name: string; confidence?: number | null }>>(suggestedCompetitors);
   useEffect(() => {
     setDiscoveredBrands(suggestedCompetitors);
   }, [suggestedCompetitors]);
+  useEffect(() => {
+    const jobId = discoveryDetails?.jobId;
+    if (!jobId || discoveryDetails?.jobStatus === "COMPLETED" || discoveryDetails?.jobStatus === "FAILED") return;
+    const interval = window.setInterval(() => {
+      void fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload: { job?: { status?: string; currentStep?: string; errorMessage?: string } } | null) => {
+          const status = payload?.job?.status;
+          if (!status) return;
+          setDiscoveryDetails((current) => current?.jobId === jobId ? { ...current, jobStatus: status } : current);
+          if (status === "COMPLETED") {
+            setDiscoveryMessage(isZh ? "重新处理已完成。请重试竞品发现。" : "Reprocess complete. Retry competitor discovery.");
+          }
+          if (status === "FAILED") {
+            setDiscoveryMessage(payload?.job?.errorMessage || (isZh ? "重新处理失败，请查看任务状态或联系支持。" : "Reprocess failed. Review job status or contact support."));
+          }
+        })
+        .catch(() => null);
+    }, 2500);
+    return () => window.clearInterval(interval);
+  }, [discoveryDetails?.jobId, discoveryDetails?.jobStatus, isZh]);
   const longestRunningLabel = context?.longest_running_ad_days === null || context?.longest_running_ad_days === undefined
     ? zhEmpty(locale)
     : isZh ? `${numberFormat.format(context.longest_running_ad_days)} 天` : `${numberFormat.format(context.longest_running_ad_days)}d`;
@@ -5882,6 +6025,14 @@ function CompetitiveContextSummary({
           setBrandInput("");
           return;
         }
+        if (syncPayload?.code === "PUBLIC_AD_LIBRARY_AUTH_EXPIRED" || syncPayload?.code === "PUBLIC_AD_LIBRARY_AUTH_FAILED") {
+          setSaveState("queued");
+          setSaveMessage(isZh
+            ? "竞品品牌已确认。Meta 广告库凭证需要管理员重新连接或更新后才能同步广告。"
+            : "Competitor brands saved. Meta ad library credentials must be refreshed before public ads can sync.");
+          setBrandInput("");
+          return;
+        }
         throw new Error(syncPayload?.message || (isZh ? "公开广告库同步排队失败。" : "Failed to queue public ad sync."));
       }
 
@@ -5897,11 +6048,12 @@ function CompetitiveContextSummary({
     if (discoveryState === "discovering") return;
     setDiscoveryState("discovering");
     setDiscoveryMessage(null);
+    setDiscoveryDetails(null);
     try {
       const response = await fetch("/api/competitive-intelligence/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sku, country: "US", limitPerTerm: 20 })
+        body: JSON.stringify({ sku, dataSourceId: contextDataSourceId ?? undefined, country: "US", limitPerTerm: 20 })
       });
       const payload = await response.json().catch(() => null) as {
         code?: string;
@@ -5909,10 +6061,42 @@ function CompetitiveContextSummary({
         searchTerms?: string[];
         searchedCountries?: string[];
         candidates?: Array<{ brandName?: string; confidence?: number }>;
+        missingFields?: string[];
+        availableFields?: string[];
+        snapshotId?: string | null;
+        dataSourceId?: string | null;
+        validationStatus?: string | null;
+        canReprocess?: boolean;
+        recommendedAction?: string | null;
       } | null;
       if (!response.ok) {
+        setDiscoveryDetails({
+          code: payload?.code,
+          missingFields: payload?.missingFields,
+          availableFields: payload?.availableFields,
+          snapshotId: payload?.snapshotId,
+          dataSourceId: payload?.dataSourceId ?? contextDataSourceId,
+          validationStatus: payload?.validationStatus,
+          canReprocess: payload?.canReprocess,
+          recommendedAction: payload?.recommendedAction
+        });
         if (payload?.code === "PUBLIC_AD_LIBRARY_TOKEN_MISSING") {
           throw new Error(isZh ? "公开广告库 token 未配置，暂时无法自动发现竞品。" : "Public ad library token is not configured.");
+        }
+        if (payload?.code === "PUBLIC_AD_LIBRARY_AUTH_EXPIRED") {
+          throw new Error(isZh
+            ? "Meta 广告库凭证已过期。请管理员重新连接 Meta，或更新服务端 Meta Ad Library token。"
+            : "Meta ad library credentials have expired. Ask an administrator to reconnect Meta or update the server Meta Ad Library token.");
+        }
+        if (payload?.code === "PUBLIC_AD_LIBRARY_AUTH_FAILED") {
+          throw new Error(isZh
+            ? "Meta 广告库凭证校验失败。请管理员重新连接 Meta，或更新服务端 Meta Ad Library token。"
+            : "Meta ad library credentials could not be validated. Ask an administrator to reconnect Meta or update the server Meta Ad Library token.");
+        }
+        if (payload?.code === "PUBLIC_AD_LIBRARY_RATE_LIMIT") {
+          throw new Error(isZh
+            ? "Meta 广告库暂时触发限流，请稍后重试。"
+            : "Meta ad library is temporarily rate limited. Try again later.");
         }
         const searched = payload?.searchedCountries?.length
           ? `${isZh ? "搜索国家" : "Countries"}：${payload.searchedCountries.join(", ")}`
@@ -5921,7 +6105,15 @@ function CompetitiveContextSummary({
           ? `${isZh ? "搜索词" : "Search terms"}：${payload.searchTerms.slice(0, 6).join(", ")}`
           : null;
         throw new Error([
-          payload?.message || (isZh ? "未能根据 SKU 找到竞品候选。" : "Could not discover competitor candidates for this SKU."),
+          payload?.code === "PRODUCT_CONTEXT_INCOMPLETE"
+            ? (isZh
+              ? "该 SKU 已导入，但缺少商品名称、类目或品牌信息，因此暂时无法生成可靠的竞品搜索。"
+              : "This SKU is imported, but product name, category, or brand context is missing, so reliable competitor search is not available yet.")
+            : payload?.code === "PRODUCT_NOT_FOUND"
+              ? (isZh
+                ? "当前有效商品上下文索引中没有找到这个 SKU。请重新处理数据，或检查报告使用的数据源是否已发布产品索引。"
+                : "This SKU was not found in the active product context index. Reprocess the data source or check whether the report source has a published product index.")
+            : payload?.message || (isZh ? "未能根据 SKU 找到竞品候选。" : "Could not discover competitor candidates for this SKU."),
           searched,
           terms
         ].filter(Boolean).join(" "));
@@ -5947,6 +6139,33 @@ function CompetitiveContextSummary({
     } catch (error) {
       setDiscoveryState("error");
       setDiscoveryMessage(error instanceof Error ? error.message : (isZh ? "竞品发现失败。" : "Competitor discovery failed."));
+    }
+  };
+  const reprocessCompetitiveData = async () => {
+    if (!discoveryDetails?.dataSourceId || discoveryDetails.jobStatus === "QUEUED" || discoveryDetails.jobStatus === "PROCESSING") return;
+    setDiscoveryDetails((current) => current ? { ...current, jobStatus: "QUEUED" } : current);
+    try {
+      const response = await fetch(`/api/data-sources/${encodeURIComponent(discoveryDetails.dataSourceId)}/reprocess`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": `competitive-context:${discoveryDetails.dataSourceId}`
+        },
+        body: JSON.stringify({
+          reason: "competitive_context_missing",
+          forceSourceInference: true,
+          rebuildSemanticMapping: true,
+          rebuildCanonical: true,
+          invalidateDependentReports: true
+        })
+      });
+      const payload = await response.json().catch(() => null) as { jobId?: string; status?: string; message?: string } | null;
+      if (!response.ok) throw new Error(payload?.message || (isZh ? "重新处理排队失败。" : "Failed to queue reprocess."));
+      setDiscoveryDetails((current) => current ? { ...current, jobId: payload?.jobId ?? null, jobStatus: payload?.status ?? "QUEUED" } : current);
+      setDiscoveryMessage(isZh ? "重新处理已排队。完成后刷新报告或重试竞品发现。" : "Reprocess queued. Retry competitor discovery after it completes.");
+    } catch (error) {
+      setDiscoveryDetails((current) => current ? { ...current, jobStatus: "FAILED" } : current);
+      setDiscoveryMessage(error instanceof Error ? error.message : (isZh ? "重新处理失败。" : "Reprocess failed."));
     }
   };
 
@@ -6021,8 +6240,8 @@ function CompetitiveContextSummary({
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
           <p className="break-words text-xs font-semibold leading-5 text-amber-800">
             {isZh
-              ? "Shopify 商品字段已接入。系统会根据 SKU 商品信息、公开广告数量和长期投放信号自动选择高置信竞品；低置信候选仍可手动确认。"
-              : "Shopify product fields are connected. Monarca can auto-select high-confidence competitors from SKU context, public ad volume, and long-running ads; lower-confidence candidates can still be confirmed manually."}
+              ? `${contextSourceLabel ? `${contextSourceLabel} ` : ""}商品字段已接入。系统会根据 SKU 商品信息、公开广告数量和长期投放信号自动选择高置信竞品；低置信候选仍可手动确认。`
+              : `${contextSourceLabel ? `${contextSourceLabel} ` : ""}product fields are connected. Monarca can auto-select high-confidence competitors from SKU context, public ad volume, and long-running ads; lower-confidence candidates can still be confirmed manually.`}
           </p>
           <button
             type="button"
@@ -6039,6 +6258,32 @@ function CompetitiveContextSummary({
             )}>
               {discoveryMessage}
             </p>
+          ) : null}
+          {discoveryDetails ? (
+            <div className="mt-2 grid gap-1 rounded-md border border-amber-200 bg-white p-2 text-[11px] font-semibold text-slate-600">
+              {discoveryDetails.availableFields?.length ? (
+                <span>{isZh ? "已找到" : "Found"}: {discoveryDetails.availableFields.join(", ")}</span>
+              ) : null}
+              {discoveryDetails.missingFields?.length ? (
+                <span>{isZh ? "缺少" : "Missing"}: {discoveryDetails.missingFields.join(", ")}</span>
+              ) : null}
+              <span>{isZh ? "校验状态" : "Validation"}: {discoveryDetails.validationStatus ?? zhEmpty(locale)}</span>
+              <span>{isZh ? "数据来源" : "Source"}: {discoveryDetails.dataSourceId || contextDataSourceId ? (contextSourceLabel ?? (isZh ? "当前数据源" : "Current data source")) : zhEmpty(locale)}</span>
+              <span>{isZh ? "快照" : "Snapshot"}: {discoveryDetails.snapshotId || contextSnapshotId ? (isZh ? "当前有效快照" : "Active canonical snapshot") : zhEmpty(locale)}</span>
+              {discoveryDetails.canReprocess && discoveryDetails.dataSourceId ? (
+                <button
+                  type="button"
+                  onClick={() => void reprocessCompetitiveData()}
+                  disabled={discoveryDetails.jobStatus === "QUEUED" || discoveryDetails.jobStatus === "PROCESSING"}
+                  className="mt-1 w-fit rounded-md border border-slate-300 bg-slate-950 px-3 py-1.5 text-[11px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {discoveryDetails.jobStatus === "QUEUED" || discoveryDetails.jobStatus === "PROCESSING"
+                    ? (isZh ? "已排队" : "Queued")
+                    : (isZh ? "重新处理数据" : "Reprocess data")}
+                </button>
+              ) : null}
+              {discoveryDetails.recommendedAction ? <span>{localizeDecisionText(discoveryDetails.recommendedAction, locale)}</span> : null}
+            </div>
           ) : null}
           <div className="mt-2 flex min-w-0 max-w-full flex-col gap-2 sm:flex-row">
             <input
@@ -7613,15 +7858,15 @@ function InventoryTable({ rows }: { rows: InventoryBreakdownRow[] }) {
               <td className="px-3 py-3">{numberFormat.format(row.stock)}</td>
               <td className="px-3 py-3">{row.runwayDays === null ? "N/A" : formatOneDecimal(row.runwayDays)}</td>
               <td className="px-3 py-3">{row.margin === null ? "N/A" : percent.format(row.margin)}</td>
-              <td className="px-3 py-3">{currencyDecimal.format(row.inventoryValue)}</td>
+              <td className="px-3 py-3">{row.inventoryValue === null ? "Unavailable" : currencyDecimal.format(row.inventoryValue)}</td>
               <td className="px-3 py-3">{inventoryRiskStatusLabel(row.inventoryRiskStatus)}</td>
               <td className="px-3 py-3 font-semibold text-slate-900">{inventoryActionLabel(row.recommendedAction)}</td>
               <td className="max-w-[300px] px-3 py-3 text-slate-600">{row.riskReason}</td>
               <td className="px-3 py-3">{numberFormat.format(row.sold)}</td>
               <td className="px-3 py-3">
                 <div>{formatOneDecimal(row.salesVelocity)} / day</div>
-                {row.velocityCalculationBasis === "30-day normalized estimate" ? (
-                  <div className="text-xs font-semibold text-slate-500">30-day normalized estimate</div>
+                {row.velocityCalculationBasis === "observed order window" ? (
+                  <div className="text-xs font-semibold text-slate-500">Observed order window</div>
                 ) : null}
               </td>
               <td className="px-3 py-3"><InventoryConfidenceBadge confidence={row.velocityConfidence ?? "LOW"} /></td>
@@ -7705,7 +7950,7 @@ function CustomerLifecyclePanel({ customer }: { customer: DecisionIntelligenceRe
 
   return (
     <div className="rounded-lg border bg-white p-4">
-      <p className="text-sm font-semibold text-slate-900">Lifecycle Structure</p>
+      <p className="text-sm font-semibold text-slate-900">Customer Status Signals</p>
       <div className="mt-3 grid grid-cols-2 gap-3">
         <SmallMetric label="New Customers" value={numberFormat.format(customer.new_customers)} />
         <SmallMetric label="Inactive Customers" value={numberFormat.format(customer.inactive_customers)} />
@@ -7972,7 +8217,7 @@ function SkuDetailPanel({ row }: { row: SkuReportRow }) {
         <DetailRow label="Available" value={row.available_stock === null ? "No Data" : numberFormat.format(row.available_stock)} />
         <DetailRow
           label="Normalized daily velocity"
-          value={row.sales_velocity ? `${ratioFormat.format(row.sales_velocity)} / day${row.velocity_calculation_basis === "30-day normalized estimate" ? " · 30-day normalized estimate" : ""}` : "No Data"}
+          value={row.sales_velocity ? `${ratioFormat.format(row.sales_velocity)} / day${row.velocity_calculation_basis === "observed order window" ? " · observed order window" : ""}` : "No Data"}
         />
         <DetailRow label="Days of inventory" value={row.days_of_inventory === null ? "No Data" : ratioFormat.format(row.days_of_inventory)} />
       </DetailSection>

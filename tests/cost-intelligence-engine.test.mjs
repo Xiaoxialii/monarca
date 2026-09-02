@@ -28,6 +28,14 @@ test("COGS semantic resolver normalizes unit cost", () => {
   assert.ok(result.confidence >= 0.8);
 });
 
+test("COGS semantic resolver treats item_cost as unit cost", () => {
+  const result = resolveCogsSemantic({ cogs: 10, quantity: 3, revenue: 90, price: 30, fieldName: "item_cost" });
+  assert.equal(result.cogs_type, "unit");
+  assert.equal(result.normalized_cogs, 30);
+  assert.equal(result.unit_cogs, 10);
+  assert.ok(result.confidence >= 0.8);
+});
+
 test("COGS semantic resolver preserves total cost", () => {
   const result = resolveCogsSemantic({ cogs: 60, quantity: 2, revenue: 100, price: 50 });
   assert.equal(result.cogs_type, "total");
@@ -62,28 +70,31 @@ test("cost intelligence aggregates real SKU fulfillment platform payment and ref
   assert.equal(result.totals.fulfillment_cost, 7);
   assert.equal(result.totals.platform_fee, 9);
   assert.equal(result.totals.payment_fee, 8.7);
-  assert.equal(result.totals.refund_cost, 25);
-  assert.equal(result.totals.total_cost, 219.7);
-  assert.equal(result.totals.net_profit, 80.3);
-  assert.equal(result.totals.margin, 0.2677);
+  assert.equal(result.totals.refund_amount, 20);
+  assert.equal(result.totals.refund_cost, 5);
+  assert.equal(result.totals.total_cost, 199.7);
+  assert.equal(result.totals.net_profit, 100.3);
+  assert.equal(result.totals.margin, 0.3343);
   assert.equal(result.data_quality.cost_confidence, 1);
   assert.equal(result.data_quality.estimated_cost_ratio, 0);
   assert.deepEqual(result.data_quality.missing_cost_fields, []);
   assert.equal(result.sku_unit_economics.length, 2);
   assert.equal(result.sku_unit_economics[0].sku, "SKU-B");
-  assert.equal(result.sku_unit_economics[0].sku_roas, 10);
+  assert.equal(result.sku_unit_economics[0].sku_roas, 0);
   assert.ok(result.sku_unit_economics[0].contribution > 0);
   assert.ok(result.sku_unit_economics[0].profit_confidence < 0.5);
-  assert.ok(result.sku_unit_economics[0].profit_confidence > 0.25);
-  assert.equal(result.sku_unit_economics[0].ad_allocation_method, "revenue_share");
-  assert.equal(result.sku_unit_economics[0].attribution_method, "revenue_share_fallback");
-  assert.equal(result.sku_unit_economics[0].roas_status, "estimated");
-  assert.equal(result.sku_unit_economics[0].roas_display, "Estimated 10.00");
+  assert.equal(result.sku_unit_economics[0].ad_cost_allocated, null);
+  assert.equal(result.sku_unit_economics[0].ad_allocation_method, "unavailable");
+  assert.equal(result.sku_unit_economics[0].attribution_method, "unavailable");
+  assert.equal(result.sku_unit_economics[0].roas_status, "attribution_missing");
+  assert.equal(result.sku_unit_economics[0].roas_display, "Attribution missing");
   assert.ok(result.sku_unit_economics[0].attribution_confidence <= 0.5);
   assert.deepEqual(result.sku_unit_economics[0].estimated_components, ["ad_allocation"]);
-  assert.equal(result.sku_unit_economics[0].cost_breakdown.ads, 20);
-  assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "PASSED");
-  assert.equal(result.data_quality.portfolio_reconciliation.portfolio_net_profit, result.data_quality.portfolio_reconciliation.sku_net_profit);
+  assert.equal(result.sku_unit_economics[0].cost_breakdown.ads, 0);
+  assert.equal(result.data_quality.portfolio_reconciliation.source, "portfolio_totals");
+  assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "FAILED");
+  assert.equal(result.data_quality.portfolio_reconciliation.portfolio_ads, 30);
+  assert.notEqual(result.data_quality.portfolio_reconciliation.portfolio_net_profit, result.data_quality.portfolio_reconciliation.sku_net_profit);
 });
 
 test("cost intelligence carries product name category and variant attributes to SKU rows", () => {
@@ -143,18 +154,19 @@ test("portfolio profitability reconciles to SKU unit economics when order and it
   const skuPaymentFee = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.payment_fee) * 100) / 100, 0);
   const skuRefundCost = result.sku_unit_economics.reduce((sum, row) => Math.round((sum + row.refund_cost) * 100) / 100, 0);
 
-  assert.equal(result.totals.revenue, 150);
-  assert.equal(result.totals.net_profit, skuNetProfit);
-  assert.equal(result.totals.shipping_cost, skuShipping);
-  assert.equal(result.totals.platform_fee, skuPlatformFee);
-  assert.equal(result.totals.payment_fee, skuPaymentFee);
-  assert.equal(result.totals.refund_cost, skuRefundCost);
+  assert.equal(result.totals.revenue, 100);
+  assert.notEqual(result.totals.net_profit, skuNetProfit);
+  assert.equal(result.totals.shipping_cost, 8);
+  assert.equal(result.totals.platform_fee, 3);
+  assert.equal(result.totals.payment_fee, 2.9);
+  assert.equal(result.totals.refund_amount, 4);
+  assert.equal(result.totals.refund_cost, 0);
   assert.equal(skuRevenue, 150);
   assert.equal(skuShipping, 8);
   assert.equal(skuPlatformFee, 3);
   assert.equal(skuPaymentFee, 2.9);
-  assert.equal(skuRefundCost, 4);
-  assert.equal(result.data_quality.portfolio_reconciliation.source, "sku_unit_economics");
+  assert.equal(skuRefundCost, 0);
+  assert.equal(result.data_quality.portfolio_reconciliation.source, "portfolio_totals");
   assert.equal(result.data_quality.portfolio_reconciliation.validation_status, "FAILED");
   assert.equal(result.data_quality.portfolio_reconciliation.order_revenue, 100);
   assert.equal(result.data_quality.portfolio_reconciliation.sku_revenue, 150);
@@ -177,8 +189,9 @@ test("cost intelligence safely degrades when cost fields are missing", () => {
   assert.equal(result.totals.shipping_cost, 8);
   assert.equal(result.totals.platform_fee, 3);
   assert.equal(result.totals.payment_fee, 2.9);
-  assert.equal(result.totals.refund_cost, 4);
-  assert.equal(result.totals.net_profit, 37.1);
+  assert.equal(result.totals.refund_amount, 4);
+  assert.equal(result.totals.refund_cost, 0);
+  assert.equal(result.totals.net_profit, 41.1);
   assert.ok(result.data_quality.cost_confidence < 0.1);
   assert.ok(result.data_quality.missing_cost_fields.includes("ecommerce_order_items.cogs"));
   assert.ok(result.data_quality.estimated_components.includes("cogs"));
@@ -405,9 +418,84 @@ test("direct SKU attribution overrides fallback allocation for tagged ad rows", 
   const bySku = new Map(rows.map((row) => [row.sku, row]));
   assert.equal(bySku.get("SKU-B")?.allocation_method, "direct");
   assert.equal(bySku.get("SKU-B")?.lineage.sku_direct_attribution, 300);
-  assert.equal(bySku.get("SKU-B")?.allocated_ad_spend, 310);
-  assert.equal(bySku.get("SKU-A")?.allocation_method, "revenue_share");
-  assert.equal(rows.reduce((sum, row) => sum + (row.allocated_ad_spend ?? 0), 0), 400);
+  assert.equal(bySku.get("SKU-B")?.allocated_ad_spend, 300);
+  assert.equal(bySku.get("SKU-A")?.allocation_method, "unavailable");
+  assert.equal(bySku.get("SKU-A")?.allocated_ad_spend, null);
+  assert.equal(rows.reduce((sum, row) => sum + (row.allocated_ad_spend ?? 0), 0), 300);
+});
+
+test("portfolio profit keeps store-wide ads when SKU attribution is unavailable", () => {
+  const result = calculateCostIntelligence({
+    revenue: 128248.04,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "ORDER-1", sku: "SKU_0082", quantity: 22, revenue: 2398.62, item_cost: 19.0204545455 },
+      { order_id: "ORDER-2", sku: "SKU_OTHER", quantity: 1182, revenue: 125849.42, cogs: 26837.96 }
+    ],
+    products: [],
+    orders: [
+      { order_id: "ORDER-1", net_sales: 2398.62, shipping_cost: 0, platform_fee: 0, payment_fee: 0 },
+      { order_id: "ORDER-2", net_sales: 125849.42, shipping_cost: 0, platform_fee: 0, payment_fee: 0 }
+    ],
+    ads: [{ ad_id: "META-STORE", spend: 307987.15 }],
+    inventory: [{ sku: "SKU_0082", stock_level: 470, inventory_unit_cost: 74.9039361702 }]
+  });
+
+  const sku82 = result.sku_unit_economics.find((row) => row.sku === "SKU_0082");
+  assert.equal(result.totals.revenue, 128248.04);
+  assert.equal(result.totals.cogs, 27256.41);
+  assert.equal(result.totals.ad_spend, 307987.15);
+  assert.equal(result.totals.gross_profit, 100991.63);
+  assert.equal(result.totals.net_profit, -206995.52);
+  assert.equal(result.totals.margin, -1.614);
+  assert.equal(result.data_quality.portfolio_reconciliation.source, "portfolio_totals");
+  assert.equal(sku82?.ad_cost_allocated, null);
+  assert.equal(sku82?.ad_allocation_method, "unavailable");
+  assert.equal(sku82?.inventory_value, 35204.85);
+  assert.equal(sku82?.roas_display, "Attribution missing");
+});
+
+test("item_cost is treated as unit COGS and is multiplied by quantity", () => {
+  const result = calculateCostIntelligence({
+    revenue: 30,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "ORDER-LINE-COST", sku: "SKU-LINE-COST", quantity: 3, revenue: 30, item_cost: 12 }
+    ],
+    products: [],
+    orders: [{ order_id: "ORDER-LINE-COST", net_sales: 30 }],
+    ads: [],
+    inventory: []
+  });
+
+  const sku = result.sku_unit_economics.find((row) => row.sku === "SKU-LINE-COST");
+  assert.equal(result.totals.cogs, 36);
+  assert.equal(sku?.cogs, 36);
+});
+
+test("inventory value uses the latest snapshot per SKU and warehouse", () => {
+  const result = calculateCostIntelligence({
+    revenue: 100,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [{ order_id: "ORDER-INV", sku: "SKU-LATEST", quantity: 1, revenue: 100, item_cost: 25 }],
+    products: [],
+    orders: [{ order_id: "ORDER-INV", net_sales: 100, order_date: "2026-07-02" }],
+    ads: [],
+    inventory: [
+      { sku: "SKU-LATEST", warehouse_id: "MAIN", stock_level: 10, inventory_unit_cost: 2, inventory_value: 20, snapshot_date: "2026-06-01" },
+      { sku: "SKU-LATEST", warehouse_id: "MAIN", stock_level: 5, inventory_unit_cost: 4, inventory_value: 20, snapshot_date: "2026-07-01" },
+      { sku: "SKU-LATEST", warehouse_id: "SECONDARY", stock_level: 3, inventory_unit_cost: 10, inventory_value: 30, snapshot_date: "2026-07-01" },
+      { sku: "SKU-LATEST", warehouse_id: "SECONDARY", stock_level: 99, inventory_unit_cost: 10, inventory_value: 990, snapshot_date: "2026-08-01" }
+    ]
+  });
+
+  const sku = result.sku_unit_economics.find((row) => row.sku === "SKU-LATEST");
+  assert.equal(sku?.stock_level, 8);
+  assert.equal(sku?.available_stock, 8);
+  assert.equal(sku?.inventory_value, 50);
 });
 
 test("Meta ad source_id matching known SKU is treated as direct SKU attribution", () => {
@@ -678,4 +766,76 @@ test("SKU direct ads keep multiple same-campaign source rows instead of collapsi
   assert.equal(bySku.get("SKU-B")?.ad_cost_allocated, 335);
   assert.equal(bySku.get("SKU-A")?.ad_allocation_method, "direct");
   assert.equal(bySku.get("SKU-B")?.ad_allocation_method, "direct");
+});
+
+test("cost intelligence applies current revenue and ad spend semantics to legacy canonical rows", () => {
+  const result = calculateCostIntelligence({
+    revenue: 5005.67,
+    refundAmount: 631,
+    refunds: [],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU_0082", revenue: 2811.9, refund_amount: 413.28, quantity: 22, item_cost: 19.0204545455 },
+      { order_id: "O-2", sku: "SKU_0015", net_sales: 2824.77, refund_amount: 217.72, quantity: 1, item_cost: 40 }
+    ],
+    products: [],
+    orders: [
+      { order_id: "O-1", revenue: 2811.9, refund_amount: 413.28, shipping_cost: 0, platform_fee: 0, payment_fee: 0, order_date: "2026-08-01" },
+      { order_id: "O-2", net_sales: 2824.77, refund_amount: 217.72, shipping_cost: 0, platform_fee: 0, payment_fee: 0, order_date: "2026-08-02" }
+    ],
+    ads: [{ campaign_id: "META-STORE", amount_spent: 307987.15, date: "2026-08-01" }],
+    inventory: [{ sku: "SKU_0082", stock_level: 470, inventoryValue: 35204.85 }]
+  });
+
+  const sku82 = result.sku_unit_economics.find((row) => row.sku === "SKU_0082");
+  assert.equal(result.totals.revenue, 5005.67);
+  assert.equal(result.totals.ad_spend, 307987.15);
+  assert.equal(sku82?.revenue, 2398.62);
+  assert.equal(sku82?.inventory_value, 35204.85);
+});
+
+test("COGS is resolved per row with line, total, row, item, and unit fallback order", () => {
+  const result = calculateCostIntelligence({
+    revenue: 550,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU-LINE", quantity: 2, revenue: 100, line_cogs: 30, item_cost: 99 },
+      { order_id: "O-2", sku: "SKU-TOTAL", quantity: 3, revenue: 150, total_cogs: 45, item_cost: 99 },
+      { order_id: "O-3", sku: "SKU-ROW", quantity: 1, revenue: 80, row_cogs: 22, item_cost: 99 },
+      { order_id: "O-4", sku: "SKU-ITEM", quantity: 4, revenue: 160, item_cost: 11 },
+      { order_id: "O-5", sku: "SKU-UNIT", quantity: 2, revenue: 60, unit_cost: 5 }
+    ],
+    products: [],
+    orders: [{ order_id: "O-1", revenue: 550, shipping_cost: 0, platform_fee: 0, payment_fee: 0 }],
+    ads: []
+  });
+
+  const bySku = new Map(result.sku_unit_economics.map((row) => [row.sku, row]));
+  assert.equal(bySku.get("SKU-LINE")?.cogs, 30);
+  assert.equal(bySku.get("SKU-TOTAL")?.cogs, 45);
+  assert.equal(bySku.get("SKU-ROW")?.cogs, 22);
+  assert.equal(bySku.get("SKU-ITEM")?.cogs, 44);
+  assert.equal(bySku.get("SKU-UNIT")?.cogs, 10);
+  assert.equal(result.totals.cogs, 151);
+  assert.equal(result.totals.cogs_coverage_rate, 1);
+  assert.equal(result.data_quality.cogs_coverage_rate, 1);
+});
+
+test("COGS coverage reports incomplete reliable cost coverage instead of silently treating missing COGS as zero", () => {
+  const result = calculateCostIntelligence({
+    revenue: 200,
+    refundAmount: 0,
+    refunds: [],
+    orderItems: [
+      { order_id: "O-1", sku: "SKU-COSTED", quantity: 2, revenue: 100, item_cost: 20 },
+      { order_id: "O-2", sku: "SKU-MISSING", quantity: 2, revenue: 100 }
+    ],
+    products: [],
+    orders: [{ order_id: "O-1", revenue: 200, shipping_cost: 0, platform_fee: 0, payment_fee: 0 }],
+    ads: []
+  });
+
+  assert.equal(result.data_quality.cogs_coverage_rate, 0.5);
+  assert.ok(result.data_quality.estimated_components.includes("cogs"));
+  assert.ok(result.totals.warnings.some((warning) => warning.includes("COGS coverage is incomplete")));
 });

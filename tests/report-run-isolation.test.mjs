@@ -41,6 +41,17 @@ test("report generate and read paths use ReportRun scope instead of workspace Da
   assert.match(reportsRoute, /findCompletedReportRun\(prisma, reportRunScope\)/, "Read should load the matching ReportRun");
   assert.match(reportsRoute, /reportRunId: reportRun\?\.id/, "Read response should include ReportRun identity");
   assert.match(reportsRoute, /reportScope: reportRunScopeMetadata\(reportRunScope\)/, "Read response should include scope metadata");
+  assert.match(reportsRoute, /select:\s*\{[\s\S]*id:\s*true[\s\S]*updatedAt:\s*true[\s\S]*\}/, "Read path should use a lightweight data-source projection");
+  assert.doesNotMatch(
+    reportsRoute,
+    /await availableDateRangeFromActiveSource\(activeSource\)/,
+    "Report read path must not scan uploaded Excel/R2 files to answer a cache miss"
+  );
+  assert.doesNotMatch(
+    reportsRoute,
+    /await kpiAssetLibraryFromActiveSource\(activeSource\)/,
+    "Report read path must not rebuild KPI assets from uploaded Excel/R2 files during GET"
+  );
 
   assert.doesNotMatch(
     reportsRoute,

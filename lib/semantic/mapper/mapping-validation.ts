@@ -34,8 +34,14 @@ const INVENTORY_FIELDS = [
   "available_stock",
   "inventory_quantity",
   "inventory_qty",
+  "inventory_value",
+  "stock_value",
+  "total_inventory_value",
+  "inventory_unit_cost",
   "reorder_point",
-  "warehouse_id"
+  "warehouse_id",
+  "snapshot_date",
+  "inventory_date"
 ];
 
 const INVENTORY_CONCEPTS = new Set<CanonicalConcept>([
@@ -43,8 +49,11 @@ const INVENTORY_CONCEPTS = new Set<CanonicalConcept>([
   "available_stock",
   "inventory_quantity",
   "inventory_cost",
+  "inventory_value",
+  "inventory_unit_cost",
   "reorder_point",
-  "warehouse_id"
+  "warehouse_id",
+  "snapshot_date"
 ]);
 
 const PRICE_FIELDS = ["price", "unit_price", "item_price", "product_price", "selling_price", "sale_price"];
@@ -64,11 +73,26 @@ const ADS_FIELDS = ["ad_spend", "ads_spend", "advertising_spend", "advertising_c
 
 const ADS_CONCEPTS = new Set<CanonicalConcept>(["ad_spend"]);
 
-const DATE_FIELDS = ["date", "day", "month", "report_date", "campaign_date", "event_date", "date_start", "insight_date"];
+const DATE_FIELDS = ["date", "day", "month", "report_date", "campaign_date", "event_date", "date_start", "insight_date", "refund_date", "refunded_at", "snapshot_date", "inventory_date", "created_at", "updated_at", "processed_at", "cancelled_at", "canceled_at"];
+const DATE_CONCEPTS = new Set<CanonicalConcept>([
+  "event_date",
+  "order_date",
+  "refund_date",
+  "snapshot_date",
+  "created_at_source",
+  "updated_at_source",
+  "processed_at_source",
+  "cancelled_at_source",
+  "customer_created_at",
+  "first_order_date",
+  "last_order_date"
+]);
 
 const IDENTITY_FIELDS = [
   "order_id",
   "source_order_id",
+  "source_line_item_id",
+  "order_item_id",
   "order_number",
   "purchase_id",
   "transaction_id",
@@ -81,12 +105,31 @@ const IDENTITY_FIELDS = [
 
 const IDENTITY_CONCEPTS = new Set<CanonicalConcept>([
   "order_id",
+  "source_order_id",
+  "source_line_item_id",
+  "order_item_id",
   "customer_id",
+  "source_customer_id",
   "product_id",
+  "variant_id",
+  "asin",
+  "source_refund_id",
+  "refund_id",
   "sku"
 ]);
 
-const STATUS_FIELDS = ["status", "order_status", "financial_status", "fulfillment_status", "fulfilment_status", "payment_status"];
+const STATUS_FIELDS = ["status", "order_status", "financial_status", "fulfillment_status", "fulfilment_status", "payment_status", "is_cancelled", "is_canceled", "cancelled", "canceled", "is_test", "test_order", "is_paid"];
+const STATUS_CONCEPTS = new Set<CanonicalConcept>([
+  "status",
+  "order_status",
+  "financial_status",
+  "payment_status",
+  "fulfillment_status",
+  "is_cancelled",
+  "is_test",
+  "is_paid",
+  "cancelled_at_source"
+]);
 
 const CHANNEL_FIELDS = [
   "channel",
@@ -145,11 +188,11 @@ export function validateSemanticMapping(sourceField: string, predictedConcept: C
     return reject(sourceField, predictedConcept, "identifier_field_cannot_map_to_revenue");
   }
 
-  if (matchesAny(normalized, STATUS_FIELDS) && predictedConcept !== "status") {
+  if (matchesAny(normalized, STATUS_FIELDS) && !STATUS_CONCEPTS.has(predictedConcept)) {
     return reject(sourceField, predictedConcept, "status_field_must_map_to_status");
   }
 
-  if (matchesAny(normalized, DATE_FIELDS) && predictedConcept !== "event_date" && predictedConcept !== "order_date") {
+  if (matchesAny(normalized, DATE_FIELDS) && !DATE_CONCEPTS.has(predictedConcept)) {
     return reject(sourceField, predictedConcept, "date_field_must_map_to_date_concept");
   }
 

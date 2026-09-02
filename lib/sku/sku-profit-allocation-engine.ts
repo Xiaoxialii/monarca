@@ -160,7 +160,7 @@ export function calculateSkuProfitAndAllocation(input: {
     }).map((row) => [row.sku, row])
   );
   const channelBreakdowns = buildChannelBreakdowns(input.orderItems);
-  const inventoryBySku = buildInventoryBySku(input.inventory ?? []);
+  const inventoryBySku = buildInventoryBySku(input.inventory ?? [], latestOrderTimestamp(input.orders ?? []));
   const velocityBySku = buildSalesVelocityBySku(input.orderItems, input.orders ?? []);
   const demandTrendBySku = buildDemandTrendBySku(input.orderItems, input.orders ?? []);
 
@@ -279,6 +279,8 @@ export function calculateSkuProfitAndAllocation(input: {
       margin,
       net_profit: netProfit,
       contribution_profit: profitability.contribution_profit,
+      inventory_unit_cost: inventory?.unit_cost ?? null,
+      inventory_value: inventory?.inventory_value ?? null,
       sales_velocity: salesVelocity,
       velocity_confidence: velocity.velocity_confidence,
       data_period_days: velocity.data_period_days,
@@ -392,9 +394,11 @@ export function calculateSkuProfitAndAllocation(input: {
 
 function buildDemandTrendBySku(orderItems: Array<Record<string, unknown>>, orders: Array<Record<string, unknown>>) {
   const orderDateById = new Map<string, string>();
+  const globalOrderDates: string[] = [];
   for (const order of orders) {
     const orderId = stringValue(order.order_id);
     const date = firstDateString(order.order_date, order.date, order.created_at, order.createdAt);
+    if (date) globalOrderDates.push(date);
     if (orderId && date) orderDateById.set(orderId, date);
   }
 
@@ -416,7 +420,7 @@ function buildDemandTrendBySku(orderItems: Array<Record<string, unknown>>, order
     sku,
     inferDemandTrendFromOrderDates({
       totalUnitsSold: quantity,
-      orderDates: datesBySku.get(sku) ?? []
+      orderDates: globalOrderDates.length ? globalOrderDates : datesBySku.get(sku) ?? []
     })
   ]));
 }
@@ -426,7 +430,7 @@ function buildChannelBreakdowns(orderItems: Array<Record<string, unknown>>) {
   for (const item of orderItems) {
     const sku = stringValue(item.sku);
     if (!sku) continue;
-    const platform = revenueChannelOrNull(firstString(item.platform, item.source_provider, item.channel));
+    const platform = inferredRevenueChannel(item);
     if (!platform) continue;
     const quantity = numberValue(item.quantity, 1);
     const revenue = firstNumber(item.revenue, item.net_sales, firstNumber(item.price, item.unit_price) * quantity);
@@ -436,6 +440,20 @@ function buildChannelBreakdowns(orderItems: Array<Record<string, unknown>>) {
     bySku.set(sku, current);
   }
   return bySku;
+}
+
+function inferredRevenueChannel(row: Record<string, unknown>) {
+  const nativeOrderId = firstString(
+    row.native_order_id,
+    row.nativeOrderId,
+    row.source_order_id,
+    row.sourceOrderId,
+    row.amazon_order_id,
+    row.amazonOrderId
+  );
+  if (/^amz[-_]/i.test(nativeOrderId) || /^amazon[-_]/i.test(nativeOrderId)) return "amazon";
+
+  return revenueChannelOrNull(firstString(row.source_provider, row.platform, row.channel));
 }
 
 function buildChannelDetails(input: {
@@ -461,28 +479,184 @@ function buildChannelDetails(input: {
     });
 }
 
-function buildInventoryBySku(rows: Array<Record<string, unknown>>) {
-  const bySku = new Map<string, { stock_level: number; available_stock: number }>();
-  for (const row of rows) {
+function buildInventoryBySku(rows: Array<Record<string, unknown>>, reportAsOf: number | null = null) {
+  const latestRows = latestInventoryRows(rows, reportAsOf);
+  const bySku = new Map<string, { stock_level: number; available_stock: number; unit_cost: number | null; inventory_value: number | null }>();
+  for (const row of latestRows) {
     const sku = stringValue(row.sku);
     if (!sku) continue;
+    if (!hasUsableInventorySignal(row)) continue;
     const stock = firstNumber(row.stock_level, row.on_hand, row.inventory_quantity, row.available_stock, row.available);
     const reserved = firstNumber(row.reserved_stock, row.reserved, row.committed);
     const explicitAvailable = firstNumber(row.available_stock, row.available);
     const available = explicitAvailable || Math.max(0, stock - reserved);
-    const current = bySku.get(sku) ?? { stock_level: 0, available_stock: 0 };
+    const unitCost = firstFiniteNumber(
+      row.inventory_unit_cost,
+      row.unit_cost,
+      row.item_cost,
+      row.cost_price,
+      row.product_cost,
+      row.average_cost,
+      row.avg_cost,
+      row.cost
+    );
+    const explicitInventoryValue = firstFiniteNumber(
+      row.inventory_value,
+      row.inventoryValue,
+      row.total_inventory_value,
+      row.totalInventoryValue,
+      row["Inventory Value"],
+      row["Inventory value"],
+      row["inventory value"],
+      row["Total Inventory Value"],
+      row["Total inventory value"],
+      row["total inventory value"],
+      row["inventory-value"],
+      row.inventory_cost,
+      row.inventoryAssetValue,
+      row.inventory_asset_value,
+      row.stock_value,
+      row.stockValue,
+      row.stock_asset_value,
+      row.on_hand_value,
+      row.total_value,
+      row.totalValue,
+      row.value
+    );
+    const current = bySku.get(sku) ?? { stock_level: 0, available_stock: 0, unit_cost: null, inventory_value: null };
     current.stock_level = roundCurrency(current.stock_level + stock);
     current.available_stock = roundCurrency(current.available_stock + available);
+    if (unitCost !== null) current.unit_cost = weightedAverageUnitCost({
+      existingUnitCost: current.unit_cost,
+      existingStock: current.stock_level - stock,
+      nextUnitCost: unitCost,
+      nextStock: stock
+    });
+    if (explicitInventoryValue !== null) {
+      current.inventory_value = roundCurrency((current.inventory_value ?? 0) + explicitInventoryValue);
+    }
     bySku.set(sku, current);
   }
   return bySku;
 }
 
+function hasUsableInventorySignal(row: Record<string, unknown>) {
+  return [
+    row.stock_level,
+    row.on_hand,
+    row.inventory_quantity,
+    row.available_stock,
+    row.available,
+    row.reserved_stock,
+    row.reserved,
+    row.committed,
+    row.inventory_value,
+    row.inventoryValue,
+    row.total_inventory_value,
+    row.totalInventoryValue,
+    row["Inventory Value"],
+    row["Inventory value"],
+    row["inventory value"],
+    row["Total Inventory Value"],
+    row["Total inventory value"],
+    row["total inventory value"],
+    row["inventory-value"],
+    row.inventory_unit_cost,
+    row.unit_cost,
+    row.item_cost,
+    row.cost_price,
+    row.product_cost,
+    row.average_cost,
+    row.avg_cost,
+    row.cost,
+    row.inventory_cost,
+    row.inventoryAssetValue,
+    row.inventory_asset_value,
+    row.stock_value,
+    row.stockValue,
+    row.stock_asset_value,
+    row.on_hand_value,
+    row.total_value,
+    row.totalValue,
+    row.value
+  ].some((value) => firstFiniteNumber(value) !== null);
+}
+
+function latestInventoryRows(rows: Array<Record<string, unknown>>, reportAsOf: number | null = null) {
+  const effectiveReportAsOf = reportAsOf ?? latestInventoryReportDate(rows);
+  const eligibleRows = effectiveReportAsOf === null
+    ? rows
+    : rows.filter((row) => {
+      const timestamp = inventorySnapshotTimestamp(row);
+      return timestamp === null || timestamp <= effectiveReportAsOf;
+    });
+  const candidateRows = eligibleRows.length ? eligibleRows : rows;
+  const byKey = new Map<string, { row: Record<string, unknown>; timestamp: number }>();
+  for (const row of candidateRows) {
+    const sku = stringValue(row.sku);
+    if (!sku) continue;
+    const timestamp = inventorySnapshotTimestamp(row);
+    const key = [
+      sku,
+      firstString(row.warehouse_id, row.location_id, row.location, row.warehouse),
+      firstString(row.data_source_id, row.dataSourceId, row.source_id, row.source)
+    ].join(":");
+    const existing = byKey.get(key);
+    const comparableTimestamp = timestamp ?? 0;
+    if (!existing || comparableTimestamp >= existing.timestamp) {
+      byKey.set(key, { row, timestamp: comparableTimestamp });
+    }
+  }
+  return Array.from(byKey.values()).map((entry) => entry.row);
+}
+
+function latestInventoryReportDate(rows: Array<Record<string, unknown>>) {
+  const timestamps = rows
+    .map((row) => inventoryTimestamp(firstString(row.report_as_of_date, row.as_of_date, row.snapshot_date, row.inventory_date, row.date)))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  return timestamps.length ? timestamps[timestamps.length - 1] : null;
+}
+
+function inventorySnapshotTimestamp(row: Record<string, unknown>) {
+  return inventoryTimestamp(firstString(row.report_as_of_date, row.as_of_date, row.snapshot_date, row.inventory_date, row.date, row.updated_at, row.created_at));
+}
+
+function latestOrderTimestamp(rows: Array<Record<string, unknown>>) {
+  const timestamps = rows
+    .map((row) => inventoryTimestamp(firstString(row.order_date, row.date, row.created_at, row.createdAt, row.processed_at)))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  return timestamps.length ? timestamps[timestamps.length - 1] : null;
+}
+
+function inventoryTimestamp(value: unknown) {
+  const text = stringValue(value);
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+}
+
+function weightedAverageUnitCost(input: {
+  existingUnitCost: number | null;
+  existingStock: number;
+  nextUnitCost: number;
+  nextStock: number;
+}) {
+  if (input.existingUnitCost === null || input.existingStock <= 0) return input.nextUnitCost;
+  const totalStock = input.existingStock + Math.max(0, input.nextStock);
+  if (totalStock <= 0) return input.nextUnitCost;
+  return ((input.existingUnitCost * input.existingStock) + (input.nextUnitCost * Math.max(0, input.nextStock))) / totalStock;
+}
+
 function buildSalesVelocityBySku(orderItems: Array<Record<string, unknown>>, orders: Array<Record<string, unknown>>) {
   const orderDateById = new Map<string, string>();
+  const globalOrderDates: string[] = [];
   for (const order of orders) {
     const orderId = stringValue(order.order_id);
     const date = firstDateString(order.order_date, order.date, order.created_at, order.createdAt);
+    if (date) globalOrderDates.push(date);
     if (orderId && date) orderDateById.set(orderId, date);
   }
 
@@ -504,7 +678,7 @@ function buildSalesVelocityBySku(orderItems: Array<Record<string, unknown>>, ord
     sku,
     calculateSalesVelocity({
       totalUnitsSold: quantity,
-      orderDates: datesBySku.get(sku) ?? []
+      orderDates: globalOrderDates.length ? globalOrderDates : datesBySku.get(sku) ?? []
     })
   ]));
 }
@@ -728,6 +902,14 @@ function firstNumber(...values: unknown[]) {
 
 function numberValue(value: unknown, fallback = 0) {
   return parseNumber(value) ?? fallback;
+}
+
+function firstFiniteNumber(...values: unknown[]) {
+  for (const value of values) {
+    const numeric = parseNumber(value);
+    if (numeric !== null) return numeric;
+  }
+  return null;
 }
 
 function firstDateString(...values: unknown[]) {

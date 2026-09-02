@@ -7,7 +7,7 @@ import { missingConfiguredShopifyScopes } from "@/lib/ecommerce-connectors/shopi
 import { isCanonicalSystemField } from "@/lib/semantic/system-fields";
 import { logWorkspaceContext } from "@/lib/current-workspace-context";
 import { recoverStaleIngestionJobs } from "@/lib/ingestion/unified-ingestion-worker";
-import { CONNECTOR_QUEUED_ASYNC_JOB_MS, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
+import { CONNECTOR_QUEUED_ASYNC_JOB_MS, recoverAsyncJobs, STALE_ASYNC_JOB_MS } from "@/lib/jobs/async-job-runner";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -93,6 +93,39 @@ type DataSourceSyncStatus =
   | "FAILED_SYNC"
   | "DISCONNECTED";
 
+type ConnectorAccountSummary = {
+  id: string;
+  dataSourceId: string | null;
+  provider: string;
+  shopDomain: string;
+  autoSyncEnabled: boolean;
+  syncIntervalMinutes: number;
+  lastSyncedAt: Date | null;
+  nextSyncAt: Date | null;
+  lastAutoSyncAttemptAt: Date | null;
+  lastAutoSyncSuccessAt: Date | null;
+  autoSyncFailureCount: number;
+};
+
+type DataSourceListRow = {
+  id: string;
+  name: string;
+  provider: string;
+  type: string;
+  isActive: boolean;
+  status: ConnectionStatus;
+  connectionMode: string | null;
+  authMethod: string | null;
+  lastErrorMessage: string | null;
+  schemas: unknown;
+  config: unknown;
+  connectedAt: Date | null;
+  lastSyncAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  ecommerceConnectorAccounts?: ConnectorAccountSummary[];
+};
+
 function missingScopeReason(missingScopes: string[]) {
   if (!missingScopes.length) return null;
   return `Missing ${missingScopes.join(", ")}`;
@@ -117,6 +150,73 @@ function statusActionForSyncStatus(syncStatus: DataSourceSyncStatus) {
   if (syncStatus === "DISCONNECTED") return "RECONNECT";
 
   return null;
+}
+
+async function listDataSourceRows(input: {
+  workspaceId: string;
+  active: boolean;
+  statuses?: ConnectionStatus[];
+  take?: number;
+  orderBy: "createdAt" | "updatedAt";
+}) {
+  const statusFilter = input.statuses?.length
+    ? `AND source.status = ANY($3::"ConnectionStatus"[])`
+    : "";
+  const limitSql = input.take ? `LIMIT ${Math.max(1, Math.min(input.take, 100))}` : "";
+  const orderColumn = input.orderBy === "updatedAt" ? `"updatedAt"` : `"createdAt"`;
+  const params = input.statuses?.length
+    ? [input.workspaceId, input.active, input.statuses]
+    : [input.workspaceId, input.active];
+
+  return prisma.$queryRawUnsafe<DataSourceListRow[]>(
+    `
+      SELECT
+        source.id,
+        source.name,
+        source.provider,
+        source.type::text AS type,
+        source."isActive",
+        source.status,
+        source."connectionMode",
+        source."authMethod",
+        source."lastErrorMessage",
+        NULL::jsonb AS schemas,
+        jsonb_strip_nulls(jsonb_build_object(
+          'type', source.config->>'type',
+          'host', source.config->>'host',
+          'port', source.config->>'port',
+          'database', source.config->>'database',
+          'ssl', source.config->'ssl',
+          'fileName', source.config->>'fileName',
+          'fileSize', source.config->>'fileSize',
+          'extension', source.config->>'extension',
+          'shopDomain', source.config->>'shopDomain',
+          'requiredScopes', source.config->>'requiredScopes',
+          'grantedScopes', source.config->>'grantedScopes',
+          'scopeStatus', source.config->>'scopeStatus',
+          'missingScopes', source.config->'missingScopes',
+          'objectKey', CASE WHEN COALESCE(source.config->>'objectKey', source.config->>'storagePath', source.config->'storage'->>'key') IS NOT NULL THEN '__present__' ELSE NULL END,
+          'storagePath', CASE WHEN source.config->>'storagePath' IS NOT NULL THEN '__present__' ELSE NULL END,
+          'storedFilePath', CASE WHEN source.config->>'storedFilePath' IS NOT NULL THEN '__present__' ELSE NULL END,
+          'inlineFileBase64', CASE WHEN source.config->>'inlineFileBase64' IS NOT NULL THEN '__present__' ELSE NULL END,
+          'storage', CASE WHEN source.config->'storage' IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(
+            'provider', source.config->'storage'->>'provider',
+            'key', CASE WHEN source.config->'storage'->>'key' IS NOT NULL THEN '__present__' ELSE NULL END
+          )) ELSE NULL END
+        )) AS config,
+        source."connectedAt",
+        source."lastSyncAt",
+        source."createdAt",
+        source."updatedAt"
+      FROM "DataSourceConnection" source
+      WHERE source."workspaceId" = $1
+        AND source."isActive" = $2
+        ${statusFilter}
+      ORDER BY source.${orderColumn} DESC
+      ${limitSql}
+    `,
+    ...params
+  );
 }
 
 function isActiveIngestionStatus(status: string | null | undefined) {
@@ -159,13 +259,14 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
     const staleHeartbeatBefore = new Date(now.getTime() - STALE_ASYNC_JOB_MS);
     const staleQueuedBefore = new Date(now.getTime() - CONNECTOR_QUEUED_ASYNC_JOB_MS);
     const staleSyncRunBefore = new Date(now.getTime() - Math.max(STALE_ASYNC_JOB_MS, 10 * 60 * 1000));
-    const [ingestionRecovery, staleConnectorJobRows, staleConnectorRuns] = await Promise.all([
-      recoverStaleIngestionJobs({ workspaceId, limit: 5 }),
+    const [ingestionRecovery, asyncJobRecovery, staleConnectorJobRows, staleConnectorRuns] = await Promise.all([
+      recoverStaleIngestionJobs({ workspaceId, limit: 5, processRetryableJobs: false }),
+      recoverAsyncJobs({ workspaceId, limit: 5 }),
       prisma.asyncJob.findMany({
         where: {
           workspaceId,
           type: "SYNC_CONNECTOR",
-          OR: [
+          ["OR"]: [
             {
               status: "QUEUED",
               updatedAt: {
@@ -314,6 +415,7 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
       ingestionRecovery.attempted ||
       ingestionRecovery.timedOut ||
       ingestionRecovery.exhausted ||
+      asyncJobRecovery.recovered ||
       staleConnectorJobs.count ||
       staleConnectorRuns.count
     ) {
@@ -323,6 +425,8 @@ async function recoverStaleDataSourceJobs(workspaceId: string) {
         ingestionRecovered: ingestionRecovery.recovered,
         ingestionTimedOut: ingestionRecovery.timedOut,
         ingestionExhausted: ingestionRecovery.exhausted,
+        asyncJobRecovered: asyncJobRecovery.recovered,
+        asyncJobAttempted: asyncJobRecovery.attempted,
         staleConnectorJobs: staleConnectorJobs.count,
         staleConnectorJobsCompleted: staleConnectorJobs.completed,
         staleConnectorJobsFailed: staleConnectorJobs.failed,
@@ -354,7 +458,15 @@ function syncStatusFromSource(source: {
     status: string | null;
     errorMessage: string | null;
   } | null;
+  latestAsyncIngestionJob?: {
+    dataSourceId?: string | null;
+    status: string | null;
+    errorMessage: string | null;
+    currentStep: string | null;
+    updatedAt: Date;
+  } | null;
   latestConnectorJob?: {
+    dataSourceId?: string | null;
     status: string | null;
     errorMessage: string | null;
     currentStep: string | null;
@@ -390,6 +502,7 @@ function syncStatusFromSource(source: {
   let statusReason: string | null = source.lastErrorMessage ?? null;
   const snapshot = source.latestSnapshot ?? null;
   const latestIngestionJob = source.latestIngestionJob ?? null;
+  const latestAsyncIngestionJob = source.latestAsyncIngestionJob ?? null;
   const latestConnectorJob = source.latestConnectorJob ?? null;
   const schemaStatus = snapshot?.schemaStatus?.toUpperCase() ?? null;
   const canonicalStatus = snapshot?.canonicalStatus?.toUpperCase() ?? null;
@@ -402,7 +515,13 @@ function syncStatusFromSource(source: {
     canonicalStatus === "READY" &&
     Boolean(snapshot.canonicalVersion);
 
-  if (source.status === ConnectionStatus.DISCONNECTED) {
+  if (latestAsyncIngestionJob?.status?.toUpperCase() === "FAILED" && isActiveIngestionStatus(ingestionStatus)) {
+    syncStatus = "FAILED_SYNC";
+    statusReason =
+      latestAsyncIngestionJob.errorMessage ??
+      latestIngestionJob?.errorMessage ??
+      "Data source sync failed. Retry sync to resume processing.";
+  } else if (source.status === ConnectionStatus.DISCONNECTED) {
     syncStatus = "DISCONNECTED";
     statusReason ??= "Data source is disconnected.";
   } else if (hasReadyCanonicalSnapshot) {
@@ -616,6 +735,7 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
       return {
         name: typeof tableRecord?.name === "string" ? tableRecord.name : "",
         schema: typeof tableRecord?.schema === "string" ? tableRecord.schema : null,
+        rowCount: toNumber(tableRecord?.rowCount),
         columns: columns.map((column) => {
           const columnRecord = asRecord(column);
 
@@ -627,7 +747,9 @@ function schemaSummary(sourceSchemas: unknown, snapshotSchema: unknown, snapshot
               ? columnRecord.rawHeaderPath.filter((item): item is string => typeof item === "string")
               : null,
             type: typeof columnRecord?.type === "string" ? columnRecord.type : null,
-            nullable: typeof columnRecord?.nullable === "boolean" ? columnRecord.nullable : null
+            nullable: typeof columnRecord?.nullable === "boolean" ? columnRecord.nullable : null,
+            rowCount: toNumber(columnRecord?.rowCount),
+            nonNullCount: toNumber(columnRecord?.nonNullCount)
           };
         })
       };
@@ -639,41 +761,33 @@ export async function GET(request: Request) {
   try {
     const session = await requireWorkspace(request);
     logWorkspaceContext("[workspace-context] data-sources.GET", session);
-    await recoverStaleDataSourceJobs(session.workspace.id);
+    const requestUrl = new URL(request.url);
+    if (requestUrl.searchParams.get("recoverStaleJobs") !== "0") {
+      await recoverStaleDataSourceJobs(session.workspace.id);
+    }
     const includeDeleted = true;
 
-    const dataSources = await prisma.dataSourceConnection.findMany({
-      where: {
-        workspaceId: session.workspace.id,
-        isActive: true,
-        status: {
-          in: [ConnectionStatus.CONNECTED, ConnectionStatus.PENDING, ConnectionStatus.FAILED]
-        }
-      },
-      select: {
-        id: true,
-        name: true,
-        provider: true,
-        type: true,
-        isActive: true,
-        status: true,
-        connectionMode: true,
-        authMethod: true,
-        lastErrorMessage: true,
-        schemas: true,
-        config: true,
-        connectedAt: true,
-        lastSyncAt: true,
-        createdAt: true,
-        updatedAt: true,
-        ecommerceConnectorAccounts: {
+    const dataSources = await listDataSourceRows({
+      workspaceId: session.workspace.id,
+      active: true,
+      statuses: [ConnectionStatus.CONNECTED, ConnectionStatus.PENDING, ConnectionStatus.FAILED],
+      orderBy: "createdAt"
+    });
+    const sourceIds = new Set(dataSources.map((source) => source.id));
+    const connectorAccounts = sourceIds.size
+      ? await prisma.ecommerceConnectorAccount.findMany({
           where: {
+            workspaceId: session.workspace.id,
+            dataSourceId: {
+              in: Array.from(sourceIds)
+            },
             provider: {
               in: ["shopify", "amazon", "meta_ads", "google_ads"]
             }
           },
           select: {
             id: true,
+            dataSourceId: true,
             provider: true,
             shopDomain: true,
             autoSyncEnabled: true,
@@ -684,36 +798,77 @@ export async function GET(request: Request) {
             lastAutoSyncSuccessAt: true,
             autoSyncFailureCount: true
           },
-          take: 1
-        }
-      },
-      orderBy: {
-        createdAt: "desc"
-      }
-    });
-    const latestSnapshots = dataSources.length
-      ? await prisma.schemaSnapshot.findMany({
-          where: {
-            workspaceId: session.workspace.id,
-            dataSourceId: {
-              in: dataSources.map((source) => source.id)
-            }
-          },
-          select: {
-            id: true,
-            dataSourceId: true,
-            status: true,
-            schemaStatus: true,
-            canonicalStatus: true,
-            canonicalVersion: true,
-            schemaJson: true,
-            qualityReport: true,
-            createdAt: true
-          },
           orderBy: {
-            createdAt: "desc"
-          }
+            updatedAt: "desc"
+          },
+          take: 100
         })
+      : [];
+    const connectorAccountsBySourceId = new Map<string, ConnectorAccountSummary[]>();
+    for (const account of connectorAccounts) {
+      if (!account.dataSourceId || connectorAccountsBySourceId.has(account.dataSourceId)) continue;
+      connectorAccountsBySourceId.set(account.dataSourceId, [account]);
+    }
+    const latestSnapshots = dataSources.length
+      ? await prisma.$queryRawUnsafe<Array<{
+          id: string;
+          dataSourceId: string | null;
+          status: ConnectionStatus;
+          schemaStatus: string;
+          canonicalStatus: string;
+          canonicalVersion: string | null;
+          schemaJson: unknown;
+          qualityReport: unknown;
+          createdAt: Date;
+        }>>(
+          `
+            WITH source_ids AS (
+              SELECT unnest($2::text[]) AS id
+            )
+            SELECT
+              snapshot.id,
+              snapshot."dataSourceId",
+              snapshot.status,
+              snapshot."schemaStatus",
+              snapshot."canonicalStatus",
+              snapshot."canonicalVersion",
+              jsonb_build_object(
+                'schemaVersion', snapshot."schemaJson"->>'schemaVersion',
+                'schema_version', snapshot."schemaJson"->>'schema_version',
+                'sourceProvider', snapshot."schemaJson"->>'sourceProvider',
+                'sourceInference', COALESCE(snapshot."schemaJson"->'sourceInference', snapshot."schemaJson"->'rawUploadSchema'->'sourceInference'),
+                'sourceInferenceVersion', snapshot."schemaJson"->>'sourceInferenceVersion',
+                'semanticMappingVersion', snapshot."schemaJson"->>'semanticMappingVersion',
+                'productContextValidation', COALESCE(snapshot."schemaJson"->'productContextValidation', snapshot."qualityReport"->'productContextValidation'),
+                'productContextIndex', COALESCE(snapshot."schemaJson"->'productContextIndex', snapshot."qualityReport"->'productContextIndex'),
+                'unifiedIngestion', COALESCE(snapshot."schemaJson"->'rawUploadSchema'->'unifiedIngestion', snapshot."schemaJson"->'unifiedIngestion')
+              ) AS "schemaJson",
+              jsonb_build_object(
+                'tableCount', snapshot."qualityReport"->'tableCount',
+                'columnCount', snapshot."qualityReport"->'columnCount',
+                'semanticFieldCount', snapshot."qualityReport"->'semanticFieldCount',
+                'businessEntityCount', snapshot."qualityReport"->'businessEntityCount',
+                'generatedMetricCount', snapshot."qualityReport"->'generatedMetricCount',
+                'canonicalArtifactBacked', snapshot."qualityReport"->'canonicalArtifactBacked',
+                'canonicalRowCount', snapshot."qualityReport"->'canonicalRowCount',
+                'semanticMappingCache', snapshot."qualityReport"->'semanticMappingCache',
+                'productContextValidation', snapshot."qualityReport"->'productContextValidation',
+                'productContextIndex', snapshot."qualityReport"->'productContextIndex'
+              ) AS "qualityReport",
+              snapshot."createdAt"
+            FROM source_ids
+            CROSS JOIN LATERAL (
+              SELECT candidate.*
+              FROM "SchemaSnapshot" candidate
+              WHERE candidate."workspaceId" = $1
+                AND candidate."dataSourceId" = source_ids.id
+              ORDER BY candidate."createdAt" DESC
+              LIMIT 1
+            ) snapshot
+          `,
+          session.workspace.id,
+          dataSources.map((source) => source.id)
+        )
       : [];
     const snapshotsBySourceId = new Map<string, typeof latestSnapshots[number][]>();
     for (const snapshot of latestSnapshots) {
@@ -761,33 +916,76 @@ export async function GET(request: Request) {
         latestIngestionJobBySourceId.set(job.dataSourceId, job);
       }
     }
-    const latestConnectorJobs = dataSources.length
-      ? await prisma.asyncJob.findMany({
-          where: {
-            workspaceId: session.workspace.id,
-            type: "SYNC_CONNECTOR"
-          },
-          select: {
-            id: true,
-            status: true,
-            currentStep: true,
-            errorMessage: true,
-            heartbeatAt: true,
-            leaseExpiresAt: true,
-            payload: true,
-            updatedAt: true
-          },
-          orderBy: {
-            updatedAt: "desc"
-          },
-          take: 100
-        })
+    const latestAsyncIngestionJobs = dataSources.length
+      ? await prisma.$queryRawUnsafe<Array<{
+          id: string;
+          dataSourceId: string | null;
+          status: string | null;
+          currentStep: string | null;
+          errorMessage: string | null;
+          updatedAt: Date;
+        }>>(
+          `
+            SELECT
+              job.id,
+              job.payload->>'dataSourceId' AS "dataSourceId",
+              job.status,
+              job."currentStep",
+              job."errorMessage",
+              job."updatedAt"
+            FROM "AsyncJob" job
+            WHERE job."workspaceId" = $1
+              AND job.type = 'INGESTION'
+              AND job.payload->>'dataSourceId' = ANY($2::text[])
+            ORDER BY job."updatedAt" DESC
+            LIMIT 100
+          `,
+          session.workspace.id,
+          Array.from(sourceIds)
+        )
       : [];
-    const sourceIds = new Set(dataSources.map((source) => source.id));
+    const latestAsyncIngestionJobBySourceId = new Map<string, typeof latestAsyncIngestionJobs[number]>();
+    for (const job of latestAsyncIngestionJobs) {
+      const dataSourceId = job.dataSourceId;
+      if (!dataSourceId || !sourceIds.has(dataSourceId) || latestAsyncIngestionJobBySourceId.has(dataSourceId)) continue;
+
+      latestAsyncIngestionJobBySourceId.set(dataSourceId, job);
+    }
+    const latestConnectorJobs = dataSources.length
+      ? await prisma.$queryRawUnsafe<Array<{
+          id: string;
+          dataSourceId: string | null;
+          status: string | null;
+          currentStep: string | null;
+          errorMessage: string | null;
+          heartbeatAt: Date | null;
+          leaseExpiresAt: Date | null;
+          updatedAt: Date;
+        }>>(
+          `
+            SELECT
+              job.id,
+              job.payload->>'dataSourceId' AS "dataSourceId",
+              job.status,
+              job."currentStep",
+              job."errorMessage",
+              job."heartbeatAt",
+              job."leaseExpiresAt",
+              job."updatedAt"
+            FROM "AsyncJob" job
+            WHERE job."workspaceId" = $1
+              AND job.type = 'SYNC_CONNECTOR'
+              AND job.payload->>'dataSourceId' = ANY($2::text[])
+            ORDER BY job."updatedAt" DESC
+            LIMIT 100
+          `,
+          session.workspace.id,
+          Array.from(sourceIds)
+        )
+      : [];
     const latestConnectorJobBySourceId = new Map<string, typeof latestConnectorJobs[number]>();
     for (const job of latestConnectorJobs) {
-      const payload = asRecord(job.payload);
-      const dataSourceId = typeof payload?.dataSourceId === "string" ? payload.dataSourceId : null;
+      const dataSourceId = job.dataSourceId;
       if (!dataSourceId || !sourceIds.has(dataSourceId)) continue;
 
       const current = latestConnectorJobBySourceId.get(dataSourceId);
@@ -803,57 +1001,16 @@ export async function GET(request: Request) {
       }
     }
     const deletedDataSources = includeDeleted
-      ? await prisma.dataSourceConnection.findMany({
-          where: {
-            workspaceId: session.workspace.id,
-            isActive: false,
-            status: ConnectionStatus.DISCONNECTED
-          },
-          select: {
-            id: true,
-            name: true,
-            provider: true,
-            type: true,
-            isActive: true,
-            status: true,
-            connectionMode: true,
-            authMethod: true,
-            lastErrorMessage: true,
-            schemas: true,
-            config: true,
-            connectedAt: true,
-            lastSyncAt: true,
-            createdAt: true,
-            updatedAt: true,
-        ecommerceConnectorAccounts: {
-          where: {
-            provider: {
-              in: ["shopify", "amazon", "meta_ads", "google_ads"]
-            }
-          },
-              select: {
-            id: true,
-            provider: true,
-            shopDomain: true,
-                autoSyncEnabled: true,
-                syncIntervalMinutes: true,
-                lastSyncedAt: true,
-                nextSyncAt: true,
-                lastAutoSyncAttemptAt: true,
-                lastAutoSyncSuccessAt: true,
-                autoSyncFailureCount: true
-              },
-              take: 1
-            }
-          },
-          orderBy: {
-            updatedAt: "desc"
-          },
+      ? await listDataSourceRows({
+          workspaceId: session.workspace.id,
+          active: false,
+          statuses: [ConnectionStatus.DISCONNECTED],
+          orderBy: "updatedAt",
           take: 20
         })
       : [];
 
-    const publicDataSource = (source: typeof dataSources[number]) => {
+    const publicDataSource = (source: DataSourceListRow) => {
       const deletedAt = source.updatedAt?.toISOString() ?? null;
       const retentionExpiresAt = source.isActive === false && source.updatedAt
         ? new Date(source.updatedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
@@ -862,10 +1019,11 @@ export async function GET(request: Request) {
         ...source,
         latestSnapshot: latestSnapshotBySourceId.get(source.id) ?? null,
         latestIngestionJob: latestIngestionJobBySourceId.get(source.id) ?? null,
+        latestAsyncIngestionJob: latestAsyncIngestionJobBySourceId.get(source.id) ?? null,
         latestConnectorJob: latestConnectorJobBySourceId.get(source.id) ?? null
       });
       const latestIngestionJob = latestIngestionJobBySourceId.get(source.id) ?? null;
-      const connectorAccount = source.ecommerceConnectorAccounts?.[0] ?? null;
+      const connectorAccount = connectorAccountsBySourceId.get(source.id)?.[0] ?? null;
 
       return {
         id: source.id,

@@ -20,6 +20,7 @@ export type CogsSemanticResolution = {
 
 const UNIT_COST_FIELDS = new Set([
   "cost_price",
+  "item_cost",
   "product_cost",
   "manufacturing_cost",
   "procurement_cost",
@@ -41,7 +42,7 @@ export function resolveCogsSemantic(input: CogsSemanticInput): CogsSemanticResol
   const rawCogs = finiteNumber(input.cogs);
   if (rawCogs === null) return null;
 
-  const quantity = Math.max(1, finiteNumber(input.quantity) ?? 1);
+  const quantity = Math.max(0, finiteNumber(input.quantity) ?? 1);
   const revenue = finiteNumber(input.revenue);
   const explicitPrice = finiteNumber(input.price);
   const inferredPrice = revenue !== null && quantity > 0 ? revenue / quantity : null;
@@ -125,7 +126,7 @@ function buildResolution(input: {
     cogs_type: input.cogsType,
     normalized_cogs: roundCurrency(normalizedCogs),
     raw_cogs: roundCurrency(input.rawCogs),
-    unit_cogs: roundCurrency(input.cogsType === "total" ? input.rawCogs / input.quantity : input.rawCogs),
+    unit_cogs: roundCurrency(input.cogsType === "total" ? (input.quantity > 0 ? input.rawCogs / input.quantity : 0) : input.rawCogs),
     confidence: roundRatio(input.confidence),
     estimated_cost_flag: input.estimatedCostFlag ?? false,
     reason: input.reason

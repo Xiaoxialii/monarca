@@ -73,6 +73,7 @@ test("manual optimization endpoint uses the async job runner and prevents duplic
 test("optimization jobs use lease heartbeat and production stale recovery", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const envExample = read(".env.example");
+  const internalWorkerRoute = read("app/api/internal/jobs/process/route.ts");
 
   assert.match(runner, /const DEFAULT_STALE_ASYNC_JOB_MS = 2 \* 60 \* 1000/);
   assert.match(runner, /const DEFAULT_SKU_OPTIMIZATION_STALE_JOB_MS = 30 \* 60 \* 1000/);
@@ -89,6 +90,26 @@ test("optimization jobs use lease heartbeat and production stale recovery", () =
   assert.match(runner, /retryCount:\s*existing\.maxRetries/);
   assert.match(runner, /if \(item\.type === "SKU_OPTIMIZATION" && item\.status === "FAILED"\) return false/);
   assert.match(runner, /processAsyncJobBatch/);
+  assert.match(internalWorkerRoute, /export const maxDuration = 300/);
+});
+
+test("optimization freshness uses the shared canonical snapshot resolver", () => {
+  const lifecycle = read("lib/dashboard/decision-snapshot-lifecycle.ts");
+
+  assert.match(lifecycle, /resolveCanonicalSnapshot/);
+  assert.match(lifecycle, /const canonicalVersion = resolvedCanonicalSnapshot\.dataVersion/);
+  assert.doesNotMatch(lifecycle, /prisma\.schemaSnapshot\.findFirst\(\{\s*where:\s*\{\s*workspaceId:\s*input\.workspaceId,[\s\S]*canonicalStatus/);
+});
+
+test("ecommerce report, decision report, and optimize reject stale profitability cache versions", () => {
+  const reportRoute = read("app/api/dashboard/ecommerce/report/route.ts");
+  const decisionReportRoute = read("app/api/dashboard/ecommerce/decision-report/route.ts");
+  const optimizeRoute = read("app/api/dashboard/ecommerce/optimize/route.ts");
+
+  for (const route of [reportRoute, decisionReportRoute, optimizeRoute]) {
+    assert.match(route, /decisionSnapshotFreshness\(prisma/);
+    assert.match(route, /profitabilityEngineVersion:\s*(cachedReport|reportCache|existingCache)\.profitabilityEngineVersion/);
+  }
 });
 
 test("decision report route refreshes optimization caches only when canonical artifacts are readable", () => {
@@ -97,7 +118,7 @@ test("decision report route refreshes optimization caches only when canonical ar
   const cache = read("lib/dashboard/optimization-report-cache.ts");
   const cacheLifecycle = read("lib/dashboard/cache-lifecycle.ts");
 
-  assert.match(route, /recoverAsyncJobs/);
+  assert.doesNotMatch(route, /recoverAsyncJobs/);
   assert.match(route, /cacheNeedsOptimizationRefresh/);
   assert.match(route, /hasOptimizationRecommendationRows/);
   assert.match(route, /restoreFreshOptimizationCacheStateIfNeeded/);
@@ -112,17 +133,17 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.match(route, /optimizationRefreshAvailability/);
   assert.match(route, /refreshSkippedReason:\s*"canonical_artifact_unavailable"/);
   assert.match(route, /latestOptimizationJob/);
-  assert.match(route, /ensureOptimizationRefreshJob/);
-  assert.match(route, /enqueueSkuOptimizationJob/);
-  assert.match(route, /processJob\(job\.id\)/);
+  assert.match(route, /optimizationRefreshStatusOrManualResponse/);
+  assert.doesNotMatch(route, /enqueueSkuOptimizationJob/);
+  assert.doesNotMatch(route, /processJob\(job\.id\)/);
   assert.match(route, /manualOptimizationRequiredResponse/);
   assert.match(route, /status:\s*"READY_TO_OPTIMIZE"/);
-  assert.match(route, /non_ready_decision_report_cache/);
+  assert.match(route, /decision_report_cache_requires_refresh/);
   assert.match(route, /decision_snapshot_missing_with_ready_sources/);
   assert.match(route, /state:\s*"ready_to_optimize"/);
   assert.match(route, /decision_report:\s*null/);
-  assert.match(route, /auto_optimization_refresh:stale_decision_report_cache/);
-  assert.match(route, /auto_optimization_refresh:stale_decision_snapshot/);
+  assert.match(route, /stale_decision_report_cache/);
+  assert.match(route, /stale_decision_snapshot/);
   assert.match(route, /stale_decision_snapshot/);
   assert.match(route, /SKU_OPTIMIZATION_STALE_JOB_MS/);
   assert.match(route, /const manualJobs = jobs\.filter\(\(job\) => asRecord\(job\.payload\)\.reason === "manual_optimization_refresh"\)/);
@@ -134,7 +155,7 @@ test("decision report route refreshes optimization caches only when canonical ar
   assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_report_cache:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.doesNotMatch(route, /fallbackReason:\s*`stale_decision_snapshot:\$\{freshness\.reason \?\? "unknown"\}`/);
   assert.match(route, /export const maxDuration = 60/);
-  assert.match(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
+  assert.doesNotMatch(route, /after\(\(\) => \{\s*void recoverAsyncJobs/);
   assert.match(artifactAvailability, /readR2ObjectText\(checkedArtifactKey\)/);
   assert.match(artifactAvailability, /firstUnavailable \?\?=/);
   assert.match(artifactAvailability, /continue;/);
@@ -156,10 +177,23 @@ test("dashboard loader skips unreadable canonical snapshots before falling back 
   const loader = read("lib/dashboard/ecommerce-sales-dashboard-loader.ts");
 
   assert.match(loader, /const snapshotsBySource = new Map/);
-  assert.match(loader, /for \(const sourceSnapshots of snapshotsBySource\.values\(\)\)/);
-  assert.match(loader, /artifactDatasets\.push\(await readCanonicalDatasetFromSnapshot\(schemaJson\)\)/);
+  assert.match(loader, /Promise\.all\(Array\.from\(snapshotsBySource\.values\(\)\)\.map\(readFirstAvailableSourceDataset\)\)/);
+  assert.match(loader, /artifactDatasets\.push\(sourceReadResult\.artifactDataset\)/);
+  assert.match(loader, /readFirstAvailableSourceDataset/);
+  assert.match(loader, /listLatestCanonicalArtifactTables/);
+  assert.match(loader, /listR2ObjectKeys/);
+  assert.match(loader, /canonicalArtifactManifest/);
+  assert.doesNotMatch(loader, /jsonb_build_object/);
+  assert.doesNotMatch(loader, /snapshot\."schemaJson"->'tables'/);
+  assert.match(loader, /suppressSupersededOrderFactDatasets\(artifactDatasets\)/);
+  assert.match(loader, /order_facts_superseded_by_newer_overlapping_source/);
+  assert.match(loader, /metadata\.metric_engine_version !== ANALYTICS_METRIC_ENGINE_VERSION/);
+  assert.match(loader, /metadata\.profitability_engine_version !== CANONICAL_PROFITABILITY_ENGINE_VERSION/);
+  assert.match(loader, /const hasArtifactTables = tableArtifacts\.some/);
   assert.match(loader, /readableArtifactError\(error\)/);
-  assert.doesNotMatch(loader, /const latestBySource = new Map/);
+  assert.doesNotMatch(loader, /'canonicalDataset', snapshot\."schemaJson"->'canonicalDataset'/);
+  assert.doesNotMatch(loader, /'dashboardSnapshot', snapshot\."schemaJson"->'dashboardSnapshot'/);
+  assert.doesNotMatch(loader, /\\$queryRawUnsafe<Array<\\{/);
 });
 
 test("optimization summary does not add simulated ad spend when no recommendations are pending", () => {
@@ -288,7 +322,7 @@ test("optimization accepted state uses action tracking records as the source of 
 
   assert.ok(acceptedImpactEffect, "accepted impact loader should exist");
   assert.match(acceptedImpactEffect[0], /\/api\/policy\/actions/);
-  assert.doesNotMatch(acceptedImpactEffect[0], /scope=current_optimization/);
+  assert.match(acceptedImpactEffect[0], /scope=current_optimization/);
   assert.match(acceptedImpactEffect[0], /activeDecisions/);
   assert.match(acceptedImpactEffect[0], /completedActions/);
   assert.doesNotMatch(renderer, /filterDecisionImpactPayloadToCurrentReport/);
@@ -327,7 +361,8 @@ test("optimization accepted impact uses the action tracker source of truth", () 
   assert.ok(acceptedProfitLine, "accepted profit gain calculation should exist");
   assert.ok(acceptFunction, "accept function should exist");
   assert.match(acceptedImpactEffect[0], /\/api\/policy\/actions/);
-  assert.doesNotMatch(acceptedImpactEffect[0], /decisionInstancePrefix/);
+  assert.match(acceptedImpactEffect[0], /scope=current_optimization/);
+  assert.doesNotMatch(acceptedImpactEffect[0], /decisionInstancePrefix=/);
   assert.match(acceptedImpactEffect[0], /activeDecisions/);
   assert.match(acceptedProfitLine[0], /acceptedImpactSummary\?\.expectedProfitImpact/);
   assert.match(renderer, /const hasAcceptedOptimizationActions = \(acceptedImpactSummary\?\.activeCount \?\? displayedAcceptedDecisionRows\.length\) > 0/);
@@ -335,7 +370,7 @@ test("optimization accepted impact uses the action tracker source of truth", () 
   assert.match(renderer, /responsePayload\?\.ok !== true/);
 });
 
-test("active strategies reads accepted actions across optimization runs", () => {
+test("active strategies reads accepted actions for the current optimization run", () => {
   const renderer = read("components/report-renderer-engine.tsx");
   const policyActionsRoute = read("app/api/policy/actions/route.ts");
   const railFunction = renderer.match(/function ActiveStrategiesRail\([\s\S]*?\nfunction activeStrategyActualLabel/);
@@ -344,7 +379,7 @@ test("active strategies reads accepted actions across optimization runs", () => 
   assert.ok(railFunction, "active strategies rail should exist");
   assert.ok(acceptedImpactEffect, "accepted impact loader should exist");
   assert.match(acceptedImpactEffect[0], /\/api\/policy\/actions/);
-  assert.doesNotMatch(acceptedImpactEffect[0], /scope=current_optimization/);
+  assert.match(acceptedImpactEffect[0], /scope=current_optimization/);
   assert.match(policyActionsRoute, /url\.searchParams\.get\("scope"\) === "current_optimization"/);
   assert.match(policyActionsRoute, /currentOptimizationDecisionInstancePrefix/);
   assert.match(policyActionsRoute, /findOptimizationReportCache/);
@@ -401,7 +436,7 @@ test("optimization page loads latest decision report on initial render", () => {
   assert.match(dashboard, /setHasStartedProfitOptimization\(true\)/);
 });
 
-test("connector sync success marks optimization stale and decision report auto-queues refresh", () => {
+test("connector sync success marks optimization stale without auto-queuing refresh", () => {
   const runner = read("lib/jobs/async-job-runner.ts");
   const connectorHandler = runner.match(/async function processConnectorSyncAsyncJob\([\s\S]*?\n\}/);
   const refreshHelper = runner.match(/async function markOptimizationRefreshRequiredAfterConnectorSync\([\s\S]*?\n\}/);
@@ -421,6 +456,19 @@ test("connector sync success marks optimization stale and decision report auto-q
   assert.match(refreshHelper[0], /manualOptimizationRequired:\s*true/);
   assert.doesNotMatch(refreshHelper[0], /enqueueSkuOptimizationJob\(client/);
   assert.doesNotMatch(refreshHelper[0], /processJob\(job\.id/);
+});
+
+test("sku optimization jobs have a maximum execution timeout", () => {
+  const runner = read("lib/jobs/async-job-runner.ts");
+  const statusRoute = read("app/api/jobs/[jobId]/route.ts");
+  const decisionRoute = read("app/api/dashboard/ecommerce/decision-report/route.ts");
+
+  assert.match(runner, /OPTIMIZATION_MAX_EXECUTION_MS/);
+  assert.match(runner, /optimizationMaxExecutionStartedBeforeDate/);
+  assert.match(runner, /SKU optimization exceeded/);
+  assert.match(statusRoute, /JOB_MAX_EXECUTION_TIMEOUT/);
+  assert.match(decisionRoute, /OPTIMIZATION_MAX_EXECUTION_MS/);
+  assert.match(decisionRoute, /executionStartedAt >= maxExecutionStartedBefore/);
 });
 
 test("optimization report cache preserves optimization run metadata", () => {
@@ -596,10 +644,10 @@ test("active strategies UI is backed by DecisionAction records", () => {
   const policyActionsRoute = read("app/api/policy/actions/route.ts");
 
   assert.match(renderer, /function ActiveStrategiesRail/);
-  assert.match(renderer, /fetch\("\/api\/policy\/actions"/);
+  assert.match(renderer, /fetch\("\/api\/policy\/actions\?scope=current_optimization"/);
   assert.match(renderer, /Active Strategies/);
   assert.match(policyActionsRoute, /listActionTrackingRecords\(\{ workspaceId, decisionInstancePrefix \}\)/);
-  assert.doesNotMatch(policyActionsRoute, /scope=current_optimization[\s\S]*fetch/);
+  assert.match(policyActionsRoute, /url\.searchParams\.get\("scope"\) === "current_optimization"/);
 });
 
 test("optimization page passes optimization run metadata into renderer report", () => {

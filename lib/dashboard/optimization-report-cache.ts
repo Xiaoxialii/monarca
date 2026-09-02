@@ -33,6 +33,7 @@ export type OptimizationReportCacheRecord = {
   executionPlanJson: unknown;
   algorithmVersion: string | null;
   optimizationVersion: string | null;
+  profitabilityEngineVersion: string | null;
   canonicalSnapshotVersion: string | null;
   metricSnapshotVersion: string | null;
   simulationVersion: string | null;
@@ -247,6 +248,7 @@ function splitOptimizationReportContent(content: Record<string, unknown>) {
     executionPlanJson: asArray(executionPlan),
     algorithmVersion: identity.algorithmVersion,
     optimizationVersion: identity.optimizationVersion ?? identity.optimizationEngineVersion ?? null,
+    profitabilityEngineVersion: identity.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION,
     canonicalSnapshotVersion: identity.canonicalSnapshotVersion ?? identity.canonicalDataVersion ?? null,
     metricSnapshotVersion: identity.metricEngineVersion ?? null,
     simulationVersion: identity.simulationVersion ?? null,
@@ -296,6 +298,7 @@ export async function findOptimizationReportCache(
       executionPlanJson: true,
       algorithmVersion: true,
       optimizationVersion: true,
+      profitabilityEngineVersion: true,
       canonicalSnapshotVersion: true,
       metricSnapshotVersion: true,
       simulationVersion: true,
@@ -386,6 +389,7 @@ export async function upsertOptimizationReportCache(
     executionPlanJson: json(split.executionPlanJson),
     algorithmVersion: split.algorithmVersion,
     optimizationVersion: split.optimizationVersion,
+    profitabilityEngineVersion: split.profitabilityEngineVersion,
     canonicalSnapshotVersion: split.canonicalSnapshotVersion,
     metricSnapshotVersion: split.metricSnapshotVersion,
     simulationVersion: split.simulationVersion,

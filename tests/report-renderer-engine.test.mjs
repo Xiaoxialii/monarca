@@ -15,7 +15,7 @@ test("report renderer is driven by decision_report props", () => {
   assert.match(source, /Ads Breakdown/);
   assert.match(source, /Customer Intelligence Engine/);
   assert.match(source, /LTV Distribution/);
-  assert.match(source, /Lifecycle Structure/);
+  assert.match(source, /Customer Status Signals/);
   assert.match(source, /CustomerCohortTable/);
   assert.match(source, /CustomerSegmentTable/);
   assert.match(source, /SkuPortfolioOptimizationPanel/);
@@ -184,6 +184,23 @@ test("dashboard report page reads the ecommerce decision report endpoint", () =>
   assert.match(reportPageSource, /isLoadingDecisionReport && !decisionReportPayload/);
 });
 
+test("settings schema expansion fetches schema when table rows are omitted from the list payload", () => {
+  const source = fs.readFileSync(join(process.cwd(), "components/dashboard.tsx"), "utf8");
+  const schemaRoute = fs.readFileSync(join(process.cwd(), "app/api/data-sources/[id]/schema/route.ts"), "utf8");
+
+  assert.match(source, /function schemaNeedsFieldCoverage/);
+  assert.match(source, /if \(willExpand && schemaNeedsFieldCoverage\(source\.schema\)\)/);
+  assert.match(source, /expandedSourceIds\.includes\(source\.id\)/);
+  assert.match(source, /void loadSourceSchema\(source\)/);
+  assert.doesNotMatch(source, /if \(willExpand && !source\.schema\?\.unifiedIngestion && \(source\.schema\?\.tables \?\? \[\]\)\.length === 0\)/);
+  assert.match(source, /fetch\(`\/api\/data-sources\/\$\{source\.id\}\/schema`/);
+  assert.match(schemaRoute, /const latestSnapshotWithTables = snapshots\.find/);
+  assert.match(schemaRoute, /const latestSnapshot = latestSnapshotWithTables \?\? latestSnapshotWithMapping \?\? snapshots\[0\] \?\? null/);
+  assert.match(schemaRoute, /function schemaTablesNeedFieldCoverage/, "Schema endpoint should detect stale table metadata without field row coverage.");
+  assert.match(schemaRoute, /const needsBackfill = schemaTablesNeedFieldCoverage\(currentSchemaJson\)/);
+  assert.doesNotMatch(schemaRoute, /schemaTables\(currentSchemaJson\)\.length === 0 && !schemaHasMapping\(currentSchemaJson\)/);
+});
+
 test("decision report API reuses dashboard data loader and returns decision_report", () => {
   const source = fs.readFileSync(join(process.cwd(), "app/api/dashboard/ecommerce/decision-report/route.ts"), "utf8");
   const proxy = fs.readFileSync(join(process.cwd(), "proxy.ts"), "utf8");
@@ -194,12 +211,23 @@ test("decision report API reuses dashboard data loader and returns decision_repo
   assert.match(source, /decisionSnapshotFreshness/);
   assert.match(source, /manualOptimizationRequiredResponse/);
   assert.doesNotMatch(source, /enqueueSkuOptimizationJob/);
+  assert.doesNotMatch(source, /ensureOptimizationRefreshJob/);
+  assert.match(source, /optimizationRefreshStatusOrManualResponse/);
   assert.match(source, /cachedOptimizationReportMissingOpsRows/);
   assert.match(source, /decision_report/);
   assert.doesNotMatch(source, /composeReport|computeCanonicalEcommerceMetrics|ShopifyGraphQL|GraphQL|access_token/);
   assert.match(proxy, /allowLocalDecisionReportFallback/);
   assert.match(proxy, /ENABLE_LOCAL_ARTIFACT_STORE/);
   assert.match(proxy, /\/api\/dashboard\/ecommerce\/decision-report/);
+});
+
+test("optimization queue uses an effective non-empty goal for displayed rows", () => {
+  const source = fs.readFileSync(join(process.cwd(), "components/report-renderer-engine.tsx"), "utf8");
+
+  assert.match(source, /const firstGoalWithRows = optimizationGoalFilters\.find/);
+  assert.match(source, /const effectiveSelectedGoal = !isAcceptedMode && rows\.length > 0 && goalCounts\[selectedGoal\] === 0/);
+  assert.match(source, /goal === effectiveSelectedGoal/);
+  assert.match(source, /optimizationActionFilters\[effectiveSelectedGoal\]/);
 });
 
 test("report renderer separates blended and attributed ROAS and avoids low-confidence inventory OK state", () => {
@@ -211,7 +239,7 @@ test("report renderer separates blended and attributed ROAS and avoids low-confi
   assert.match(source, /ROAS unavailable: no campaign-level attribution data exists/);
   assert.match(source, /No campaign-level attribution data exists/);
   assert.match(source, /Normalized Daily Velocity/);
-  assert.match(source, /30-day normalized estimate/);
+  assert.match(source, /Observed order window/);
   assert.match(source, /InventoryConfidenceBadge/);
   assert.match(source, /inventoryRiskStatusFromRow/);
   assert.match(source, /Inventory observation/);
@@ -220,10 +248,33 @@ test("report renderer separates blended and attributed ROAS and avoids low-confi
   assert.match(source, /Stockout risk/);
   assert.match(source, /Potential excess inventory/);
   assert.match(source, /CAC attribution confidence insufficient/);
+  assert.match(source, /Contribution Profit/);
+  assert.match(source, /Contribution Margin/);
+  assert.match(source, /Pre-Ad Est\. Profit/);
+  assert.match(source, /Pre-Ad Est\. Margin/);
+  assert.match(source, /Blended CAC/);
+  assert.match(source, /Store ad spend divided by new customers/);
+  assert.match(source, /inventory_value: profit\?\.inventory_value \?\? row\?\.inventory_value \?\? null/);
+  assert.match(source, /inventory_decision: profit\?\.inventory_decision \?\? row\?\.inventory_decision/);
+  assert.match(source, /demand_trend: profit\?\.demand_trend \?\? row\?\.demand_trend/);
+  assert.match(source, /row\.inventoryValue === null \? "Unavailable" : currencyDecimal\.format\(row\.inventoryValue\)/);
   assert.match(source, /Unavailable/);
   assert.match(source, /Campaign attribution unavailable when orders cannot be directly matched to campaigns/);
   assert.match(source, /Requires multiple customer cohorts/);
   assert.match(source, /Limited historical window/);
   assert.match(source, /insufficient cohort history/);
   assert.match(source, /Cohort analysis requires multiple customer cohorts/);
+});
+
+test("empty operating report shell refreshes report and SKU rows stay unshaded", () => {
+  const source = fs.readFileSync(join(process.cwd(), "components/report-renderer-engine.tsx"), "utf8");
+  const dashboard = fs.readFileSync(join(process.cwd(), "components/dashboard.tsx"), "utf8");
+
+  assert.match(source, /onRefreshReport/);
+  assert.match(source, /开始更新报表/);
+  assert.doesNotMatch(source, /href="\/dashboard\/import-data"/);
+  assert.match(dashboard, /onRefreshReport=\{refreshDecisionReport\}/);
+  assert.match(dashboard, /"\/api\/dashboard\/ecommerce\/optimize"/);
+  assert.doesNotMatch(source, /index < 5 && "bg-emerald-50\/40"/);
+  assert.doesNotMatch(source, /lowMargin && "bg-rose-50\/60"/);
 });

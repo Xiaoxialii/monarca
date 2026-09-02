@@ -112,6 +112,7 @@ export async function POST(request: Request) {
     const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
     const key = stringValue(payload?.key) || stringValue(payload?.path);
     const fileName = stringValue(payload?.fileName);
+    const requestedBusinessSource = stringValue(payload?.businessSource) || stringValue(payload?.providerSource);
     const mimeType = stringValue(payload?.mimeType) || "application/octet-stream";
     const fileSize = toNumber(payload?.fileSize);
     const extension = fileExtension(fileName);
@@ -304,6 +305,7 @@ export async function POST(request: Request) {
           fileSize,
           mimeType,
           extension,
+          businessSource: requestedBusinessSource || undefined,
           schemaSnapshotId: result.schemaSnapshot.id,
           storage
         } as Prisma.InputJsonValue
@@ -316,6 +318,7 @@ export async function POST(request: Request) {
       payload: {
         unifiedIngestionJobId: ingestionJob.id,
         dataSourceId: result.dataSource.id,
+        dataSourceIds: [result.dataSource.id],
         schemaSnapshotId: result.schemaSnapshot.id
       } as Prisma.InputJsonValue
     });

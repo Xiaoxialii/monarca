@@ -12,7 +12,7 @@ export function analyzeRawFields(rawData: unknown): FieldAnalyzerResult {
   const rows = normalizeRows(rawData);
   const observations = new Map<string, RawFieldObservation>();
 
-  for (const row of rows.slice(0, 50)) {
+  for (const row of representativeRows(rows, 500)) {
     visit(row, [], observations);
   }
 
@@ -30,6 +30,35 @@ export function analyzeRawFields(rawData: unknown): FieldAnalyzerResult {
     confidence: Number(Math.min(0.98, best?.[1] ?? 0).toFixed(4)),
     key_patterns: detectKeyPatterns(fields)
   };
+}
+
+function representativeRows(rows: unknown[], maxRows: number) {
+  if (rows.length <= maxRows) return rows;
+
+  const selected = new Map<number, unknown>();
+  const firstWindow = Math.min(50, rows.length);
+  const lastWindow = Math.min(50, rows.length);
+
+  for (let index = 0; index < firstWindow; index += 1) {
+    selected.set(index, rows[index]);
+  }
+
+  for (let index = Math.max(0, rows.length - lastWindow); index < rows.length; index += 1) {
+    selected.set(index, rows[index]);
+  }
+
+  const remaining = Math.max(0, maxRows - selected.size);
+  if (remaining > 0) {
+    const stride = rows.length / remaining;
+    for (let offset = 0; offset < remaining; offset += 1) {
+      const index = Math.min(rows.length - 1, Math.floor(offset * stride));
+      selected.set(index, rows[index]);
+    }
+  }
+
+  return Array.from(selected.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([, row]) => row);
 }
 
 export function normalizeRows(rawData: unknown): unknown[] {
@@ -54,6 +83,7 @@ function visit(value: unknown, path: string[], observations: Map<string, RawFiel
 
   if (value && typeof value === "object") {
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (isSyntheticField(key)) continue;
       visit(nested, [...path, key], observations);
     }
     return;
@@ -71,6 +101,10 @@ function visit(value: unknown, path: string[], observations: Map<string, RawFiel
 
   if (observation.samples.length < 12) observation.samples.push(value);
   observations.set(rawPath, observation);
+}
+
+function isSyntheticField(key: string) {
+  return key.startsWith("__");
 }
 
 function dominantType(types: SemanticValueType[]) {

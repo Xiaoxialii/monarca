@@ -1,13 +1,24 @@
 import type { PrismaClient } from "@prisma/client";
-import { readR2ObjectText } from "@/lib/r2-storage";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
+import { resolveCanonicalSnapshot, type ResolvedCanonicalSnapshot } from "@/lib/snapshot/canonical-snapshot-resolver";
+import {
+  buildProductContextIndexRows,
+  lookupProductContextIndex,
+  lookupWorkspaceProductContextIndex,
+  readCanonicalTableRows,
+  replaceProductContextIndex,
+  type ProductContextIndexRow
+} from "@/lib/snapshot/product-context-index";
 import {
   enqueueCompetitivePublicAdSyncJob,
   fetchMetaAdLibrarySearchAds,
   metaAdLibraryAccessToken,
   normalizeCompetitorBrandName,
+  publicAdLibraryErrorCode,
+  publicAdLibraryUserMessage,
   upsertSuggestedCompetitorBrands
 } from "@/lib/competitive-intelligence/meta-ad-library";
+import type { CanonicalDataset } from "@/lib/semantic/types";
 
 const AUTO_CONFIRM_MIN_CONFIDENCE = 0.72;
 const AUTO_CONFIRM_MIN_ADS = 6;
@@ -24,6 +35,15 @@ export type CompetitorDiscoveryResult = {
   country: string;
   status: "SUCCESS" | "UNSUPPORTED" | "NO_PRODUCT_CONTEXT" | "NO_CANDIDATES";
   code?: string;
+  missingFields?: string[];
+  availableFields?: string[];
+  snapshotId?: string | null;
+  dataSourceId?: string | null;
+  validationStatus?: string | null;
+  canReprocess?: boolean;
+  recommendedAction?: string | null;
+  contextSource?: string | null;
+  lookupMetrics?: JsonRecord;
   searchTerms: string[];
   searchedCountries?: string[];
   candidates: Array<{
@@ -44,6 +64,7 @@ export async function discoverCompetitorBrandsForSku(
   input: {
     workspaceId: string;
     sku: string;
+    dataSourceId?: string | null;
     country?: string | null;
     limitPerTerm?: number;
     fetchImpl?: typeof fetch;
@@ -66,33 +87,52 @@ export async function discoverCompetitorBrandsForSku(
     };
   }
 
-  const product = await loadSkuProductContext(prisma, {
+  const resolvedSnapshot = await resolveCanonicalSnapshot(prisma, {
     workspaceId: input.workspaceId,
-    sku
+    dataSourceId: input.dataSourceId ?? undefined,
+    requireProductContext: true
   });
-  if (!product) {
-    return {
-      ok: false,
+  if (!resolvedSnapshot.snapshotId) {
+    return structuredProductContextFailure({
       sku,
       country,
-      status: "NO_PRODUCT_CONTEXT",
-      code: "SKU_PRODUCT_CONTEXT_MISSING",
-      searchTerms: [],
-      candidates: []
-    };
+      code: "SNAPSHOT_NOT_READY",
+      resolvedSnapshot,
+      product: null,
+      lookupMetrics: {}
+    });
+  }
+
+  const loadedContext = await loadSkuProductContext(prisma, {
+    workspaceId: input.workspaceId,
+    dataSourceId: input.dataSourceId,
+    sku,
+    resolvedSnapshot
+  });
+  const product = loadedContext.product;
+  const lookupMetrics = loadedContext.lookupMetrics;
+  const effectiveSnapshot = loadedContext.resolvedSnapshot ?? resolvedSnapshot;
+  if (!product) {
+    return structuredProductContextFailure({
+      sku,
+      country,
+      code: "PRODUCT_NOT_FOUND",
+      resolvedSnapshot: effectiveSnapshot,
+      product: null,
+      lookupMetrics
+    });
   }
 
   const searchTerms = searchTermsFromProduct(product);
   if (!searchTerms.length) {
-    return {
-      ok: false,
+    return structuredProductContextFailure({
       sku,
       country,
-      status: "NO_PRODUCT_CONTEXT",
-      code: "SKU_PRODUCT_CONTEXT_INSUFFICIENT",
-      searchTerms: [],
-      candidates: []
-    };
+      code: "PRODUCT_CONTEXT_INCOMPLETE",
+      resolvedSnapshot: effectiveSnapshot,
+      product,
+      lookupMetrics
+    });
   }
 
   const ownBrandNames = new Set([
@@ -110,30 +150,56 @@ export async function discoverCompetitorBrandsForSku(
   }>();
 
   const searchedCountries = [country];
-  await searchCountry({
-    scored,
-    token,
-    country,
-    searchTerms,
-    limitPerTerm: input.limitPerTerm,
-    fetchImpl: input.fetchImpl,
-    ownBrandNames
-  });
-  if (scored.size === 0) {
-    for (const fallbackCountry of FALLBACK_AD_LIBRARY_COUNTRIES) {
-      if (fallbackCountry === country) continue;
-      searchedCountries.push(fallbackCountry);
-      await searchCountry({
-        scored,
-        token,
-        country: fallbackCountry,
-        searchTerms,
-        limitPerTerm: input.limitPerTerm,
-        fetchImpl: input.fetchImpl,
-        ownBrandNames
-      });
-      if (scored.size >= 3) break;
+  try {
+    await searchCountry({
+      scored,
+      token,
+      country,
+      searchTerms,
+      limitPerTerm: input.limitPerTerm,
+      fetchImpl: input.fetchImpl,
+      ownBrandNames
+    });
+    if (scored.size === 0) {
+      for (const fallbackCountry of FALLBACK_AD_LIBRARY_COUNTRIES) {
+        if (fallbackCountry === country) continue;
+        searchedCountries.push(fallbackCountry);
+        await searchCountry({
+          scored,
+          token,
+          country: fallbackCountry,
+          searchTerms,
+          limitPerTerm: input.limitPerTerm,
+          fetchImpl: input.fetchImpl,
+          ownBrandNames
+        });
+        if (scored.size >= 3) break;
+      }
     }
+  } catch (error) {
+    const code = publicAdLibraryErrorCode(error);
+    if (code === "PUBLIC_AD_LIBRARY_AUTH_EXPIRED" || code === "PUBLIC_AD_LIBRARY_AUTH_FAILED" || code === "PUBLIC_AD_LIBRARY_RATE_LIMIT") {
+      return {
+        ok: false,
+        sku,
+        country,
+        status: "UNSUPPORTED",
+        code,
+        missingFields: [],
+        availableFields: availableContextFields(product),
+        snapshotId: effectiveSnapshot.snapshotId,
+        dataSourceId: effectiveSnapshot.dataSourceId,
+        validationStatus: effectiveSnapshot.validationStatus,
+        canReprocess: false,
+        recommendedAction: publicAdLibraryUserMessage(code),
+        contextSource: stringValue(product.context_source),
+        lookupMetrics,
+        searchTerms,
+        searchedCountries,
+        candidates: []
+      };
+    }
+    throw error;
   }
 
   const candidates = Array.from(scored.values())
@@ -183,11 +249,13 @@ export async function discoverCompetitorBrandsForSku(
           rank_score: candidate.rankScore,
           sku_product_context: {
             sku,
-            product_name: stringValue(product.product_name),
-            category: stringValue(product.category, product.category_full_name, product.product_type),
+            product_name: stringValue(product.product_name, product.productName, product.title),
+            category: stringValue(product.category, product.category_full_name, product.productType, product.product_type),
             tags: stringArray(product.tags).slice(0, 12),
             handle: stringValue(product.handle, product.product_handle),
-            own_brand: stringValue(product.vendor, product.brand)
+            own_brand: stringValue(product.vendor, product.brand),
+            source: stringValue(product.context_source),
+            snapshot_id: effectiveSnapshot.snapshotId
           },
           auto_confirmed: autoConfirmed,
           auto_confirm_reason: autoConfirmed
@@ -249,6 +317,11 @@ export async function discoverCompetitorBrandsForSku(
     searchTerms,
     searchedCountries,
     candidates,
+    snapshotId: effectiveSnapshot.snapshotId,
+    dataSourceId: effectiveSnapshot.dataSourceId,
+    validationStatus: effectiveSnapshot.validationStatus,
+    contextSource: stringValue(product.context_source),
+    lookupMetrics,
     queuedSyncJobId: queuedSyncJobIds[0] ?? null,
     queuedSyncJobIds
   };
@@ -309,85 +382,235 @@ async function searchCountry(input: {
 
 async function loadSkuProductContext(prisma: PrismaClient, input: {
   workspaceId: string;
+  dataSourceId?: string | null;
   sku: string;
+  resolvedSnapshot: ResolvedCanonicalSnapshot;
 }) {
-  const snapshots = await prisma.schemaSnapshot.findMany({
-    where: {
-      workspaceId: input.workspaceId,
-      canonicalStatus: "READY",
-      canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-      dataSource: {
-        isActive: true
-      }
-    },
-    orderBy: { createdAt: "desc" },
-    take: 10,
-    select: { schemaJson: true }
+  const indexed = await lookupProductContextIndex(prisma, {
+    workspaceId: input.workspaceId,
+    schemaSnapshotId: input.resolvedSnapshot.snapshotId ?? "",
+    sku: input.sku
   });
-
-  let bestMatch: JsonRecord | null = null;
-  let bestScore = -1;
-  for (const snapshot of snapshots) {
-    const schema = objectValue(snapshot.schemaJson);
-    const embedded = objectValue(objectValue(schema.canonicalDataset).tables);
-    const embeddedRows = Array.isArray(embedded.ecommerce_products) ? embedded.ecommerce_products.map(objectValue) : [];
-    const artifactRows = embeddedRows.length ? [] : await readProductArtifactRows(schema);
-    const rows = embeddedRows.length ? embeddedRows : artifactRows;
-    for (const row of rows) {
-      if (normalizeSku(stringValue(row.sku)) !== normalizeSku(input.sku)) continue;
-      const score = productContextScore(row);
-      if (score > bestScore) {
-        bestMatch = row;
-        bestScore = score;
-      }
-    }
+  if (indexed.row) {
+    return {
+      product: productRecordFromIndexRow(indexed.row, "PRODUCT_CONTEXT_INDEX"),
+      lookupMetrics: indexed.metrics,
+      resolvedSnapshot: input.resolvedSnapshot
+    };
   }
 
-  return bestMatch;
+  const workspaceIndexed = await lookupWorkspaceProductContextIndex(prisma, {
+    workspaceId: input.workspaceId,
+    dataSourceId: input.dataSourceId ?? null,
+    sku: input.sku
+  });
+  if (workspaceIndexed.row) {
+    return {
+      product: productRecordFromIndexRow(workspaceIndexed.row, "WORKSPACE_PRODUCT_CONTEXT_INDEX"),
+      lookupMetrics: {
+        ...indexed.metrics,
+        fallback: workspaceIndexed.metrics
+      },
+      resolvedSnapshot: resolvedSnapshotFromWorkspaceIndex(input.resolvedSnapshot, workspaceIndexed.snapshot)
+    };
+  }
+
+  const snapshot = await prisma.schemaSnapshot.findFirst({
+    where: {
+      id: input.resolvedSnapshot.snapshotId ?? "",
+      workspaceId: input.workspaceId,
+      canonicalStatus: "READY",
+      canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
+    },
+    select: { id: true, workspaceId: true, dataSourceId: true, schemaJson: true }
+  });
+  if (!snapshot) return { product: null, lookupMetrics: indexed.metrics, resolvedSnapshot: input.resolvedSnapshot };
+
+  const startedAt = Date.now();
+  const schema = objectValue(snapshot.schemaJson);
+  const [products, orderItems] = await Promise.all([
+    readCanonicalTableRows(schema, "ecommerce_products", 50_000),
+    readCanonicalTableRows(schema, "ecommerce_order_items", 50_000)
+  ]);
+  const dataset: CanonicalDataset = {
+    schema_version: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+    tables: {
+      ecommerce_orders: [],
+      ecommerce_order_items: orderItems.rows,
+      ecommerce_products: products.rows,
+      ecommerce_customers: [],
+      ecommerce_refunds: [],
+      ecommerce_ads: [],
+      ecommerce_inventory: [],
+      ecommerce_costs: []
+    },
+    metadata: {
+      source_platforms: [],
+      normalized_at: new Date().toISOString(),
+      unknown_fields: [],
+      validation: { accepted_rows: products.rows.length + orderItems.rows.length, rejected_rows: 0, warnings: [], rejected: [] },
+      dedupe: { canonical_key_strategy: "hash(platform + source_id + order_id)", duplicate_count: 0 },
+      mapping_confidence: 0
+    }
+  };
+  const indexBuild = buildProductContextIndexRows({
+    workspaceId: snapshot.workspaceId,
+    dataSourceId: snapshot.dataSourceId,
+    schemaSnapshotId: snapshot.id,
+    provider: input.resolvedSnapshot.provider,
+    canonicalDataset: dataset
+  });
+  await replaceProductContextIndex(prisma, indexBuild.rows);
+  const rebuilt = indexBuild.rows
+    .filter((row) => normalizeSku(row.sku ?? "") === normalizeSku(input.sku))
+    .sort((left, right) => right.contextQuality - left.contextQuality)[0] ?? null;
+
+  return {
+    product: rebuilt ? productRecordFromIndexRow(rebuilt, "CANONICAL_ARTIFACT_FALLBACK") : null,
+    lookupMetrics: {
+      ...indexed.metrics,
+      fallback: "canonical_artifact_bounded_backfill",
+      durationMs: Date.now() - startedAt,
+      bytesRead: products.bytesRead + orderItems.bytesRead,
+      rowsScanned: products.rows.length + orderItems.rows.length,
+      indexRowsBuilt: indexBuild.rows.length
+    },
+    resolvedSnapshot: input.resolvedSnapshot
+  };
 }
 
-async function readProductArtifactRows(schema: JsonRecord) {
-  const tables = Array.isArray(schema.tables) ? schema.tables : [];
-  const table = tables.find((item) => objectValue(item).name === "ecommerce_products");
-  const artifactKey = stringValue(objectValue(table).artifactKey);
-  if (!artifactKey) return [];
-  return parseJsonl(await readR2ObjectText(artifactKey).catch(() => ""));
+function resolvedSnapshotFromWorkspaceIndex(
+  fallback: ResolvedCanonicalSnapshot,
+  indexedSnapshot: {
+    snapshotId: string;
+    dataSourceId: string | null;
+    provider: string | null;
+    validationStatus: string | null;
+    schemaVersion: string | null;
+    mappingVersion: string | null;
+    sourceInferenceVersion: string | null;
+    productContextIndexVersion: string | null;
+    publishedAt: string | null;
+  } | null
+): ResolvedCanonicalSnapshot {
+  if (!indexedSnapshot) return fallback;
+  return {
+    ...fallback,
+    snapshotId: indexedSnapshot.snapshotId,
+    dataSourceId: indexedSnapshot.dataSourceId,
+    provider: indexedSnapshot.provider,
+    schemaVersion: indexedSnapshot.schemaVersion,
+    mappingVersion: indexedSnapshot.mappingVersion,
+    sourceInferenceVersion: indexedSnapshot.sourceInferenceVersion,
+    productContextIndexVersion: indexedSnapshot.productContextIndexVersion,
+    validationStatus: indexedSnapshot.validationStatus ?? fallback.validationStatus,
+    publishedAt: indexedSnapshot.publishedAt,
+    dataVersion: `${indexedSnapshot.snapshotId}:${indexedSnapshot.schemaVersion ?? "unknown"}`,
+    capabilities: {
+      ...fallback.capabilities,
+      productContextAvailable: true,
+      competitiveDiscoveryAvailable: true
+    },
+    warnings: [...fallback.warnings, "Resolved SKU context from workspace-scoped product context index fallback."]
+  };
 }
 
 function searchTermsFromProduct(product: JsonRecord) {
-  const productName = cleanSearchText(stringValue(product.product_name));
-  const category = cleanSearchText(stringValue(product.category, product.category_full_name, product.category_name, product.product_type));
+  const productName = cleanSearchText(stringValue(product.product_name, product.productName, product.title));
+  const ownBrand = cleanSearchText(stringValue(product.brand, product.vendor));
+  const asin = cleanSearchText(stringValue(product.asin));
+  const category = cleanSearchText(stringValue(product.category, product.category_full_name, product.category_name, product.product_type, product.productType));
   const tags = stringArray(product.tags).map(cleanSearchText).filter(Boolean);
   const handle = cleanSearchText(stringValue(product.handle, product.product_handle).replace(/-/g, " "));
+  const descriptionKeywords = safeDescriptionKeywords(stringValue(product.description, product.description_html));
   const terms = [
+    [productName, ownBrand].filter(Boolean).join(" "),
     [productName, category].filter(Boolean).join(" "),
+    [asin, ownBrand || productName].filter(Boolean).join(" "),
     productName,
     category,
     ...tags.slice(0, 4),
-    handle
+    handle,
+    ...descriptionKeywords
   ].filter((term) => term.length >= 3 && !/^\d+$/.test(term));
 
   return Array.from(new Set(terms)).slice(0, 6);
 }
 
-function productContextScore(product: JsonRecord) {
-  const productName = cleanSearchText(stringValue(product.product_name));
-  const category = cleanSearchText(stringValue(product.category, product.category_full_name, product.category_name, product.product_type));
-  const tags = stringArray(product.tags).map(cleanSearchText).filter(Boolean);
-  const handle = cleanSearchText(stringValue(product.handle, product.product_handle).replace(/-/g, " "));
-  const description = cleanSearchText(stringValue(product.description, product.description_html));
-  const vendor = normalizeCompetitorBrandName(stringValue(product.vendor, product.brand));
-  const price = stringValue(product.price, product.compare_at_price);
+function structuredProductContextFailure(input: {
+  sku: string;
+  country: string;
+  code: "PRODUCT_NOT_FOUND" | "PRODUCT_CONTEXT_INCOMPLETE" | "SNAPSHOT_NOT_READY";
+  resolvedSnapshot: ResolvedCanonicalSnapshot;
+  product: JsonRecord | null;
+  lookupMetrics: JsonRecord;
+}): CompetitorDiscoveryResult {
+  const availableFields = availableContextFields(input.product);
+  const missingFields = missingContextFields(input.product);
+  return {
+    ok: false,
+    sku: input.sku,
+    country: input.country,
+    status: "NO_PRODUCT_CONTEXT",
+    code: input.code,
+    missingFields,
+    availableFields,
+    snapshotId: input.resolvedSnapshot.snapshotId,
+    dataSourceId: input.resolvedSnapshot.dataSourceId,
+    validationStatus: input.resolvedSnapshot.validationStatus,
+    canReprocess: Boolean(input.resolvedSnapshot.dataSourceId),
+    recommendedAction: input.code === "SNAPSHOT_NOT_READY"
+      ? "Wait for ingestion to finish or reprocess the data source."
+      : input.code === "PRODUCT_NOT_FOUND"
+        ? "Review field mapping or reprocess the data source with product identifiers."
+        : "Reprocess data or map product_name, category, brand, tags, handle, or description fields.",
+    contextSource: input.product ? stringValue(input.product.context_source) : null,
+    lookupMetrics: input.lookupMetrics,
+    searchTerms: [],
+    candidates: []
+  };
+}
 
-  return [
-    productName.length >= 3 ? 12 : 0,
-    category.length >= 3 ? 10 : 0,
-    tags.length ? Math.min(12, tags.length * 3) : 0,
-    handle.length >= 3 ? 8 : 0,
-    description.length >= 12 ? 8 : 0,
-    vendor.length >= 3 ? 4 : 0,
-    price ? 1 : 0
-  ].reduce((sum, value) => sum + value, 0);
+function productRecordFromIndexRow(row: ProductContextIndexRow, source: string): JsonRecord {
+  return {
+    sku: row.sku,
+    product_id: row.productId,
+    variant_id: row.variantId,
+    asin: row.asin,
+    product_name: row.productName,
+    category: row.category,
+    product_type: row.productType,
+    brand: row.brand,
+    vendor: row.vendor,
+    tags: row.tags,
+    handle: row.handle,
+    price: row.price,
+    currency: row.currency,
+    context_source: source,
+    source_provenance: row.sourceProvenance
+  };
+}
+
+function availableContextFields(product: JsonRecord | null) {
+  if (!product) return [];
+  return ["sku", "product_id", "variant_id", "asin", "product_name", "category", "product_type", "brand", "vendor", "tags", "handle", "price", "currency"]
+    .filter((field) => {
+      const value = product[field];
+      return Array.isArray(value) ? value.length > 0 : Boolean(stringValue(value));
+    });
+}
+
+function missingContextFields(product: JsonRecord | null) {
+  if (!product) return ["sku", "product_name", "category", "brand", "tags", "handle"];
+  return ["product_name", "category", "brand", "tags", "handle"]
+    .filter((field) => !availableContextFields(product).includes(field));
+}
+
+function safeDescriptionKeywords(value: string) {
+  return cleanSearchText(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && token.length <= 24)
+    .slice(0, 5);
 }
 
 function confidenceForCandidate(input: {
@@ -446,14 +669,6 @@ function cleanSearchText(value: string) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
-}
-
-function parseJsonl(input: string) {
-  return input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as JsonRecord);
 }
 
 function objectValue(value: unknown): JsonRecord {

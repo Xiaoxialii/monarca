@@ -80,6 +80,7 @@ export async function POST(request: Request) {
         snapshot: {
           algorithmVersion: existingCache.algorithmVersion,
           optimizationVersion: existingCache.optimizationVersion,
+          profitabilityEngineVersion: existingCache.profitabilityEngineVersion,
           canonicalSnapshotVersion: existingCache.canonicalSnapshotVersion,
           metricSnapshotVersion: existingCache.metricSnapshotVersion,
           simulationVersion: existingCache.simulationVersion,

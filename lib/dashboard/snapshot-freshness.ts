@@ -86,6 +86,7 @@ export function snapshotIdentityFromPayload(value: unknown): SnapshotIdentity {
 export function snapshotIdentityFromCacheRecord(record: {
   algorithmVersion?: string | null;
   optimizationVersion?: string | null;
+  profitabilityEngineVersion?: string | null;
   canonicalSnapshotVersion?: string | null;
   metricSnapshotVersion?: string | null;
   simulationVersion?: string | null;
@@ -97,6 +98,7 @@ export function snapshotIdentityFromCacheRecord(record: {
     algorithmVersion: record.algorithmVersion ?? null,
     optimizationVersion: record.optimizationVersion ?? null,
     optimizationEngineVersion: record.optimizationVersion ?? null,
+    profitabilityEngineVersion: record.profitabilityEngineVersion ?? null,
     canonicalDataVersion: record.canonicalSnapshotVersion ?? null,
     canonicalSnapshotVersion: record.canonicalSnapshotVersion ?? null,
     metricEngineVersion: record.metricSnapshotVersion ?? null,

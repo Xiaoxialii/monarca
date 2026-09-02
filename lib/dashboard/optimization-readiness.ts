@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { canonicalArtifactAvailability, type CanonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifact-availability";
+import { resolveCanonicalSnapshot } from "@/lib/snapshot/canonical-snapshot-resolver";
 
 export type OptimizationReadinessCode =
   | "NO_DATA_CONNECTED"
@@ -61,7 +62,7 @@ export async function optimizationReadiness(
   prisma: PrismaClient,
   input: { workspaceId: string }
 ): Promise<OptimizationReadiness> {
-  const [connectedSourceCount, latestObserved, latestReady] = await Promise.all([
+  const [connectedSourceCount, latestObserved, resolved] = await Promise.all([
     prisma.dataSourceConnection.count({
       where: {
         workspaceId: input.workspaceId,
@@ -88,25 +89,7 @@ export async function optimizationReadiness(
       },
       orderBy: { createdAt: "desc" }
     }),
-    prisma.schemaSnapshot.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        dataSourceId: { not: null },
-        canonicalStatus: "READY",
-        canonicalVersion: { not: null },
-        dataSource: {
-          isActive: true,
-          status: "CONNECTED"
-        }
-      },
-      select: {
-        id: true,
-        dataSourceId: true,
-        version: true,
-        canonicalVersion: true
-      },
-      orderBy: { createdAt: "desc" }
-    })
+    resolveCanonicalSnapshot(prisma, { workspaceId: input.workspaceId })
   ]);
 
   if (!connectedSourceCount) {
@@ -126,7 +109,7 @@ export async function optimizationReadiness(
     };
   }
 
-  if (!latestReady) {
+  if (!resolved.snapshotId) {
     const code = canonicalStatusCode(latestObserved?.canonicalStatus ?? null);
     return {
       ready: false,
@@ -152,11 +135,7 @@ export async function optimizationReadiness(
   }
 
   const artifact = await canonicalArtifactAvailability(prisma, { workspaceId: input.workspaceId });
-  const dataVersion = canonicalDataVersion({
-    snapshotId: latestReady.id,
-    version: latestReady.version,
-    canonicalVersion: latestReady.canonicalVersion
-  });
+  const dataVersion = resolved.dataVersion;
 
   if (!artifact.available) {
     return {
@@ -172,8 +151,8 @@ export async function optimizationReadiness(
           canonicalStatus: latestObserved.canonicalStatus
         }
         : null,
-      canonicalSnapshotId: latestReady.id,
-      dataSourceId: latestReady.dataSourceId,
+      canonicalSnapshotId: resolved.snapshotId,
+      dataSourceId: resolved.dataSourceId,
       dataVersion,
       artifactStatus: "UNAVAILABLE",
       artifact
@@ -193,8 +172,8 @@ export async function optimizationReadiness(
         canonicalStatus: latestObserved.canonicalStatus
       }
       : null,
-    canonicalSnapshotId: latestReady.id,
-    dataSourceId: latestReady.dataSourceId,
+    canonicalSnapshotId: resolved.snapshotId,
+    dataSourceId: resolved.dataSourceId,
     dataVersion,
     artifactStatus: "AVAILABLE",
     artifact

@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import jitiFactory from "jiti";
+
+const require = createRequire(import.meta.url);
+const Module = require("module");
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
+  if (typeof request === "string" && request.startsWith("@/")) {
+    return originalResolveFilename.call(this, join(process.cwd(), request.slice(2)), parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 const jiti = jitiFactory(process.cwd() + "/");
 const {
@@ -49,7 +62,7 @@ test("cache key is bound to canonical profitability engine version", () => {
     filters: { channel: "app" }
   };
 
-  assert.equal(CANONICAL_PROFITABILITY_ENGINE_VERSION, "v2.1-profitability-reconciliation");
+  assert.equal(CANONICAL_PROFITABILITY_ENGINE_VERSION, "v2.8-source-scope-dedupe");
   assert.notEqual(
     reportMetricCacheKey(base),
     reportMetricCacheKey({ ...base, profitabilityEngineVersion: "v1" })
@@ -95,6 +108,7 @@ test("cache key is bound to semantic source, domain and snapshot", () => {
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, domain: "logistics" }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, semanticSnapshotVersion: "4" }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, semanticSchemaHash: "schema-hash-b" }));
+  assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, canonicalDataVersion: "snapshot-b:v2" }));
   assert.notEqual(reportMetricCacheKey(base), reportMetricCacheKey({ ...base, queryHash: "query-hash-b" }));
 });
 

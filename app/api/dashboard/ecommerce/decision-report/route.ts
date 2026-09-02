@@ -1,6 +1,6 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-workspace-context";
-import { currentDecisionSnapshotVersions, decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
+import { decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import {
   findLatestDecisionSnapshot,
   snapshotPerformance
@@ -14,9 +14,7 @@ import { canonicalArtifactAvailability } from "@/lib/dashboard/canonical-artifac
 import { optimizationReadiness, type OptimizationReadiness } from "@/lib/dashboard/optimization-readiness";
 import { validateOptimizationData } from "@/lib/optimization/optimization-data-contract";
 import {
-  enqueueSkuOptimizationJob,
-  recoverAsyncJobs,
-  processJob,
+  OPTIMIZATION_MAX_EXECUTION_MS,
   SKU_OPTIMIZATION_STALE_JOB_MS
 } from "@/lib/jobs/async-job-runner";
 import { prisma } from "@/lib/prisma";
@@ -94,6 +92,7 @@ async function restoreFreshOptimizationCacheStateIfNeeded(input: {
     state: string;
     algorithmVersion: string | null;
     optimizationVersion: string | null;
+    profitabilityEngineVersion: string | null;
     canonicalSnapshotVersion: string | null;
     metricSnapshotVersion: string | null;
     simulationVersion: string | null;
@@ -112,6 +111,7 @@ async function restoreFreshOptimizationCacheStateIfNeeded(input: {
     snapshot: {
       algorithmVersion: input.reportCache.algorithmVersion,
       optimizationVersion: input.reportCache.optimizationVersion,
+      profitabilityEngineVersion: input.reportCache.profitabilityEngineVersion,
       canonicalSnapshotVersion: input.reportCache.canonicalSnapshotVersion,
       metricSnapshotVersion: input.reportCache.metricSnapshotVersion,
       simulationVersion: input.reportCache.simulationVersion,
@@ -531,44 +531,67 @@ async function latestOptimizationJob(workspaceId: string) {
   if (queued) return queued;
 
   const staleBefore = new Date(Date.now() - SKU_OPTIMIZATION_STALE_JOB_MS);
+  const maxExecutionStartedBefore = new Date(Date.now() - OPTIMIZATION_MAX_EXECUTION_MS);
   return manualJobs.find((job) => {
     const heartbeat = job.heartbeatAt ?? job.startedAt ?? job.lockedAt ?? job.updatedAt ?? job.createdAt;
-    return heartbeat >= staleBefore;
+    const executionStartedAt = job.startedAt ?? job.lockedAt ?? job.createdAt;
+    return heartbeat >= staleBefore && executionStartedAt >= maxExecutionStartedBefore;
   }) ?? null;
 }
 
-async function ensureOptimizationRefreshJob(input: {
+async function optimizationRefreshStatusOrManualResponse(input: {
   workspaceId: string;
-  decisionMode: "full" | "sku";
-  readiness?: OptimizationReadiness | null;
+  mode: "full" | "sku";
+  payload?: Record<string, unknown>;
+  message: string;
   reason: string;
+  readiness?: OptimizationReadiness | null;
+  startedAt: number;
+  currentVersions?: DecisionReportContractInput["currentVersions"];
+  snapshotType?: string;
 }) {
-  const existing = await latestOptimizationJob(input.workspaceId);
-  if (existing && isPendingOptimizationStatus(existing.status)) return existing;
-
-  const versions = await currentDecisionSnapshotVersions(prisma, {
-    workspaceId: input.workspaceId
-  });
-  const job = await enqueueSkuOptimizationJob(prisma, {
-    workspaceId: input.workspaceId,
-    reason: input.reason,
-    decisionMode: input.decisionMode,
-    schemaSnapshotId: input.readiness?.canonicalSnapshotId ?? null,
-    inputHash: versions.inputHash
-  });
-
-  after(() => {
-    void processJob(job.id).catch((error) => {
-      console.error("[decision-report] failed to process auto optimization refresh job", {
-        jobId: job.id,
-        workspaceId: input.workspaceId,
-        reason: input.reason,
-        error
+  const currentCanonical = input.payload
+    ? await withCurrentCanonicalDecisionReport(input.workspaceId, input.mode, input.payload).catch((error) => {
+      console.warn("[decision-report] stale refresh canonical overlay failed", {
+        workspace_id: input.workspaceId,
+        mode: input.mode,
+        error: error instanceof Error ? error.message : String(error)
       });
-    });
-  });
+      return null;
+    })
+    : null;
+  const payload = currentCanonical?.overlayApplied ? currentCanonical.payload : undefined;
 
-  return job;
+  const job = await latestOptimizationJob(input.workspaceId);
+  if (job && isPendingOptimizationStatus(job.status)) {
+    return queuedOptimizationResponse({
+      workspaceId: input.workspaceId,
+      mode: input.mode,
+      payload,
+      jobId: job.id,
+      status: job.status,
+      currentStep: job.currentStep,
+      message: input.message,
+      readiness: input.readiness,
+      startedAt: input.startedAt
+    });
+  }
+
+  return manualOptimizationRequiredResponse({
+    workspaceId: input.workspaceId,
+    mode: input.mode,
+    payload,
+    startedAt: input.startedAt,
+    message: input.message,
+    reason: input.reason,
+    readiness: input.readiness,
+    currentVersions: {
+      ...input.currentVersions,
+      canonicalSnapshotVersion: currentCanonical?.loaded?.lineage?.schemaSnapshotId ?? input.currentVersions?.canonicalSnapshotVersion ?? null,
+      metricSnapshotVersion: currentCanonical?.loaded?.data?.metadata.metric_engine_version ?? input.currentVersions?.metricSnapshotVersion ?? null
+    },
+    snapshotType: input.snapshotType
+  });
 }
 
 function queuedOptimizationResponse(input: {
@@ -643,6 +666,7 @@ function queuedOptimizationResponse(input: {
 function manualOptimizationRequiredResponse(input: {
   workspaceId: string;
   mode: "full" | "sku";
+  payload?: Record<string, unknown>;
   startedAt: number;
   message: string;
   reason: string;
@@ -650,11 +674,32 @@ function manualOptimizationRequiredResponse(input: {
   currentVersions?: DecisionReportContractInput["currentVersions"];
   snapshotType?: string;
 }) {
+  const payload = input.payload ?? {};
+  const existingReport = asRecord(payload.decision_report);
+  const existingOptimization = asRecord(existingReport.sku_portfolio_optimization);
+  const existingSkuDecisions = Array.isArray(existingOptimization.skuDecisions)
+    ? existingOptimization.skuDecisions
+    : Array.isArray(payload.skuDecisions)
+      ? payload.skuDecisions
+      : [];
+  const existingRiskAlerts = Array.isArray(payload.riskAlerts)
+    ? payload.riskAlerts
+    : Array.isArray(existingReport.riskAlerts)
+      ? existingReport.riskAlerts
+      : [];
+  const existingExecutionPlan = Array.isArray(payload.executionPlan)
+    ? payload.executionPlan
+    : Array.isArray(existingReport.executionPlan)
+      ? existingReport.executionPlan
+      : [];
+  const hasExistingReport = Object.keys(existingReport).length > 0 || existingSkuDecisions.length > 0;
+
   return decisionReportJson({
     workspaceId: input.workspaceId,
     mode: input.mode,
     startedAt: input.startedAt,
     payload: {
+      ...payload,
       ok: true,
       state: "ready_to_optimize",
       status: "READY_TO_OPTIMIZE",
@@ -663,12 +708,16 @@ function manualOptimizationRequiredResponse(input: {
       staleReason: input.reason,
       jobId: null,
       currentVersions: input.currentVersions ?? null,
-      decision_report: null,
-      portfolioSummary: null,
-      allocationRecommendation: null,
-      skuDecisions: [],
-      riskAlerts: [],
-      executionPlan: [],
+      decision_report: hasExistingReport ? payload.decision_report : null,
+      portfolioSummary: hasExistingReport
+        ? payload.portfolioSummary ?? existingReport.portfolioSummary ?? existingOptimization.portfolioSummary ?? null
+        : null,
+      allocationRecommendation: hasExistingReport
+        ? payload.allocationRecommendation ?? existingReport.allocationRecommendation ?? null
+        : null,
+      skuDecisions: hasExistingReport ? existingSkuDecisions : [],
+      riskAlerts: hasExistingReport ? existingRiskAlerts : [],
+      executionPlan: hasExistingReport ? existingExecutionPlan : [],
       snapshot: {
         id: null,
         type: input.snapshotType ?? "OptimizationReportCache",
@@ -676,14 +725,14 @@ function manualOptimizationRequiredResponse(input: {
       }
     },
     currentVersions: input.currentVersions ?? null,
-    optimizationSource: "none",
+    optimizationSource: hasExistingReport ? "optimization_snapshot" : "none",
     optimizationStatus: "PENDING",
     optimizationSnapshotId: null,
     refreshStatus: "IDLE",
     refreshJobId: null,
     refreshCurrentStep: null,
     readiness: input.readiness ?? null,
-    fallbackUsed: false,
+    fallbackUsed: hasExistingReport,
     fallbackReason: input.reason
   });
 }
@@ -711,6 +760,60 @@ async function withOptimizationReadiness(workspaceId: string, payload: Record<st
     ...normalizedPayload,
     optimizationReadiness,
     optimizationReadinessDebug: readinessDebug(loaded, "cached_payload_with_current_canonical_metrics")
+  };
+}
+
+async function withCurrentCanonicalDecisionReport(
+  workspaceId: string,
+  mode: "full" | "sku",
+  payload: Record<string, unknown>
+) {
+  const normalizedPayload = normalizeOptimizationProfitImpactPayload(payload);
+  const loaded = await loadEcommerceSalesDashboardData({
+    workspaceId,
+    decisionMode: mode
+  }).catch((error) => {
+    console.warn("[decision-report] current canonical overlay failed", {
+      workspace_id: workspaceId,
+      mode,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  });
+
+  if (loaded?.state !== "ready" || !loaded.data?.decision_report) {
+    return {
+      payload: await withOptimizationReadiness(workspaceId, normalizedPayload),
+      loaded,
+      overlayApplied: false
+    };
+  }
+
+  const cachedReport = asRecord(normalizedPayload.decision_report);
+  const cachedOptimization = asRecord(cachedReport.sku_portfolio_optimization);
+  const liveReport = asRecord(loaded.data.decision_report);
+  const liveOptimization = asRecord(liveReport.sku_portfolio_optimization);
+
+  return {
+    payload: {
+      ...normalizedPayload,
+      decision_report: {
+        ...liveReport,
+        sku_portfolio_optimization: Object.keys(cachedOptimization).length
+          ? {
+            ...liveOptimization,
+            ...cachedOptimization
+          }
+          : liveOptimization
+      },
+      generated_at: loaded.data.metadata.computed_at,
+      source_platforms: loaded.data.metadata.source_platforms,
+      analytics_validation: loaded.data.analytics_validation,
+      optimizationReadiness: validateOptimizationData(loaded.data),
+      optimizationReadinessDebug: readinessDebug(loaded, "current_canonical_metrics")
+    },
+    loaded,
+    overlayApplied: true
   };
 }
 
@@ -777,11 +880,6 @@ export async function GET(request: Request) {
   });
   if (session instanceof NextResponse) return session;
   logWorkspaceContext("[workspace-context] dashboard.ecommerce.decision-report.GET", session);
-  after(() => {
-    void recoverAsyncJobs({ workspaceId: session.workspace.id, limit: 5 }).catch((error) => {
-      console.error("Failed to recover stale optimization jobs from decision report route", error);
-    });
-  });
 
   const reportCache = await findOptimizationReportCache(prisma, {
     workspaceId: session.workspace.id,
@@ -821,22 +919,18 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await ensureOptimizationRefreshJob({
-        workspaceId: session.workspace.id,
-        decisionMode,
-        readiness: refreshAvailability.readiness,
-        reason: `auto_optimization_refresh:non_ready_decision_report_cache:${reportCache.state || "unknown"}`
-      });
-
-      return queuedOptimizationResponse({
+      return optimizationRefreshStatusOrManualResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        jobId: job.id,
-        status: job.status,
-        currentStep: job.currentStep,
-        message: "New data is available. Optimization refresh is running.",
+        payload: cachedPayload,
+        message: "New data is available. Run optimization to refresh recommendations.",
+        reason: `decision_report_cache_requires_refresh:${reportCache.state || "unknown"}`,
         readiness: refreshAvailability.readiness,
-        startedAt
+        startedAt,
+        currentVersions: {
+          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null
+        },
+        snapshotType: "OptimizationReportCache"
       });
     }
 
@@ -857,21 +951,18 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await ensureOptimizationRefreshJob({
-        workspaceId: session.workspace.id,
-        decisionMode,
-        readiness: refreshAvailability.readiness,
-        reason: "auto_optimization_refresh:missing_ops_rows"
-      });
-      return queuedOptimizationResponse({
+      return optimizationRefreshStatusOrManualResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        jobId: job.id,
-        status: job.status,
-        currentStep: job.currentStep,
-        message: "Optimization refresh is running.",
+        payload: cachedPayload,
+        message: "Optimization recommendations need to be regenerated.",
+        reason: "decision_report_cache_missing_optimization_rows",
         readiness: refreshAvailability.readiness,
-        startedAt
+        startedAt,
+        currentVersions: {
+          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null
+        },
+        snapshotType: "OptimizationReportCache"
       });
     }
 
@@ -880,6 +971,7 @@ export async function GET(request: Request) {
       snapshot: {
         algorithmVersion: reportCache.algorithmVersion,
         optimizationVersion: reportCache.optimizationVersion,
+        profitabilityEngineVersion: reportCache.profitabilityEngineVersion,
         canonicalSnapshotVersion: reportCache.canonicalSnapshotVersion,
         metricSnapshotVersion: reportCache.metricSnapshotVersion,
         simulationVersion: reportCache.simulationVersion,
@@ -904,21 +996,38 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await ensureOptimizationRefreshJob({
-        workspaceId: session.workspace.id,
-        decisionMode,
-        readiness: refreshAvailability.readiness,
-        reason: `auto_optimization_refresh:stale_decision_report_cache:${freshness.reason ?? "unknown"}`
-      });
-      return queuedOptimizationResponse({
+      return optimizationRefreshStatusOrManualResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
-        jobId: job.id,
-        status: job.status,
-        currentStep: job.currentStep,
-        message: "New data is available. Optimization refresh is running.",
+        payload: cachedPayload,
+        message: "New data is available. Run optimization to refresh recommendations.",
+        reason: `stale_decision_report_cache:${freshness.reason ?? "unknown"}`,
         readiness: refreshAvailability.readiness,
-        startedAt
+        startedAt,
+        currentVersions: {
+          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null
+        },
+        snapshotType: "OptimizationReportCache"
+      });
+    }
+
+    const currentCanonical = await withCurrentCanonicalDecisionReport(session.workspace.id, decisionMode, cachedPayload);
+    if (!currentCanonical.overlayApplied) {
+      const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
+      return manualOptimizationRequiredResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: currentCanonical.loaded?.message ?? "Current canonical report is not ready. Stale cached metrics were not reused.",
+        reason: `current_canonical_not_ready:${currentCanonical.loaded?.state ?? "unavailable"}`,
+        readiness: refreshAvailability.readiness,
+        currentVersions: {
+          canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? refreshAvailability.readiness?.dataVersion ?? null,
+          metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? null,
+          optimizationVersion: reportCache.optimizationVersion ?? null,
+          inputHash: reportCache.inputHash ?? null
+        },
+        snapshotType: "OptimizationReportCache"
       });
     }
 
@@ -927,15 +1036,24 @@ export async function GET(request: Request) {
       mode: decisionMode,
       startedAt,
       payload: {
-        ...await withOptimizationReadiness(session.workspace.id, cachedPayload),
+        ...currentCanonical.payload,
         snapshot: {
           id: reportCache.id,
           type: "OptimizationReportCache",
           sourceDecisionSnapshotId: reportCache.sourceDecisionSnapshotId,
           createdAt: dateToIso(reportCache.createdAt),
           updatedAt: dateToIso(reportCache.updatedAt),
-          latestSnapshot: true
+          latestSnapshot: true,
+          metricsOverlayApplied: currentCanonical.overlayApplied,
+          canonicalLineage: currentCanonical.loaded?.lineage ?? null
         }
+      },
+      metricsGeneratedAt: currentCanonical.loaded?.data?.metadata.computed_at ?? null,
+      currentVersions: {
+        canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? reportCache.canonicalSnapshotVersion ?? null,
+        metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? reportCache.metricSnapshotVersion ?? null,
+        optimizationVersion: reportCache.optimizationVersion ?? null,
+        inputHash: reportCache.inputHash ?? null
       },
       optimizationStatus: "SUCCESS",
       optimizationSnapshotId: reportCache.id,
@@ -963,6 +1081,7 @@ export async function GET(request: Request) {
       snapshot: {
         algorithmVersion: typeof snapshot.algorithmVersion === "string" ? snapshot.algorithmVersion : null,
         optimizationVersion: typeof snapshot.optimizationVersion === "string" ? snapshot.optimizationVersion : null,
+        profitabilityEngineVersion: typeof snapshot.profitabilityEngineVersion === "string" ? snapshot.profitabilityEngineVersion : null,
         canonicalSnapshotVersion: typeof snapshot.canonicalSnapshotVersion === "string" ? snapshot.canonicalSnapshotVersion : null,
         metricSnapshotVersion: typeof snapshot.metricSnapshotVersion === "string" ? snapshot.metricSnapshotVersion : null,
         simulationVersion: typeof snapshot.simulationVersion === "string" ? snapshot.simulationVersion : null,
@@ -987,22 +1106,38 @@ export async function GET(request: Request) {
         });
       }
 
-      const job = await ensureOptimizationRefreshJob({
-        workspaceId: session.workspace.id,
-        decisionMode,
-        readiness: refreshAvailability.readiness,
-        reason: `auto_optimization_refresh:stale_decision_snapshot:${freshness.reason ?? "unknown"}`
-      });
-      return queuedOptimizationResponse({
+      return optimizationRefreshStatusOrManualResponse({
         workspaceId: session.workspace.id,
         mode: decisionMode,
         payload: recommendationsJson,
-        jobId: job.id,
-        status: job.status,
-        currentStep: job.currentStep,
-        message: "New data is available. Optimization refresh is running.",
+        message: "New data is available. Run optimization to refresh recommendations.",
+        reason: `stale_decision_snapshot:${freshness.reason ?? "unknown"}`,
         readiness: refreshAvailability.readiness,
-        startedAt
+        startedAt,
+        currentVersions: {
+          canonicalSnapshotVersion: refreshAvailability.readiness?.dataVersion ?? null
+        },
+        snapshotType: "DecisionSnapshot"
+      });
+    }
+
+    const currentCanonical = await withCurrentCanonicalDecisionReport(session.workspace.id, decisionMode, recommendationsJson);
+    if (!currentCanonical.overlayApplied) {
+      const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
+      return manualOptimizationRequiredResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: currentCanonical.loaded?.message ?? "Current canonical report is not ready. Stale cached metrics were not reused.",
+        reason: `current_canonical_not_ready:${currentCanonical.loaded?.state ?? "unavailable"}`,
+        readiness: refreshAvailability.readiness,
+        currentVersions: {
+          canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? refreshAvailability.readiness?.dataVersion ?? null,
+          metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? null,
+          optimizationVersion: typeof snapshot.optimizationVersion === "string" ? snapshot.optimizationVersion : null,
+          inputHash: typeof snapshot.inputHash === "string" ? snapshot.inputHash : null
+        },
+        snapshotType: "DecisionSnapshot"
       });
     }
 
@@ -1011,7 +1146,7 @@ export async function GET(request: Request) {
       mode: decisionMode,
       startedAt,
       payload: {
-        ...await withOptimizationReadiness(session.workspace.id, recommendationsJson),
+        ...currentCanonical.payload,
         snapshot: {
           id: snapshot.id,
           type: "DecisionSnapshot",
@@ -1023,8 +1158,17 @@ export async function GET(request: Request) {
           metricSnapshotVersion: snapshot.metricSnapshotVersion,
           simulationVersion: snapshot.simulationVersion,
           inputHash: snapshot.inputHash,
-          generatedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null
+          generatedAt: snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null,
+          metricsOverlayApplied: currentCanonical.overlayApplied,
+          canonicalLineage: currentCanonical.loaded?.lineage ?? null
         }
+      },
+      metricsGeneratedAt: currentCanonical.loaded?.data?.metadata.computed_at ?? (snapshot.generatedAt instanceof Date ? snapshot.generatedAt.toISOString() : null),
+      currentVersions: {
+        canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? snapshot.canonicalSnapshotVersion ?? null,
+        metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? snapshot.metricSnapshotVersion ?? null,
+        optimizationVersion: snapshot.optimizationVersion ?? null,
+        inputHash: snapshot.inputHash ?? null
       },
       optimizationStatus: "SUCCESS",
       optimizationSnapshotId: snapshot.id,

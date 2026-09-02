@@ -6,7 +6,7 @@ import { attachSnapshotIdentity } from "./dashboard/snapshot-freshness";
 
 export { CANONICAL_PROFITABILITY_ENGINE_VERSION };
 
-export const ANALYTICS_METRIC_ENGINE_VERSION = "analytics_metric_v2026_08_06_cache_freshness";
+export const ANALYTICS_METRIC_ENGINE_VERSION = "analytics_metric_v2026_08_31_source_scope_dedupe_v5";
 export const CUSTOMER_ENGINE_VERSION = "customer_lifecycle_v2026_08_05_period_scoped";
 export const cachedReportDateRangePresets = ["DAILY", "WEEKLY", "7D", "30D", "90D", "12M", "ALL", "CUSTOM"] as const;
 
@@ -45,6 +45,7 @@ type CacheIdentityInput = {
   domain?: string | null;
   semanticSnapshotVersion?: string | null;
   semanticSchemaHash?: string | null;
+  canonicalDataVersion?: string | null;
   queryHash?: string | null;
   profitabilityEngineVersion?: string | null;
   metricEngineVersion?: string | null;
@@ -100,6 +101,7 @@ export function reportMetricCacheKey(input: CacheIdentityInput) {
     domain: input.domain ?? null,
     semanticSnapshotVersion: input.semanticSnapshotVersion ?? null,
     semanticSchemaHash: input.semanticSchemaHash ?? null,
+    canonicalDataVersion: input.canonicalDataVersion ?? null,
     queryHash: input.queryHash ?? null
   });
 }
@@ -120,6 +122,12 @@ function payloadCustomerEngineVersion(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
   return typeof record.customerEngineVersion === "string" ? record.customerEngineVersion : null;
+}
+
+function payloadCanonicalDataVersion(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record.canonicalDataVersion === "string" ? record.canonicalDataVersion : null;
 }
 
 export function isCacheableReportRange(range: Pick<ReportDateRangeInput, "preset">) {
@@ -172,7 +180,8 @@ export function cacheIdentityFromPayload({
       : null,
     semanticSchemaHash: typeof payload.semanticContext === "object" && payload.semanticContext && !Array.isArray(payload.semanticContext)
       ? String((payload.semanticContext as Record<string, unknown>).schemaHash ?? "")
-      : null
+      : null,
+    canonicalDataVersion: typeof payload.canonicalDataVersion === "string" ? payload.canonicalDataVersion : null
   };
 }
 
@@ -208,10 +217,12 @@ export async function getReportMetricCache(
   const expectedProfitabilityEngineVersion = input.profitabilityEngineVersion ?? CANONICAL_PROFITABILITY_ENGINE_VERSION;
   const expectedMetricEngineVersion = input.metricEngineVersion ?? ANALYTICS_METRIC_ENGINE_VERSION;
   const expectedCustomerEngineVersion = input.customerEngineVersion ?? CUSTOMER_ENGINE_VERSION;
+  const expectedCanonicalDataVersion = input.canonicalDataVersion ?? null;
   if (
     payloadProfitabilityEngineVersion(cache.payloadJson) !== expectedProfitabilityEngineVersion ||
     payloadMetricEngineVersion(cache.payloadJson) !== expectedMetricEngineVersion ||
-    payloadCustomerEngineVersion(cache.payloadJson) !== expectedCustomerEngineVersion
+    payloadCustomerEngineVersion(cache.payloadJson) !== expectedCustomerEngineVersion ||
+    (expectedCanonicalDataVersion !== null && payloadCanonicalDataVersion(cache.payloadJson) !== expectedCanonicalDataVersion)
   ) {
     await prisma.reportMetricCache.update({
       where: { id: cache.id },

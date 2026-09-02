@@ -1655,7 +1655,10 @@ type ConnectedSourceRow = {
         rawHeaderPath?: string[] | null;
         type?: string | null;
         nullable?: boolean | null;
+        rowCount?: number | null;
+        nonNullCount?: number | null;
       }>;
+      rowCount?: number | null;
     }>;
   } | null;
   connectedAt: string | null;
@@ -3878,6 +3881,52 @@ function formatSourceDateTime(value: string | null | undefined, isZh: boolean) {
   }).format(date);
 }
 
+function formatFieldRowCoverage(input: {
+  nonNullCount?: number | null;
+  rowCount?: number | null;
+  tableRowCount?: number | null;
+  isZh: boolean;
+}) {
+  const parsedTotal = Number.isFinite(Number(input.rowCount))
+    ? Number(input.rowCount)
+    : Number.isFinite(Number(input.tableRowCount))
+      ? Number(input.tableRowCount)
+      : null;
+  const parsedFilled = Number.isFinite(Number(input.nonNullCount)) ? Number(input.nonNullCount) : null;
+  const total = parsedTotal !== null && parsedTotal > 0 ? parsedTotal : null;
+  const filled = parsedFilled !== null && (total !== null || parsedFilled > 0) ? parsedFilled : null;
+  const format = (value: number) => new Intl.NumberFormat("en-US").format(Math.max(0, Math.trunc(value)));
+
+  if (filled !== null && total !== null) {
+    return input.isZh
+      ? `非空 ${format(filled)} / 共 ${format(total)} 行`
+      : `${format(filled)} / ${format(total)} rows filled`;
+  }
+
+  if (total !== null) {
+    return input.isZh ? `共 ${format(total)} 行` : `${format(total)} rows`;
+  }
+
+  return null;
+}
+
+function schemaNeedsFieldCoverage(schema: ConnectedSourceRow["schema"] | null | undefined) {
+  const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+  if (!tables.length) return true;
+
+  return tables.every((table) => {
+    const tableHasRowCount = typeof table.rowCount === "number" && Number.isFinite(table.rowCount) && table.rowCount > 0;
+    const columns = Array.isArray(table.columns) ? table.columns : [];
+    const columnsHaveCoverage = columns.some((column) => {
+      const rowCount = typeof column.rowCount === "number" && Number.isFinite(column.rowCount) && column.rowCount > 0;
+      const nonNullCount = typeof column.nonNullCount === "number" && Number.isFinite(column.nonNullCount) && column.nonNullCount > 0;
+      return rowCount || nonNullCount;
+    });
+
+    return !tableHasRowCount && !columnsHaveCoverage;
+  });
+}
+
 function sourceTypeLabel(copy: DashboardCopy, source: ConnectedSourceRow) {
   const catalogSource = copy.connectors.sources.find(
     (item) => item.name === source.provider || item.name === source.name
@@ -3998,6 +4047,7 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
     return {
       name: typeof tableRecord.name === "string" ? tableRecord.name : "",
       schema: typeof tableRecord.schema === "string" ? tableRecord.schema : null,
+      rowCount: valueAsNumber(tableRecord.rowCount),
       columns: columns.map((column) => {
         const columnRecord = valueAsRecord(column);
 
@@ -4009,7 +4059,9 @@ function schemaFromSchemaEndpointPayload(payload: unknown): ConnectedSourceRow["
             ? columnRecord.rawHeaderPath.filter((item): item is string => typeof item === "string")
             : null,
           type: typeof columnRecord.type === "string" ? columnRecord.type : null,
-          nullable: typeof columnRecord.nullable === "boolean" ? columnRecord.nullable : null
+          nullable: typeof columnRecord.nullable === "boolean" ? columnRecord.nullable : null,
+          rowCount: valueAsNumber(columnRecord.rowCount),
+          nonNullCount: valueAsNumber(columnRecord.nonNullCount)
         };
       }).filter((column) => column.name)
     };
@@ -4269,6 +4321,48 @@ function SettingsConnectedSourcesPanel({
     adAccountId?: string | null;
   }>>({});
   const isZh = copy.connectors.connectedCountLabel.includes("个");
+  const refreshConnectedSources = async () => {
+    const response = await fetch("/api/data-sources", { cache: "no-store" });
+    const payload = await response.json().catch(() => null) as { ok?: boolean; dataSources?: ConnectedSourceRow[]; message?: string } | null;
+
+    if (!response.ok || !payload?.ok || !Array.isArray(payload.dataSources)) {
+      throw new Error(payload?.message || (isZh ? "刷新数据源状态失败" : "Failed to refresh data source status"));
+    }
+
+    payload.dataSources.forEach((source) => onUpdateConnectedSource(source));
+    return payload.dataSources;
+  };
+  const waitForSourceJob = async (jobId: string) => {
+    const terminalStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 900 : 2000));
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        message?: string;
+        job?: {
+          status?: string | null;
+          currentStep?: string | null;
+          errorMessage?: string | null;
+        } | null;
+      } | null;
+
+      if (!response.ok || !payload?.ok || !payload.job) {
+        throw new Error(payload?.message || (isZh ? "读取处理任务状态失败" : "Failed to load processing job status"));
+      }
+
+      const status = String(payload.job.status ?? "").toUpperCase();
+      if (!terminalStatuses.has(status)) continue;
+      if (status !== "COMPLETED") {
+        throw new Error(payload.job.errorMessage || payload.job.currentStep || (isZh ? "数据重新处理失败" : "Data reprocess failed"));
+      }
+
+      return payload.job;
+    }
+
+    throw new Error(isZh ? "数据仍在处理中，请稍后刷新查看。" : "Data is still processing. Refresh shortly to view the latest status.");
+  };
   const connectedCountLabel = isLoadingConnectedSources
     ? (isZh ? "加载中" : "Loading")
     : `${connectedSources.length} ${copy.connectors.connectedCountLabel}`;
@@ -4308,6 +4402,8 @@ function SettingsConnectedSourcesPanel({
         syncingMetaAds: "同步中",
         syncGoogleAds: "同步 Google Ads",
         syncingGoogleAds: "同步中",
+        reprocess: "重新处理数据",
+        reprocessing: "处理中",
         recentScan: "最近扫描",
         noTables: "暂未读取到表结构",
         fieldNullable: "可为空",
@@ -4366,6 +4462,8 @@ function SettingsConnectedSourcesPanel({
         syncingMetaAds: "Syncing",
         syncGoogleAds: "Sync Google Ads",
         syncingGoogleAds: "Syncing",
+        reprocess: "Reprocess data",
+        reprocessing: "Processing",
         recentScan: "Last scan",
         noTables: "No tables found yet",
         fieldNullable: "nullable",
@@ -4390,7 +4488,7 @@ function SettingsConnectedSourcesPanel({
         off: "Off"
       };
 
-  const loadSourceSchema = async (source: ConnectedSourceRow) => {
+  const loadSourceSchema = useCallback(async (source: ConnectedSourceRow) => {
     setLoadingSchemaSourceIds((current) => current.includes(source.id) ? current : [...current, source.id]);
     setSchemaLoadErrors((current) => {
       const next = { ...current };
@@ -4409,9 +4507,15 @@ function SettingsConnectedSourcesPanel({
       }
 
       const schema = schemaFromSchemaEndpointPayload(payload);
+      const loadedTables = Array.isArray(schema?.tables) ? schema.tables : [];
+      if (!schema || loadedTables.length === 0) {
+        throw new Error(isZh
+          ? "已读取到数据源摘要，但完整表结构暂不可用。请重新处理数据。"
+          : "Source summary is available, but full table details are not available yet. Reprocess the data.");
+      }
       onUpdateConnectedSource({
         ...source,
-        schema: schema ?? source.schema
+        schema
       });
     } catch (error) {
       setSchemaLoadErrors((current) => ({
@@ -4421,7 +4525,7 @@ function SettingsConnectedSourcesPanel({
     } finally {
       setLoadingSchemaSourceIds((current) => current.filter((id) => id !== source.id));
     }
-  };
+  }, [isZh, onUpdateConnectedSource]);
 
   const toggleSourceSchema = (source: ConnectedSourceRow) => {
     const sourceId = source.id;
@@ -4433,10 +4537,21 @@ function SettingsConnectedSourcesPanel({
         : [...current, sourceId]
     );
 
-    if (willExpand && !source.schema?.unifiedIngestion && (source.schema?.tables ?? []).length === 0) {
+    if (willExpand && schemaNeedsFieldCoverage(source.schema)) {
       void loadSourceSchema(source);
     }
   };
+
+  useEffect(() => {
+    connectedSources.forEach((source) => {
+      if (!expandedSourceIds.includes(source.id)) return;
+      if (!schemaNeedsFieldCoverage(source.schema)) return;
+      if (loadingSchemaSourceIds.includes(source.id)) return;
+      if (schemaLoadErrors[source.id]) return;
+
+      void loadSourceSchema(source);
+    });
+  }, [connectedSources, expandedSourceIds, loadSourceSchema, loadingSchemaSourceIds, schemaLoadErrors]);
 
   const toggleTable = (sourceId: string, tableName: string) => {
     const key = `${sourceId}:${tableName}`;
@@ -4506,14 +4621,60 @@ function SettingsConnectedSourcesPanel({
     }
   };
 
-  const rescanSource = async (sourceId: string) => {
+  const rescanSource = async (source: ConnectedSourceRow) => {
+    const sourceId = source.id;
+    const isUploadedFileSource = source.type === "EXCEL" || source.type === "CSV";
     setRescanningSourceId(sourceId);
 
     try {
-      const response = await fetch(`/api/data-sources/${sourceId}/rescan`, {
-        method: "POST"
-      });
-      const payload = await response.json().catch(() => null);
+      if (isUploadedFileSource) {
+        const response = await fetch(`/api/data-sources/${sourceId}/reprocess`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": `settings-reprocess-${sourceId}`
+          },
+          body: JSON.stringify({
+            reason: "settings_manual_reprocess",
+            forceSourceInference: true,
+            rebuildSemanticMapping: true,
+            rebuildCanonical: true,
+            invalidateDependentReports: true
+          })
+        });
+        const payload = await response.json().catch(() => null) as {
+          ok?: boolean;
+          message?: string;
+          jobId?: string | null;
+          dataSource?: ConnectedSourceRow;
+        } | null;
+
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.message || (isZh ? "数据重新处理启动失败" : "Data reprocess failed to start"));
+        }
+
+        if (payload.dataSource) {
+          onUpdateConnectedSource(payload.dataSource as ConnectedSourceRow);
+        }
+        setExpandedSourceIds((current) =>
+          current.includes(sourceId) ? current : [...current, sourceId]
+        );
+        window.dispatchEvent(new Event("monarca-data-sources-updated"));
+
+        if (payload.jobId) {
+          await waitForSourceJob(payload.jobId);
+        }
+        await refreshConnectedSources();
+        window.dispatchEvent(new Event("monarca-data-sources-updated"));
+        return;
+      }
+
+      const response = await fetch(`/api/data-sources/${sourceId}/rescan`, { method: "POST" });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        message?: string;
+        dataSource?: ConnectedSourceRow;
+      } | null;
 
       if (response.ok && payload?.ok && payload.dataSource) {
         onUpdateConnectedSource(payload.dataSource as ConnectedSourceRow);
@@ -4522,7 +4683,7 @@ function SettingsConnectedSourcesPanel({
         );
         window.dispatchEvent(new Event("monarca-data-sources-updated"));
       } else {
-        window.alert(payload?.message || (isZh ? "同步数据源失败" : "Source sync failed"));
+        throw new Error(payload?.message || (isZh ? "同步数据源失败" : "Source sync failed"));
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : (isZh ? "同步数据源失败" : "Source sync failed"));
@@ -4948,6 +5109,7 @@ function SettingsConnectedSourcesPanel({
               const isMetaAdsSource = source.provider === "meta_ads";
               const isGoogleAdsSource = source.provider === "google_ads";
               const usesConnectorSync = isShopifySource || isAmazonSource || isMetaAdsSource || isGoogleAdsSource;
+              const isUploadedFileSource = source.type === "EXCEL" || source.type === "CSV";
               const shopifyFetchResult = shopifyFetchResults[source.id];
               const shopifySyncResult = shopifySyncResults[source.id];
               const metaSyncResult = metaSyncResults[source.id];
@@ -5131,10 +5293,12 @@ function SettingsConnectedSourcesPanel({
                           variant="outline"
                           size="sm"
                           disabled={rescanningSourceId === source.id}
-                          onClick={() => void rescanSource(source.id)}
+                          onClick={() => void rescanSource(source)}
                         >
                           <RefreshCw className={cn("size-4", rescanningSourceId === source.id && "animate-spin")} />
-                          {rescanningSourceId === source.id ? labels.rescanning : labels.rescan}
+                          {rescanningSourceId === source.id
+                            ? (isUploadedFileSource ? labels.reprocessing : labels.rescanning)
+                            : (isUploadedFileSource ? labels.reprocess : labels.rescan)}
                         </Button>
                       ) : null}
                       {isShopifySource ? (
@@ -5302,23 +5466,44 @@ function SettingsConnectedSourcesPanel({
                                     <span className="truncate">{tableName}</span>
                                   </span>
                                   <span className="shrink-0 text-xs text-muted-foreground">
-                                    {table.columns.length} {labels.columnUnit}
+                                    {[
+                                      `${table.columns.length} ${labels.columnUnit}`,
+                                      typeof table.rowCount === "number" && Number.isFinite(table.rowCount) && table.rowCount > 0
+                                        ? (isZh
+                                          ? `${new Intl.NumberFormat("en-US").format(Math.trunc(table.rowCount))} 行`
+                                          : `${new Intl.NumberFormat("en-US").format(Math.trunc(table.rowCount))} rows`)
+                                        : null
+                                    ].filter(Boolean).join(" · ")}
                                   </span>
                                 </button>
                                 {isTableExpanded ? (
                                   <div className="grid gap-1 border-t px-3 py-2">
-                                    {table.columns.map((column) => (
-                                      <div
-                                        key={`${tableName}.${column.name}`}
-                                        className="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-xs"
-                                      >
-                                        <span className="font-medium text-foreground">{column.name}</span>
-                                        <span className="text-muted-foreground">
-                                          {column.type ?? "field"} ·{" "}
-                                          {column.nullable ? labels.fieldNullable : labels.fieldRequired}
-                                        </span>
-                                      </div>
-                                    ))}
+                                    {table.columns.map((column) => {
+                                      const rowCoverage = formatFieldRowCoverage({
+                                        nonNullCount: column.nonNullCount,
+                                        rowCount: column.rowCount,
+                                        tableRowCount: table.rowCount,
+                                        isZh
+                                      });
+
+                                      return (
+                                        <div
+                                          key={`${tableName}.${column.name}`}
+                                          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded px-2 py-1.5 text-xs sm:grid-cols-[minmax(0,1fr)_auto_auto]"
+                                        >
+                                          <span className="min-w-0 truncate font-medium text-foreground">{column.name}</span>
+                                          <span className="text-right text-muted-foreground">
+                                            {column.type ?? "field"} ·{" "}
+                                            {column.nullable ? labels.fieldNullable : labels.fieldRequired}
+                                          </span>
+                                          {rowCoverage ? (
+                                            <span className="col-span-2 text-right text-muted-foreground sm:col-span-1">
+                                              {rowCoverage}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 ) : null}
                               </div>
@@ -6570,8 +6755,8 @@ function formatBusinessNumber(value: number) {
 
 function normalizedSourceStatus(source: ConnectedSourceRow) {
   return (
-    source.ingestionJob?.status ||
     source.syncStatus ||
+    source.ingestionJob?.status ||
     source.schema?.unifiedIngestion?.status ||
     source.status ||
     ""
@@ -6580,8 +6765,8 @@ function normalizedSourceStatus(source: ConnectedSourceRow) {
 
 function sourceStatusValues(source: ConnectedSourceRow) {
   return [
-    source.ingestionJob?.status,
     source.syncStatus,
+    source.ingestionJob?.status,
     source.schema?.unifiedIngestion?.status,
     source.status
   ]
@@ -6590,6 +6775,10 @@ function sourceStatusValues(source: ConnectedSourceRow) {
 }
 
 function sourceIsSyncing(source: ConnectedSourceRow) {
+  const statuses = sourceStatusValues(source);
+  if (statuses.some((status) => status === "FAILED" || status === "FAILED_SYNC" || status === "FAILED_AUTH" || status === "TIMEOUT" || status === "DISCONNECTED")) {
+    return false;
+  }
   const syncingStatuses = [
     "RUNNING",
     "SYNCING",
@@ -6600,10 +6789,11 @@ function sourceIsSyncing(source: ConnectedSourceRow) {
     "INDEXING"
   ];
 
-  return sourceStatusValues(source).some((status) => syncingStatuses.includes(status));
+  return statuses.some((status) => syncingStatuses.includes(status));
 }
 
 function sourceSyncProgress(source: ConnectedSourceRow) {
+  if (!sourceIsSyncing(source)) return null;
   const explicitProgress = source.ingestionJob?.progress;
   if (typeof explicitProgress === "number" && Number.isFinite(explicitProgress)) {
     return Math.max(0, Math.min(100, Math.round(explicitProgress)));
@@ -6628,6 +6818,7 @@ function sourceSyncProgress(source: ConnectedSourceRow) {
 }
 
 function sourceNeedsConnectedSourceRefresh(source: ConnectedSourceRow) {
+  if (!sourceIsSyncing(source)) return false;
   const activeStatuses = new Set(["QUEUED", "RUNNING", "SYNCING", "PROCESSING", "SCHEMA_READY", "CANONICALIZING", "GENERATING", "INDEXING"]);
   return sourceStatusValues(source).some((status) => activeStatuses.has(status));
 }
@@ -13540,7 +13731,8 @@ function ReportMetricEvidencePanel({
                   <div key={module} className="rounded-xl border bg-white p-4">
                     {(() => {
                       const primaryResults = (typeFilter === "all"
-                        ? results.filter((result) => !["comparison", "distribution", "auxiliary"].includes(reportMetricDisplayType(result)))
+                        ? results.filter((result) => typeFilter !== "all" || reportMetricDisplayType(result) !== "ranking")
+                            .filter((result) => !["comparison", "distribution", "auxiliary"].includes(reportMetricDisplayType(result)))
                         : results
                       ).slice(0, 8);
                       const primaryIds = new Set(primaryResults.map((result) => result.metricId));
@@ -16821,7 +17013,7 @@ function ReportGeneratedPanel({
 	          <CardContent className="grid gap-3 p-4 text-sm text-amber-900">
 	            <p>{failedResults.length} 个指标计算失败，已从本次报告中排除</p>
 	            {reportDataAudit ? (
-	              <div className="grid gap-2 rounded-lg border border-amber-200/80 bg-white/65 p-3 text-xs leading-5 text-amber-950 sm:grid-cols-3">
+	              <div className="grid gap-2 rounded-lg border border-amber-200/80 bg-white/65 p-3 text-xs leading-5 text-amber-950 md:grid-cols-3">
 	                <p>
 	                  <span className="font-semibold">数据源总行数</span>
 	                  <span className="ml-2">{totalSourceRows ?? "未知"}</span>
@@ -17675,7 +17867,10 @@ function ReportsPage({
     const showLoading = options.showLoading ?? true;
     const requestId = analysisDecisionReportRequestRef.current + 1;
     analysisDecisionReportRequestRef.current = requestId;
-    if (showLoading) setIsLoadingAnalysisDecisionReport(true);
+    if (showLoading) {
+      setIsLoadingAnalysisDecisionReport(true);
+      setAnalysisDecisionReportPayload(null);
+    }
     try {
       const modeQuery = mode === "sku" ? "mode=sku&" : "";
       const { response, payload } = await fetchReportJson<typeof analysisDecisionReportPayload>(
@@ -17685,16 +17880,29 @@ function ReportsPage({
           ? "无法连接到 Monarca 优化服务，请刷新页面后重试。"
           : "Could not reach the Monarca optimization service. Refresh the page and try again."
       );
-	      if (response.ok && payload?.ok) {
-	        if (analysisDecisionReportRequestRef.current === requestId) {
-	          setAnalysisDecisionReportPayload(payload);
+      if (response.ok && payload?.ok) {
+        if (analysisDecisionReportRequestRef.current === requestId) {
+          setAnalysisDecisionReportPayload(payload);
           const hasOptimizationSnapshot =
             payload.optimization?.source === "optimization_snapshot" &&
             (payload.optimization?.recommendationCount ?? 0) > 0;
-	          if (hasOptimizationSnapshot || payload.optimizationRun?.completed_at) {
-	            setHasStartedProfitOptimization(true);
-	          }
-	        }
+          const refreshStatus = payload.refresh?.status;
+          const optimizationIsRunning =
+            refreshStatus === "QUEUED" ||
+            refreshStatus === "RUNNING" ||
+            payload.optimization?.status === "RUNNING";
+          setHasStartedProfitOptimization(hasOptimizationSnapshot || optimizationIsRunning);
+          if (!optimizationIsRunning && !hasOptimizationSnapshot) {
+            setProfitOptimizationRunStatus("IDLE");
+            setProfitOptimizationRunStep(null);
+            setStatusMessage((current) => {
+              if (!current) return null;
+              return /optimization refresh exceeded|optimization job did not complete|优化任务未完成|优化运行失败/i.test(current)
+                ? null
+                : current;
+            });
+          }
+        }
       }
       return payload;
     } catch (error) {
@@ -17942,14 +18150,21 @@ function ReportsPage({
     ?? analysisDecisionReportPayload?.snapshot?.createdAt
     ?? null;
   const metricsLastUpdatedAt = analysisDecisionReportPayload?.metrics?.generatedAt ?? analysisDecisionReportPayload?.generated_at ?? null;
-  const effectiveOptimizationStartedForReport = hasStartedProfitOptimization || hasOptimizationSnapshot;
   const isOptimizationRefreshInFlight =
     refreshState?.status === "QUEUED" ||
     refreshState?.status === "RUNNING" ||
-    optimizationState?.status === "RUNNING";
+    optimizationState?.status === "RUNNING" ||
+    profitOptimizationRunStatus === "QUEUED" ||
+    profitOptimizationRunStatus === "PROCESSING" ||
+    profitOptimizationRunStatus === "PAUSED";
+  const hasCurrentOptimizationActivity =
+    hasOptimizationSnapshot ||
+    isOptimizationRefreshInFlight ||
+    isRunningProfitOptimization;
+  const effectiveOptimizationStartedForReport = hasCurrentOptimizationActivity;
   const shouldShowOptimizationLoading =
     isRunningProfitOptimization ||
-    (!hasOptimizationSnapshot && effectiveOptimizationStartedForReport && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight));
+    (!hasOptimizationSnapshot && (isLoadingAnalysisDecisionReport || isOptimizationRefreshInFlight) && hasCurrentOptimizationActivity);
   const optimizationHeaderUpdatedAt = optimizationLastUpdatedAt ?? metricsLastUpdatedAt ?? undefined;
   const reportHeaderAction = (
     <div className="flex shrink-0 items-center justify-end text-right text-xs font-bold tabular-nums text-slate-500">
@@ -18066,6 +18281,11 @@ function ReportPage({
     decision_report?: DecisionIntelligenceReportV1 | null;
     generated_at?: string;
     source_platforms?: string[];
+    analytics_validation?: {
+      status?: string;
+      errors?: string[];
+      warnings?: string[];
+    } | null;
     code?: string;
     jobId?: string;
   };
@@ -18100,19 +18320,75 @@ function ReportPage({
           : "Could not reach the Monarca report service. Refresh the page and try again."
       );
 
+      if (payload?.state === "unavailable" || payload?.status === "FAILED_VALIDATION") {
+        setDecisionReportPayload(payload);
+        return payload;
+      }
+
       if (!response.ok || !payload?.ok) {
+        setDecisionReportPayload(null);
         throw new Error(payload?.message || (isZh ? "经营报表加载失败" : "Failed to load decision report"));
       }
 
       setDecisionReportPayload(payload);
       return payload;
     } catch (error) {
+      setDecisionReportPayload(null);
       setDecisionReportError(error instanceof Error ? error.message : (isZh ? "经营报表加载失败" : "Failed to load decision report"));
       return null;
     } finally {
       setIsLoadingDecisionReport(false);
     }
   }, [decisionReportRange, isLoadingConnectedSources, isZh]);
+
+  const refreshDecisionReport = useCallback(async () => {
+    if (isLoadingConnectedSources || isLoadingDecisionReport) return null;
+
+    setIsLoadingDecisionReport(true);
+    setDecisionReportError(null);
+
+    try {
+      const { response, payload } = await fetchReportJson<ProfitOptimizationJobPayload>(
+        "/api/dashboard/ecommerce/optimize",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userRequested: true, source: "report_refresh" })
+        },
+        isZh
+          ? "刷新报表请求没有到达 Monarca 服务，请刷新页面后重试。"
+          : "The report refresh request did not reach Monarca. Refresh the page and try again."
+      );
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || (isZh ? "创建报表刷新任务失败" : "Failed to create report refresh job"));
+      }
+
+      if (payload.jobId) {
+        const completedJob = await waitForProfitOptimizationJob(payload.jobId, {
+          isZh,
+          onStatus: () => {}
+        });
+
+        if (completedJob.status !== "COMPLETED") {
+          throw new Error(completedJob.errorMessage || (isZh ? "报表刷新任务未完成" : "Report refresh job did not complete"));
+        }
+      }
+
+      let latestReport = await loadDecisionReport();
+      for (let attempt = 0; attempt < 5 && latestReport?.state !== "ready"; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 750 : 1500));
+        latestReport = await loadDecisionReport();
+      }
+      return latestReport;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : (isZh ? "报表刷新失败" : "Report refresh failed");
+      setDecisionReportError(message);
+      return null;
+    } finally {
+      setIsLoadingDecisionReport(false);
+    }
+  }, [isLoadingConnectedSources, isLoadingDecisionReport, isZh, loadDecisionReport]);
 
   useEffect(() => {
     if (!decisionReportIsRefreshing || isLoadingDecisionReport) return;
@@ -18135,7 +18411,7 @@ function ReportPage({
       <div className="flex justify-end px-1 pb-1">
         <Button
           type="button"
-          onClick={() => void loadDecisionReport()}
+          onClick={() => void refreshDecisionReport()}
           disabled={isLoadingDecisionReport || isLoadingConnectedSources}
         >
           <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
@@ -18149,19 +18425,56 @@ function ReportPage({
         </aside>
         <div className="min-w-0 overflow-hidden">
           {isLoadingConnectedSources ? (
-            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           ) : !effectiveHasConnectedDatabase && isLoadingDecisionReport ? (
-            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           ) : !effectiveHasConnectedDatabase && !decisionReportPayload && !decisionReportError ? (
-            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           ) : isLoadingDecisionReport && !decisionReportPayload ? (
-            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell showEmptyShellLoading onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           ) : decisionReportIsReady ? (
             <ReportRendererEngine
               report={decisionReportPayload?.decision_report ?? null}
               message={decisionReportPayload?.message}
+              onRefreshReport={refreshDecisionReport}
+              isRefreshingReport={isLoadingDecisionReport}
               locale={locale}
             />
+          ) : decisionReportPayload?.status === "FAILED_VALIDATION" ? (
+            <Card className="border-amber-200 bg-amber-50 shadow-sm">
+              <CardContent className="flex flex-col gap-3 p-5 text-sm text-amber-950">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-700" />
+                  <div>
+                    <p className="font-semibold">
+                      {isZh ? "当前报表数据未通过校验" : "Current report data failed validation"}
+                    </p>
+                    <p className="mt-1 text-amber-800">
+                      {isZh
+                        ? "系统检测到订单、明细、库存或广告数据没有对齐，已停止展示旧报表数值。请重新处理数据源后刷新报表。"
+                        : "Orders, line items, inventory, or ads do not reconcile, so stale report values are not shown. Reprocess the data source, then refresh the report."}
+                    </p>
+                    <p className="mt-2 text-xs font-semibold text-amber-900">
+                      {isZh
+                        ? "原因：当前数据源的订单、商品明细、广告或库存 artifact 无法对账。"
+                        : "Reason: the current order, line-item, ads, or inventory artifacts do not reconcile."}
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <Button
+                    type="button"
+                    onClick={() => void refreshDecisionReport()}
+                    disabled={isLoadingDecisionReport || isLoadingConnectedSources}
+                    variant="outline"
+                    className="border-amber-300 bg-white text-amber-950 hover:bg-amber-100"
+                  >
+                    <RefreshCw className={cn("size-4", isLoadingDecisionReport && "animate-spin")} />
+                    {isLoadingDecisionReport ? (isZh ? "刷新中..." : "Refreshing...") : (isZh ? "刷新报表" : "Refresh report")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           ) : decisionReportError ? (
             <Card className="border-rose-200 bg-rose-50 shadow-sm">
               <CardContent className="p-5 text-sm font-medium text-rose-900">
@@ -18169,9 +18482,9 @@ function ReportPage({
               </CardContent>
             </Card>
           ) : shouldShowDecisionReportEmpty ? (
-            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           ) : (
-            <ReportRendererEngine report={null} showEmptyShell locale={locale} />
+            <ReportRendererEngine report={null} showEmptyShell onRefreshReport={refreshDecisionReport} isRefreshingReport={isLoadingDecisionReport} locale={locale} />
           )}
         </div>
       </div>

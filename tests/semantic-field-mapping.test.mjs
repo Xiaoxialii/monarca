@@ -130,13 +130,54 @@ test("Shopify order structure fields do not map to revenue", async () => {
   }], "shopify");
   const byField = new Map(result.mappings.map((mapping) => [mapping.source_field || mapping.field, mapping]));
 
-  assert.equal(byField.get("source_order_id")?.canonical, "order_id");
+  assert.equal(byField.get("source_order_id")?.canonical, "source_order_id");
   assert.equal(byField.get("customer_id")?.canonical, "customer_id");
   assert.equal(byField.get("order_date")?.canonical, "order_date");
-  assert.equal(byField.get("order_status")?.canonical, "status");
-  assert.equal(byField.get("financial_status")?.canonical, "status");
-  assert.equal(byField.get("fulfillment_status")?.canonical, "status");
+  assert.equal(byField.get("order_status")?.canonical, "order_status");
+  assert.equal(byField.get("financial_status")?.canonical, "financial_status");
+  assert.equal(byField.get("fulfillment_status")?.canonical, "fulfillment_status");
   assert.equal(byField.get("net_sales")?.canonical, "net_sales");
+  assert.equal(result.canonical_schema.tables.ecommerce_orders[0]?.source_order_id, "gid://shopify/Order/1");
+});
+
+test("semantic engine preserves explicit order status, refund, and inventory value concepts", async () => {
+  const result = await run([{
+    amazon_order_id: "AMZ-1",
+    financial_status: "paid",
+    payment_status: "captured",
+    fulfillment_status: "fulfilled",
+    cancelled_at: "",
+    refund_date: "2026-08-02",
+    source_line_item_id: "LINE-1",
+    inventory_value: 35204.85,
+    snapshot_date: "2026-08-09"
+  }], "amazon");
+  const byField = new Map(result.mappings.map((mapping) => [mapping.source_field || mapping.field, mapping]));
+
+  assert.equal(byField.get("financial_status")?.canonical, "financial_status");
+  assert.equal(byField.get("payment_status")?.canonical, "payment_status");
+  assert.equal(byField.get("fulfillment_status")?.canonical, "fulfillment_status");
+  assert.equal(byField.get("cancelled_at")?.canonical, "cancelled_at_source");
+  assert.equal(byField.get("refund_date")?.canonical, "refund_date");
+  assert.equal(byField.get("source_line_item_id")?.canonical, "source_line_item_id");
+  assert.equal(byField.get("inventory_value")?.canonical, "inventory_value");
+  assert.equal(byField.get("snapshot_date")?.canonical, "snapshot_date");
+});
+
+test("semantic engine maps human-readable inventory value headers", async () => {
+  const result = await run([{
+    sku: "SKU_0050",
+    available: 954,
+    "Inventory value": 48129.06,
+    "Snapshot Date": "2026-08-09"
+  }], "excel");
+  const byField = new Map(result.mappings.map((mapping) => [mapping.source_field || mapping.field, mapping]));
+  const inventory = result.canonical_schema.tables.ecommerce_inventory[0];
+
+  assert.equal(byField.get("Inventory value")?.canonical, "inventory_value");
+  assert.equal(byField.get("Snapshot Date")?.canonical, "snapshot_date");
+  assert.equal(inventory.inventory_value, 48129.06);
+  assert.equal(inventory.snapshot_date, "2026-08-09");
 });
 
 

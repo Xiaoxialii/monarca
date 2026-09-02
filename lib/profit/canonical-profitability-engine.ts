@@ -1,4 +1,4 @@
-export const CANONICAL_PROFITABILITY_ENGINE_VERSION = "v2.1-profitability-reconciliation" as const;
+export const CANONICAL_PROFITABILITY_ENGINE_VERSION = "v2.8-source-scope-dedupe" as const;
 
 export type CogsStatus = "AVAILABLE" | "ESTIMATED" | "MISSING";
 export type CanonicalAdAllocationMethod = "DIRECT_SKU" | "CAMPAIGN" | "REVENUE_SHARE" | "UNKNOWN";
@@ -69,8 +69,8 @@ export function calculateSkuProfitability(input: CanonicalProfitabilityInput): C
   const operatingCost = money(shippingCost + fulfillmentCost + platformFee + paymentFee + refundCost);
   const totalCost = money(cogs + operatingCost + adSpend);
   const grossProfit = money(revenue - cogs);
-  const contributionProfit = money(revenue - cogs - operatingCost);
-  const netProfit = money(contributionProfit - adSpend);
+  const contributionProfit = money(revenue - cogs - operatingCost - adSpend);
+  const netProfit = contributionProfit;
   const margin = ratio(netProfit, revenue);
   const cogsStatus = input.cogsStatus ?? inferCogsStatus({ cogs, revenue, cogsConfidence: input.cogsConfidence });
   const cogsConfidence = confidence(input.cogsConfidence ?? confidenceForCogsStatus(cogsStatus));

@@ -128,10 +128,10 @@ test("async job runner centralizes lifecycle, heartbeat, snapshots, and recovery
   assert.match(recoveryRoute, /RECOVERY_QUEUED/);
 });
 
-test("data sources listing recovers stale ingestion jobs so sources do not stay syncing forever", () => {
+test("data sources listing reports stale ingestion state without blocking on recovery", () => {
   const dataSourcesRoute = read("app/api/data-sources/route.ts");
 
-  assert.match(dataSourcesRoute, /import \{ after, NextResponse \} from "next\/server"/);
+  assert.match(dataSourcesRoute, /import \{ NextResponse \} from "next\/server"/);
   assert.match(dataSourcesRoute, /recoverStaleIngestionJobs/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs/);
   assert.match(dataSourcesRoute, /function isActiveIngestionStatus/);
@@ -140,9 +140,11 @@ test("data sources listing recovers stale ingestion jobs so sources do not stay 
   assert.match(dataSourcesRoute, /"TIMEOUT"/);
   assert.match(dataSourcesRoute, /ingestionJob:/);
   assert.match(dataSourcesRoute, /async function recoverStaleDataSourceJobs\(workspaceId: string\)/);
-  assert.match(dataSourcesRoute, /recoverStaleIngestionJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
+  assert.match(dataSourcesRoute, /recoverStaleIngestionJobs\(\{\s*workspaceId,\s*limit:\s*5,\s*processRetryableJobs:\s*false\s*\}\)/);
   assert.match(dataSourcesRoute, /recoverAsyncJobs\(\{\s*workspaceId,\s*limit:\s*5\s*\}\)/);
-  assert.match(dataSourcesRoute, /after\(\(\) => \{\s*void recoverStaleDataSourceJobs\(session\.workspace\.id\)/);
+  assert.match(dataSourcesRoute, /requestUrl\.searchParams\.get\("recoverStaleJobs"\) !== "0"/);
+  assert.doesNotMatch(dataSourcesRoute, /after\(\(\) => \{\s*void recoverStaleDataSourceJobs\(session\.workspace\.id\)/);
+  assert.match(dataSourcesRoute, /job\.payload->>'dataSourceId'/);
   assert.match(dataSourcesRoute, /prisma\.unifiedIngestionJob\.findMany/);
   assert.match(dataSourcesRoute, /latestIngestionJobBySourceId/);
   assert.match(dataSourcesRoute, /latestIngestionJob:\s*latestIngestionJobBySourceId\.get\(source\.id\) \?\? null/);
@@ -189,7 +191,9 @@ test("worker owns canonicalization and commits schema state without long interac
   assert.match(worker, /writeCanonicalDatasetArtifacts\(/);
   assert.match(worker, /export function inferBusinessSource/);
   assert.match(worker, /sourceProvider:\s*businessSource/);
-  assert.match(worker, /businessSource,\s*\n\s*sampledRows:/);
+  assert.match(worker, /sourceInference,\s*\n\s*sourceInferenceVersion:/);
+  assert.match(worker, /productContextValidation/);
+  assert.match(worker, /replaceProductContextIndex/);
   assert.match(worker, /transportSource:\s*source/);
   assert.doesNotMatch(worker, /generateEcommerceDecisionSnapshots\(client/);
   assert.doesNotMatch(worker, /generateWorkspaceMetricsFromConnectedSources/);
@@ -247,13 +251,137 @@ test("upload and rescan routes use a serverless-safe semantic sample size", () =
 });
 
 test("uploaded Excel files infer business platform instead of using transport source", () => {
-  const { inferBusinessSource } = jiti("./lib/ingestion/unified-ingestion-worker.ts");
+  const { inferBusinessSource, inferBusinessSourceDiagnostic } = jiti("./lib/ingestion/unified-ingestion-worker.ts");
 
   assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "shopify_enriched.xlsx" }), "shopify");
   assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "amazon_enriched.xlsx" }), "amazon");
   assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "meta_ads_enriched.xlsx" }), "meta_ads");
   assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", fileName: "inventory_enriched.xlsx" }), "inventory");
   assert.equal(inferBusinessSource({ source: "excel", provider: "Excel", businessSource: "excel", fileName: "shopify_enriched.xlsx" }), "shopify");
+  assert.equal(inferBusinessSource({
+    source: "excel",
+    provider: "Excel",
+    fileName: "shopify_enriched.xlsx",
+    observedFields: ["amazon_order_id", "asin", "seller_sku", "item_price", "item_cost"]
+  }), "amazon");
+  assert.equal(inferBusinessSource({
+    source: "excel",
+    provider: "Excel",
+    businessSource: "shopify",
+    fileName: "shopify_enriched.xlsx",
+    observedFields: ["amazon_order_id", "asin", "seller_sku"]
+  }), "shopify");
+
+  const amazonHeaders = inferBusinessSourceDiagnostic({
+    source: "excel",
+    provider: "Excel",
+    fileName: "shopify_enriched.xlsx",
+    observedFields: ["amazon_order_id", "asin", "seller_sku", "item_price", "fulfillment_channel"]
+  });
+  assert.equal(amazonHeaders.inferredSource, "amazon");
+  assert.ok(amazonHeaders.confidence > 0.7);
+  assert.ok(amazonHeaders.matchedSignals.some((signal) => signal === "amazon:asin"));
+  assert.ok(amazonHeaders.conflictingSignals.includes("weak:shopify"));
+  assert.ok(amazonHeaders.warnings.some((warning) => /conflicted/i.test(warning)));
+  assert.match(amazonHeaders.inferenceVersion, /^source_inference\/v/);
+
+  const shopifyHeaders = inferBusinessSourceDiagnostic({
+    source: "excel",
+    provider: "Excel",
+    fileName: "amazon_export.xlsx",
+    observedFields: ["shopify_order_id", "variant_id", "lineitem_name", "compare_at_price", "fulfillment_status"]
+  });
+  assert.equal(shopifyHeaders.inferredSource, "shopify");
+  assert.ok(shopifyHeaders.conflictingSignals.includes("weak:amazon"));
+
+  const genericHeaders = inferBusinessSourceDiagnostic({
+    source: "excel",
+    provider: "Excel",
+    fileName: "orders.xlsx",
+    observedFields: ["order_id", "sku", "product_name", "quantity", "unit_price", "order_date"]
+  });
+  assert.equal(genericHeaders.inferredSource, "ecommerce");
+  assert.equal(genericHeaders.matchedSignals[0], "generic:ecommerce_fields");
+
+  const mixedHeaders = inferBusinessSourceDiagnostic({
+    source: "excel",
+    provider: "Excel",
+    fileName: "upload.xlsx",
+    observedFields: ["asin", "seller_sku", "item_price", "variant_id", "lineitem_name"]
+  });
+  assert.equal(mixedHeaders.inferredSource, "amazon");
+  assert.ok(mixedHeaders.conflictingSignals.some((signal) => signal.startsWith("shopify:")));
+});
+
+test("semantic field analyzer samples across multi-sheet flattened Excel rows", () => {
+  const { analyzeRawFields } = jiti("./lib/semantic/engine/field-analyzer.ts");
+  const rows = [
+    ...Array.from({ length: 600 }, (_, index) => ({
+      amazon_order_id: `order-${index}`,
+      sku: `SKU-${index}`,
+      item_price: 10
+    })),
+    ...Array.from({ length: 600 }, (_, index) => ({
+      order_id: `order-${index}`,
+      sku: `SKU-${index}`,
+      product_name: `Product ${index}`,
+      asin: `B000000${index}`
+    })),
+    ...Array.from({ length: 100 }, (_, index) => ({
+      product_id: `product-${index}`,
+      sku: `SKU-${index}`,
+      product_name: `Catalog Product ${index}`,
+      product_type: "Bags",
+      tags: "travel, storage",
+      handle: `catalog-product-${index}`
+    }))
+  ];
+
+  const result = analyzeRawFields(rows);
+  const fieldNames = result.fields.map((field) => field.field);
+  assert.ok(fieldNames.includes("amazon_order_id"));
+  assert.ok(fieldNames.includes("product_name"));
+  assert.ok(fieldNames.includes("product_type"));
+  assert.ok(fieldNames.includes("handle"));
+  assert.ok(!fieldNames.includes("__sheetName"));
+});
+
+test("worker canonical sampling keeps rows from later Excel sheets", () => {
+  const { representativeIngestionRows } = jiti("./lib/ingestion/unified-ingestion-worker.ts");
+  const rows = [
+    ...Array.from({ length: 600 }, (_, index) => ({ __sheetName: "source_orders", sku: `SKU-${index}`, item_price: 10 })),
+    ...Array.from({ length: 600 }, (_, index) => ({ __sheetName: "ecommerce_order_items", sku: `SKU-${index}`, product_name: `Line Product ${index}` })),
+    ...Array.from({ length: 100 }, (_, index) => ({ __sheetName: "ecommerce_products", sku: `SKU-${index}`, product_name: `Catalog Product ${index}`, tags: "catalog" }))
+  ];
+
+  const sampledRows = representativeIngestionRows(rows, 1_000);
+  assert.equal(sampledRows.length, 1_000);
+  assert.ok(sampledRows.some((row) => row.__sheetName === "source_orders"));
+  assert.ok(sampledRows.some((row) => row.__sheetName === "ecommerce_order_items"));
+  assert.ok(sampledRows.some((row) => row.__sheetName === "ecommerce_products"));
+});
+
+test("reprocess endpoint queues idempotent ingestion from preserved raw artifacts", () => {
+  const reprocessRoute = read("app/api/data-sources/[id]/reprocess/route.ts");
+
+  assert.match(reprocessRoute, /requireWorkspaceRole\(\[WorkspaceRole\.OWNER,\s*WorkspaceRole\.ADMIN\]/);
+  assert.match(reprocessRoute, /id:\s*dataSourceId/);
+  assert.match(reprocessRoute, /workspaceId:\s*session\.workspace\.id/);
+  assert.match(reprocessRoute, /RAW_ARTIFACT_UNAVAILABLE/);
+  assert.match(reprocessRoute, /rawUploadLocatorFromIngestionHistory/, "Reprocess should recover preserved raw uploads from prior ingestion job metadata.");
+  assert.match(reprocessRoute, /!objectKey\.startsWith\(\"\/tmp\/\"\)/, "Expired local tmp upload paths must not be treated as cloud artifact keys.");
+  assert.match(read("lib/ingestion/unified-ingestion-worker.ts"), /representativeIngestionRows\(uploadRows, MAX_UNIFIED_INGESTION_SAMPLE_ROWS\)/);
+  assert.match(read("lib/ingestion/unified-ingestion-worker.ts"), /payload:\s*uploadRows/);
+  assert.doesNotMatch(read("lib/ingestion/unified-ingestion-worker.ts"), /payload:\s*sampledRows/);
+  assert.match(reprocessRoute, /ACTIVE_REPROCESS_STATUSES\s*=\s*\["QUEUED", "PROCESSING", "PAUSED"\]/);
+  assert.match(reprocessRoute, /status:\s*\{\s*in:\s*\[\.\.\.ACTIVE_REPROCESS_STATUSES\]\s*\}/);
+  assert.match(reprocessRoute, /idempotencyKey/);
+  assert.match(reprocessRoute, /schemaSnapshot\.create/);
+  assert.match(reprocessRoute, /unifiedIngestionJob\.create/);
+  assert.match(reprocessRoute, /createAsyncJob\(prisma/);
+  assert.match(reprocessRoute, /after\(\(\) => \{\s*void processJob\(asyncJob\.id\)/);
+  assert.match(reprocessRoute, /statusUrl:\s*`\/api\/jobs\/\$\{asyncJob\.id\}`/);
+  assert.match(reprocessRoute, /clearWorkspaceReportCaches/);
 });
 
 test("decision snapshots degrade gracefully when profit inputs are incomplete", () => {

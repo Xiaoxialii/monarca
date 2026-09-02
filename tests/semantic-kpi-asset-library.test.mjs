@@ -119,3 +119,24 @@ test("semantic KPI asset library preserves grouped Excel KPI headers", async () 
   assert.ok(semanticLayer.metrics.some((metric) => metric.name === "首揽及时率 得分"));
   assert.ok(semanticLayer.metrics.every((metric) => metric.tags.includes("Semantic KPI Asset")));
 });
+
+test("Excel schema inference records per-field row coverage", async () => {
+  const XLSX = await import("xlsx");
+  const rows = [
+    ["amazon_order_id", "sku", "asin", "item_price"],
+    ["A-1", "SKU_0001", "B0001", 12.5],
+    ["A-2", "SKU_0002", "", 14],
+    ["A-3", "", "B0003", ""]
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), "orders");
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+  const [table] = await inferTablesFromExcelBuffer("shopify_named_amazon_headers.xlsx", buffer);
+
+  assert.equal(table.rowCount, 3);
+  assert.equal(table.columns.find((column) => column.name === "amazon_order_id")?.rowCount, 3);
+  assert.equal(table.columns.find((column) => column.name === "amazon_order_id")?.nonNullCount, 3);
+  assert.equal(table.columns.find((column) => column.name === "sku")?.nonNullCount, 2);
+  assert.equal(table.columns.find((column) => column.name === "asin")?.nonNullCount, 2);
+  assert.equal(table.columns.find((column) => column.name === "item_price")?.nonNullCount, 2);
+});

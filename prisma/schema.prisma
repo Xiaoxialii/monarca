@@ -12,6 +12,11 @@ enum WorkspaceRole {
   VIEWER
 }
 
+enum SystemRole {
+  USER
+  SUPER_ADMIN
+}
+
 enum DataSourceType {
   SQL_SERVER
   POSTGRESQL
@@ -293,6 +298,7 @@ model User {
   name                String
   avatarUrl           String?            @map("avatar_url")
   locale              String             @default("en")
+  systemRole          SystemRole         @default(USER)
   productAccessEnabled Boolean           @default(false)
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -1094,6 +1100,11 @@ model SchemaSnapshot {
   schemaStatus     String                @default("PENDING")
   canonicalStatus  String                @default("NOT_STARTED")
   canonicalVersion String?
+  validationStatus String?
+  sourceInferenceVersion String?
+  semanticMappingVersion String?
+  productContextIndexVersion String?
+  publishedAt      DateTime?
   schemaJson       Json
   qualityReport    Json?
   createdAt        DateTime              @default(now())
@@ -1102,6 +1113,43 @@ model SchemaSnapshot {
   reportRuns       ReportRun[]
 
   @@unique([workspaceId, version])
+  @@index([workspaceId, canonicalStatus, canonicalVersion])
+  @@index([workspaceId, publishedAt])
+}
+
+model ProductContextIndex {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  dataSourceId     String?
+  schemaSnapshotId String
+  provider         String?
+  normalizedSku    String?
+  sku              String?
+  productId        String?
+  variantId        String?
+  asin             String?
+  productName      String?
+  category         String?
+  productType      String?
+  brand            String?
+  vendor           String?
+  tags             Json?
+  handle           String?
+  price            Float?
+  currency         String?
+  contextQuality   Float    @default(0)
+  searchable       Boolean  @default(false)
+  sourceProvenance Json?
+  indexVersion     String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([workspaceId, schemaSnapshotId, provider, normalizedSku, productId, variantId, asin])
+  @@index([workspaceId, schemaSnapshotId, normalizedSku])
+  @@index([workspaceId, schemaSnapshotId, asin])
+  @@index([workspaceId, schemaSnapshotId, productId])
+  @@index([workspaceId, dataSourceId, schemaSnapshotId])
+  @@index([workspaceId, schemaSnapshotId, searchable])
 }
 
 model MetricDefinition {
@@ -1266,6 +1314,7 @@ model DecisionSnapshot {
   optimizationType          String?
   algorithmVersion          String?
   optimizationVersion       String?
+  profitabilityEngineVersion String?
   canonicalSnapshotVersion  String?
   metricSnapshotVersion     String?
   simulationVersion         String?
@@ -1710,6 +1759,7 @@ model OptimizationReportCache {
   executionPlanJson            Json      @default("[]")
   algorithmVersion             String?
   optimizationVersion          String?
+  profitabilityEngineVersion   String?
   canonicalSnapshotVersion     String?
   metricSnapshotVersion        String?
   simulationVersion            String?

@@ -12,8 +12,16 @@ import { buildSemanticMappingCache, semanticMappingCacheSummary } from "@/lib/se
 import type { CanonicalDataset } from "@/lib/semantic/types";
 import { ECOMMERCE_CANONICAL_SCHEMA_VERSION } from "@/lib/snapshot/canonical-snapshot-generator";
 import { writeCanonicalDatasetArtifacts } from "@/lib/snapshot/canonical-artifact-writer";
+import {
+  buildProductContextIndexRows,
+  PRODUCT_CONTEXT_INDEX_VERSION,
+  PRODUCT_CONTEXT_VALIDATION_VERSION,
+  replaceProductContextIndex
+} from "@/lib/snapshot/product-context-index";
 
 const MAX_UNIFIED_INGESTION_SAMPLE_ROWS = 1_000;
+export const SOURCE_INFERENCE_VERSION = "source_inference/v2";
+export const SEMANTIC_MAPPING_VERSION = "semantic_mapping/v2_product_context";
 const ACTIVE_INGESTION_JOB_STATUSES = ["RUNNING"] as const;
 const LEGACY_ACTIVE_INGESTION_JOB_STATUSES = ["PROCESSING", "SCHEMA_READY", "CANONICALIZING"] as const;
 const MAX_INGESTION_ATTEMPTS = 3;
@@ -175,21 +183,175 @@ export function inferBusinessSource(input: {
   provider?: string | null;
   businessSource?: string | null;
   fileName?: string | null;
+  observedFields?: string[];
+}) {
+  return inferBusinessSourceDiagnostic(input).inferredSource;
+}
+
+export function inferBusinessSourceDiagnostic(input: {
+  source?: UploadSource;
+  provider?: string | null;
+  businessSource?: string | null;
+  fileName?: string | null;
+  observedFields?: string[];
 }) {
   const explicit = normalizeBusinessSource(input.businessSource);
-  if (explicit && !isTransportSource(explicit)) return explicit;
+  if (explicit && !isTransportSource(explicit)) {
+    return {
+      inferredSource: explicit,
+      confidence: 1,
+      matchedSignals: [`explicit:${explicit}`],
+      conflictingSignals: [] as string[],
+      warnings: [] as string[],
+      inferenceVersion: SOURCE_INFERENCE_VERSION
+    };
+  }
+
+  const observed = inferBusinessSourceFromObservedFields(input.observedFields ?? []);
 
   const provider = normalizeBusinessSource(input.provider);
-  if (provider && !isTransportSource(provider)) return provider;
-
   const value = normalizeBusinessSource(`${input.provider ?? ""} ${input.fileName ?? ""}`) ?? "";
+  const namedSource = businessSourceFromNormalizedValue(value);
+  const providerSource = provider && !isTransportSource(provider) ? provider : null;
+  const weakSource = providerSource ?? namedSource;
+  const conflicts = [
+    ...(weakSource && observed.inferredSource && weakSource !== observed.inferredSource ? [`weak:${weakSource}`] : []),
+    ...observed.conflictingSignals
+  ];
+
+  if (observed.inferredSource) {
+    return {
+      inferredSource: observed.inferredSource,
+      confidence: observed.confidence,
+      matchedSignals: observed.matchedSignals,
+      conflictingSignals: conflicts,
+      warnings: conflicts.length ? ["Source filename/provider conflicted with strong field signals; using observed fields."] : [],
+      inferenceVersion: SOURCE_INFERENCE_VERSION
+    };
+  }
+  if (weakSource) {
+    return {
+      inferredSource: weakSource,
+      confidence: providerSource ? 0.75 : 0.55,
+      matchedSignals: [providerSource ? `provider:${weakSource}` : `filename:${weakSource}`],
+      conflictingSignals: [] as string[],
+      warnings: providerSource ? [] : ["Business source inferred from weak filename signal."],
+      inferenceVersion: SOURCE_INFERENCE_VERSION
+    };
+  }
+
+  const fallback = hasGenericEcommerceFields(input.observedFields ?? []) ? "ecommerce" : input.source ?? "upload";
+  return {
+    inferredSource: fallback,
+    confidence: fallback === "ecommerce" ? 0.5 : 0.25,
+    matchedSignals: fallback === "ecommerce" ? ["generic:ecommerce_fields"] : [`transport:${fallback}`],
+    conflictingSignals: [] as string[],
+    warnings: fallback === "ecommerce" ? ["Using generic ecommerce fallback."] : [],
+    inferenceVersion: SOURCE_INFERENCE_VERSION
+  };
+}
+
+function businessSourceFromNormalizedValue(value: string) {
   if (hasBusinessToken(value, ["meta", "facebook", "fb", "meta_ads", "facebook_ads"])) return "meta_ads";
   if (hasBusinessToken(value, ["amazon", "amz"])) return "amazon";
   if (hasBusinessToken(value, ["shopify"])) return "shopify";
   if (hasBusinessToken(value, ["inventory", "warehouse", "stock"])) return "inventory";
   if (hasBusinessToken(value, ["ads", "ad", "advertising", "campaign"])) return "ads";
 
-  return input.source ?? "upload";
+  return null;
+}
+
+function inferBusinessSourceFromObservedFields(fields: string[]) {
+  const normalizedFields = new Set(fields.map((fieldName) => normalizeBusinessSource(fieldName)).filter(Boolean) as string[]);
+  if (!normalizedFields.size) {
+    return {
+      inferredSource: null as string | null,
+      confidence: 0,
+      matchedSignals: [] as string[],
+      conflictingSignals: [] as string[]
+    };
+  }
+
+  const signals = {
+    amazon: observedFieldMatches(normalizedFields, [
+      "amazon_order_id",
+      "asin",
+      "amazon_order_id",
+      "marketplace_id",
+      "seller_sku",
+      "item_price",
+      "item_tax",
+      "amazon_fee",
+      "fba_fee",
+      "referral_fee",
+      "fulfillment_channel"
+    ]),
+    shopify: observedFieldMatches(normalizedFields, [
+      "shopify_order_id",
+      "shopify_product_id",
+      "admin_graphql_api_id",
+      "variant_id",
+      "variant_sku",
+      "lineitem_sku",
+      "lineitem_name",
+      "handle",
+      "product_handle",
+      "vendor",
+      "product_type",
+      "compare_at_price",
+      "financial_status",
+      "fulfillment_status",
+      "body_html"
+    ]),
+    meta_ads: observedFieldMatches(normalizedFields, [
+      "ad_account_id",
+      "campaign_id",
+      "adset_id",
+      "ad_set_id",
+      "ad_id",
+      "impressions",
+      "clicks",
+      "spend",
+      "date_start"
+    ]),
+    inventory: observedFieldMatches(normalizedFields, [
+      "warehouse_id",
+      "stock_level",
+      "stock_on_hand",
+      "available_stock",
+      "reorder_point",
+      "inventory_quantity"
+    ])
+  };
+  const score = Object.fromEntries(Object.entries(signals).map(([source, matches]) => [source, matches.length]));
+  const ranked = Object.entries(score).sort((left, right) => right[1] - left[1]);
+  const [winner, winningScore] = ranked[0] ?? [];
+  const runnerUp = ranked[1];
+  const runnerUpScore = runnerUp?.[1] ?? 0;
+
+  return {
+    inferredSource: winningScore >= 2 && winningScore >= runnerUpScore + 1 ? winner : null,
+    confidence: Math.min(0.98, 0.45 + winningScore * 0.12 - runnerUpScore * 0.06),
+    matchedSignals: winner ? signals[winner as keyof typeof signals].map((field) => `${winner}:${field}`) : [],
+    conflictingSignals: runnerUp && runnerUpScore > 0 ? signals[runnerUp[0] as keyof typeof signals].map((field) => `${runnerUp[0]}:${field}`) : []
+  };
+}
+
+function observedFieldMatches(fields: Set<string>, candidates: string[]) {
+  return Array.from(new Set(candidates.filter((fieldName) => fields.has(fieldName))));
+}
+
+function hasGenericEcommerceFields(fields: string[]) {
+  const normalizedFields = new Set(fields.map((fieldName) => normalizeBusinessSource(fieldName)).filter(Boolean) as string[]);
+  const requiredGroups = [
+    ["order_id", "order_number"],
+    ["sku", "seller_sku", "variant_sku"],
+    ["product_name", "product_title", "item_name", "title"],
+    ["quantity", "qty"],
+    ["unit_price", "price", "item_price"],
+    ["order_date", "date", "created_at"]
+  ];
+  return requiredGroups.filter((group) => group.some((field) => normalizedFields.has(field))).length >= 4;
 }
 
 function isTransportSource(value: string) {
@@ -209,6 +371,22 @@ function normalizeBusinessSource(value?: string | null) {
   return normalized;
 }
 
+function observedFieldsFromTables(tables: Array<{
+  columns: Array<{
+    name?: string;
+    displayName?: string;
+    semanticName?: string;
+    rawHeaderPath?: string[];
+  }>;
+}>) {
+  return Array.from(new Set(tables.flatMap((table) => table.columns.flatMap((column) => [
+    column.name,
+    column.displayName,
+    column.semanticName,
+    ...(column.rawHeaderPath ?? [])
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)))));
+}
+
 function publicTables(tables: Array<{
   name: string;
   rowCount?: number;
@@ -219,6 +397,8 @@ function publicTables(tables: Array<{
     rawHeaderPath?: string[];
     type?: string;
     nullable?: boolean;
+    rowCount?: number;
+    nonNullCount?: number;
   }>;
   rawHeaderRows?: string[][];
 }>) {
@@ -232,7 +412,9 @@ function publicTables(tables: Array<{
       semanticName: column.semanticName,
       rawHeaderPath: column.rawHeaderPath,
       type: column.type ?? "unknown",
-      nullable: column.nullable
+      nullable: column.nullable,
+      rowCount: column.rowCount,
+      nonNullCount: column.nonNullCount
     }))
   }));
 }
@@ -445,12 +627,13 @@ export async function processIngestionJob(
   const fileName = metadata.fileName;
   const schemaSnapshotId = metadata.schemaSnapshotId;
   const provider = metadata.provider ?? (source === "csv" ? "CSV" : "Excel");
-  const businessSource = inferBusinessSource({
+  let sourceInference = inferBusinessSourceDiagnostic({
     source,
     provider,
     businessSource: metadata.businessSource,
     fileName
   });
+  let businessSource = sourceInference.inferredSource;
   let currentStep: string | null = "Loading uploaded file";
   let currentProgress = 5;
   const stopHeartbeat = startHeartbeat(client, jobId, () => ({
@@ -514,6 +697,14 @@ export async function processIngestionJob(
     });
 
     const tables = await inferSchema(source, fileName, content);
+    sourceInference = inferBusinessSourceDiagnostic({
+      source,
+      provider,
+      businessSource: metadata.businessSource,
+      fileName,
+      observedFields: observedFieldsFromTables(tables)
+    });
+    businessSource = sourceInference.inferredSource;
     const schemaTables = publicTables(tables);
     const semanticLayer = buildSemanticLayer(tables);
     const semanticMappingCache = buildSemanticMappingCache({
@@ -532,7 +723,8 @@ export async function processIngestionJob(
         source: businessSource,
         transportSource: source,
         totalParsedRows: tables.reduce((sum, table) => sum + (table.rowCount ?? 0), 0)
-      })
+      }),
+      sourceInference
     };
     const qualityReport = {
       tableCount: tables.length,
@@ -566,18 +758,21 @@ export async function processIngestionJob(
     });
 
     const uploadRows = await parseRows(source, content);
-    const sampledRows = uploadRows.slice(0, MAX_UNIFIED_INGESTION_SAMPLE_ROWS);
+    const sampledRows = representativeIngestionRows(uploadRows, MAX_UNIFIED_INGESTION_SAMPLE_ROWS);
     const ingestionResult = await runUnifiedIngestionPipeline({
       source: businessSource,
       workspace_id: workspaceId,
-      payload: sampledRows,
+      payload: uploadRows,
       metadata: {
         fileName,
         transportSource: source,
         businessSource,
+        sourceInference,
+        sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+        semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
         sampledRows: sampledRows.length,
         totalParsedRows: uploadRows.length,
-        samplingStrategy: "first_n_rows",
+        samplingStrategy: "representative_rows_for_mapping_full_rows_for_canonical",
         semanticMemoryMode: "ephemeral"
       },
       memory: new InMemorySemanticMemoryStore(),
@@ -607,16 +802,38 @@ export async function processIngestionJob(
       }
     });
     const canonicalRowCount = countCanonicalRows(ingestionResult.canonical_data as CanonicalDataset);
-    const canonicalStatus = canonicalRowCount > 0 ? "READY" : "FAILED";
+    const productContextIndex = buildProductContextIndexRows({
+      workspaceId,
+      dataSourceId,
+      schemaSnapshotId,
+      provider: businessSource,
+      canonicalDataset: ingestionResult.canonical_data as CanonicalDataset
+    });
+    const indexWrite = await replaceProductContextIndex(client, productContextIndex.rows);
+    const validationStatus = productContextIndex.validation.status;
+    const canonicalStatus = canonicalRowCount > 0 && validationStatus !== "FAILED_VALIDATION" ? "READY" : "FAILED";
     const completedSchemaPayload = {
       ...schemaPayload,
-      unifiedIngestion
+      unifiedIngestion,
+      sourceInference
     };
     const schemaJson = {
       sourceId: dataSourceId,
       rawUploadSchema: completedSchemaPayload,
       ...canonicalSchemaJson,
-      semanticMappingCache
+      semanticMappingCache,
+      sourceInference,
+      sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+      semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
+      productContextIndexVersion: PRODUCT_CONTEXT_INDEX_VERSION,
+      productContextValidationVersion: PRODUCT_CONTEXT_VALIDATION_VERSION,
+      productContextValidation: productContextIndex.validation,
+      productContextIndex: {
+        status: indexWrite.available ? "READY" : "UNAVAILABLE",
+        version: PRODUCT_CONTEXT_INDEX_VERSION,
+        rowCount: productContextIndex.rows.length,
+        insertedRows: indexWrite.inserted
+      }
     } as Prisma.InputJsonValue;
 
     await setJobState({
@@ -634,8 +851,14 @@ export async function processIngestionJob(
           fileSize: metadata.fileSize ?? 0,
           tableCount: qualityReport.tableCount,
           columnCount: qualityReport.columnCount,
+          canonicalArtifactManifest: objectValue(canonicalSchemaJson).canonicalArtifactManifest ?? null,
           canonicalStatus,
           canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+          validationStatus,
+          sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+          semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
+          productContextIndexVersion: PRODUCT_CONTEXT_INDEX_VERSION,
+          publishedAt: canonicalStatus === "READY" ? new Date() : null,
           schemaSnapshotId
         } as Prisma.InputJsonValue
       }
@@ -648,8 +871,17 @@ export async function processIngestionJob(
         qualityReport: {
           ...qualityReport,
           canonicalArtifactBacked: canonicalRowCount > 0,
+          canonicalArtifactManifest: objectValue(canonicalSchemaJson).canonicalArtifactManifest ?? null,
           canonicalRowCount,
-          semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
+          semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache),
+          sourceInference,
+          productContextValidation: productContextIndex.validation,
+          productContextIndex: {
+            status: indexWrite.available ? "READY" : "UNAVAILABLE",
+            version: PRODUCT_CONTEXT_INDEX_VERSION,
+            rowCount: productContextIndex.rows.length,
+            insertedRows: indexWrite.inserted
+          }
         } as Prisma.InputJsonValue
       }
     });
@@ -660,7 +892,12 @@ export async function processIngestionJob(
         status: canonicalRowCount > 0 ? ConnectionStatus.CONNECTED : ConnectionStatus.FAILED,
         schemaStatus: "READY",
         canonicalStatus,
-        canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION
+        canonicalVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
+        validationStatus,
+        sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+        semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
+        productContextIndexVersion: PRODUCT_CONTEXT_INDEX_VERSION,
+        publishedAt: canonicalStatus === "READY" ? new Date() : null
       }
     });
 
@@ -676,9 +913,15 @@ export async function processIngestionJob(
         config: {
           ...compactDataSourceConfig({}, metadata),
           businessSource,
+          sourceInference,
+          canonicalArtifactManifest: objectValue(canonicalSchemaJson).canonicalArtifactManifest ?? null,
           schemaSnapshotId,
           schemaVersion: ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-          canonicalStatus
+          canonicalStatus,
+          validationStatus,
+          sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+          semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
+          productContextIndexVersion: PRODUCT_CONTEXT_INDEX_VERSION
         } as Prisma.InputJsonValue
       }
     });
@@ -702,7 +945,17 @@ export async function processIngestionJob(
         lockedAt: null,
         lockedBy: null,
         completedAt: new Date(),
-        errorMessage: null
+        errorMessage: null,
+        metadataJson: {
+          ...metadata,
+          sourceInference,
+          businessSource,
+          schemaSnapshotId,
+          sourceInferenceVersion: SOURCE_INFERENCE_VERSION,
+          semanticMappingVersion: SEMANTIC_MAPPING_VERSION,
+          productContextIndexVersion: PRODUCT_CONTEXT_INDEX_VERSION,
+          productContextValidation: productContextIndex.validation
+        } as Prisma.InputJsonValue
       }
     });
 
@@ -768,6 +1021,38 @@ export async function processIngestionJob(
   }
 }
 
+export function representativeIngestionRows<T>(rows: T[], maxRows = MAX_UNIFIED_INGESTION_SAMPLE_ROWS) {
+  if (rows.length <= maxRows) return rows;
+
+  const selected = new Map<number, T>();
+  const firstWindow = Math.min(100, rows.length);
+  const lastWindow = Math.min(100, rows.length);
+
+  for (let index = 0; index < firstWindow; index += 1) {
+    selected.set(index, rows[index]);
+  }
+
+  for (let index = Math.max(0, rows.length - lastWindow); index < rows.length; index += 1) {
+    selected.set(index, rows[index]);
+  }
+
+  const remaining = Math.max(0, maxRows - selected.size);
+  if (remaining > 0) {
+    const stride = rows.length / remaining;
+    for (let offset = 0; offset < remaining; offset += 1) {
+      selected.set(Math.min(rows.length - 1, Math.floor(offset * stride)), rows[Math.min(rows.length - 1, Math.floor(offset * stride))]);
+    }
+  }
+
+  for (let index = 0; selected.size < maxRows && index < rows.length; index += 1) {
+    selected.set(index, rows[index]);
+  }
+
+  return Array.from(selected.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([, row]) => row);
+}
+
 function countCanonicalRows(dataset: CanonicalDataset) {
   return Object.values(dataset.tables).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
 }
@@ -831,10 +1116,12 @@ export async function recoverStaleIngestionJobs(
     client?: PrismaClient;
     workspaceId?: string;
     limit?: number;
+    processRetryableJobs?: boolean;
   } = {}
 ) {
   const client = options.client ?? prisma;
   const limit = options.limit ?? 10;
+  const processRetryableJobs = options.processRetryableJobs ?? true;
   const staleRunningJobs = await client.unifiedIngestionJob.findMany({
     where: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
@@ -887,7 +1174,7 @@ export async function recoverStaleIngestionJobs(
     }
   }
 
-  const jobs = await client.unifiedIngestionJob.findMany({
+  const jobs = processRetryableJobs ? await client.unifiedIngestionJob.findMany({
     where: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       OR: [
@@ -923,7 +1210,7 @@ export async function recoverStaleIngestionJobs(
       updatedAt: "asc"
     },
     take: limit
-  });
+  }) : [];
   const results = [];
 
   for (const job of jobs) {

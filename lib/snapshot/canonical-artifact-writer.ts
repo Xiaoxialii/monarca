@@ -75,6 +75,15 @@ export async function writeCanonicalDatasetArtifacts(input: {
 
   return {
     ...snapshotJson,
+    canonicalArtifactManifest: Object.fromEntries(Object.entries(artifacts).map(([tableName, artifact]) => [
+      tableName,
+      {
+        name: tableName,
+        artifactKey: artifact.artifactKey,
+        rowCount: artifact.rowCount,
+        checksum: artifact.checksum
+      }
+    ])),
     canonicalDataset: null,
     dashboardSnapshot: null,
     metrics: null

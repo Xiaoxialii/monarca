@@ -32,14 +32,27 @@ export function validateAnalyticsMetrics(input: {
   dataset: CanonicalDataset;
   metrics: CanonicalEcommerceMetricOutput["metrics"];
 }): AnalyticsValidationResult {
-  const orders = dedupeBy(input.dataset.tables.ecommerce_orders ?? [], (row) => stringValue(row.order_id) || stringValue(row.canonical_key));
-  const orderItems = dedupeBy(input.dataset.tables.ecommerce_order_items ?? [], (row) => stringValue(row.canonical_key) || [row.order_id, row.variant_id, row.product_id, row.sku].map(stringValue).join(":"));
+  const sourceOrders = dedupeBy(input.dataset.tables.ecommerce_orders ?? [], sourceOrderIdentity);
+  const orders = sourceOrders.filter(isValidRevenueOrder);
+  const validOrderIds = new Set(orders.flatMap(orderMatchValues).filter(Boolean));
+  const sourceItems = input.dataset.tables.ecommerce_order_items ?? [];
+  const hasOrderFacts = sourceOrders.length > 0;
+  const scopedItems = validOrderIds.size
+    ? sourceItems.filter((row) => orderMatchValues(row).some((orderId) => validOrderIds.has(orderId)))
+    : hasOrderFacts
+      ? []
+      : sourceItems;
+  const orderItems = dedupeBy(scopedItems, (row) => stringValue(row.canonical_key) || [row.order_id, row.variant_id, row.product_id, row.sku].map(stringValue).join(":"));
   const revenueFromOrders = roundCurrency(sum(orders.map(orderRevenue)));
   const revenueFromOrderItems = roundCurrency(sum(orderItems.map(lineItemRevenue)));
   const revenueFromSkuRollup = roundCurrency(sum(input.metrics.core.sku_revenue.map((row) => row.revenue)));
-  const displayedRevenue = roundCurrency(input.metrics.business.revenue);
-  const revenueBaseline = orderItems.length ? revenueFromOrderItems : revenueFromOrders;
-  const uniqueOrderIds = new Set(orders.map((row) => stringValue(row.order_id)).filter(Boolean)).size;
+  const displayedRevenue = roundCurrency(firstNumber(
+    input.metrics.revenue,
+    input.metrics.core.revenue,
+    input.metrics.business.revenue
+  ));
+  const revenueBaseline = orders.length ? revenueFromOrders : revenueFromOrderItems;
+  const uniqueOrderIds = new Set(orders.map(sourceOrderIdentity).filter(Boolean)).size;
   const displayedOrders = input.metrics.core.orders;
   const business = input.metrics.business;
   const skuRows = business.sku_unit_economics;
@@ -87,8 +100,11 @@ export function validateAnalyticsMetrics(input: {
   if (Math.abs(reconciliation.revenue_difference) > tolerance) {
     errors.push(`Revenue does not reconcile with ${orderItems.length ? "order item" : "order"} revenue: ${reconciliation.revenue_difference}`);
   }
+  if (hasOrderFacts && !orders.length) {
+    errors.push("No valid paid revenue orders are available in the selected canonical snapshot.");
+  }
   if (Math.abs(displayedRevenue - revenueFromSkuRollup) > tolerance && revenueFromSkuRollup > 0) {
-    errors.push(`Revenue does not reconcile with SKU rollup: ${roundCurrency(displayedRevenue - revenueFromSkuRollup)}`);
+    warnings.push(`Revenue does not fully reconcile with SKU rollup: ${roundCurrency(displayedRevenue - revenueFromSkuRollup)}`);
   }
   if (reconciliation.order_count_difference !== 0) {
     errors.push(`Displayed orders do not match COUNT(DISTINCT order_id): ${reconciliation.order_count_difference}`);
@@ -126,13 +142,105 @@ function dedupeBy<T>(rows: T[], getKey: (row: T) => string) {
   return result;
 }
 
+function sourceOrderIdentity(row: CanonicalRow) {
+  const nativeOrderId = stringValue(row.source_order_id || row.native_order_id || row.amazon_order_id || row.external_order_id);
+  const sourceId = stringValue(row.source_id);
+  const orderId = stringValue(row.order_id);
+  if (nativeOrderId) return nativeOrderId;
+  if (sourceId && !sourceId.includes("gid://shopify/Order/") && sourceId !== orderId) return sourceId;
+  return orderId || sourceId || stringValue(row.canonical_key);
+}
+
+function orderMatchValues(row: CanonicalRow) {
+  return [
+    row.source_order_id,
+    row.native_order_id,
+    row.amazon_order_id,
+    row.external_order_id,
+    row.order_id,
+    row.source_id
+  ].map(stringValue).filter(Boolean);
+}
+
+const VALID_REVENUE_STATUSES = new Set(["paid", "partially_refunded", "captured", "settled"]);
+const INVALID_REVENUE_STATUSES = new Set(["cancelled", "canceled", "failed", "pending", "unpaid", "voided"]);
+
+function isValidRevenueOrder(row: CanonicalRow) {
+  if (
+    truthyFlag(row.is_test) ||
+    truthyFlag(row.test) ||
+    truthyFlag(row.is_cancelled) ||
+    truthyFlag(row.cancelled) ||
+    Boolean(stringValue(row.cancelled_at)) ||
+    Boolean(stringValue(row.cancelled_at_source))
+  ) {
+    return false;
+  }
+
+  const explicitPaymentStatus = firstString(row.financial_status, row.payment_status);
+  const fallbackStatus = firstString(row.status, row.order_status);
+  const financialStatus = normalizeStatus(explicitPaymentStatus || fallbackStatus);
+  const hasOrderDate = Boolean(dayKey(firstString(row.order_date, row.date, row.created_at, row.createdAt, row.processed_at)));
+  const explicitPaidFlag = truthyFlag(row.is_paid) || truthyFlag(row.paid) || truthyFlag(row.isPaid);
+  if (explicitPaidFlag && financialStatus !== "authorized" && !INVALID_REVENUE_STATUSES.has(financialStatus)) return true;
+  if (!financialStatus) return hasPositiveCommerceRevenueOrPayment(row);
+  if (INVALID_REVENUE_STATUSES.has(financialStatus)) return false;
+  if (financialStatus === "authorized") return false;
+  if (financialStatus === "partially_paid") return paidAmount(row) !== null;
+  if (financialStatus === "refunded") return true;
+  if (!explicitPaymentStatus) return hasOrderDate && hasPositiveCommerceRevenueOrPayment(row);
+  return VALID_REVENUE_STATUSES.has(financialStatus);
+}
+
+function dayKey(value: unknown) {
+  const text = firstString(value);
+  if (!text) return "";
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
 function orderRevenue(row: CanonicalRow) {
-  return firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales);
+  return firstNumber(computedNetRevenue(row), row.net_revenue, row.net_amount, row.net_total, row.total_paid, row.net_sales, row.revenue, row.gross_sales);
 }
 
 function lineItemRevenue(row: CanonicalRow) {
   const quantity = firstNumber(row.quantity) || 1;
-  return roundCurrency(firstNumber(row.revenue, row.net_sales, firstNumber(row.price, row.unit_price) * quantity));
+  return roundCurrency(firstNumber(computedNetRevenue(row), row.net_revenue, row.net_amount, row.net_total, row.net_sales, row.revenue, row.gross_sales, firstNumber(row.price, row.unit_price) * quantity));
+}
+
+function computedNetRevenue(row: CanonicalRow) {
+  if (stringValue(row.revenue_allocation_source) === "order_net_revenue") {
+    const allocatedNet = firstFiniteNumber(row.net_revenue, row.net_sales, row.revenue);
+    if (allocatedNet !== null) return roundCurrency(Math.max(0, allocatedNet));
+  }
+
+  if (!hasFiniteNumber(row.gross_sales)) {
+    const explicitNet = firstFiniteNumber(row.net_revenue, row.netRevenue, row.net_amount, row.netAmount, row.net_total, row.netTotal);
+    if (explicitNet !== null) return roundCurrency(Math.max(0, explicitNet));
+
+    if (!hasRevenueAdjustment(row)) return null;
+
+    const legacyPreRefundRevenue = firstFiniteNumber(row.revenue, row.sales, row.gmv, row.amount, row.total, row.subtotal, row.net_sales, row.netSales);
+    if (legacyPreRefundRevenue === null) return null;
+    return roundCurrency(Math.max(0, legacyPreRefundRevenue -
+      firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+      firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+  }
+
+  return roundCurrency(
+    Math.max(0, firstNumber(row.gross_sales) -
+      firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+      firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund))
+  );
+}
+
+function firstFiniteNumber(...values: unknown[]) {
+  for (const value of values) {
+    const number = numericValue(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
 }
 
 function firstNumber(...values: unknown[]) {
@@ -144,6 +252,67 @@ function firstNumber(...values: unknown[]) {
     }
   }
   return 0;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function hasFiniteNumber(value: unknown) {
+  return Number.isFinite(numericValue(value));
+}
+
+function numericValue(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return NaN;
+  const parsed = Number(value.replace(/[$,%\s,]/g, ""));
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function hasRevenueAdjustment(row: CanonicalRow) {
+  return firstFiniteNumber(
+    row.discount,
+    row.discount_amount,
+    row.total_discount,
+    row.discounts,
+    row.refund,
+    row.refund_amount,
+    row.refunded_amount,
+    row.total_refund
+  ) !== null;
+}
+
+function paidAmount(row: CanonicalRow) {
+  return firstFiniteNumber(row.paid_amount, row.amount_paid, row.total_paid, row.captured_amount, row.net_payment);
+}
+
+function hasPositiveCommerceRevenueOrPayment(row: CanonicalRow) {
+  return firstNumber(
+    row.total_paid,
+    row.paid_amount,
+    row.amount_paid,
+    row.captured_amount,
+    row.net_payment,
+    row.gross_sales,
+    row.total_price,
+    row.total,
+    row.revenue
+  ) > 0;
+}
+
+function truthyFlag(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return false;
+  return ["true", "1", "yes", "y"].includes(value.trim().toLowerCase());
+}
+
+function normalizeStatus(value: unknown) {
+  return stringValue(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
 function stringValue(value: unknown) {

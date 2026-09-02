@@ -139,7 +139,7 @@ test("partnership application duplicate submissions do not produce a database 50
 test("unauthorized users cannot enter admin partnership application management", () => {
   const adminPage = fs.readFileSync("app/admin/partnership-applications/page.tsx", "utf8");
 
-  assert.match(adminPage, /requireWorkspaceRole\(\[WorkspaceRole\.OWNER,\s*WorkspaceRole\.ADMIN\]\)/);
+  assert.match(adminPage, /requireSuperAdmin\(\)/);
   assert.match(adminPage, /redirect\("\/sign-in"\)/);
   assert.match(adminPage, /redirect\("\/dashboard"\)/);
 });
@@ -150,6 +150,7 @@ test("admins can view details and update application status", () => {
 
   assert.match(adminPage, /PartnershipApplicationStatusForm/);
   assert.match(adminPage, /selected\.businessDescription/);
+  assert.match(statusRoute, /requireSuperAdmin\(request\)/);
   assert.match(statusRoute, /prisma\.storePartnershipApplication\.update/);
   assert.match(statusRoute, /allowedStatuses\.has/);
 });

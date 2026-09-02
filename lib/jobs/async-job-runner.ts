@@ -194,6 +194,7 @@ function errorCodeFromError(error: unknown) {
   if (/NO_READY_CANONICAL_SNAPSHOT|No READY ecommerce canonical snapshot/i.test(message)) return "CANONICAL_NOT_READY";
   if (/R2 storage is not configured|R2_CONFIGURATION_MISSING/i.test(message)) return "CANONICAL_ARTIFACT_UNREADABLE";
   if (/specified key does not exist|NoSuchKey|not found|ENOENT/i.test(message)) return "CANONICAL_ARTIFACT_NOT_FOUND";
+  if (/optimization exceeded|exceeded .*minutes|maximum execution/i.test(message)) return "JOB_MAX_EXECUTION_TIMEOUT";
   if (/database|prisma|P1001|connection/i.test(message)) return "DATABASE_UNAVAILABLE";
   return "ASYNC_JOB_FAILED";
 }
@@ -216,6 +217,10 @@ function optimizationQueuedBeforeDate(now = new Date()) {
 
 function skuOptimizationStaleBeforeDate(now = new Date()) {
   return new Date(now.getTime() - SKU_OPTIMIZATION_STALE_JOB_MS);
+}
+
+function optimizationMaxExecutionStartedBeforeDate(now = new Date()) {
+  return new Date(now.getTime() - OPTIMIZATION_MAX_EXECUTION_MS);
 }
 
 function staleQueuedJobWhere(now = new Date()) {
@@ -272,6 +277,7 @@ function staleResumableJobWhere(now = new Date()) {
 
 function staleSkuOptimizationResumableJobWhere(now = new Date()) {
   const staleBefore = skuOptimizationStaleBeforeDate(now);
+  const maxExecutionStartedBefore = optimizationMaxExecutionStartedBeforeDate(now);
   return {
     type: "SKU_OPTIMIZATION",
     status: {
@@ -279,6 +285,9 @@ function staleSkuOptimizationResumableJobWhere(now = new Date()) {
     },
     OR: [
       { leaseExpiresAt: { lt: now } },
+      { startedAt: { lt: maxExecutionStartedBefore } },
+      { startedAt: null, lockedAt: { lt: maxExecutionStartedBefore } },
+      { startedAt: null, lockedAt: null, createdAt: { lt: maxExecutionStartedBefore } },
       {
         leaseExpiresAt: null,
         heartbeatAt: {
@@ -327,7 +336,9 @@ function isStaleSkuOptimizationJob(job: {
   createdAt: Date;
 }, now = new Date()) {
   if (job.status !== "PROCESSING" && job.status !== "PAUSED") return false;
-  return activeJobHeartbeatDate(job) < skuOptimizationStaleBeforeDate(now);
+  const executionStartedAt = job.startedAt ?? job.lockedAt ?? job.createdAt;
+  const exceededMaxExecution = executionStartedAt.getTime() < now.getTime() - OPTIMIZATION_MAX_EXECUTION_MS;
+  return exceededMaxExecution || activeJobHeartbeatDate(job) < skuOptimizationStaleBeforeDate(now);
 }
 
 function startHeartbeat(
@@ -524,6 +535,15 @@ export async function enqueueSkuOptimizationJob(
     }
 
     if (!isStaleSkuOptimizationJob(existing, now)) return existing;
+    const executionStartedAt = existing.startedAt ?? existing.lockedAt ?? existing.createdAt;
+    const exceededMaxExecution = executionStartedAt.getTime() < optimizationMaxExecutionStartedBeforeDate(now).getTime();
+    const staleErrorCode = exceededMaxExecution ? "JOB_MAX_EXECUTION_TIMEOUT" : "JOB_HEARTBEAT_TIMEOUT";
+    const staleCurrentStep = exceededMaxExecution
+      ? "Failed - optimization exceeded maximum execution time"
+      : "Failed - stale optimization job heartbeat";
+    const staleErrorMessage = exceededMaxExecution
+      ? `Superseded because SKU optimization ran for more than ${Math.round(OPTIMIZATION_MAX_EXECUTION_MS / 60000)} minutes.`
+      : `Superseded because SKU optimization heartbeat was stale for more than ${Math.round(SKU_OPTIMIZATION_STALE_JOB_MS / 60000)} minutes.`;
 
     await client.asyncJob.updateMany({
       where: {
@@ -535,9 +555,9 @@ export async function enqueueSkuOptimizationJob(
       data: {
         status: "FAILED",
         progress: 100,
-        currentStep: "Failed - stale optimization job heartbeat",
-        errorCode: "JOB_HEARTBEAT_TIMEOUT",
-        errorMessage: `Superseded because SKU optimization heartbeat was stale for more than ${Math.round(SKU_OPTIMIZATION_STALE_JOB_MS / 60000)} minutes.`,
+        currentStep: staleCurrentStep,
+        errorCode: staleErrorCode,
+        errorMessage: staleErrorMessage,
         heartbeatAt: now,
         lockedAt: null,
         lockedBy: null,
@@ -551,7 +571,11 @@ export async function enqueueSkuOptimizationJob(
     continue;
   }
 
-  const retryableFailed = existingJobs.find((job) => job.status === "FAILED" && job.retryCount < job.maxRetries);
+  const retryableFailed = existingJobs.find((job) => (
+    job.status === "FAILED" &&
+    job.retryCount < job.maxRetries &&
+    job.errorCode !== "JOB_MAX_EXECUTION_TIMEOUT"
+  ));
   if (retryableFailed) {
     await client.asyncJob.update({
       where: { id: retryableFailed.id },
@@ -625,9 +649,13 @@ export async function processJob(
       status: true,
       retryCount: true,
       maxRetries: true,
+      errorCode: true,
       leaseExpiresAt: true
     }
   });
+  if (previousJob?.status === "FAILED" && previousJob.errorCode === "JOB_MAX_EXECUTION_TIMEOUT") {
+    return { ok: false, skipped: true, reason: "Job exceeded maximum execution time." };
+  }
   const shouldIncrementRetryCount = Boolean(previousJob && previousJob.status !== "QUEUED");
   const now = new Date();
   const leaseExpiresAt = new Date(now.getTime() + ASYNC_JOB_LEASE_MS);
@@ -638,6 +666,9 @@ export async function processJob(
       },
       OR: [
         { leaseExpiresAt: { lt: now } },
+        { startedAt: { lt: optimizationMaxExecutionStartedBeforeDate(now) } },
+        { startedAt: null, lockedAt: { lt: optimizationMaxExecutionStartedBeforeDate(now) } },
+        { startedAt: null, lockedAt: null, updatedAt: { lt: optimizationMaxExecutionStartedBeforeDate(now) } },
         { leaseExpiresAt: null, heartbeatAt: { lt: skuOptimizationStaleBeforeDate(now) } },
         { leaseExpiresAt: null, heartbeatAt: null, updatedAt: { lt: skuOptimizationStaleBeforeDate(now) } }
       ]
@@ -1642,12 +1673,16 @@ async function processSkuOptimizationAsyncJob(
   });
 
   const snapshotStartedAt = Date.now();
-  const decisionSnapshots = await generateEcommerceDecisionSnapshots(client, {
-    workspaceId: input.workspaceId,
-    dataSourceId: null,
-    sourceJobId: input.id,
-    modes: decisionMode ? [decisionMode] : undefined
-  });
+  const decisionSnapshots = await withTimeout(
+    generateEcommerceDecisionSnapshots(client, {
+      workspaceId: input.workspaceId,
+      dataSourceId: null,
+      sourceJobId: input.id,
+      modes: decisionMode ? [decisionMode] : undefined
+    }),
+    OPTIMIZATION_MAX_EXECUTION_MS,
+    `SKU optimization exceeded ${Math.round(OPTIMIZATION_MAX_EXECUTION_MS / 60000)} minutes while generating decision snapshot.`
+  );
   console.info("[sku-optimization-job]", {
     job_id: input.id,
     workspace_id: input.workspaceId,

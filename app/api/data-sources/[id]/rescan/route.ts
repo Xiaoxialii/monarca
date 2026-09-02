@@ -154,12 +154,12 @@ async function buildUnifiedUploadIngestionSummary(input: {
     const result = await runUnifiedIngestionPipeline({
       source: input.source,
       workspace_id: input.workspaceId,
-      payload: sampledRows,
+      payload: input.rows,
       metadata: {
         fileName: input.fileName,
         sampledRows: sampledRows.length,
         totalParsedRows: input.rows.length,
-        samplingStrategy: "rescan_first_n_rows"
+        samplingStrategy: "rescan_first_n_rows_for_mapping_full_rows_for_canonical"
       },
       memory: new PrismaSemanticMemoryStore(prisma, { workspaceId: input.workspaceId })
     });
@@ -285,6 +285,9 @@ async function rescanUploadedSource(input: {
         }
       })
       : null;
+    const canonicalArtifactManifest = canonicalSchemaJson
+      ? asRecord(canonicalSchemaJson)?.canonicalArtifactManifest ?? null
+      : null;
 
     const schemaSnapshot = await tx.schemaSnapshot.create({
       data: {
@@ -311,11 +314,36 @@ async function rescanUploadedSource(input: {
           generatedMetricCount: semanticLayer.metrics.length,
           analysisReport,
           canonicalArtifactBacked: Boolean(canonicalSchemaJson),
+          canonicalArtifactManifest,
           rescan: true,
           semanticMappingCache: semanticMappingCacheSummary(semanticMappingCache)
         }
       }
     });
+
+    if (canonicalSchemaJson) {
+      await tx.dataSourceConnection.update({
+        where: {
+          id: input.dataSource.id
+        },
+        data: {
+          schemas: {
+            ...schemaPayload,
+            canonicalArtifactManifest,
+            canonicalStatus: "READY",
+            canonicalVersion: "ecommerce_canonical_v1",
+            schemaSnapshotId: schemaSnapshot.id
+          } as Prisma.InputJsonValue,
+          config: {
+            ...(config ?? {}),
+            canonicalArtifactManifest,
+            canonicalStatus: "READY",
+            schemaVersion: "ecommerce_canonical_v1",
+            schemaSnapshotId: schemaSnapshot.id
+          } as Prisma.InputJsonValue
+        }
+      });
+    }
 
     const metricGeneration = await generateWorkspaceMetricsFromConnectedSources(tx, {
       workspaceId: input.dataSource.workspaceId,

@@ -168,6 +168,11 @@ export type CanonicalEcommerceMetricOutput = {
     core: {
       revenue: number;
       orders: number;
+      orders_created?: number;
+      paid_orders?: number;
+      net_revenue_orders?: number;
+      cancelled_orders?: number;
+      fully_refunded_orders?: number;
       aov: number;
       aov_confidence: "HIGH" | "MEDIUM" | "LOW";
       refund_rate: number;
@@ -200,6 +205,7 @@ export type CanonicalEcommerceMetricOutput = {
       optimization_allowed: boolean;
       warnings: string[];
       engine_version: string;
+      cogs_coverage_rate: number;
       missing_cost_fields: string[];
       estimated_components: string[];
       portfolio_reconciliation?: {
@@ -358,15 +364,49 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
     estimatedMetrics: new Set()
   };
 
-  const orders = dedupeBy(dataset.tables.ecommerce_orders ?? [], (row) => stringValue(row.order_id) || stringValue(row.canonical_key));
+  const sourceRefunds = dedupeBy(dataset.tables.ecommerce_refunds ?? [], (row) => stringValue(row.refund_id) || stringValue(row.canonical_key));
+  const allSourceOrders = dataset.tables.ecommerce_orders ?? [];
+  const sourceOrders = attachRefundAmountsToOrders(
+    dedupeBy(allSourceOrders, sourceOrderIdentity),
+    sourceRefunds
+  );
+  const orders = filterValidOrders(sourceOrders);
+  const orderStatusSummary = summarizeOrderStatuses(sourceOrders, orders);
+  const observedOrderWindow = observedDateWindow(sourceOrders.filter(isNonTestNonCancelledOrder));
   const normalizedProducts = normalizeProductSkuRows(dataset.tables.ecommerce_products ?? []);
   const products = dedupeBy(normalizedProducts, (row) => stringValue(row.variant_id) || stringValue(row.product_id) || stringValue(row.canonical_key));
-  const enrichedOrderItems = enrichOrderItemsWithCanonicalSku(dataset.tables.ecommerce_order_items ?? [], products);
-  const orderItems = dedupeBy(enrichedOrderItems, (row) => stringValue(row.canonical_key) || [row.order_id, row.variant_id, row.product_id, row.sku].map(stringValue).join(":"));
-  const refunds = dedupeBy(dataset.tables.ecommerce_refunds ?? [], (row) => stringValue(row.refund_id) || stringValue(row.canonical_key));
-  const ads = dedupeBy(dataset.tables.ecommerce_ads ?? [], (row) => stringValue(row.canonical_key) || adRowIdentity(row));
+  const enrichedOrderItems = attachNativeOrderIdsToOrderItems(
+    enrichOrderItemsWithCanonicalSku(dataset.tables.ecommerce_order_items ?? [], products),
+    allSourceOrders
+  );
+  const validOrderIds = new Set(orders.flatMap(orderMatchValues).filter(Boolean));
+  const hasOrderFacts = sourceOrders.length > 0;
+  const refunds = validOrderIds.size
+    ? sourceRefunds.filter((row) => {
+      const orderIds = orderMatchValues(row);
+      return !orderIds.length || orderIds.some((orderId) => validOrderIds.has(orderId));
+    })
+    : hasOrderFacts
+      ? []
+    : sourceRefunds;
+  const orderItemsWithRefunds = attachRefundAmountsToOrderItems(enrichedOrderItems, refunds);
+  const matchedOrderItems = validOrderIds.size
+    ? orderItemsWithRefunds.filter((row) => orderMatchValues(row).some((orderId) => validOrderIds.has(orderId)))
+    : [];
+  const scopedOrderItems = validOrderIds.size
+    ? (matchedOrderItems.length ? matchedOrderItems : orderItemsWithRefunds)
+    : (hasOrderFacts ? [] : orderItemsWithRefunds);
+  if (validOrderIds.size && !matchedOrderItems.length && orderItemsWithRefunds.length) {
+    quality.estimatedMetrics.add("order_item_order_linkage");
+  }
+  const orderItems = dedupeBy(scopedOrderItems.map(withNetQuantity), orderItemDedupeKey);
+  const sourceAds = dedupeBy(dataset.tables.ecommerce_ads ?? [], (row) => stringValue(row.canonical_key) || adRowIdentity(row));
+  const ads = filterAdsToOrderWindow(sourceAds, observedOrderWindow);
   const customers = dedupeBy(dataset.tables.ecommerce_customers ?? [], (row) => stringValue(row.customer_id) || stringValue(row.canonical_key));
-  const inventory = dedupeBy(dataset.tables.ecommerce_inventory ?? dataset.tables.inventory ?? [], (row) => [row.sku, row.warehouse_id, row.date].map(stringValue).join(":") || stringValue(row.canonical_key));
+  const inventory = dedupeBy(
+    (dataset.tables.ecommerce_inventory ?? dataset.tables.inventory ?? []).filter(hasUsableInventorySignal),
+    (row) => [row.sku, row.warehouse_id, row.snapshot_date ?? row.date].map(stringValue).join(":") || stringValue(row.canonical_key)
+  );
 
   trackCompleteness(quality, "ecommerce_orders", orders, ["order_id", "revenue"]);
   trackCompleteness(quality, "ecommerce_order_items", orderItems, ["sku", "price", "quantity"]);
@@ -375,34 +415,44 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
   if (ads.length) trackCompleteness(quality, "ecommerce_ads", ads, ["spend"]);
   if (inventory.length) trackCompleteness(quality, "ecommerce_inventory", inventory, ["sku", "stock_level"]);
 
-  const orderCount = new Set(orders.map((row) => stringValue(row.order_id)).filter(Boolean)).size;
+  const paidOrderCount = new Set(orders.map(sourceOrderIdentity).filter(Boolean)).size;
+  const displayOrderCount = paidOrderCount;
   const actualRefundAmount = roundCurrency(sum(refunds.map((row) => firstNumber(row.amount, row.refund_amount))));
-  const skuRevenue = buildSkuRevenue(orderItems, quality);
+  const orderNetRevenueById = buildOrderNetRevenueById(orders);
+  const shouldUseOrderNetRevenue = orderNetRevenueById.size > 0;
+  const revenueOrderItems = shouldUseOrderNetRevenue
+    ? allocateOrderNetRevenueToItems(orderItems, orderNetRevenueById)
+    : orderItems;
+  const skuRevenue = buildSkuRevenue(revenueOrderItems, quality);
   const revenueFromOrders = roundCurrency(sum(orders.map(orderRevenue)));
-  const revenueFromOrderItems = roundCurrency(sum(orderItems.map((row) => lineItemRevenue(row))));
+  const revenueFromOrderItems = roundCurrency(sum(revenueOrderItems.map((row) => lineItemRevenue(row))));
   const revenueFromSkuRollup = roundCurrency(sum(skuRevenue.map((row) => row.revenue)));
-  const revenue = revenueFromOrderItems > 0 ? revenueFromOrderItems : revenueFromOrders;
+  const revenue = shouldUseOrderNetRevenue && revenueFromOrders > 0
+    ? revenueFromOrders
+    : revenueFromOrderItems > 0
+      ? revenueFromOrderItems
+      : revenueFromOrders;
   const effectiveRefundAmount = refunds.length ? actualRefundAmount : 0;
-  const productPerformance = buildProductPerformance(orderItems, products, quality);
+  const productPerformance = buildProductPerformance(revenueOrderItems, products, quality);
   const metricValidation = metricValidationSummary({
     revenueFromOrders,
     revenueFromOrderItems,
     revenueFromSkuRollup,
     displayedRevenue: revenue,
-    uniqueOrderIds: orderCount,
-    displayedOrders: orderCount
+    uniqueOrderIds: paidOrderCount,
+    displayedOrders: displayOrderCount
   });
-  const business = buildBusinessMetrics({ revenue, refundAmount: effectiveRefundAmount, refunds, orderItems, products, orders, ads, inventory, quality });
-  const growth = buildGrowthMetrics({ orders, orderItems, quality });
-  const attribution = buildAttributionMetrics({ orders, orderItems, ads, skuUnitEconomics: business.sku_unit_economics, revenue, quality });
+  const business = buildBusinessMetrics({ revenue, refundAmount: effectiveRefundAmount, refunds, orderItems: revenueOrderItems, products, orders, ads, inventory, quality });
+  const growth = buildGrowthMetrics({ orders, orderItems: revenueOrderItems, quality });
+  const attribution = buildAttributionMetrics({ orders, orderItems: revenueOrderItems, ads, skuUnitEconomics: business.sku_unit_economics, revenue, quality });
   const customerReliability = customerAcquisitionReliability(orders, customers);
-  const customer = buildCustomerMetrics({ orders, customers, orderCount, adSpend: business.ad_spend, netProfit: business.net_profit, quality, acquisitionReliable: customerReliability.reliable });
+  const customer = buildCustomerMetrics({ orders, customers, orderCount: paidOrderCount, adSpend: business.ad_spend, netProfit: business.net_profit, quality, acquisitionReliable: customerReliability.reliable });
   const adsMetrics = buildAdsMetrics({
     revenue: business.revenue,
-    orderCount,
+    orderCount: paidOrderCount,
     adSpend: business.ad_spend,
     customerCount: customer.customer_count,
-    newCustomers: newCustomerCount(orders, customers),
+    newCustomers: acquiredCustomerCount(orders, customers),
     newCustomerReliable: customerReliability.reliable,
     attributionCoverage: attribution.order_attribution_coverage,
     quality
@@ -424,9 +474,14 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
     metrics: {
       core: {
         revenue,
-        orders: orderCount,
-        aov: orderCount ? roundCurrency(revenue / orderCount) : 0,
-        aov_confidence: aovConfidence({ orders, orderCount }),
+        orders: displayOrderCount,
+        orders_created: orderStatusSummary.orders_created,
+        paid_orders: orderStatusSummary.paid_orders,
+        net_revenue_orders: orderStatusSummary.net_revenue_orders,
+        cancelled_orders: orderStatusSummary.cancelled_orders,
+        fully_refunded_orders: orderStatusSummary.fully_refunded_orders,
+        aov: paidOrderCount ? roundCurrency(revenue / paidOrderCount) : 0,
+        aov_confidence: aovConfidence({ orders, orderCount: paidOrderCount }),
         refund_rate: revenue > 0 ? roundRatio(effectiveRefundAmount / revenue) : 0,
         sku_revenue: skuRevenue,
         product_performance: productPerformance
@@ -437,8 +492,8 @@ export function computeCanonicalEcommerceMetrics(dataset: CanonicalDataset): Can
       ads: adsMetrics,
       attribution,
       revenue,
-      orders: orderCount,
-      aov: orderCount ? roundCurrency(revenue / orderCount) : 0,
+      orders: displayOrderCount,
+      aov: paidOrderCount ? roundCurrency(revenue / paidOrderCount) : 0,
       refund_rate: revenue > 0 ? roundRatio(effectiveRefundAmount / revenue) : 0,
       sku_revenue: skuRevenue,
       product_performance: productPerformance
@@ -617,6 +672,7 @@ function buildBusinessMetrics(input: {
     optimization_allowed: cost.totals.optimization_allowed,
     warnings: cost.totals.warnings,
     engine_version: cost.totals.engine_version,
+    cogs_coverage_rate: cost.totals.cogs_coverage_rate,
     missing_cost_fields: cost.data_quality.missing_cost_fields,
     estimated_components: cost.data_quality.estimated_components,
     portfolio_reconciliation: cost.data_quality.portfolio_reconciliation,
@@ -672,11 +728,13 @@ function buildGrowthMetrics(input: {
     quality.estimatedMetrics.add("growth.sku_growth_rate");
   }
 
+  const growthWindowDays = observedSeriesWindowDays(daily);
+
   return {
     revenue_growth_rate: latestGrowthRate(daily, "revenue"),
     order_growth_rate: latestGrowthRate(daily, "orders"),
     sku_growth_rate: latestGrowthRate(daily, "sku_count"),
-    growth_window_days: 7,
+    growth_window_days: growthWindowDays,
     daily,
     weekly,
     monthly
@@ -774,7 +832,7 @@ function buildCustomerMetrics(input: {
     const profileOrders = profileOrderCountByCustomer.get(customerId) ?? 0;
     return Math.max(observedOrders, profileOrders) > 1;
   }).length;
-  const newCustomers = newCustomerCount(orders, customers);
+  const newCustomers = acquiredCustomerCount(orders, customers);
   const ltvValues = Array.from(customerIds).map((customerId) => revenueByCustomer.get(customerId) ?? firstNumber(customers.find((row) => stringValue(row.customer_id) === customerId)?.total_spent));
   const activeCustomerCount = Array.from(customerIds).filter((customerId) =>
     (orderIdsByCustomer.get(customerId)?.size ?? 0) > 0 ||
@@ -795,7 +853,7 @@ function buildCustomerMetrics(input: {
     totalAdSpend: adSpend
   });
   const profileOrderCount = sum(Array.from(profileOrderCountByCustomer.values()));
-  const customerOrderCount = profileOrderCount > 0 ? profileOrderCount : orderCount;
+  const customerOrderCount = orderCount > 0 ? orderCount : profileOrderCount;
   const avgOrderValue = safeRatio(eventLevelCustomerRevenue, customerOrderCount || orderCount);
   const purchaseFrequency = safeRatio(customerOrderCount, activeCustomerCount || customerCount);
   const customerRevenueLtv = roundCurrency(avgOrderValue * purchaseFrequency);
@@ -1107,11 +1165,14 @@ function customerValueSegments(input: {
     .map((customerId) => ({ customerId, revenue: input.revenueByCustomer.get(customerId) ?? 0 }))
     .sort((left, right) => right.revenue - left.revenue || left.customerId.localeCompare(right.customerId));
   const count = customers.length;
+  const topOneEnd = Math.max(1, Math.ceil(count * 0.01));
+  const topTenEnd = Math.max(topOneEnd, Math.ceil(count * 0.1));
+  const middleEnd = Math.max(topTenEnd, Math.ceil(count * 0.5));
   const buckets = [
-    { segment: "Top 1%", rows: customers.slice(0, Math.max(1, Math.ceil(count * 0.01))) },
-    { segment: "Top 10%", rows: customers.slice(0, Math.max(1, Math.ceil(count * 0.1))) },
-    { segment: "Middle 40%", rows: customers.slice(Math.max(1, Math.ceil(count * 0.1)), Math.max(1, Math.ceil(count * 0.5))) },
-    { segment: "Bottom 50%", rows: customers.slice(Math.max(1, Math.ceil(count * 0.5))) }
+    { segment: "Top 1%", rows: customers.slice(0, topOneEnd) },
+    { segment: "Next 9%", rows: customers.slice(topOneEnd, topTenEnd) },
+    { segment: "Middle 40%", rows: customers.slice(topTenEnd, middleEnd) },
+    { segment: "Bottom 50%", rows: customers.slice(middleEnd) }
   ];
 
   const revenue = buckets.map((bucket) => {
@@ -1148,12 +1209,12 @@ function buildAttributionMetrics(input: {
   quality: QualityAccumulator;
 }): AttributionMetric {
   const { orders, orderItems, ads, quality } = input;
-  const adSpend = roundCurrency(sum(ads.map((row) => firstNumber(row.spend, row.ad_spend))));
+  const adSpend = roundCurrency(sum(ads.map(adSpendValue)));
   const campaignAdSpend = new Map<string, number>();
   for (const ad of ads) {
     const campaignId = firstString(ad.campaign_id, ad.utm_campaign, ad.ad_id);
     if (!campaignId) continue;
-    campaignAdSpend.set(campaignId, roundCurrency((campaignAdSpend.get(campaignId) ?? 0) + firstNumber(ad.spend, ad.ad_spend)));
+    campaignAdSpend.set(campaignId, roundCurrency((campaignAdSpend.get(campaignId) ?? 0) + adSpendValue(ad)));
   }
 
   const orderAttribution = new Map<string, { campaignId: string; adId: string; source: string }>();
@@ -1277,27 +1338,37 @@ function buildAttributionMetrics(input: {
   };
 }
 
-function newCustomerCount(orders: Array<Record<string, unknown>>, customers: Array<Record<string, unknown>>) {
-  const orderIdsByCustomer = new Map<string, Set<string>>();
+function acquiredCustomerCount(orders: Array<Record<string, unknown>>, customers: Array<Record<string, unknown>>) {
+  const orderDatesByCustomer = new Map<string, string[]>();
+  const observedWindow = observedDateWindow(orders);
   for (const order of orders) {
     const customerId = explicitCustomerIdFromOrder(order);
     if (!customerId) continue;
 
-    const orderIds = orderIdsByCustomer.get(customerId) ?? new Set<string>();
-    const orderId = stringValue(order.order_id);
-    if (orderId) orderIds.add(orderId);
-    orderIdsByCustomer.set(customerId, orderIds);
+    const date = customerLifecycleOrderDate(order);
+    if (!date) continue;
+    const dates = orderDatesByCustomer.get(customerId) ?? [];
+    dates.push(date);
+    orderDatesByCustomer.set(customerId, dates);
   }
 
-  const explicitNewCustomers = customers.filter((customer) => {
-    if (typeof customer.is_new_customer === "boolean") return customer.is_new_customer;
-    const totalOrders = firstFiniteNumber(customer.total_orders, customer.order_count);
-    return totalOrders !== null && totalOrders <= 1;
+  const explicitFirstPurchaseCustomers = observedWindow
+    ? customers.filter((customer) => {
+      const customerId = stringValue(customer.customer_id);
+      if (!customerId && typeof customer.is_new_customer !== "boolean") return false;
+      const firstOrderDate = dayKey(firstString(customer.first_order_date, customer.first_order_at, customer.customer_first_order_date));
+      if (firstOrderDate) return firstOrderDate >= observedWindow.start && firstOrderDate <= observedWindow.end;
+      return Boolean(customerId && customer.is_new_customer === true && orderDatesByCustomer.has(customerId));
+    }).length
+    : 0;
+
+  if (explicitFirstPurchaseCustomers) return explicitFirstPurchaseCustomers;
+
+  return Array.from(orderDatesByCustomer.values()).filter((dates) => {
+    if (!dates.length || !observedWindow) return false;
+    const firstOrderDate = [...dates].sort()[0];
+    return firstOrderDate >= observedWindow.start && firstOrderDate <= observedWindow.end;
   }).length;
-
-  if (explicitNewCustomers) return explicitNewCustomers;
-
-  return Array.from(orderIdsByCustomer.values()).filter((orderIds) => orderIds.size <= 1).length;
 }
 
 function customerAcquisitionReliability(orders: Array<Record<string, unknown>>, customers: Array<Record<string, unknown>>) {
@@ -1306,7 +1377,7 @@ function customerAcquisitionReliability(orders: Array<Record<string, unknown>>, 
   const orderCustomerRows = orders.filter((order) => explicitCustomerIdFromOrder(order)).length;
   const customerCoverage = safeRatio(orderCustomerRows, orders.length);
   const customerProfileCoverage = safeRatio(explicitNewCustomerRows + customerOrderRows, customers.length);
-  const newCustomers = newCustomerCount(orders, customers);
+  const newCustomers = acquiredCustomerCount(orders, customers);
   const dataPeriodDays = orderDataPeriodDays(orders);
   const hasMultipleOrderPeriods = dataPeriodDays >= 14;
   const reliable = newCustomers > 0 && (
@@ -1437,6 +1508,20 @@ function bucketsToSeries(buckets: Map<string, { revenue: number; orderIds: Set<s
     .sort((left, right) => left.period.localeCompare(right.period));
 }
 
+function observedSeriesWindowDays(rows: TimeSeriesMetric[]) {
+  const dates = rows
+    .map((row) => dayKey(row.period))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  if (!dates.length) return 0;
+  if (dates.length === 1) return 1;
+
+  return daysBetween(
+    new Date(`${dates[0]}T00:00:00.000Z`),
+    new Date(`${dates[dates.length - 1]}T00:00:00.000Z`)
+  ) + 1;
+}
+
 function rollupSeries(rows: TimeSeriesMetric[], getPeriod: (period: string) => string) {
   const buckets = new Map<string, TimeSeriesMetric>();
   for (const row of rows) {
@@ -1464,6 +1549,21 @@ function latestGrowthRate(rows: TimeSeriesMetric[], field: keyof Pick<TimeSeries
 
 function dayKey(value: unknown) {
   if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}(?:$|[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)$/.test(trimmed)) {
+      return trimmed.slice(0, 10);
+    }
+  }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -1590,8 +1690,461 @@ function adRowIdentity(row: Record<string, unknown>) {
     firstString(row.ad_date, row.date, row.report_date),
     stringValue(row.platform),
     stringValue(row.source_provider),
-    String(firstNumber(row.spend, row.ad_spend))
+    String(adSpendValue(row))
   ].join(":");
+}
+
+function attachRefundAmountsToOrders(
+  rows: Array<Record<string, unknown>>,
+  refunds: Array<Record<string, unknown>>
+) {
+  const refundByOrder = new Map<string, number>();
+  for (const refund of refunds) {
+    const amount = refundAmountValue(refund);
+    if (amount <= 0) continue;
+    for (const key of orderMatchValues(refund)) {
+      refundByOrder.set(key, roundCurrency((refundByOrder.get(key) ?? 0) + amount));
+    }
+  }
+
+  return rows.map((row) => {
+    if (hasPositiveRefundAmount(row) || !hasPreRefundRevenueSignal(row)) return row;
+    const refundAmount = orderMatchValues(row).reduce((total, key) => Math.max(total, refundByOrder.get(key) ?? 0), 0);
+    if (refundAmount <= 0) return row;
+
+    return {
+      ...row,
+      refund_amount: refundAmount,
+      refund_source: "ecommerce_refunds"
+    };
+  });
+}
+
+function attachRefundAmountsToOrderItems(
+  rows: Array<Record<string, unknown>>,
+  refunds: Array<Record<string, unknown>>
+) {
+  const refundByLine = new Map<string, { amount: number; quantity: number }>();
+  for (const refund of refunds) {
+    const amount = refundAmountValue(refund);
+    const quantity = refundQuantityValue(refund);
+    if (amount <= 0 && quantity <= 0) continue;
+    for (const key of orderItemMatchValues(refund)) {
+      const current = refundByLine.get(key) ?? { amount: 0, quantity: 0 };
+      refundByLine.set(key, {
+        amount: roundCurrency(current.amount + amount),
+        quantity: roundRatio(current.quantity + quantity)
+      });
+    }
+  }
+
+  if (!refundByLine.size) return rows;
+
+  return rows.map((row) => {
+    if (!hasPreRefundRevenueSignal(row)) return row;
+    const refund = orderItemMatchValues(row).reduce((current, key) => {
+      const next = refundByLine.get(key);
+      if (!next) return current;
+      return {
+        amount: Math.max(current.amount, next.amount),
+        quantity: Math.max(current.quantity, next.quantity)
+      };
+    }, { amount: 0, quantity: 0 });
+    if (refund.amount <= 0 && refund.quantity <= 0) return row;
+
+    return {
+      ...row,
+      ...(hasPositiveRefundAmount(row) ? {} : { refund_amount: refund.amount }),
+      ...(firstFiniteNumber(row.refunded_quantity, row.refund_quantity, row.returned_quantity) !== null ? {} : { refunded_quantity: refund.quantity }),
+      refund_source: "ecommerce_refunds"
+    };
+  });
+}
+
+function refundAmountValue(row: Record<string, unknown>) {
+  return firstNumber(row.amount, row.refund_amount, row.refunded_amount, row.total_refund);
+}
+
+function refundQuantityValue(row: Record<string, unknown>) {
+  return firstNumber(row.quantity, row.refunded_quantity, row.refund_quantity, row.returned_quantity);
+}
+
+function hasPositiveRefundAmount(row: Record<string, unknown>) {
+  return firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund) > 0;
+}
+
+function hasPreRefundRevenueSignal(row: Record<string, unknown>) {
+  return hasFiniteNumber(row.gross_sales) ||
+    hasFiniteNumber(row.grossSales) ||
+    hasFiniteNumber(row.gross_revenue) ||
+    hasFiniteNumber(row.grossRevenue) ||
+    hasFiniteNumber(row.sales) ||
+    hasFiniteNumber(row.gmv) ||
+    hasFiniteNumber(row.amount) ||
+    hasFiniteNumber(row.total) ||
+    hasFiniteNumber(row.subtotal);
+}
+
+function orderMatchValues(row: Record<string, unknown>) {
+  return uniqueStrings([
+    row.native_order_id,
+    row.nativeOrderId,
+    row.order_id,
+    row.orderId,
+    row.source_order_id,
+    row.sourceOrderId,
+    row.amazon_order_id,
+    row.shopify_order_id,
+    nativeOrderIdFromRow(row)
+  ]);
+}
+
+function orderItemMatchValues(row: Record<string, unknown>) {
+  const orderIds = orderMatchValues(row);
+  const lineIds = uniqueStrings([
+    row.source_line_item_id,
+    row.sourceLineItemId,
+    row.line_item_id,
+    row.lineItemId,
+    row.order_item_id,
+    row.orderItemId
+  ]);
+  if (!lineIds.length) return [];
+
+  return [
+    ...lineIds.map((lineId) => `line:${lineId}`),
+    ...orderIds.flatMap((orderId) => lineIds.map((lineId) => `order-line:${orderId}:${lineId}`))
+  ];
+}
+
+function uniqueStrings(values: unknown[]) {
+  return Array.from(new Set(values.map(stringValue).map((value) => value.trim()).filter(Boolean)));
+}
+
+function sourceOrderIdentity(row: Record<string, unknown>) {
+  const sourceOrderId = firstString(row.native_order_id, row.nativeOrderId, row.source_order_id, row.sourceOrderId, row.order_id, row.orderId, row.amazon_order_id, row.shopify_order_id);
+  const nativeOrderId = nativeOrderIdFromRow(row);
+  if (!sourceOrderId && !nativeOrderId) return "";
+  const workspace = firstString(row.workspace_id, row.workspaceId);
+  const sourceAccount = firstString(row.source_account_id, row.sourceAccountId, row.account_id, row.accountId, row.shop_id, row.seller_id);
+  const nativeProvider = nativeProviderFromOrderId(nativeOrderId || sourceOrderId);
+
+  if (nativeProvider) {
+    return [
+      "native-source-order",
+      workspace || "unknown",
+      nativeProvider,
+      normalizeIdentityPart(nativeOrderId || sourceOrderId)
+    ].join(":");
+  }
+
+  const scopedParts = [
+    workspace,
+    firstString(row.data_source_id, row.dataSourceId, row.connection_id, row.connectionId),
+    sourceAccount,
+    sourceOrderId
+  ];
+
+  if (scopedParts.slice(0, 3).some(Boolean)) {
+    return ["source-order", ...scopedParts.map((part) => part || "unknown")].join(":");
+  }
+
+  return ["source-order", sourceOrderId].join(":");
+}
+
+const NATIVE_ORDER_PROVIDER_KEYS = ["amazon", "shopify"] as const;
+const NATIVE_ORDER_ID_PATTERNS = [
+  [/^AMZ[-_:]/i, /^\d{3}-\d{7}-\d{7}$/],
+  [/^gid:\/\/shopify\/Order\//i]
+] as const;
+
+function nativeProviderFromOrderId(value: string) {
+  const normalized = value.trim();
+  const index = NATIVE_ORDER_ID_PATTERNS.findIndex((patterns) => patterns.some((pattern) => pattern.test(normalized)));
+  if (index >= 0) return NATIVE_ORDER_PROVIDER_KEYS[index] ?? "";
+  return "";
+}
+
+function nativeOrderIdFromRow(row: Record<string, unknown>) {
+  const candidates = [
+    row.native_order_id,
+    row.nativeOrderId,
+    row.source_order_id,
+    row.sourceOrderId,
+    row.order_id,
+    row.orderId,
+    row.amazon_order_id,
+    row.shopify_order_id,
+    row.source_id,
+    row.sourceId
+  ].map(firstString).map((value) => value.trim()).filter(Boolean);
+
+  for (const providerIndex of [0, 1]) {
+    const value = candidates.find((candidate) => NATIVE_ORDER_ID_PATTERNS[providerIndex]?.some((pattern) => pattern.test(candidate)));
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function normalizeIdentityPart(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function orderItemDedupeKey(row: Record<string, unknown>) {
+  const orderId = stringValue(row.order_id);
+  if (orderId) {
+    const sourceOrderId = nativeOrderIdFromRow(row) || firstString(row.native_order_id, row.nativeOrderId, row.source_order_id, row.sourceOrderId, row.order_id, row.orderId, row.amazon_order_id, row.shopify_order_id);
+    const nativeProvider = nativeProviderFromOrderId(sourceOrderId);
+    return [
+      "order-item",
+      firstString(row.workspace_id, row.workspaceId),
+      nativeProvider ? `native:${nativeProvider}` : firstString(row.data_source_id, row.dataSourceId),
+      nativeProvider ? "" : firstString(row.source_account_id, row.sourceAccountId, row.account_id, row.accountId, row.shop_id, row.seller_id),
+      normalizeIdentityPart(sourceOrderId),
+      nativeProvider ? "" : firstString(row.source_line_item_id, row.sourceLineItemId, row.line_item_id, row.lineItemId, row.order_item_id, row.orderItemId),
+      nativeProvider ? "" : orderId,
+      firstString(row.sku, row.product_sku, row.seller_sku),
+      firstString(row.asin),
+      nativeProvider ? "" : firstString(row.variant_id),
+      nativeProvider ? "" : firstString(row.product_id),
+      nativeProvider ? "" : firstString(row.product_name, row.title, row.item_name, row.name),
+      String(numberValue(row.quantity, 1)),
+      String(lineItemRevenueBasisForAllocation(row)),
+      String(firstNumber(row.cogs, row.item_cost, row.unit_cost, row.cost_price))
+    ].join(":");
+  }
+
+  return stringValue(row.canonical_key);
+}
+
+function attachNativeOrderIdsToOrderItems(
+  items: Array<Record<string, unknown>>,
+  orders: Array<Record<string, unknown>>
+) {
+  if (!items.length || !orders.length) return items;
+
+  const nativeOrderIdByOrderMatch = new Map<string, string>();
+  for (const order of orders) {
+    const nativeOrderId = nativeOrderIdFromRow(order);
+    if (!nativeOrderId) continue;
+    for (const matchValue of orderMatchValues(order)) {
+      nativeOrderIdByOrderMatch.set(matchValue, nativeOrderId);
+    }
+  }
+
+  if (!nativeOrderIdByOrderMatch.size) return items;
+
+  return items.map((item) => {
+    const nativeOrderId = orderMatchValues(item)
+      .map((matchValue) => nativeOrderIdByOrderMatch.get(matchValue))
+      .find(Boolean);
+    return nativeOrderId ? { ...item, native_order_id: nativeOrderId } : item;
+  });
+}
+
+function buildOrderNetRevenueById(rows: Array<Record<string, unknown>>) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const orderId = orderAllocationIdentity(row);
+    if (!orderId || !hasExplicitCommerceRevenue(row)) continue;
+    map.set(orderId, orderRevenue(row));
+  }
+  return map;
+}
+
+function allocateOrderNetRevenueToItems(
+  rows: Array<Record<string, unknown>>,
+  orderNetRevenueById: Map<string, number>
+) {
+  const rowsByOrderId = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const orderId = orderAllocationIdentity(row);
+    if (!orderId || !orderNetRevenueById.has(orderId)) continue;
+    rowsByOrderId.set(orderId, [...(rowsByOrderId.get(orderId) ?? []), row]);
+  }
+
+  const allocatedRevenueByRow = new Map<Record<string, unknown>, number>();
+  for (const [orderId, orderRows] of rowsByOrderId) {
+    const orderRevenueValue = orderNetRevenueById.get(orderId) ?? 0;
+    const bases = orderRows.map((row) => Math.max(0, lineItemRevenueBasisForAllocation(row)));
+    const totalBasis = roundCurrency(sum(bases));
+    const netQuantities = orderRows.map((row) => Math.max(0, numberValue(row.quantity, 0)));
+    const totalNetQuantity = roundRatio(sum(netQuantities));
+    const allocationBasis = totalBasis > 0 ? bases : netQuantities;
+    const totalAllocationBasis = totalBasis > 0 ? totalBasis : totalNetQuantity;
+    if (totalAllocationBasis <= 0) continue;
+
+    let allocatedSoFar = 0;
+    orderRows.forEach((row, index) => {
+      const allocated = index === orderRows.length - 1
+        ? roundCurrency(orderRevenueValue - allocatedSoFar)
+        : roundCurrency(orderRevenueValue * (allocationBasis[index] / totalAllocationBasis));
+      allocatedSoFar = roundCurrency(allocatedSoFar + allocated);
+      allocatedRevenueByRow.set(row, allocated);
+    });
+  }
+
+  return rows.map((row) => {
+    const allocatedRevenue = allocatedRevenueByRow.get(row);
+    if (allocatedRevenue === undefined) return row;
+    return {
+      ...row,
+      revenue: allocatedRevenue,
+      net_sales: allocatedRevenue,
+      net_revenue: allocatedRevenue,
+      revenue_allocation_source: "order_net_revenue"
+    };
+  });
+}
+
+function orderAllocationIdentity(row: Record<string, unknown>) {
+  return sourceOrderIdentity(row) || stringValue(row.order_id);
+}
+
+const VALID_FINANCIAL_STATUSES = new Set([
+  "paid",
+  "partially_refunded",
+  "captured",
+  "settled"
+]);
+
+const INVALID_FINANCIAL_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "failed",
+  "pending",
+  "unpaid",
+  "voided"
+]);
+
+function filterValidOrders(rows: Array<Record<string, unknown>>) {
+  return rows.filter(isValidOrder);
+}
+
+function isNonTestNonCancelledOrder(row: Record<string, unknown>) {
+  return !truthyFlag(row.is_test) &&
+    !truthyFlag(row.test) &&
+    !truthyFlag(row.is_cancelled) &&
+    !truthyFlag(row.cancelled) &&
+    !Boolean(stringValue(row.cancelled_at)) &&
+    !Boolean(stringValue(row.cancelled_at_source)) &&
+    !["cancelled", "canceled"].includes(normalizeStatus(firstString(row.financial_status, row.payment_status, row.status, row.order_status)));
+}
+
+function isValidOrder(row: Record<string, unknown>) {
+  if (!isNonTestNonCancelledOrder(row)) return false;
+
+  const explicitPaymentStatus = firstString(row.financial_status, row.payment_status);
+  const fallbackStatus = firstString(row.status, row.order_status);
+  const financialStatus = normalizeStatus(explicitPaymentStatus || fallbackStatus);
+  const hasOrderDate = Boolean(dayKey(firstString(row.order_date, row.date, row.created_at, row.createdAt, row.processed_at)));
+  const explicitPaidFlag = truthyFlag(row.is_paid) || truthyFlag(row.paid) || truthyFlag(row.isPaid);
+  if (explicitPaidFlag && financialStatus !== "authorized" && !INVALID_FINANCIAL_STATUSES.has(financialStatus)) return true;
+  if (!financialStatus) return hasPositiveCommerceRevenueOrPayment(row);
+  if (INVALID_FINANCIAL_STATUSES.has(financialStatus)) return false;
+  if (financialStatus === "authorized") return false;
+  if (financialStatus === "partially_paid") return paidAmount(row) !== null;
+  if (financialStatus === "refunded") return true;
+  if (!explicitPaymentStatus) return hasOrderDate && hasPositiveCommerceRevenueOrPayment(row);
+  return VALID_FINANCIAL_STATUSES.has(financialStatus);
+}
+
+function withNetQuantity(row: Record<string, unknown>) {
+  const quantity = itemNetQuantity(row);
+  if (quantity === numberValue(row.quantity, 1)) return row;
+
+  return {
+    ...row,
+    quantity,
+    source_quantity: row.quantity,
+    quantity_adjustment_source: "refunded_quantity"
+  };
+}
+
+function itemNetQuantity(row: Record<string, unknown>) {
+  const explicitNetQuantity = firstFiniteNumber(row.net_quantity, row.quantity_net, row.net_units, row.units_sold_net);
+  if (explicitNetQuantity !== null) return Math.max(0, explicitNetQuantity);
+
+  const quantity = numberValue(row.quantity, 1);
+  const refundedQuantity = firstFiniteNumber(row.refunded_quantity, row.refund_quantity, row.returned_quantity);
+  if (refundedQuantity !== null && !quantityAlreadyNet(row)) return Math.max(0, quantity - refundedQuantity);
+
+  return quantity;
+}
+
+function quantityAlreadyNet(row: Record<string, unknown>) {
+  return truthyFlag(row.quantity_is_net) ||
+    truthyFlag(row.is_net_quantity) ||
+    hasValue(row.net_quantity) ||
+    hasValue(row.quantity_net) ||
+    hasValue(row.net_units) ||
+    hasValue(row.units_sold_net);
+}
+
+function hasExplicitCommerceRevenue(row: Record<string, unknown>) {
+  return [
+    computedOrderNetRevenue(row),
+    row.net_revenue,
+    row.netRevenue,
+    row.net_amount,
+    row.netAmount,
+    row.net_total,
+    row.netTotal,
+    row.total_paid
+  ].some((value) => value !== null && hasFiniteNumber(value));
+}
+
+function computedOrderNetRevenue(row: Record<string, unknown>) {
+  if (firstString(row.revenue_allocation_source) === "order_net_revenue") {
+    const allocatedNet = firstFiniteNumber(row.net_revenue, row.net_sales, row.revenue);
+    if (allocatedNet !== null) return roundCurrency(Math.max(0, allocatedNet));
+  }
+
+  const paymentStatus = normalizeStatus(firstString(row.financial_status, row.payment_status, row.status, row.order_status));
+  if (paymentStatus === "partially_paid") {
+    const paid = paidAmount(row);
+    if (paid === null) return null;
+    return roundCurrency(Math.max(0, paid - firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+  }
+
+  const grossSales = firstFiniteNumber(row.gross_sales, row.grossSales);
+  if (grossSales === null) {
+    const explicitNet = firstFiniteNumber(row.net_revenue, row.netRevenue, row.net_amount, row.netAmount, row.net_total, row.netTotal);
+    if (explicitNet !== null) return roundCurrency(Math.max(0, explicitNet));
+
+    if (!hasRevenueAdjustment(row)) return null;
+
+    const legacyPreRefundRevenue = firstFiniteNumber(row.revenue, row.sales, row.gmv, row.amount, row.total, row.subtotal, row.net_sales, row.netSales);
+    if (legacyPreRefundRevenue === null) return null;
+
+    return roundCurrency(
+      Math.max(0, legacyPreRefundRevenue -
+        firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+        firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund))
+    );
+  }
+  return roundCurrency(
+    Math.max(0, grossSales -
+      firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+      firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund))
+  );
+}
+
+function lineItemRevenueBasisForAllocation(row: Record<string, unknown>, quantity = numberValue(row.quantity, 1)) {
+  return firstNumber(
+    computedLineItemNetRevenue(row),
+    row.net_revenue,
+    row.netRevenue,
+    row.net_amount,
+    row.netAmount,
+    row.net_total,
+    row.netTotal,
+    row.net_sales,
+    row.gross_sales,
+    row.revenue,
+    firstNumber(row.price, row.unit_price) * quantity
+  );
 }
 
 function sum(values: number[]) {
@@ -1599,11 +2152,179 @@ function sum(values: number[]) {
 }
 
 function orderRevenue(row: Record<string, unknown>) {
-  return firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales);
+  return firstNumber(
+    computedOrderNetRevenue(row),
+    row.net_revenue,
+    row.netRevenue,
+    row.net_amount,
+    row.netAmount,
+    row.net_total,
+    row.netTotal,
+    row.total_paid,
+    row.net_sales,
+    row.revenue,
+    row.gross_sales
+  );
 }
 
 function lineItemRevenue(row: Record<string, unknown>, quantity = numberValue(row.quantity, 1)) {
-  return roundCurrency(firstNumber(row.revenue, row.net_sales, firstNumber(row.price, row.unit_price) * quantity));
+  return roundCurrency(firstNumber(
+    computedLineItemNetRevenue(row),
+    row.net_revenue,
+    row.netRevenue,
+    row.net_amount,
+    row.netAmount,
+    row.net_total,
+    row.netTotal,
+    row.net_sales,
+    row.revenue,
+    row.gross_sales,
+    firstNumber(row.price, row.unit_price) * quantity
+  ));
+}
+
+function computedLineItemNetRevenue(row: Record<string, unknown>) {
+  if (firstString(row.revenue_allocation_source) === "order_net_revenue") {
+    const allocatedNet = firstFiniteNumber(row.net_revenue, row.net_sales, row.revenue);
+    if (allocatedNet !== null) return roundCurrency(Math.max(0, allocatedNet));
+  }
+
+  const paymentStatus = normalizeStatus(firstString(row.financial_status, row.payment_status, row.status, row.order_status));
+  if (paymentStatus === "partially_paid") {
+    const paid = paidAmount(row);
+    if (paid === null) return null;
+    return roundCurrency(Math.max(0, paid - firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+  }
+
+  const grossSales = firstFiniteNumber(row.gross_sales, row.grossSales);
+  if (grossSales === null) {
+    const explicitNet = firstFiniteNumber(row.net_revenue, row.netRevenue, row.net_amount, row.netAmount, row.net_total, row.netTotal);
+    if (explicitNet !== null) return roundCurrency(Math.max(0, explicitNet));
+
+    if (!hasRevenueAdjustment(row)) return null;
+
+    const legacyPreRefundRevenue = firstFiniteNumber(row.revenue, row.sales, row.gmv, row.amount, row.total, row.subtotal, row.net_sales, row.netSales);
+    if (legacyPreRefundRevenue === null) return null;
+
+    return roundCurrency(
+      Math.max(0, legacyPreRefundRevenue -
+        firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+        firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund))
+    );
+  }
+  return roundCurrency(
+    Math.max(0, grossSales -
+      firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+      firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund))
+  );
+}
+
+function paidAmount(row: Record<string, unknown>) {
+  return firstFiniteNumber(row.paid_amount, row.amount_paid, row.total_paid, row.captured_amount, row.net_payment);
+}
+
+function hasPositiveCommerceRevenueOrPayment(row: Record<string, unknown>) {
+  const paid = paidAmount(row);
+  if (paid !== null) return paid > 0;
+  return orderRevenue(row) > 0;
+}
+
+function adSpendValue(row: Record<string, unknown>) {
+  return firstNumber(
+    row.spend,
+    row.ad_spend,
+    row.ads_spend,
+    row.amount_spent,
+    row.amountSpent,
+    row["amount spent"],
+    row["Amount spent"],
+    row.total_spend,
+    row.total_ad_spend,
+    row.ad_cost,
+    row.cost
+  );
+}
+
+function hasRevenueAdjustment(row: Record<string, unknown>) {
+  return hasFiniteNumber(row.discount) ||
+    hasFiniteNumber(row.discount_amount) ||
+    hasFiniteNumber(row.total_discount) ||
+    hasFiniteNumber(row.discounts) ||
+    hasFiniteNumber(row.refund) ||
+    hasFiniteNumber(row.refund_amount) ||
+    hasFiniteNumber(row.refunded_amount) ||
+    hasFiniteNumber(row.total_refund);
+}
+
+function summarizeOrderStatuses(sourceOrders: Array<Record<string, unknown>>, paidOrders: Array<Record<string, unknown>>) {
+  const paidOrderIds = new Set(paidOrders.map(sourceOrderIdentity).filter(Boolean));
+  const nonTestOrders = sourceOrders.filter((row) => !truthyFlag(row.is_test) && !truthyFlag(row.test));
+  const cancelledOrders = nonTestOrders.filter((row) => !isValidOrder(row));
+  const fullyRefundedOrders = nonTestOrders.filter((row) => {
+    const status = normalizeStatus(firstString(row.financial_status, row.payment_status, row.status, row.order_status));
+    return status === "refunded" || (computedOrderNetRevenue(row) === 0 && firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund) > 0);
+  });
+  const netRevenueOrders = paidOrders.filter((row) => orderRevenue(row) > 0);
+
+  return {
+    orders_created: new Set(sourceOrders.map(sourceOrderIdentity).filter(Boolean)).size,
+    paid_orders: paidOrderIds.size,
+    net_revenue_orders: new Set(netRevenueOrders.map(sourceOrderIdentity).filter(Boolean)).size,
+    cancelled_orders: new Set(cancelledOrders.map(sourceOrderIdentity).filter(Boolean)).size,
+    fully_refunded_orders: new Set(fullyRefundedOrders.map(sourceOrderIdentity).filter(Boolean)).size
+  };
+}
+
+function observedDateWindow(rows: Array<Record<string, unknown>>) {
+  const days = rows
+    .map((row) => dayKey(firstString(row.order_date, row.date, row.created_at, row.createdAt, row.processed_at)))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  if (!days.length) return null;
+  return { start: days[0], end: days[days.length - 1] };
+}
+
+function filterAdsToOrderWindow(rows: Array<Record<string, unknown>>, window: { start: string; end: string } | null) {
+  if (!window) return rows;
+  return rows.filter((row) => {
+    const date = dayKey(firstString(row.date, row.ad_date, row.report_date, row.day, row.created_at, row.createdAt));
+    if (!date) return true;
+    return date >= window.start && date <= window.end;
+  });
+}
+
+function hasUsableInventorySignal(row: Record<string, unknown>) {
+  return [
+    row.stock_level,
+    row.on_hand,
+    row.inventory_quantity,
+    row.available_stock,
+    row.available,
+    row.reserved_stock,
+    row.inventory_value,
+    row.inventoryValue,
+    row.total_inventory_value,
+    row.totalInventoryValue,
+    row["Inventory Value"],
+    row["Inventory value"],
+    row["inventory value"],
+    row["Total Inventory Value"],
+    row["Total inventory value"],
+    row["total inventory value"],
+    row["inventory-value"],
+    row.inventory_unit_cost,
+    row.unit_cost,
+    row.inventory_cost,
+    row.inventoryAssetValue,
+    row.inventory_asset_value,
+    row.stock_value,
+    row.stockValue,
+    row.stock_asset_value,
+    row.on_hand_value,
+    row.total_value,
+    row.totalValue,
+    row.value
+  ].some(hasFiniteNumber);
 }
 
 function firstNumber(...values: unknown[]) {
@@ -1620,7 +2341,7 @@ function firstString(...values: unknown[]) {
 
 function firstFiniteNumber(...values: unknown[]) {
   for (const value of values) {
-    const number = Number(value);
+    const number = numericValue(value);
     if (Number.isFinite(number)) return number;
   }
 
@@ -1628,13 +2349,24 @@ function firstFiniteNumber(...values: unknown[]) {
 }
 
 function numberValue(value: unknown, fallback = 0) {
-  const number = Number(value);
+  const number = numericValue(value);
 
   return Number.isFinite(number) ? number : fallback;
 }
 
 function hasFiniteNumber(value: unknown) {
-  return Number.isFinite(Number(value));
+  return Number.isFinite(numericValue(value));
+}
+
+function numericValue(value: unknown) {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number(value);
+
+  const normalized = value.trim().replace(/[$,\s]/g, "").replace(/^\((.*)\)$/, "-$1");
+  if (!normalized) return NaN;
+
+  return Number(normalized);
 }
 
 function stringValue(value: unknown) {
@@ -1643,6 +2375,18 @@ function stringValue(value: unknown) {
 
 function hasValue(value: unknown) {
   return value !== null && value !== undefined && value !== "";
+}
+
+function truthyFlag(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value !== "string") return false;
+
+  return ["1", "true", "yes", "y"].includes(value.trim().toLowerCase());
+}
+
+function normalizeStatus(value: unknown) {
+  return stringValue(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
 function roundCurrency(value: number) {

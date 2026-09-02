@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { WorkspaceRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { APPLICATION_STATUS_OPTIONS } from "@/lib/partnership-applications";
-import { requireWorkspaceRole, workspaceAuthErrorResponse } from "@/lib/workspace-auth";
+import { requireSuperAdmin } from "@/lib/system-admin-auth";
+import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireWorkspaceRole([WorkspaceRole.OWNER, WorkspaceRole.ADMIN], request);
+    await requireSuperAdmin(request);
     const { id } = await params;
     const payload = await request.json().catch(() => null);
     const status = payload && typeof payload === "object"

@@ -14,6 +14,10 @@ import type { DecisionReadiness } from "@/lib/optimization/decision-readiness-en
 export type CompetitiveContext = {
   status: "READY" | "NEEDS_COMPETITOR_REVIEW" | "PUBLIC_AD_LIBRARY_NOT_CONNECTED" | "INSUFFICIENT_SKU_SIGNAL";
   source: "PUBLIC_AD_LIBRARY" | "SKU_CONTEXT" | "USER_CONFIRMED_COMPETITORS" | "SKU_PRODUCT_CONTEXT_CANDIDATES";
+  data_source_id?: string | null;
+  snapshot_id?: string | null;
+  provider?: string | null;
+  source_label?: string | null;
   category: string | null;
   price_position: "BELOW_MARKET" | "AT_MARKET" | "ABOVE_MARKET" | "UNKNOWN";
   own_price: number | null;

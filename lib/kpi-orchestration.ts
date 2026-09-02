@@ -66,7 +66,7 @@ function selectMetricPath(industry: IndustryContext, metrics: MetricDefinition[]
   return "generic_semantic_metrics";
 }
 
-export function selectKpiExecutionDataSources<T extends DataSourceConnection>(dataSources: T[]) {
+export function selectKpiExecutionDataSources<T extends Pick<DataSourceConnection, "type" | "updatedAt">>(dataSources: T[]) {
   const ranked = [...dataSources].sort((left, right) => {
     const priorityDelta = dataSourcePriorityRank(dataSourcePriority(left)) - dataSourcePriorityRank(dataSourcePriority(right));
     if (priorityDelta !== 0) return priorityDelta;

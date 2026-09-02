@@ -104,6 +104,8 @@ export type DecisionIntelligenceReportV1 = {
   performance_overview: {
     revenue: number;
     orders: number;
+    paid_orders?: number;
+    cancelled_orders?: number;
     aov: number;
     gross_profit: number;
     net_profit: number;
@@ -113,7 +115,40 @@ export type DecisionIntelligenceReportV1 = {
     cac: number | null;
   };
   sku_breakdown: {
-    top_revenue_skus: Array<{ sku: string; product_name?: string; category?: string; variant_name?: string; size?: string; color?: string; revenue: number; quantity: number; share?: number; estimated: boolean }>;
+    top_revenue_skus: Array<{
+      sku: string;
+      product_name?: string;
+      category?: string;
+      variant_name?: string;
+      size?: string;
+      color?: string;
+      revenue: number;
+      quantity: number;
+      share?: number;
+      stock_level?: number | null;
+      available_stock?: number | null;
+      sales_velocity?: number;
+      normalized_daily_sales_velocity?: number;
+      velocity_window_days?: number;
+      calculation_window_days?: number;
+      velocity_calculation_basis?: "30-day normalized estimate" | "observed order window";
+      velocity_confidence?: "HIGH" | "MEDIUM" | "LOW";
+      data_period_days?: number;
+      inventory_risk_status?: "OK" | "INSUFFICIENT_DATA" | "STOCKOUT_RISK" | "LOW_CONFIDENCE_STOCK_RISK" | "EXCESS_INVENTORY" | "OVERSTOCK_RISK" | "LIQUIDATION_RISK" | "HEALTHY" | "OBSERVATION";
+      days_of_inventory?: number | null;
+      inventory_confidence?: number;
+      lifecycle_stage?: string;
+      lifecycle_confidence?: "HIGH" | "MEDIUM" | "LOW";
+      demand_trend?: DemandTrend;
+      inventory_decision?: InventoryDecision;
+      inventory_risk_score?: number;
+      inventory_recommended_action?: InventoryDecision["recommended_action"];
+      inventory_risk_reason?: string;
+      inventory_value?: number | null;
+      paid_dependency_score?: number;
+      organic_sales_ratio?: number;
+      estimated: boolean;
+    }>;
     top_profit_skus: Array<{
       sku: string;
       product_name?: string;
@@ -341,20 +376,49 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
   const profitabilityRevenue = Number.isFinite(metrics.business.revenue)
     ? metrics.business.revenue
     : metrics.core.revenue;
-  const profitabilityAov = metrics.core.orders > 0 ? roundCurrency(profitabilityRevenue / metrics.core.orders) : 0;
+  const paidOrderCount = metrics.core.paid_orders && metrics.core.paid_orders > 0
+    ? metrics.core.paid_orders
+    : metrics.core.orders;
+  const profitabilityAov = paidOrderCount > 0 ? roundCurrency(profitabilityRevenue / paidOrderCount) : 0;
   const totalSkuRevenue = metrics.core.sku_revenue.reduce((sum, row) => sum + row.revenue, 0);
-  const topRevenueSkus = metrics.core.sku_revenue.map((row) => ({
-    sku: row.sku,
-    product_name: row.product_name,
-    category: row.category,
-    variant_name: row.variant_name,
-    size: row.size,
-    color: row.color,
-    revenue: row.revenue,
-    quantity: row.quantity,
-    share: totalSkuRevenue > 0 ? roundRatio(row.revenue / totalSkuRevenue) : 0,
-    estimated: row.estimated
-  }));
+  const economicsBySku = new Map(metrics.business.sku_unit_economics.map((row) => [row.sku, row]));
+  const topRevenueSkus = metrics.core.sku_revenue.map((row) => {
+    const economics = economicsBySku.get(row.sku);
+    return {
+      sku: row.sku,
+      product_name: row.product_name,
+      category: row.category,
+      variant_name: row.variant_name,
+      size: row.size,
+      color: row.color,
+      revenue: row.revenue,
+      quantity: row.quantity,
+      share: totalSkuRevenue > 0 ? roundRatio(row.revenue / totalSkuRevenue) : 0,
+      stock_level: economics?.stock_level ?? null,
+      available_stock: economics?.available_stock ?? null,
+      sales_velocity: economics?.sales_velocity,
+      normalized_daily_sales_velocity: economics?.normalized_daily_sales_velocity,
+      velocity_window_days: economics?.velocity_window_days,
+      calculation_window_days: economics?.calculation_window_days,
+      velocity_calculation_basis: economics?.velocity_calculation_basis,
+      velocity_confidence: economics?.velocity_confidence,
+      data_period_days: economics?.data_period_days,
+      inventory_risk_status: economics?.inventory_risk_status,
+      days_of_inventory: economics?.days_of_inventory ?? null,
+      inventory_confidence: economics?.inventory_confidence,
+      lifecycle_stage: economics?.lifecycle_stage,
+      lifecycle_confidence: economics?.lifecycle_confidence,
+      demand_trend: economics?.demand_trend,
+      inventory_decision: economics?.inventory_decision,
+      inventory_risk_score: economics?.inventory_risk_score,
+      inventory_recommended_action: economics?.inventory_recommended_action,
+      inventory_risk_reason: economics?.inventory_risk_reason,
+      inventory_value: economics?.inventory_value ?? null,
+      paid_dependency_score: economics?.paid_dependency_score,
+      organic_sales_ratio: economics?.organic_sales_ratio,
+      estimated: row.estimated
+    };
+  });
   const topProfitSkus = metrics.business.sku_unit_economics.map((row) => ({
     sku: row.sku,
     product_name: row.product_name,
@@ -533,6 +597,8 @@ export function buildDecisionIntelligenceReportV1(metricOutput: MetricOutput): D
     performance_overview: {
       revenue: profitabilityRevenue,
       orders: metrics.core.orders,
+      paid_orders: metrics.core.paid_orders,
+      cancelled_orders: metrics.core.cancelled_orders,
       aov: profitabilityAov,
       gross_profit: metrics.business.gross_profit,
       net_profit: metrics.business.net_profit,
@@ -1040,10 +1106,30 @@ function buildCompetitiveContextForSku(input: {
     "No user-confirmed competitor brands are attached to this SKU.",
     "Competitor creative signals are not used for automated budget decisions yet."
   ];
+  const dataSourceId = stringValue(
+    source.dataSourceId,
+    source.data_source_id,
+    source.sourceDataSourceId,
+    source.source_data_source_id
+  );
+  const snapshotId = stringValue(
+    source.snapshotId,
+    source.snapshot_id,
+    source.schemaSnapshotId,
+    source.schema_snapshot_id,
+    source.canonicalSnapshotId,
+    source.canonical_snapshot_id
+  );
+  const provider = stringValue(source.provider, source.source_provider, source.businessSource, source.business_source);
+  const sourceLabel = stringValue(source.sourceLabel, source.source_label, source.dataSourceName, source.data_source_name, provider);
 
   return {
     status: hasPriceSignal ? "PUBLIC_AD_LIBRARY_NOT_CONNECTED" : "INSUFFICIENT_SKU_SIGNAL",
     source: "SKU_CONTEXT",
+    data_source_id: dataSourceId || null,
+    snapshot_id: snapshotId || null,
+    provider: provider || null,
+    source_label: sourceLabel || null,
     category: input.category,
     price_position: pricePosition,
     own_price: input.price > 0 ? input.price : null,
@@ -1067,6 +1153,14 @@ function buildCompetitiveContextForSku(input: {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function stringValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
 }
 
 function numberValue(value: unknown) {
@@ -1133,14 +1227,12 @@ function buildPortfolioOptimizationSkuInputs(input: {
   }
 
   if (input.revenueRows.length) {
-    const totalRevenue = input.revenueRows.reduce((sum, row) => sum + row.revenue, 0);
     const portfolioMargin = input.metrics.business.margin || 0.28;
+    const velocityWindowDays = Math.max(1, input.metrics.growth.growth_window_days || 0);
     return input.revenueRows.map((row, index) => {
       const quantity = Math.max(1, row.quantity || Math.round(row.revenue / 48));
       const price = roundCurrency(row.revenue / quantity);
-      const adsSpend = input.metrics.ads.ad_spend > 0 && totalRevenue > 0
-        ? roundCurrency(input.metrics.ads.ad_spend * row.revenue / totalRevenue)
-        : roundCurrency(row.revenue * 0.055);
+      const adsSpend = 0;
       const margin = clamp(portfolioMargin + (((index % 7) - 3) * 0.012), 0.12, 0.48);
       const cogs = roundCurrency(price * Math.max(0.15, 1 - margin) * 0.62);
       const profitability = calculateSkuProfitability({
@@ -1150,8 +1242,8 @@ function buildPortfolioOptimizationSkuInputs(input: {
         adSpend: adsSpend,
         cogsStatus: "ESTIMATED",
         cogsConfidence: 0.55,
-        adAllocationMethod: input.metrics.ads.ad_spend > 0 ? "REVENUE_SHARE" : "UNKNOWN",
-        attributionConfidence: input.metrics.ads.ad_spend > 0 ? 0.5 : 0.25,
+        adAllocationMethod: "UNKNOWN",
+        attributionConfidence: 0.25,
         criticalFieldsMissing: ["sku_profit_rows"]
       });
 
@@ -1171,13 +1263,13 @@ function buildPortfolioOptimizationSkuInputs(input: {
         warnings: profitability.validation.warnings,
         cogs_status: profitability.cogs_status,
         cogs_confidence: profitability.cogs_confidence,
-        ad_allocation_method: "revenue_share",
+        ad_allocation_method: "unavailable",
         attribution_confidence: profitability.attribution_confidence,
-        inventory: Math.max(quantity * 2, 120 + ((index * 37) % 900)),
-        sales_velocity: roundRatio(quantity / 30),
+        inventory: 0,
+        sales_velocity: input.metrics.growth.growth_window_days > 0 ? roundRatio(quantity / velocityWindowDays) : 0,
         sales_velocity_confidence: "LOW",
-        velocity_window_days: 30,
-        data_period_days: 0,
+        velocity_window_days: input.metrics.growth.growth_window_days > 0 ? velocityWindowDays : 0,
+        data_period_days: input.metrics.growth.growth_window_days > 0 ? velocityWindowDays : 0,
         inventory_risk_status: "INSUFFICIENT_DATA",
         refund_rate: 0.04 + ((index % 5) * 0.006),
         customer_ltv: input.metrics.customer.ltv || 140,
@@ -1257,7 +1349,10 @@ function buildSyntheticPortfolioSkuInputs(confidence: number): PortfolioSkuInput
       ad_allocation_method: "unavailable",
       attribution_confidence: profitability.attribution_confidence,
       inventory,
-      sales_velocity: roundRatio(quantity / 30),
+      sales_velocity: 0,
+      sales_velocity_confidence: "LOW",
+      velocity_window_days: 0,
+      data_period_days: 0,
       refund_rate: 0.025 + ((index % 8) * 0.006),
       customer_ltv: 120 + ((index * 17) % 170),
       conversion_rate: 0.018 + ((index % 9) * 0.004),

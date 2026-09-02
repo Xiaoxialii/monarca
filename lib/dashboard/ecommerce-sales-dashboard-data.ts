@@ -2,6 +2,8 @@ import type { CanonicalDataset } from "@/lib/semantic/types";
 import { filterCanonicalDatasetForDateRange } from "@/lib/analytics/analysis-period-engine";
 import { validateAnalyticsMetrics, type AnalyticsValidationResult } from "@/lib/analytics/analytics-validation-engine";
 import { computeCanonicalEcommerceMetrics, type CanonicalEcommerceMetricOutput } from "@/lib/metrics/canonical-ecommerce-metric-engine";
+import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "@/lib/profit/canonical-profitability-engine";
+import { ANALYTICS_METRIC_ENGINE_VERSION } from "@/lib/report-metric-cache";
 import { enrichOrderItemsWithCanonicalSku, normalizeProductSkuRows } from "@/lib/sku/sku-intelligence-engine";
 import { buildDecisionIntelligenceReportV1, type DecisionIntelligenceReportV1 } from "@/lib/decision-intelligence/decision-intelligence-engine";
 import type { ReportDateRangeInput } from "@/lib/report-date-range";
@@ -76,6 +78,8 @@ export type EcommerceSalesDashboardData = {
       endDate?: string | null;
     };
     filtered_row_counts?: Record<string, number>;
+    metric_engine_version?: string;
+    profitability_engine_version?: string;
   };
 };
 
@@ -196,7 +200,9 @@ export function buildEcommerceSalesDashboardData(
         startDate: filtered.dateRange.startDate ?? null,
         endDate: filtered.dateRange.endDate ?? null
       },
-      filtered_row_counts: filtered.filteredRowCounts
+      filtered_row_counts: filtered.filteredRowCounts,
+      metric_engine_version: ANALYTICS_METRIC_ENGINE_VERSION,
+      profitability_engine_version: CANONICAL_PROFITABILITY_ENGINE_VERSION
     }
   };
 }
@@ -245,7 +251,7 @@ export function adaptCanonicalDatasetForMetrics(dataset: CanonicalDataset): Cano
   })));
   const ecommerceOrderItems = enrichOrderItemsWithCanonicalSku(dataset.tables.ecommerce_order_items.map((row) => {
     const quantity = firstNumber(row.quantity) || 1;
-    const price = firstNumber(row.price, row.unit_price, safeDivide(firstNumber(row.net_sales, row.gross_sales), quantity));
+    const price = firstNumber(row.price, row.unit_price, safeDivide(rowRevenue(row), quantity));
 
     return {
       ...row,
@@ -264,10 +270,12 @@ export function adaptCanonicalDatasetForMetrics(dataset: CanonicalDataset): Cano
     tables: {
       ecommerce_orders: dataset.tables.ecommerce_orders.map((row, index) => {
         const orderDate = firstString(row.order_date, row.created_at_source, row.processed_at_source);
+        const revenue = rowRevenue(row);
         return {
           ...row,
           platform: canonicalPlatform(row),
-          revenue: firstNumber(row.revenue, row.net_sales, row.total_paid, row.gross_sales),
+          revenue,
+          net_revenue: revenue,
           order_date: shouldSpreadSingleMonthOrders ? spreadMonthDate(orderDate, index) : orderDate,
           currency: firstString(row.currency),
           status: firstString(row.status, row.order_status, row.financial_status)
@@ -289,25 +297,49 @@ export function adaptCanonicalDatasetForMetrics(dataset: CanonicalDataset): Cano
       ecommerce_ads: (dataset.tables.ecommerce_ads ?? []).map((row) => ({
         ...row,
         platform: canonicalPlatform(row),
-        spend: firstNumber(row.spend, row.ad_spend),
+        spend: adSpendValue(row),
         impressions: firstNumber(row.impressions),
         clicks: firstNumber(row.clicks),
         conversions: firstNumber(row.conversions),
         attribution_revenue: firstNumber(row.attribution_revenue, row.purchase_value, row.revenue),
         date: firstString(row.date, row.month)
       })),
-      ecommerce_inventory: ((dataset.tables.ecommerce_inventory ?? dataset.tables.inventory ?? []) as CanonicalRow[]).map((row) => ({
-        ...row,
-        platform: canonicalPlatform(row),
-        sku: firstString(row.sku),
-        warehouse_id: firstString(row.warehouse_id, row.warehouse),
-        stock_level: firstNumber(row.stock_level, row.on_hand, row.inventory_quantity, row.available_stock, row.available),
-        available_stock: firstNumber(row.available_stock, row.available, row.stock_level, row.on_hand, row.inventory_quantity),
-        reserved_stock: firstNumber(row.reserved_stock, row.reserved),
-        reorder_point: firstNumber(row.reorder_point),
-        fulfillment_days: firstNumber(row.fulfillment_days, row.fulfillment_time, row.fulfillment_time_days),
-        date: firstString(row.date, row.snapshot_date, row.month)
-      }))
+      ecommerce_inventory: ((dataset.tables.ecommerce_inventory ?? dataset.tables.inventory ?? []) as CanonicalRow[]).map((row) => {
+        const stockLevel = firstFiniteNumber(row.stock_level, row.on_hand, row.inventory_quantity, row.available_stock, row.available);
+        const availableStock = firstFiniteNumber(row.available_stock, row.available, row.stock_level, row.on_hand, row.inventory_quantity);
+        const reservedStock = firstFiniteNumber(row.reserved_stock, row.reserved);
+        const value = firstInventoryValue(row);
+
+        const snapshotDate = firstString(
+          row.snapshot_date,
+          row.snapshotDate,
+          row["Snapshot Date"],
+          row["Snapshot date"],
+          row["snapshot date"],
+          row.as_of_date,
+          row.asOfDate,
+          row["As of Date"],
+          row["as of date"],
+          row.report_as_of_date,
+          row.date,
+          row.month
+        );
+
+        return {
+          ...row,
+          platform: canonicalPlatform(row),
+          sku: firstString(row.sku),
+          warehouse_id: firstString(row.warehouse_id, row.warehouse),
+          ...(stockLevel !== null ? { stock_level: stockLevel } : {}),
+          ...(availableStock !== null ? { available_stock: availableStock, available: availableStock } : {}),
+          ...(reservedStock !== null ? { reserved_stock: reservedStock } : {}),
+          ...(value !== null ? { inventory_value: value, inventory_cost: value } : {}),
+          reorder_point: firstNumber(row.reorder_point),
+          fulfillment_days: firstNumber(row.fulfillment_days, row.fulfillment_time, row.fulfillment_time_days),
+          date: snapshotDate,
+          snapshot_date: snapshotDate
+        };
+      })
     },
     metadata: {
       ...dataset.metadata,
@@ -324,7 +356,7 @@ function aggregateRevenueByPeriod(rows: CanonicalRow[], granularity: "day" | "we
   for (const row of rows) {
     const period = periodKey(firstString(row.order_date), granularity);
     if (!period) continue;
-    map.set(period, roundCurrency((map.get(period) ?? 0) + numberValue(row.revenue)));
+    map.set(period, roundCurrency((map.get(period) ?? 0) + rowRevenue(row)));
   }
 
   return Array.from(map.entries())
@@ -508,7 +540,7 @@ function canonicalPlatform(row: CanonicalRow) {
 
 function firstNumber(...values: unknown[]) {
   for (const value of values) {
-    const number = Number(value);
+    const number = numericValue(value);
     if (Number.isFinite(number)) return number;
   }
 
@@ -528,10 +560,134 @@ function safeDivide(value: number, divisor: number) {
   return divisor ? value / divisor : 0;
 }
 
+function computedNetRevenue(row: CanonicalRow) {
+  if (firstString(row.revenue_allocation_source) === "order_net_revenue") {
+    const allocatedNet = firstFiniteNumber(row.net_revenue, row.net_sales, row.revenue);
+    if (allocatedNet !== null) return roundCurrency(Math.max(0, allocatedNet));
+  }
+
+  const paymentStatus = firstString(row.financial_status, row.payment_status, row.status, row.order_status).toLowerCase().replace(/[\s-]+/g, "_");
+  if (paymentStatus === "partially_paid") {
+    const paid = firstFiniteNumber(row.paid_amount, row.amount_paid, row.total_paid, row.captured_amount, row.net_payment);
+    if (paid === null) return null;
+    return roundCurrency(Math.max(0, paid - firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+  }
+
+  const grossSales = firstFiniteNumber(row.gross_sales, row.grossSales);
+  if (grossSales === null) {
+    const explicitNet = firstFiniteNumber(row.net_revenue, row.netRevenue, row.net_amount, row.netAmount, row.net_total, row.netTotal);
+    if (explicitNet !== null) return roundCurrency(Math.max(0, explicitNet));
+
+    if (!hasRevenueAdjustment(row)) return null;
+
+    const legacyPreRefundRevenue = firstFiniteNumber(row.revenue, row.sales, row.gmv, row.amount, row.total, row.subtotal, row.net_sales, row.netSales);
+    if (legacyPreRefundRevenue === null) return null;
+
+    return roundCurrency(Math.max(0, legacyPreRefundRevenue -
+      firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+      firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+  }
+
+  return roundCurrency(Math.max(0, grossSales -
+    firstNumber(row.discount, row.discount_amount, row.total_discount, row.discounts) -
+    firstNumber(row.refund, row.refund_amount, row.refunded_amount, row.total_refund)));
+}
+
+function rowRevenue(row: CanonicalRow) {
+  return firstNumber(
+    computedNetRevenue(row),
+    row.net_revenue,
+    row.netRevenue,
+    row.net_amount,
+    row.netAmount,
+    row.net_total,
+    row.netTotal,
+    row.total_paid,
+    row.net_sales,
+    row.revenue,
+    row.gross_sales
+  );
+}
+
+function adSpendValue(row: CanonicalRow) {
+  return firstNumber(
+    row.spend,
+    row.ad_spend,
+    row.ads_spend,
+    row.amount_spent,
+    row.amountSpent,
+    row["amount spent"],
+    row["Amount spent"],
+    row.total_spend,
+    row.total_ad_spend,
+    row.ad_cost,
+    row.cost
+  );
+}
+
+function firstInventoryValue(row: CanonicalRow) {
+  return firstFiniteNumber(
+    row.inventory_value,
+    row.inventoryValue,
+    row.total_inventory_value,
+    row.totalInventoryValue,
+    row["Inventory Value"],
+    row["Inventory value"],
+    row["inventory value"],
+    row["Total Inventory Value"],
+    row["Total inventory value"],
+    row["total inventory value"],
+    row["inventory-value"],
+    row.inventory_cost,
+    row.inventoryAssetValue,
+    row.inventory_asset_value,
+    row.stock_value,
+    row.stockValue,
+    row.stock_asset_value,
+    row.on_hand_value,
+    row.total_value,
+    row.totalValue,
+    row.value
+  );
+}
+
+function hasRevenueAdjustment(row: CanonicalRow) {
+  return firstFiniteNumber(
+    row.discount,
+    row.discount_amount,
+    row.total_discount,
+    row.discounts,
+    row.refund,
+    row.refund_amount,
+    row.refunded_amount,
+    row.total_refund
+  ) !== null;
+}
+
 function numberValue(value: unknown, fallback = 0) {
-  const number = Number(value);
+  const number = numericValue(value);
 
   return Number.isFinite(number) ? number : fallback;
+}
+
+function firstFiniteNumber(...values: unknown[]) {
+  for (const value of values) {
+    const number = numericValue(value);
+    if (Number.isFinite(number)) return number;
+  }
+
+  return null;
+}
+
+function numericValue(value: unknown) {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number(value);
+
+  const normalized = value.trim().replace(/[$,\s]/g, "").replace(/^\((.*)\)$/, "-$1");
+  if (!normalized) return NaN;
+
+  return Number(normalized);
 }
 
 function stringValue(value: unknown) {

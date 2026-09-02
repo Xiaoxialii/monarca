@@ -55,6 +55,12 @@ function normalizeCsvNumber(value: string) {
   return cleaned ? Number(cleaned) : Number.NaN;
 }
 
+function isPresentCellValue(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return String(value).trim().length > 0;
+}
+
 function normalizeHeaderToken(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -280,6 +286,7 @@ export function inferTablesFromCsvText(fileName: string, text: string) {
   }
 
   const sampleRows = lines.slice(1, 501).map(splitCsvLine);
+  const allRows = lines.slice(1).map(splitCsvLine);
   const sampleRecords = sampleRows.map((row) =>
     Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))
   );
@@ -292,6 +299,7 @@ export function inferTablesFromCsvText(fileName: string, text: string) {
       sampleRows: sampleRecords,
       columns: headers.map((header, index) => {
         const values = sampleRows.map((row) => row[index] ?? "");
+        const nonNullCount = allRows.reduce((sum, row) => sum + (isPresentCellValue(row[index]) ? 1 : 0), 0);
         const displayName = originalHeaders[index] ?? header;
 
         return {
@@ -299,6 +307,8 @@ export function inferTablesFromCsvText(fileName: string, text: string) {
           displayName,
           type: inferCsvColumnType(`${originalHeaders[index] ?? ""} ${header}`, values),
           nullable: true,
+          rowCount,
+          nonNullCount,
           semanticName: header,
           rawHeaderPath: [displayName]
         };
@@ -316,7 +326,9 @@ export async function inferTablesFromExcelBuffer(fileName: string, buffer: Array
     const rawRows = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date | null>>(worksheet, {
       header: 1,
       defval: "",
-      blankrows: false
+      blankrows: false,
+      raw: false,
+      dateNF: "yyyy-mm-dd hh:mm:ss"
     });
     const rows = fillMergedHeaderRows(rawRows, worksheet["!merges"] as Array<{ s?: { r?: number; c?: number }; e?: { r?: number; c?: number } }> | undefined);
     const headerIndex = rows.findIndex((row) => row.some((cell) => String(cell ?? "").trim()));
@@ -351,6 +363,7 @@ export async function inferTablesFromExcelBuffer(fileName: string, buffer: Array
       sampleRows: sampleRecords,
       columns: headers.map((header, index) => {
         const values = sampleRows.map((row) => String(row[index] ?? ""));
+        const nonNullCount = dataRows.reduce((sum, row) => sum + (isPresentCellValue(row[index]) ? 1 : 0), 0);
         const displayName = originalHeaders[index] ?? header;
 
         return {
@@ -358,6 +371,8 @@ export async function inferTablesFromExcelBuffer(fileName: string, buffer: Array
           displayName,
           type: inferCsvColumnType(`${displayName} ${header}`, values),
           nullable: true,
+          rowCount: dataRows.length,
+          nonNullCount,
           semanticName: header,
           rawHeaderPath: headerPaths[index] ?? [displayName]
         };
@@ -375,7 +390,9 @@ export async function excelRecordsFromBuffer(fileName: string, buffer: ArrayBuff
     const rawRows = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date | null>>(worksheet, {
       header: 1,
       defval: "",
-      blankrows: false
+      blankrows: false,
+      raw: false,
+      dateNF: "yyyy-mm-dd hh:mm:ss"
     });
     const rows = fillMergedHeaderRows(rawRows, worksheet["!merges"] as Array<{ s?: { r?: number; c?: number }; e?: { r?: number; c?: number } }> | undefined);
     const headerIndex = rows.findIndex((row) => row.some((cell) => String(cell ?? "").trim()));
@@ -387,6 +404,7 @@ export async function excelRecordsFromBuffer(fileName: string, buffer: ArrayBuff
     const originalHeaders = headerPaths.map((path, index) => displayHeaderFromPath(path, `field_${index + 1}`));
     const canonicalInputs = headerPaths.map((path, index) => path.join("_") || originalHeaders[index] || `field_${index + 1}`);
     const headers = canonicalUploadHeaders(canonicalInputs);
+    const tableName = workbook.SheetNames.length === 1 ? tableNameFromFile(fileName) : tableNameFromFile(sheetName);
     const dataRows = rows.slice(headerIndex + headerDepth).filter((row) => row.some((cell) => String(cell ?? "").trim()));
 
     if (dataRows.length > MAX_EXCEL_ROWS) {
@@ -397,9 +415,10 @@ export async function excelRecordsFromBuffer(fileName: string, buffer: ArrayBuff
       throw new Error(`Excel sheet has too many columns. Maximum supported columns: ${MAX_EXCEL_COLUMNS}.`);
     }
 
-    return dataRows.map((row) =>
-      Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))
-    );
+    return dataRows.map((row) => ({
+      __source_table: tableName,
+      ...Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))
+    }));
   });
 }
 

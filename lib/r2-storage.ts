@@ -1,6 +1,7 @@
-import { GetObjectCommand, PutBucketCorsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, PutBucketCorsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -11,6 +12,8 @@ type StoredUpload = {
 };
 
 let r2CorsSetup: Promise<void> | null = null;
+const R2_CONNECTION_TIMEOUT_MS = 5_000;
+const R2_REQUEST_TIMEOUT_MS = 15_000;
 
 export const r2UploadCorsPolicy = {
   allowedOrigins: [
@@ -85,6 +88,10 @@ function r2Client(config: NonNullable<ReturnType<typeof r2Config>>) {
     region: "auto",
     endpoint: config.endpoint,
     forcePathStyle: true,
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: R2_CONNECTION_TIMEOUT_MS,
+      requestTimeout: R2_REQUEST_TIMEOUT_MS
+    }),
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey
@@ -203,6 +210,67 @@ async function streamToBuffer(stream: unknown) {
 
 export async function readR2ObjectText(key: string) {
   return (await readR2ObjectBuffer(key)).toString("utf8");
+}
+
+export async function listR2ObjectKeys(prefix: string, maxKeys = 1000) {
+  const config = r2Config();
+
+  if (!config) {
+    if (!isLocalArtifactFallbackEnabled()) {
+      throw new Error("R2 storage is not configured.");
+    }
+
+    const root = localArtifactRoot();
+    const prefixPath = localArtifactPath(prefix);
+    const keys: string[] = [];
+
+    async function walk(directory: string) {
+      let entries: string[];
+      try {
+        entries = await readdir(directory);
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (keys.length >= maxKeys) return;
+        const entryPath = path.join(directory, entry);
+        const entryStat = await stat(entryPath);
+        if (entryStat.isDirectory()) {
+          await walk(entryPath);
+          continue;
+        }
+
+        const key = path.relative(root, entryPath).split(path.sep).join("/");
+        if (key.startsWith(prefix)) keys.push(key);
+      }
+    }
+
+    await walk(prefixPath);
+    return keys;
+  }
+
+  const client = r2Client(config);
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await client.send(new ListObjectsV2Command({
+      Bucket: config.bucket,
+      Prefix: prefix,
+      MaxKeys: Math.min(1000, Math.max(1, maxKeys - keys.length)),
+      ContinuationToken: continuationToken
+    }));
+
+    for (const item of response.Contents ?? []) {
+      if (item.Key) keys.push(item.Key);
+      if (keys.length >= maxKeys) break;
+    }
+
+    continuationToken = response.IsTruncated && keys.length < maxKeys ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return keys;
 }
 
 export async function readR2ObjectBuffer(key: string) {

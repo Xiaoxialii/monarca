@@ -40,7 +40,7 @@ test("canonical profitability v2 uses one reconciled total cost including ads", 
   assert.equal(result.engine_version, CANONICAL_PROFITABILITY_ENGINE_VERSION);
   assert.equal(result.gross_profit, 600);
   assert.equal(result.operating_cost, 130);
-  assert.equal(result.contribution_profit, 470);
+  assert.equal(result.contribution_profit, 370);
   assert.equal(result.total_cost, 630);
   assert.equal(result.ad_spend, 100);
   assert.equal(result.net_profit, 370);

@@ -58,6 +58,8 @@ export type InventoryDecisionInput = {
   margin: number;
   net_profit: number;
   contribution_profit?: number | null;
+  inventory_unit_cost?: number | null;
+  inventory_value?: number | null;
   sales_velocity: number;
   velocity_confidence?: InventoryDecisionConfidence | null;
   data_period_days?: number | null;
@@ -73,8 +75,11 @@ export function evaluateInventoryDecision(input: InventoryDecisionInput): Invent
   const lifecycle = normalizeLifecycle(input.lifecycle_stage);
   const velocityConfidence = input.velocity_confidence ?? "LOW";
   const dataConfidence = combinedConfidence(velocityConfidence, input.lifecycle_confidence ?? "LOW", input.data_period_days ?? 0);
-  const unitCost = input.sold > 0 ? Math.max(0, input.cogs / input.sold) : 0;
-  const inventoryValue = roundCurrency(Math.max(0, input.stock) * unitCost);
+  const fallbackUnitCost = input.sold > 0 ? Math.max(0, input.cogs / input.sold) : 0;
+  const unitCost = isFiniteNumber(input.inventory_unit_cost) ? Math.max(0, input.inventory_unit_cost ?? 0) : fallbackUnitCost;
+  const inventoryValue = isFiniteNumber(input.inventory_value)
+    ? roundCurrency(Math.max(0, input.inventory_value ?? 0))
+    : roundCurrency(Math.max(0, input.stock) * unitCost);
   const runway = input.runway_days ?? (input.sales_velocity > 0 ? input.stock / input.sales_velocity : null);
   const sellThroughRate = input.sold + input.stock > 0 ? input.sold / (input.sold + input.stock) : 0;
   const demandTrend = input.demandTrend ?? inferDemandTrendFromSignals({
@@ -257,6 +262,10 @@ function roundRatio(value: number) {
 
 function roundCurrency(value: number) {
   return Number(value.toFixed(2));
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function formatCurrency(value: number) {

@@ -5,8 +5,7 @@ import { ANALYTICS_METRIC_ENGINE_VERSION } from "@/lib/report-metric-cache";
 import { CANONICAL_PROFITABILITY_ENGINE_VERSION } from "@/lib/profit/canonical-profitability-engine";
 import {
   ECOMMERCE_CANONICAL_SCHEMA_VERSION,
-  ensureEcommerceCanonicalSnapshotFromDataSourceSchemas,
-  isEcommerceCanonicalSchemaJson
+  ensureEcommerceCanonicalSnapshotFromDataSourceSchemas
 } from "@/lib/snapshot/canonical-snapshot-generator";
 import {
   adaptCanonicalDatasetForMetrics,
@@ -562,10 +561,9 @@ async function findLatestEcommerceCanonicalSnapshots(input: {
       canonicalArtifactTablesFromMetadata(sourceConfig) ??
       canonicalArtifactTablesFromMetadata(sourceSchemas) ??
       [];
-    const listedTables = await listLatestCanonicalArtifactTables(input.workspaceId, dataSourceId).catch(() => null);
-    const tables = Array.isArray(listedTables) && (listedTables.length > 0 || schemaUsesCanonicalArtifactPrefix(input.workspaceId, dataSourceId, manifestTables))
-      ? listedTables
-      : manifestTables;
+    const tables = manifestTables.length
+      ? manifestTables
+      : await listLatestCanonicalArtifactTables(input.workspaceId, dataSourceId).catch(() => []);
     const schemaJson = lightweightCanonicalSchemaJsonFromTables({
       workspaceId: input.workspaceId,
       dataSourceId,
@@ -677,33 +675,6 @@ function snapshotHasAnyTable(snapshot: Pick<EcommerceCanonicalSnapshotRow, "sche
   });
 }
 
-async function lightweightCanonicalSchemaJson(input: {
-  workspaceId: string;
-  dataSourceId: string;
-  sourceProvider: string;
-  qualityReport: unknown;
-  sourceConfig: unknown;
-  sourceSchemas: unknown;
-}) {
-  const qualityReport = objectValue(input.qualityReport);
-  const sourceConfig = objectValue(input.sourceConfig);
-  const sourceSchemas = objectValue(input.sourceSchemas);
-  const manifestTables = canonicalArtifactTablesFromMetadata(qualityReport) ??
-    canonicalArtifactTablesFromMetadata(sourceConfig) ??
-    canonicalArtifactTablesFromMetadata(sourceSchemas);
-  const tables = manifestTables ?? await listLatestCanonicalArtifactTables(input.workspaceId, input.dataSourceId);
-
-  return lightweightCanonicalSchemaJsonFromTables({
-    workspaceId: input.workspaceId,
-    dataSourceId: input.dataSourceId,
-    sourceProvider: input.sourceProvider,
-    qualityReport,
-    sourceConfig,
-    sourceSchemas,
-    tables
-  });
-}
-
 function lightweightCanonicalSchemaJsonFromTables(input: {
   workspaceId: string;
   dataSourceId: string;
@@ -781,15 +752,6 @@ function artifactTablesFromCandidate(candidate: unknown) {
       };
     })
     .filter((item) => item.name && item.artifactKey);
-}
-
-function schemaUsesCanonicalArtifactPrefix(
-  workspaceId: string,
-  dataSourceId: string,
-  tables: Array<{ artifactKey?: string | null }>
-) {
-  const prefix = `canonical/${workspaceId}/${dataSourceId}/`;
-  return tables.some((table) => typeof table.artifactKey === "string" && table.artifactKey.startsWith(prefix));
 }
 
 async function listLatestCanonicalArtifactTables(workspaceId: string, dataSourceId: string) {

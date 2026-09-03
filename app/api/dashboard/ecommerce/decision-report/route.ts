@@ -3,6 +3,7 @@ import { getCurrentWorkspaceContext, logWorkspaceContext } from "@/lib/current-w
 import { decisionSnapshotFreshness } from "@/lib/dashboard/decision-snapshot-lifecycle";
 import {
   findLatestDecisionSnapshot,
+  findLatestReportSnapshotLegacy,
   snapshotPerformance
 } from "@/lib/dashboard/snapshot-store";
 import {
@@ -1176,6 +1177,73 @@ export async function GET(request: Request) {
       optimizationCanonicalVersion: snapshot.canonicalSnapshotVersion,
       optimizationVersion: snapshot.optimizationVersion,
       refreshStatus: "IDLE"
+    });
+  }
+
+  const reportSnapshot = await findLatestReportSnapshotLegacy(prisma, {
+    workspaceId: session.workspace.id,
+    reportType: `optimization_decision_report:${decisionMode}`,
+    cacheKey: "latest"
+  }).catch((error) => {
+    console.warn("[decision-report] report snapshot lookup failed; using live fallback when available", {
+      workspace_id: session.workspace.id,
+      mode: decisionMode,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  });
+  const reportSnapshotPayload = asRecord(reportSnapshot?.contentJson);
+
+  if (
+    reportSnapshot &&
+    Object.keys(reportSnapshotPayload).length &&
+    !cacheNeedsOptimizationRefresh(reportSnapshotPayload)
+  ) {
+    const currentCanonical = await withCurrentCanonicalDecisionReport(session.workspace.id, decisionMode, reportSnapshotPayload);
+    if (!currentCanonical.overlayApplied) {
+      const refreshAvailability = await optimizationRefreshAvailability(session.workspace.id);
+      return manualOptimizationRequiredResponse({
+        workspaceId: session.workspace.id,
+        mode: decisionMode,
+        startedAt,
+        message: currentCanonical.loaded?.message ?? "Current canonical report is not ready. Stale cached metrics were not reused.",
+        reason: `current_canonical_not_ready:${currentCanonical.loaded?.state ?? "unavailable"}`,
+        readiness: refreshAvailability.readiness,
+        currentVersions: {
+          canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? refreshAvailability.readiness?.dataVersion ?? null,
+          metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? null
+        },
+        snapshotType: "ReportSnapshot"
+      });
+    }
+
+    return decisionReportJson({
+      workspaceId: session.workspace.id,
+      mode: decisionMode,
+      startedAt,
+      payload: {
+        ...currentCanonical.payload,
+        snapshot: {
+          id: reportSnapshot.id,
+          type: "ReportSnapshot",
+          createdAt: dateToIso(reportSnapshot.createdAt),
+          updatedAt: dateToIso(reportSnapshot.updatedAt),
+          latestSnapshot: true,
+          metricsOverlayApplied: currentCanonical.overlayApplied,
+          canonicalLineage: currentCanonical.loaded?.lineage ?? null
+        }
+      },
+      metricsGeneratedAt: currentCanonical.loaded?.data?.metadata.computed_at ?? dateToIso(reportSnapshot.updatedAt),
+      currentVersions: {
+        canonicalSnapshotVersion: currentCanonical.loaded?.lineage?.schemaSnapshotId ?? null,
+        metricSnapshotVersion: currentCanonical.loaded?.data?.metadata.metric_engine_version ?? null
+      },
+      optimizationStatus: "SUCCESS",
+      optimizationSnapshotId: reportSnapshot.id,
+      optimizationGeneratedAt: dateToIso(reportSnapshot.updatedAt),
+      refreshStatus: "IDLE",
+      fallbackUsed: true,
+      fallbackReason: "report_snapshot_latest"
     });
   }
 

@@ -208,6 +208,8 @@ test("decision report API reuses dashboard data loader and returns decision_repo
   assert.match(source, /getCurrentWorkspaceContext/);
   assert.match(source, /findOptimizationReportCache/);
   assert.match(source, /findLatestDecisionSnapshot/);
+  assert.match(source, /findLatestReportSnapshotLegacy/);
+  assert.match(source, /report_snapshot_latest/);
   assert.match(source, /decisionSnapshotFreshness/);
   assert.match(source, /manualOptimizationRequiredResponse/);
   assert.doesNotMatch(source, /enqueueSkuOptimizationJob/);

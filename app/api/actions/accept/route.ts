@@ -5,6 +5,7 @@ import {
   getDbActionTrackingRecordByRecommendationId
 } from "@/lib/optimization/action-tracking-store";
 import { findOptimizationReportCache, optimizationReportCachePayload } from "@/lib/dashboard/optimization-report-cache";
+import { findLatestReportSnapshotLegacy } from "@/lib/dashboard/snapshot-store";
 import { prisma } from "@/lib/prisma";
 import { resolveActionSession } from "@/app/api/actions/session";
 import { workspaceAuthErrorResponse } from "@/lib/workspace-auth";
@@ -158,13 +159,32 @@ async function currentOptimizationRecommendationExists(workspaceId: string, reco
     workspaceId,
     mode: "full"
   });
-  if (!cache) return false;
+  if (cache && optimizationPayloadIncludesRecommendation(optimizationReportCachePayload(cache), recommendationId)) {
+    return true;
+  }
 
-  const payload = optimizationReportCachePayload(cache);
-  const optimization = asRecord(asRecord(payload.decision_report).sku_portfolio_optimization);
+  for (const mode of ["full", "sku"] as const) {
+    const reportSnapshot = await findLatestReportSnapshotLegacy(prisma, {
+      workspaceId,
+      reportType: `optimization_decision_report:${mode}`,
+      cacheKey: "latest"
+    });
+    if (optimizationPayloadIncludesRecommendation(asRecord(reportSnapshot?.contentJson), recommendationId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function optimizationPayloadIncludesRecommendation(payload: Record<string, unknown>, recommendationId: string) {
+  const report = asRecord(payload.decision_report);
+  const optimization = asRecord(report.sku_portfolio_optimization);
   const rows = [
     ...asArray(optimization.skuDecisions),
-    ...asArray(optimization.recommended_portfolio)
+    ...asArray(optimization.recommended_portfolio),
+    ...asArray(report.skuDecisions),
+    ...asArray(payload.skuDecisions)
   ];
 
   return rows.some((row) => asRecord(row).recommendation_id === recommendationId);

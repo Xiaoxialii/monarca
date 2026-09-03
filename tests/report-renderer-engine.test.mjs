@@ -223,6 +223,18 @@ test("decision report API reuses dashboard data loader and returns decision_repo
   assert.match(proxy, /\/api\/dashboard\/ecommerce\/decision-report/);
 });
 
+test("accept action API validates recommendations from report snapshots", () => {
+  const source = fs.readFileSync(join(process.cwd(), "app/api/actions/accept/route.ts"), "utf8");
+
+  assert.match(source, /findOptimizationReportCache/);
+  assert.match(source, /findLatestReportSnapshotLegacy/);
+  assert.match(source, /optimization_decision_report:\$\{mode\}/);
+  assert.match(source, /optimizationPayloadIncludesRecommendation/);
+  assert.match(source, /recommended_portfolio/);
+  assert.match(source, /skuDecisions/);
+  assert.match(source, /Accepted recommendation is not present in the current optimization snapshot/);
+});
+
 test("optimization queue uses an effective non-empty goal for displayed rows", () => {
   const source = fs.readFileSync(join(process.cwd(), "components/report-renderer-engine.tsx"), "utf8");
 

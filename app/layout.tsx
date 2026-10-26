@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { getRequestHtmlLang } from "@/lib/server-locale";
 import "./globals.css";
 
